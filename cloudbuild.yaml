@@ -1,0 +1,50 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/keshless-tickets-api:${COMMIT_SHA}'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/keshless-tickets-api:latest'
+      - '.'
+
+  # Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/keshless-tickets-api'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'keshless-tickets-api'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/keshless-tickets-api:${COMMIT_SHA}'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--set-env-vars'
+      - 'NODE_ENV=production,PORT=5000,JWT_EXPIRY=7d,R2_ACCOUNT_ID=bdc6eef36c1a0f2c82ab5f85d15e0345,R2_ACCESS_KEY_ID=5af7df8e7c0ed6c6eb8d74a6e1cf5af3,R2_SECRET_ACCESS_KEY=ea92e61c8aca5b94c79aa742729ba7dd20e8b38697bcaba52629b91a9816e69c,R2_BUCKET_NAME=yeboshops-media,R2_PUBLIC_URL=https://media.eneza.app'
+      - '--set-secrets'
+      - 'MONGODB_URI=keshless-tickets-mongodb-uri:latest,JWT_SECRET=keshless-tickets-jwt-secret:latest,SERVICE_KEY=keshless-tickets-service-key:latest'
+
+images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/keshless-tickets-api:${COMMIT_SHA}'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/keshless-tickets-api:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'

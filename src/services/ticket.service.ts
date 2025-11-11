@@ -384,7 +384,7 @@ export class TicketService {
       const ticket = await Ticket.findOne({
         ticketId,
         vendorId
-      }).session(session || undefined);
+      }).session(session || null);
 
       if (!ticket) {
         throw new Error('Ticket not found');
@@ -404,7 +404,7 @@ export class TicketService {
       }
 
       // Get sale info
-      const sale = await TicketSale.findById(ticket.saleId).session(session || undefined);
+      const sale = await TicketSale.findById(ticket.saleId).session(session || null);
       if (!sale) {
         throw new Error('Sale record not found');
       }
@@ -414,7 +414,7 @@ export class TicketService {
       await ticket.save(session ? { session } : undefined);
 
       // Update event stats
-      const event = await Event.findById(ticket.eventId).session(session || undefined);
+      const event = await Event.findById(ticket.eventId).session(session || null);
       if (event) {
         const ticketTypeObj = event.ticketTypes.find(tt => tt.name === ticket.ticketType);
         if (ticketTypeObj) {

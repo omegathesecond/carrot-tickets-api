@@ -27,7 +27,7 @@ export class TicketsController {
   /**
    * Authentication: Login
    */
-  static async login(req: Request, res: Response): Promise<void> {
+  static async login(req: Request, res: Response): Promise<any> {
     try {
       // Validate input
       const { error, value } = loginSchema.validate(req.body);
@@ -51,7 +51,7 @@ export class TicketsController {
   /**
    * Authentication: Refresh token
    */
-  static async refresh(req: Request, res: Response): Promise<void> {
+  static async refresh(req: Request, res: Response): Promise<any> {
     try {
       const { refreshToken } = req.body;
 
@@ -72,7 +72,7 @@ export class TicketsController {
   /**
    * Authentication: Logout
    */
-  static async logout(req: Request, res: Response): Promise<void> {
+  static async logout(req: Request, res: Response): Promise<any> {
     try {
       const { refreshToken } = req.body;
 
@@ -90,7 +90,7 @@ export class TicketsController {
   /**
    * Authentication: Get current user
    */
-  static async getMe(req: Request, res: Response): Promise<void> {
+  static async getMe(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -110,7 +110,7 @@ export class TicketsController {
   /**
    * User: Update profile
    */
-  static async updateProfile(req: Request, res: Response): Promise<void> {
+  static async updateProfile(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -138,7 +138,7 @@ export class TicketsController {
   /**
    * User: Change password
    */
-  static async changePassword(req: Request, res: Response): Promise<void> {
+  static async changePassword(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -169,7 +169,7 @@ export class TicketsController {
   /**
    * Events: Get all events
    */
-  static async getEvents(req: Request, res: Response): Promise<void> {
+  static async getEvents(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -195,7 +195,7 @@ export class TicketsController {
   /**
    * Events: Get single event
    */
-  static async getEvent(req: Request, res: Response): Promise<void> {
+  static async getEvent(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -212,7 +212,7 @@ export class TicketsController {
   /**
    * Events: Create event
    */
-  static async createEvent(req: Request, res: Response): Promise<void> {
+  static async createEvent(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -238,7 +238,7 @@ export class TicketsController {
   /**
    * Events: Update event
    */
-  static async updateEvent(req: Request, res: Response): Promise<void> {
+  static async updateEvent(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -266,7 +266,7 @@ export class TicketsController {
   /**
    * Events: Delete event
    */
-  static async deleteEvent(req: Request, res: Response): Promise<void> {
+  static async deleteEvent(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -283,7 +283,7 @@ export class TicketsController {
   /**
    * Events: Publish event
    */
-  static async publishEvent(req: Request, res: Response): Promise<void> {
+  static async publishEvent(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -300,7 +300,7 @@ export class TicketsController {
   /**
    * Events: Unpublish event
    */
-  static async unpublishEvent(req: Request, res: Response): Promise<void> {
+  static async unpublishEvent(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -317,7 +317,7 @@ export class TicketsController {
   /**
    * Ticket Types: Add ticket type to event
    */
-  static async addTicketType(req: Request, res: Response): Promise<void> {
+  static async addTicketType(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -329,7 +329,7 @@ export class TicketsController {
       }).validate(req.body);
 
       if (error) {
-        return ApiResponseUtil.error(res, error.details[0].message, 400);
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
       const event = await EventService.addTicketType(
@@ -348,7 +348,7 @@ export class TicketsController {
   /**
    * Ticket Types: Update ticket type
    */
-  static async updateTicketType(req: Request, res: Response): Promise<void> {
+  static async updateTicketType(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId, ticketTypeName } = req.params;
@@ -360,7 +360,7 @@ export class TicketsController {
       }).min(1).validate(req.body);
 
       if (error) {
-        return ApiResponseUtil.error(res, error.details[0].message, 400);
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
       const event = await EventService.updateTicketType(
@@ -380,7 +380,7 @@ export class TicketsController {
   /**
    * Ticket Types: Delete ticket type
    */
-  static async deleteTicketType(req: Request, res: Response): Promise<void> {
+  static async deleteTicketType(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId, ticketTypeName } = req.params;
@@ -401,7 +401,7 @@ export class TicketsController {
   /**
    * Ticket Types: Adjust quantity
    */
-  static async adjustTicketQuantity(req: Request, res: Response): Promise<void> {
+  static async adjustTicketQuantity(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId, ticketTypeName } = req.params;
@@ -413,7 +413,7 @@ export class TicketsController {
       }).validate(req.body);
 
       if (error) {
-        return ApiResponseUtil.error(res, error.details[0].message, 400);
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
       const event = await EventService.adjustTicketQuantity(
@@ -433,7 +433,7 @@ export class TicketsController {
   /**
    * Ticket Types: Mark as sold out
    */
-  static async markTicketSoldOut(req: Request, res: Response): Promise<void> {
+  static async markTicketSoldOut(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId, ticketTypeName } = req.params;
@@ -442,7 +442,7 @@ export class TicketsController {
       }).validate(req.body);
 
       if (error) {
-        return ApiResponseUtil.error(res, error.details[0].message, 400);
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
       const event = await EventService.markTicketSoldOut(
@@ -462,7 +462,7 @@ export class TicketsController {
   /**
    * Sales: Sell tickets
    */
-  static async sellTickets(req: Request, res: Response): Promise<void> {
+  static async sellTickets(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -497,7 +497,7 @@ export class TicketsController {
   /**
    * Sales: Get sales
    */
-  static async getSales(req: Request, res: Response): Promise<void> {
+  static async getSales(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -523,7 +523,7 @@ export class TicketsController {
   /**
    * Sales: Get single sale
    */
-  static async getSale(req: Request, res: Response): Promise<void> {
+  static async getSale(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { saleId } = req.params;
@@ -540,7 +540,7 @@ export class TicketsController {
   /**
    * Sales: Refund ticket
    */
-  static async refundTicket(req: Request, res: Response): Promise<void> {
+  static async refundTicket(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { ticketId } = req.params;
@@ -568,7 +568,7 @@ export class TicketsController {
   /**
    * Scans: Validate ticket
    */
-  static async validateTicket(req: Request, res: Response): Promise<void> {
+  static async validateTicket(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -600,7 +600,7 @@ export class TicketsController {
   /**
    * Scans: Check-in ticket
    */
-  static async checkInTicket(req: Request, res: Response): Promise<void> {
+  static async checkInTicket(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -633,7 +633,7 @@ export class TicketsController {
   /**
    * Scans: Get scans
    */
-  static async getScans(req: Request, res: Response): Promise<void> {
+  static async getScans(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -659,7 +659,7 @@ export class TicketsController {
   /**
    * Analytics: Get dashboard stats
    */
-  static async getDashboardStats(req: Request, res: Response): Promise<void> {
+  static async getDashboardStats(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -685,7 +685,7 @@ export class TicketsController {
   /**
    * Analytics: Get sales stats
    */
-  static async getSalesStats(req: Request, res: Response): Promise<void> {
+  static async getSalesStats(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -711,7 +711,7 @@ export class TicketsController {
   /**
    * Analytics: Get revenue stats
    */
-  static async getRevenueStats(req: Request, res: Response): Promise<void> {
+  static async getRevenueStats(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
 
@@ -737,7 +737,7 @@ export class TicketsController {
   /**
    * Analytics: Get event analytics
    */
-  static async getEventAnalytics(req: Request, res: Response): Promise<void> {
+  static async getEventAnalytics(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
@@ -757,7 +757,7 @@ export class TicketsController {
   /**
    * Export: Export sales
    */
-  static async exportSales(req: Request, res: Response): Promise<void> {
+  static async exportSales(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId, startDate, endDate } = req.query;
@@ -783,7 +783,7 @@ export class TicketsController {
   /**
    * Export: Export revenue
    */
-  static async exportRevenue(req: Request, res: Response): Promise<void> {
+  static async exportRevenue(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId, startDate, endDate } = req.query;
@@ -809,7 +809,7 @@ export class TicketsController {
   /**
    * Export: Export event summary
    */
-  static async exportEventSummary(req: Request, res: Response): Promise<void> {
+  static async exportEventSummary(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;

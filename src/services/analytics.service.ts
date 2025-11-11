@@ -86,7 +86,7 @@ export class AnalyticsService {
   /**
    * Get dashboard statistics
    */
-  static async getDashboardStats(query: AnalyticsQuery): Promise<DashboardStats> {
+  static async getDashboardStats(query: AnalyticsQuery): Promise<any> {
     try {
       const { vendorId, startDate, endDate } = query;
 

@@ -19,11 +19,15 @@ export class MediaController {
    * Upload event poster
    * POST /api/media/events/:eventId/poster
    */
-  static async uploadPoster(req: Request, res: Response): Promise<void> {
+  static async uploadPoster(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = req.params;
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
+
+      if (!eventId) {
+        return ApiResponseUtil.validationError(res, 'Event ID is required');
+      }
 
       if (!file) {
         return ApiResponseUtil.validationError(res, 'No file uploaded');
@@ -48,7 +52,7 @@ export class MediaController {
       const { key, url } = await R2Service.uploadEventMedia(
         eventId,
         'poster',
-        file.originalname,
+        file.originalname || 'poster',
         file.buffer,
         file.mimetype
       );
@@ -71,11 +75,15 @@ export class MediaController {
    * Upload event thumbnail
    * POST /api/media/events/:eventId/thumbnail
    */
-  static async uploadThumbnail(req: Request, res: Response): Promise<void> {
+  static async uploadThumbnail(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = req.params;
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
+
+      if (!eventId) {
+        return ApiResponseUtil.validationError(res, 'Event ID is required');
+      }
 
       if (!file) {
         return ApiResponseUtil.validationError(res, 'No file uploaded');
@@ -100,7 +108,7 @@ export class MediaController {
       const { key, url } = await R2Service.uploadEventMedia(
         eventId,
         'thumbnail',
-        file.originalname,
+        file.originalname || 'thumbnail',
         file.buffer,
         file.mimetype
       );
@@ -124,11 +132,15 @@ export class MediaController {
    * POST /api/media/events/:eventId/gallery
    * Supports multiple files
    */
-  static async uploadGalleryImages(req: Request, res: Response): Promise<void> {
+  static async uploadGalleryImages(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = req.params;
       const ticketsUser = (req as any).ticketsUser;
       const files = req.files as Express.Multer.File[];
+
+      if (!eventId) {
+        return ApiResponseUtil.validationError(res, 'Event ID is required');
+      }
 
       if (!files || files.length === 0) {
         return ApiResponseUtil.validationError(res, 'No files uploaded');
@@ -148,7 +160,7 @@ export class MediaController {
         const { key, url } = await R2Service.uploadEventMedia(
           eventId,
           'gallery',
-          file.originalname,
+          file.originalname || 'gallery-image',
           file.buffer,
           file.mimetype
         );
@@ -174,11 +186,15 @@ export class MediaController {
    * Upload QR code
    * POST /api/media/events/:eventId/qrcode
    */
-  static async uploadQRCode(req: Request, res: Response): Promise<void> {
+  static async uploadQRCode(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = req.params;
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
+
+      if (!eventId) {
+        return ApiResponseUtil.validationError(res, 'Event ID is required');
+      }
 
       if (!file) {
         return ApiResponseUtil.validationError(res, 'No file uploaded');
@@ -203,7 +219,7 @@ export class MediaController {
       const { key, url } = await R2Service.uploadEventMedia(
         eventId,
         'qrcode',
-        file.originalname,
+        file.originalname || 'qrcode',
         file.buffer,
         file.mimetype
       );
@@ -227,7 +243,7 @@ export class MediaController {
    * DELETE /api/media/events/:eventId
    * Body: { url: string, mediaType: 'poster' | 'thumbnail' | 'gallery' | 'qrcode' }
    */
-  static async deleteMedia(req: Request, res: Response): Promise<void> {
+  static async deleteMedia(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = req.params;
       const { url, mediaType } = req.body;
@@ -283,7 +299,7 @@ export class MediaController {
    * List all media for an event
    * GET /api/media/events/:eventId/list
    */
-  static async listEventMedia(req: Request, res: Response): Promise<void> {
+  static async listEventMedia(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = req.params;
       const ticketsUser = (req as any).ticketsUser;
