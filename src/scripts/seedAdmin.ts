@@ -38,7 +38,9 @@ async function seedAdmin() {
         tickets: { enabled: true, activatedAt: new Date() }
       },
       isActive: true,
-      verificationStatus: 'verified'
+      verificationStatus: 'verified',
+      isVerified: true,
+      isSuperAdmin: true
     });
 
     console.log('✅ Admin user created:');
@@ -47,12 +49,17 @@ async function seedAdmin() {
     console.log(`   - ID: ${admin._id}`);
     console.log(`   - Slug: ${admin.slug}`);
     console.log(`   - Role: tickets_owner (GOD permissions)`);
-    console.log(`   - Permissions: ALL\n`);
+    console.log(`   - Permissions: ALL`);
+    console.log(`   - Super Admin: YES (System-wide access)\n`);
 
-    console.log('👑👑👑 ADMIN USER CREATED SUCCESSFULLY! 👑👑👑\n');
+    console.log('👑👑👑 SYSTEM-WIDE ADMIN CREATED SUCCESSFULLY! 👑👑👑\n');
     console.log('📝 Admin credentials:');
     console.log('   Email: admin@keshless.com');
     console.log('   Password: Admin@123\n');
+    console.log('✨ Admin capabilities:');
+    console.log('   - View ALL events from ALL vendors');
+    console.log('   - Publish/Unpublish any event');
+    console.log('   - System-wide analytics and reporting\n');
     console.log('⚠️  IMPORTANT: Change the admin password after first login!\n');
 
   } catch (error: any) {

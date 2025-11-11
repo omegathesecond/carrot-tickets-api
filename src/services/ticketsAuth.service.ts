@@ -51,7 +51,8 @@ export class TicketsAuthService {
         userType: 'vendor',
         app: 'tickets',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission)
+        permissions: Object.values(TicketsPermission),
+        isSuperAdmin: vendor.isSuperAdmin || false
       };
       const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
       const refreshToken = this.generateRefreshToken();
@@ -70,7 +71,8 @@ export class TicketsAuthService {
           slug: vendor.slug,
           userType: 'vendor',
           role: TicketsRole.OWNER,
-          permissions: Object.values(TicketsPermission)
+          permissions: Object.values(TicketsPermission),
+          isSuperAdmin: vendor.isSuperAdmin || false
         }
       };
     }
@@ -200,7 +202,8 @@ export class TicketsAuthService {
         slug: vendor.slug,
         userType: 'vendor',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission)
+        permissions: Object.values(TicketsPermission),
+        isSuperAdmin: vendor.isSuperAdmin || false
       };
     } else {
       const subUser = await VendorSubUser.findById(userId);
@@ -438,7 +441,8 @@ export class TicketsAuthService {
         userType: 'vendor',
         app: 'tickets',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission)
+        permissions: Object.values(TicketsPermission),
+        isSuperAdmin: vendor.isSuperAdmin || false
       };
     } else {
       const subUser = await VendorSubUser.findById(refreshTokenDoc.userId);

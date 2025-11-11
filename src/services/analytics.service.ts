@@ -11,6 +11,7 @@ export interface AnalyticsQuery {
   startDate?: Date;
   endDate?: Date;
   eventId?: string;
+  isSuperAdmin?: boolean;
 }
 
 export interface DashboardStats {
@@ -88,7 +89,7 @@ export class AnalyticsService {
    */
   static async getDashboardStats(query: AnalyticsQuery): Promise<any> {
     try {
-      const { vendorId, startDate, endDate } = query;
+      const { vendorId, startDate, endDate, isSuperAdmin = false } = query;
 
       // Build date filter
       const dateFilter: any = {};
@@ -98,9 +99,15 @@ export class AnalyticsService {
         if (endDate) dateFilter.createdAt.$lte = endDate;
       }
 
+      // Build vendor filter - skip for superadmin
+      const vendorFilter: any = {};
+      if (!isSuperAdmin) {
+        vendorFilter.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
+
       // Get event stats
       const eventStats = await Event.aggregate([
-        { $match: { vendorId: new mongoose.Types.ObjectId(vendorId), ...dateFilter } },
+        { $match: { ...vendorFilter, ...dateFilter } },
         {
           $group: {
             _id: '$status',
@@ -126,11 +133,17 @@ export class AnalyticsService {
       });
 
       // Get ticket stats
-      const salesFilter: any = { vendorId: new mongoose.Types.ObjectId(vendorId), paymentStatus: PaymentStatus.COMPLETED };
+      const salesFilter: any = { ...vendorFilter, paymentStatus: PaymentStatus.COMPLETED };
       if (startDate || endDate) {
         salesFilter.soldAt = {};
         if (startDate) salesFilter.soldAt.$gte = startDate;
         if (endDate) salesFilter.soldAt.$lte = endDate;
+      }
+
+      // Build ticket filter for count
+      const ticketFilter: any = { status: TicketStatus.CHECKED_IN, ...dateFilter };
+      if (!isSuperAdmin) {
+        ticketFilter.vendorId = vendorId;
       }
 
       const [ticketsSoldResult, totalRevenueResult, checkedInCount] = await Promise.all([
@@ -142,11 +155,7 @@ export class AnalyticsService {
           { $match: salesFilter },
           { $group: { _id: null, total: { $sum: '$totalAmount' } } }
         ]),
-        Ticket.countDocuments({
-          vendorId,
-          status: TicketStatus.CHECKED_IN,
-          ...dateFilter
-        })
+        Ticket.countDocuments(ticketFilter)
       ]);
 
       const totalSold = ticketsSoldResult[0]?.total || 0;
@@ -192,23 +201,28 @@ export class AnalyticsService {
       });
 
       // Get recent activity
+      const recentActivityFilter: any = isSuperAdmin ? {} : { vendorId: new mongoose.Types.ObjectId(vendorId) };
+      const upcomingEventsFilter: any = {
+        status: EventStatus.PUBLISHED,
+        eventDate: { $gte: new Date() }
+      };
+      if (!isSuperAdmin) {
+        upcomingEventsFilter.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
+
       const [recentSales, recentScans, upcomingEvents] = await Promise.all([
-        TicketSale.find({ vendorId: new mongoose.Types.ObjectId(vendorId) })
+        TicketSale.find(recentActivityFilter)
           .populate('eventId', 'name venue')
           .sort({ soldAt: -1 })
           .limit(5)
           .lean(),
-        TicketScan.find({ vendorId: new mongoose.Types.ObjectId(vendorId) })
+        TicketScan.find(recentActivityFilter)
           .populate('ticketId')
           .populate('eventId', 'name venue')
           .sort({ scannedAt: -1 })
           .limit(5)
           .lean(),
-        Event.find({
-          vendorId: new mongoose.Types.ObjectId(vendorId),
-          status: EventStatus.PUBLISHED,
-          eventDate: { $gte: new Date() }
-        })
+        Event.find(upcomingEventsFilter)
           .sort({ eventDate: 1 })
           .limit(5)
           .lean()
@@ -245,13 +259,15 @@ export class AnalyticsService {
    */
   static async getSalesStats(query: AnalyticsQuery): Promise<SalesStats> {
     try {
-      const { vendorId, startDate, endDate, eventId } = query;
+      const { vendorId, startDate, endDate, eventId, isSuperAdmin = false } = query;
 
-      // Build filter
+      // Build filter - skip vendorId for superadmin
       const filter: any = {
-        vendorId: new mongoose.Types.ObjectId(vendorId),
         paymentStatus: PaymentStatus.COMPLETED
       };
+      if (!isSuperAdmin) {
+        filter.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
 
       if (eventId) filter.eventId = new mongoose.Types.ObjectId(eventId);
 
@@ -355,13 +371,15 @@ export class AnalyticsService {
     query: AnalyticsQuery & { groupBy?: 'daily' | 'weekly' | 'monthly' }
   ): Promise<RevenueStats> {
     try {
-      const { vendorId, startDate, endDate, eventId, groupBy = 'daily' } = query;
+      const { vendorId, startDate, endDate, eventId, groupBy = 'daily', isSuperAdmin = false } = query;
 
-      // Build filter
+      // Build filter - skip vendorId for superadmin
       const filter: any = {
-        vendorId: new mongoose.Types.ObjectId(vendorId),
         paymentStatus: PaymentStatus.COMPLETED
       };
+      if (!isSuperAdmin) {
+        filter.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
 
       if (eventId) filter.eventId = new mongoose.Types.ObjectId(eventId);
 
@@ -494,11 +512,23 @@ export class AnalyticsService {
   /**
    * Get event-specific analytics
    */
-  static async getEventAnalytics(eventId: string, vendorId: string) {
+  static async getEventAnalytics(eventId: string, vendorId: string, isSuperAdmin: boolean = false) {
     try {
-      const event = await Event.findOne({ _id: new mongoose.Types.ObjectId(eventId), vendorId: new mongoose.Types.ObjectId(vendorId) });
+      // Build event query - skip vendorId for superadmin
+      const eventQuery: any = { _id: new mongoose.Types.ObjectId(eventId) };
+      if (!isSuperAdmin) {
+        eventQuery.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
+
+      const event = await Event.findOne(eventQuery);
       if (!event) {
         throw new Error('Event not found');
+      }
+
+      // Build filter for queries - skip vendorId for superadmin
+      const eventIdFilter: any = { eventId: new mongoose.Types.ObjectId(eventId) };
+      if (!isSuperAdmin) {
+        eventIdFilter.vendorId = new mongoose.Types.ObjectId(vendorId);
       }
 
       // Get sales data
@@ -510,24 +540,22 @@ export class AnalyticsService {
         salesByType
       ] = await Promise.all([
         TicketSale.countDocuments({
-          eventId: new mongoose.Types.ObjectId(eventId),
-          vendorId: new mongoose.Types.ObjectId(vendorId),
+          ...eventIdFilter,
           paymentStatus: PaymentStatus.COMPLETED
         }),
         TicketSale.aggregate([
           {
             $match: {
-              eventId: new mongoose.Types.ObjectId(eventId),
-              vendorId: new mongoose.Types.ObjectId(vendorId),
+              ...eventIdFilter,
               paymentStatus: PaymentStatus.COMPLETED
             }
           },
           { $group: { _id: null, total: { $sum: '$totalAmount' } } }
         ]),
-        Ticket.countDocuments({ eventId: new mongoose.Types.ObjectId(eventId), vendorId: new mongoose.Types.ObjectId(vendorId), status: TicketStatus.SOLD }),
-        Ticket.countDocuments({ eventId: new mongoose.Types.ObjectId(eventId), vendorId: new mongoose.Types.ObjectId(vendorId), status: TicketStatus.CHECKED_IN }),
+        Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.SOLD }),
+        Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.CHECKED_IN }),
         Ticket.aggregate([
-          { $match: { eventId: new mongoose.Types.ObjectId(eventId), vendorId: new mongoose.Types.ObjectId(vendorId) } },
+          { $match: eventIdFilter },
           {
             $group: {
               _id: '$ticketType',

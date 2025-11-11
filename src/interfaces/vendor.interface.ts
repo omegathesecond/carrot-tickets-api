@@ -41,6 +41,7 @@ export interface IVendor extends Document {
   // Account Status
   isActive: boolean;
   isVerified: boolean;
+  isSuperAdmin?: boolean; // System-wide admin access
 
   // App Access
   apps: {

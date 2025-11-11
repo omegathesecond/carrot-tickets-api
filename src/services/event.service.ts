@@ -45,6 +45,7 @@ export interface GetEventsQuery {
   search?: string;
   page?: number;
   limit?: number;
+  isSuperAdmin?: boolean;
 }
 
 export class EventService {
@@ -98,11 +99,15 @@ export class EventService {
         endDate,
         search,
         page = 1,
-        limit = 20
+        limit = 20,
+        isSuperAdmin = false
       } = query;
 
-      // Build query
-      const filter: any = { vendorId };
+      // Build query - skip vendorId filter for superadmin
+      const filter: any = {};
+      if (!isSuperAdmin) {
+        filter.vendorId = vendorId;
+      }
 
       if (status) {
         filter.status = status;
@@ -153,12 +158,14 @@ export class EventService {
   /**
    * Get single event by ID
    */
-  static async getEventById(eventId: string, vendorId: string): Promise<IEvent> {
+  static async getEventById(eventId: string, vendorId: string, isSuperAdmin: boolean = false): Promise<IEvent> {
     try {
-      const event = await Event.findOne({
-        _id: eventId,
-        vendorId
-      });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -177,10 +184,15 @@ export class EventService {
   static async updateEvent(
     eventId: string,
     vendorId: string,
-    updates: UpdateEventParams
+    updates: UpdateEventParams,
+    isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -236,9 +248,13 @@ export class EventService {
   /**
    * Delete event (soft delete - only allowed if no tickets sold)
    */
-  static async deleteEvent(eventId: string, vendorId: string): Promise<void> {
+  static async deleteEvent(eventId: string, vendorId: string, isSuperAdmin: boolean = false): Promise<void> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -260,9 +276,13 @@ export class EventService {
   /**
    * Publish event (make it active)
    */
-  static async publishEvent(eventId: string, vendorId: string): Promise<IEvent> {
+  static async publishEvent(eventId: string, vendorId: string, isSuperAdmin: boolean = false): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -286,9 +306,13 @@ export class EventService {
   /**
    * Unpublish event (revert to draft)
    */
-  static async unpublishEvent(eventId: string, vendorId: string): Promise<IEvent> {
+  static async unpublishEvent(eventId: string, vendorId: string, isSuperAdmin: boolean = false): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -465,10 +489,15 @@ export class EventService {
       description?: string;
       price: number;
       quantity: number;
-    }
+    },
+    isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -511,10 +540,15 @@ export class EventService {
       description?: string;
       price?: number;
       quantity?: number;
-    }
+    },
+    isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -559,10 +593,15 @@ export class EventService {
   static async deleteTicketType(
     eventId: string,
     vendorId: string,
-    ticketTypeName: string
+    ticketTypeName: string,
+    isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -596,10 +635,15 @@ export class EventService {
     eventId: string,
     vendorId: string,
     ticketTypeName: string,
-    adjustment: number
+    adjustment: number,
+    isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');
@@ -643,10 +687,15 @@ export class EventService {
     eventId: string,
     vendorId: string,
     ticketTypeName: string,
-    isSoldOut: boolean
+    isSoldOut: boolean,
+    isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
-      const event = await Event.findOne({ _id: eventId, vendorId });
+      const query: any = { _id: eventId };
+      if (!isSuperAdmin) {
+        query.vendorId = vendorId;
+      }
+      const event = await Event.findOne(query);
 
       if (!event) {
         throw new Error('Event not found');

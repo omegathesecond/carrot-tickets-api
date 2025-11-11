@@ -95,6 +95,11 @@ const vendorSchema = new Schema<IVendor>({
     default: false,
     index: true
   },
+  isSuperAdmin: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
 
   // App Access Control
   apps: {

@@ -77,4 +77,5 @@ export interface TicketsUserToken {
   app: 'tickets';
   role: TicketsRole;
   permissions: TicketsPermission[];
+  isSuperAdmin?: boolean;
 }

@@ -182,7 +182,8 @@ export class TicketsController {
 
       const result = await EventService.getEvents({
         vendorId: ticketsUser.vendorId as string,
-        ...value
+        ...value,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false
       });
 
       ApiResponseUtil.success(res, result);
@@ -200,7 +201,11 @@ export class TicketsController {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
 
-      const event = await EventService.getEventById(eventId as string, ticketsUser.vendorId as string);
+      const event = await EventService.getEventById(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
 
       ApiResponseUtil.success(res, event);
     } catch (error: any) {
@@ -253,7 +258,8 @@ export class TicketsController {
       const event = await EventService.updateEvent(
         eventId as string,
         ticketsUser.vendorId as string,
-        value
+        value,
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, event, 'Event updated successfully');
@@ -271,7 +277,11 @@ export class TicketsController {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
 
-      await EventService.deleteEvent(eventId as string, ticketsUser.vendorId as string);
+      await EventService.deleteEvent(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
 
       ApiResponseUtil.success(res, null, 'Event deleted successfully');
     } catch (error: any) {
@@ -288,7 +298,11 @@ export class TicketsController {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
 
-      const event = await EventService.publishEvent(eventId as string, ticketsUser.vendorId as string);
+      const event = await EventService.publishEvent(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
 
       ApiResponseUtil.success(res, event, 'Event published successfully');
     } catch (error: any) {
@@ -305,7 +319,11 @@ export class TicketsController {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
 
-      const event = await EventService.unpublishEvent(eventId as string, ticketsUser.vendorId as string);
+      const event = await EventService.unpublishEvent(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
 
       ApiResponseUtil.success(res, event, 'Event unpublished successfully');
     } catch (error: any) {
@@ -335,7 +353,8 @@ export class TicketsController {
       const event = await EventService.addTicketType(
         eventId as string,
         ticketsUser.vendorId as string,
-        value
+        value,
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, event, 'Ticket type added successfully');
@@ -367,7 +386,8 @@ export class TicketsController {
         eventId as string,
         ticketsUser.vendorId as string,
         decodeURIComponent(ticketTypeName as string),
-        value
+        value,
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, event, 'Ticket type updated successfully');
@@ -388,7 +408,8 @@ export class TicketsController {
       const event = await EventService.deleteTicketType(
         eventId as string,
         ticketsUser.vendorId as string,
-        decodeURIComponent(ticketTypeName as string)
+        decodeURIComponent(ticketTypeName as string),
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, event, 'Ticket type deleted successfully');
@@ -420,7 +441,8 @@ export class TicketsController {
         eventId as string,
         ticketsUser.vendorId as string,
         decodeURIComponent(ticketTypeName as string),
-        value.adjustment
+        value.adjustment,
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, event, 'Ticket quantity adjusted successfully');
@@ -449,7 +471,8 @@ export class TicketsController {
         eventId as string,
         ticketsUser.vendorId as string,
         decodeURIComponent(ticketTypeName as string),
-        value.isSoldOut
+        value.isSoldOut,
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, event, 'Ticket sold-out status updated successfully');
@@ -672,7 +695,8 @@ export class TicketsController {
 
       const stats = await AnalyticsService.getDashboardStats({
         vendorId: ticketsUser.vendorId as string,
-        ...value
+        ...value,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false
       });
 
       ApiResponseUtil.success(res, stats);
@@ -698,7 +722,8 @@ export class TicketsController {
 
       const stats = await AnalyticsService.getSalesStats({
         vendorId: ticketsUser.vendorId as string,
-        ...value
+        ...value,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false
       });
 
       ApiResponseUtil.success(res, stats);
@@ -724,7 +749,8 @@ export class TicketsController {
 
       const stats = await AnalyticsService.getRevenueStats({
         vendorId: ticketsUser.vendorId as string,
-        ...value
+        ...value,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false
       });
 
       ApiResponseUtil.success(res, stats);
@@ -744,7 +770,8 @@ export class TicketsController {
 
       const analytics = await AnalyticsService.getEventAnalytics(
         eventId as string,
-        ticketsUser.vendorId as string
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
       );
 
       ApiResponseUtil.success(res, analytics);
