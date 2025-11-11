@@ -33,8 +33,12 @@ export class MediaController {
         return ApiResponseUtil.validationError(res, 'No file uploaded');
       }
 
-      // Verify event exists and belongs to vendor
-      const event = await Event.findOne({ _id: eventId, vendorId: ticketsUser.vendorId });
+      // Verify event exists and belongs to vendor (or superadmin)
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) {
+        query.vendorId = ticketsUser.vendorId;
+      }
+      const event = await Event.findOne(query);
       if (!event) {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
@@ -89,8 +93,12 @@ export class MediaController {
         return ApiResponseUtil.validationError(res, 'No file uploaded');
       }
 
-      // Verify event exists and belongs to vendor
-      const event = await Event.findOne({ _id: eventId, vendorId: ticketsUser.vendorId });
+      // Verify event exists and belongs to vendor (or superadmin)
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) {
+        query.vendorId = ticketsUser.vendorId;
+      }
+      const event = await Event.findOne(query);
       if (!event) {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
@@ -146,8 +154,12 @@ export class MediaController {
         return ApiResponseUtil.validationError(res, 'No files uploaded');
       }
 
-      // Verify event exists and belongs to vendor
-      const event = await Event.findOne({ _id: eventId, vendorId: ticketsUser.vendorId });
+      // Verify event exists and belongs to vendor (or superadmin)
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) {
+        query.vendorId = ticketsUser.vendorId;
+      }
+      const event = await Event.findOne(query);
       if (!event) {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
@@ -200,8 +212,12 @@ export class MediaController {
         return ApiResponseUtil.validationError(res, 'No file uploaded');
       }
 
-      // Verify event exists and belongs to vendor
-      const event = await Event.findOne({ _id: eventId, vendorId: ticketsUser.vendorId });
+      // Verify event exists and belongs to vendor (or superadmin)
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) {
+        query.vendorId = ticketsUser.vendorId;
+      }
+      const event = await Event.findOne(query);
       if (!event) {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
@@ -253,8 +269,12 @@ export class MediaController {
         return ApiResponseUtil.validationError(res, 'URL and media type are required');
       }
 
-      // Verify event exists and belongs to vendor
-      const event = await Event.findOne({ _id: eventId, vendorId: ticketsUser.vendorId });
+      // Verify event exists and belongs to vendor (or superadmin)
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) {
+        query.vendorId = ticketsUser.vendorId;
+      }
+      const event = await Event.findOne(query);
       if (!event) {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
@@ -304,8 +324,12 @@ export class MediaController {
       const { eventId } = req.params;
       const ticketsUser = (req as any).ticketsUser;
 
-      // Verify event exists and belongs to vendor
-      const event = await Event.findOne({ _id: eventId, vendorId: ticketsUser.vendorId });
+      // Verify event exists and belongs to vendor (or superadmin)
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) {
+        query.vendorId = ticketsUser.vendorId;
+      }
+      const event = await Event.findOne(query);
       if (!event) {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
