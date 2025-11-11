@@ -139,7 +139,7 @@ export class EventService {
       ]);
 
       return {
-        events,
+        data: events,
         pagination: {
           total,
           page,

@@ -329,7 +329,7 @@ export class TicketService {
       ]);
 
       return {
-        sales,
+        data: sales,
         pagination: {
           total,
           page,

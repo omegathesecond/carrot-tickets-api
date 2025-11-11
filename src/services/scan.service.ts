@@ -383,7 +383,7 @@ export class ScanService {
       ]);
 
       return {
-        scans,
+        data: scans,
         pagination: {
           total,
           page,
