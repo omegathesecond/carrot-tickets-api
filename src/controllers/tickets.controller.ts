@@ -1,0 +1,832 @@
+import { Request, Response } from 'express';
+import Joi from 'joi';
+import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { TicketsAuthService } from '@services/ticketsAuth.service';
+import { EventService } from '@services/event.service';
+import { TicketService } from '@services/ticket.service';
+import { ScanService } from '@services/scan.service';
+import { AnalyticsService } from '@services/analytics.service';
+import { ExportService } from '@services/export.service';
+import {
+  loginSchema,
+  updateProfileSchema,
+  changePasswordSchema,
+  createEventSchema,
+  updateEventSchema,
+  eventQuerySchema,
+  sellTicketSchema,
+  refundTicketSchema,
+  ticketSalesQuerySchema,
+  validateTicketSchema,
+  checkInTicketSchema,
+  scanQuerySchema,
+  analyticsQuerySchema
+} from '@validators/tickets.validator';
+
+export class TicketsController {
+  /**
+   * Authentication: Login
+   */
+  static async login(req: Request, res: Response): Promise<void> {
+    try {
+      // Validate input
+      const { error, value } = loginSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const { identifier, password } = value;
+
+      // Login
+      const result = await TicketsAuthService.login(identifier, password);
+
+      ApiResponseUtil.success(res, result, 'Login successful');
+    } catch (error: any) {
+      console.error('Login error:', error);
+      ApiResponseUtil.error(res, error.message || 'Login failed', 401);
+    }
+  }
+
+  /**
+   * Authentication: Refresh token
+   */
+  static async refresh(req: Request, res: Response): Promise<void> {
+    try {
+      const { refreshToken } = req.body;
+
+      if (!refreshToken) {
+        ApiResponseUtil.error(res, 'Refresh token is required', 400);
+        return;
+      }
+
+      const result = await TicketsAuthService.refreshAccessToken(refreshToken);
+
+      ApiResponseUtil.success(res, result, 'Token refreshed successfully');
+    } catch (error: any) {
+      console.error('Refresh token error:', error);
+      ApiResponseUtil.error(res, error.message || 'Token refresh failed', 401);
+    }
+  }
+
+  /**
+   * Authentication: Logout
+   */
+  static async logout(req: Request, res: Response): Promise<void> {
+    try {
+      const { refreshToken } = req.body;
+
+      if (refreshToken) {
+        await TicketsAuthService.revokeRefreshToken(refreshToken);
+      }
+
+      ApiResponseUtil.success(res, null, 'Logged out successfully');
+    } catch (error: any) {
+      console.error('Logout error:', error);
+      ApiResponseUtil.error(res, error.message || 'Logout failed');
+    }
+  }
+
+  /**
+   * Authentication: Get current user
+   */
+  static async getMe(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      const user = await TicketsAuthService.getMe(
+        ticketsUser.userId as string | undefined,
+        ticketsUser.vendorId as string | undefined,
+        ticketsUser.userType as string
+      );
+
+      ApiResponseUtil.success(res, user);
+    } catch (error: any) {
+      console.error('Get me error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch user');
+    }
+  }
+
+  /**
+   * User: Update profile
+   */
+  static async updateProfile(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = updateProfileSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const updatedUser = await TicketsAuthService.updateProfile(
+        ticketsUser.userId as string | undefined,
+        ticketsUser.vendorId as string | undefined,
+        ticketsUser.userType as string,
+        value
+      );
+
+      ApiResponseUtil.success(res, updatedUser, 'Profile updated successfully');
+    } catch (error: any) {
+      console.error('Update profile error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to update profile');
+    }
+  }
+
+  /**
+   * User: Change password
+   */
+  static async changePassword(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = changePasswordSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const { currentPassword, newPassword } = value;
+
+      await TicketsAuthService.changePassword(
+        ticketsUser.userId as string | undefined,
+        ticketsUser.vendorId as string | undefined,
+        ticketsUser.userType as string,
+        currentPassword,
+        newPassword
+      );
+
+      ApiResponseUtil.success(res, null, 'Password changed successfully');
+    } catch (error: any) {
+      console.error('Change password error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to change password');
+    }
+  }
+
+  /**
+   * Events: Get all events
+   */
+  static async getEvents(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query
+      const { error, value } = eventQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await EventService.getEvents({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Get events error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch events');
+    }
+  }
+
+  /**
+   * Events: Get single event
+   */
+  static async getEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const event = await EventService.getEventById(eventId as string, ticketsUser.vendorId as string);
+
+      ApiResponseUtil.success(res, event);
+    } catch (error: any) {
+      console.error('Get event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch event', 404);
+    }
+  }
+
+  /**
+   * Events: Create event
+   */
+  static async createEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = createEventSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const event = await EventService.createEvent({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.created(res, event, 'Event created successfully');
+    } catch (error: any) {
+      console.error('Create event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to create event');
+    }
+  }
+
+  /**
+   * Events: Update event
+   */
+  static async updateEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      // Validate input
+      const { error, value } = updateEventSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const event = await EventService.updateEvent(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        value
+      );
+
+      ApiResponseUtil.success(res, event, 'Event updated successfully');
+    } catch (error: any) {
+      console.error('Update event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to update event');
+    }
+  }
+
+  /**
+   * Events: Delete event
+   */
+  static async deleteEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      await EventService.deleteEvent(eventId as string, ticketsUser.vendorId as string);
+
+      ApiResponseUtil.success(res, null, 'Event deleted successfully');
+    } catch (error: any) {
+      console.error('Delete event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to delete event');
+    }
+  }
+
+  /**
+   * Events: Publish event
+   */
+  static async publishEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const event = await EventService.publishEvent(eventId as string, ticketsUser.vendorId as string);
+
+      ApiResponseUtil.success(res, event, 'Event published successfully');
+    } catch (error: any) {
+      console.error('Publish event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to publish event');
+    }
+  }
+
+  /**
+   * Events: Unpublish event
+   */
+  static async unpublishEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const event = await EventService.unpublishEvent(eventId as string, ticketsUser.vendorId as string);
+
+      ApiResponseUtil.success(res, event, 'Event unpublished successfully');
+    } catch (error: any) {
+      console.error('Unpublish event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to unpublish event');
+    }
+  }
+
+  /**
+   * Ticket Types: Add ticket type to event
+   */
+  static async addTicketType(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+      const { error, value } = Joi.object({
+        name: Joi.string().required().trim().max(100),
+        description: Joi.string().optional().max(500),
+        price: Joi.number().required().min(0),
+        quantity: Joi.number().required().min(1)
+      }).validate(req.body);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0].message, 400);
+      }
+
+      const event = await EventService.addTicketType(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        value
+      );
+
+      ApiResponseUtil.success(res, event, 'Ticket type added successfully');
+    } catch (error: any) {
+      console.error('Add ticket type error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to add ticket type');
+    }
+  }
+
+  /**
+   * Ticket Types: Update ticket type
+   */
+  static async updateTicketType(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId, ticketTypeName } = req.params;
+      const { error, value } = Joi.object({
+        name: Joi.string().optional().trim().max(100),
+        description: Joi.string().optional().max(500),
+        price: Joi.number().optional().min(0),
+        quantity: Joi.number().optional().min(1)
+      }).min(1).validate(req.body);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0].message, 400);
+      }
+
+      const event = await EventService.updateTicketType(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        decodeURIComponent(ticketTypeName as string),
+        value
+      );
+
+      ApiResponseUtil.success(res, event, 'Ticket type updated successfully');
+    } catch (error: any) {
+      console.error('Update ticket type error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to update ticket type');
+    }
+  }
+
+  /**
+   * Ticket Types: Delete ticket type
+   */
+  static async deleteTicketType(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId, ticketTypeName } = req.params;
+
+      const event = await EventService.deleteTicketType(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        decodeURIComponent(ticketTypeName as string)
+      );
+
+      ApiResponseUtil.success(res, event, 'Ticket type deleted successfully');
+    } catch (error: any) {
+      console.error('Delete ticket type error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to delete ticket type');
+    }
+  }
+
+  /**
+   * Ticket Types: Adjust quantity
+   */
+  static async adjustTicketQuantity(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId, ticketTypeName } = req.params;
+      const { error, value } = Joi.object({
+        adjustment: Joi.number().required().not(0).messages({
+          'any.required': 'Adjustment value is required',
+          'any.invalid': 'Adjustment cannot be zero'
+        })
+      }).validate(req.body);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0].message, 400);
+      }
+
+      const event = await EventService.adjustTicketQuantity(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        decodeURIComponent(ticketTypeName as string),
+        value.adjustment
+      );
+
+      ApiResponseUtil.success(res, event, 'Ticket quantity adjusted successfully');
+    } catch (error: any) {
+      console.error('Adjust ticket quantity error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to adjust ticket quantity');
+    }
+  }
+
+  /**
+   * Ticket Types: Mark as sold out
+   */
+  static async markTicketSoldOut(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId, ticketTypeName } = req.params;
+      const { error, value } = Joi.object({
+        isSoldOut: Joi.boolean().required()
+      }).validate(req.body);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0].message, 400);
+      }
+
+      const event = await EventService.markTicketSoldOut(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        decodeURIComponent(ticketTypeName as string),
+        value.isSoldOut
+      );
+
+      ApiResponseUtil.success(res, event, 'Ticket sold-out status updated successfully');
+    } catch (error: any) {
+      console.error('Mark ticket sold out error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to update sold-out status');
+    }
+  }
+
+  /**
+   * Sales: Sell tickets
+   */
+  static async sellTickets(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = sellTicketSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await TicketService.sellTickets({
+        vendorId: ticketsUser.vendorId as string,
+        soldBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
+        soldByType: ticketsUser.userType === 'vendor' ? 'vendor' : 'sub-user',
+        ...value
+      });
+
+      ApiResponseUtil.created(
+        res,
+        {
+          sale: result.sale,
+          tickets: result.tickets
+        },
+        result.paymentMessage || 'Tickets sold successfully'
+      );
+    } catch (error: any) {
+      console.error('Sell tickets error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to sell tickets');
+    }
+  }
+
+  /**
+   * Sales: Get sales
+   */
+  static async getSales(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query
+      const { error, value } = ticketSalesQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await TicketService.getSales({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Get sales error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch sales');
+    }
+  }
+
+  /**
+   * Sales: Get single sale
+   */
+  static async getSale(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { saleId } = req.params;
+
+      const sale = await TicketService.getSaleById(saleId as string, ticketsUser.vendorId as string);
+
+      ApiResponseUtil.success(res, sale);
+    } catch (error: any) {
+      console.error('Get sale error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch sale', 404);
+    }
+  }
+
+  /**
+   * Sales: Refund ticket
+   */
+  static async refundTicket(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { ticketId } = req.params;
+
+      // Validate input
+      const { error, value } = refundTicketSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const ticket = await TicketService.refundTicket(
+        ticketId as string,
+        ticketsUser.vendorId as string,
+        value.reason
+      );
+
+      ApiResponseUtil.success(res, ticket, 'Ticket refunded successfully');
+    } catch (error: any) {
+      console.error('Refund ticket error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to refund ticket');
+    }
+  }
+
+  /**
+   * Scans: Validate ticket
+   */
+  static async validateTicket(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = validateTicketSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.validateTicket({
+        ticketId: value.ticketId,
+        vendorId: ticketsUser.vendorId as string,
+        scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
+        scannedByType: ticketsUser.userType === 'vendor' ? 'vendor' : 'sub-user'
+      });
+
+      if (result.valid) {
+        ApiResponseUtil.success(res, result, result.message);
+      } else {
+        ApiResponseUtil.error(res, result.message, 400, result);
+      }
+    } catch (error: any) {
+      console.error('Validate ticket error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to validate ticket');
+    }
+  }
+
+  /**
+   * Scans: Check-in ticket
+   */
+  static async checkInTicket(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = checkInTicketSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.checkInTicket({
+        ticketId: value.ticketId,
+        vendorId: ticketsUser.vendorId as string,
+        scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
+        scannedByType: ticketsUser.userType === 'vendor' ? 'vendor' : 'sub-user',
+        notes: value.notes
+      });
+
+      if (result.valid) {
+        ApiResponseUtil.success(res, result, result.message);
+      } else {
+        ApiResponseUtil.error(res, result.message, 400, result);
+      }
+    } catch (error: any) {
+      console.error('Check-in ticket error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to check in ticket');
+    }
+  }
+
+  /**
+   * Scans: Get scans
+   */
+  static async getScans(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query
+      const { error, value } = scanQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.getScans({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Get scans error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch scans');
+    }
+  }
+
+  /**
+   * Analytics: Get dashboard stats
+   */
+  static async getDashboardStats(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query
+      const { error, value } = analyticsQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const stats = await AnalyticsService.getDashboardStats({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.success(res, stats);
+    } catch (error: any) {
+      console.error('Get dashboard stats error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch dashboard statistics');
+    }
+  }
+
+  /**
+   * Analytics: Get sales stats
+   */
+  static async getSalesStats(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query
+      const { error, value } = analyticsQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const stats = await AnalyticsService.getSalesStats({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.success(res, stats);
+    } catch (error: any) {
+      console.error('Get sales stats error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch sales statistics');
+    }
+  }
+
+  /**
+   * Analytics: Get revenue stats
+   */
+  static async getRevenueStats(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query
+      const { error, value } = analyticsQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const stats = await AnalyticsService.getRevenueStats({
+        vendorId: ticketsUser.vendorId as string,
+        ...value
+      });
+
+      ApiResponseUtil.success(res, stats);
+    } catch (error: any) {
+      console.error('Get revenue stats error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch revenue statistics');
+    }
+  }
+
+  /**
+   * Analytics: Get event analytics
+   */
+  static async getEventAnalytics(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const analytics = await AnalyticsService.getEventAnalytics(
+        eventId as string,
+        ticketsUser.vendorId as string
+      );
+
+      ApiResponseUtil.success(res, analytics);
+    } catch (error: any) {
+      console.error('Get event analytics error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch event analytics');
+    }
+  }
+
+  /**
+   * Export: Export sales
+   */
+  static async exportSales(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId, startDate, endDate } = req.query;
+
+      const csv = await ExportService.exportSalesToCSV({
+        vendorId: ticketsUser.vendorId as string,
+        eventId: eventId as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined
+      });
+
+      const filename = ExportService.getFilename('sales');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(csv);
+    } catch (error: any) {
+      console.error('Export sales error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to export sales');
+    }
+  }
+
+  /**
+   * Export: Export revenue
+   */
+  static async exportRevenue(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId, startDate, endDate } = req.query;
+
+      const csv = await ExportService.exportRevenueToCSV({
+        vendorId: ticketsUser.vendorId as string,
+        eventId: eventId as string,
+        startDate: startDate ? new Date(startDate as string) : undefined,
+        endDate: endDate ? new Date(endDate as string) : undefined
+      });
+
+      const filename = ExportService.getFilename('revenue');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(csv);
+    } catch (error: any) {
+      console.error('Export revenue error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to export revenue');
+    }
+  }
+
+  /**
+   * Export: Export event summary
+   */
+  static async exportEventSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const csv = await ExportService.exportEventSummaryToCSV(
+        eventId as string,
+        ticketsUser.vendorId as string
+      );
+
+      const filename = ExportService.getFilename('event_summary');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(csv);
+    } catch (error: any) {
+      console.error('Export event summary error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to export event summary');
+    }
+  }
+}
