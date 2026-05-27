@@ -261,7 +261,7 @@ export class PublicController {
             eventDate: event.eventDate,
             venue: event.venue
           })),
-          transactionId: paymentResult.transactionId,
+          transactionId: result.sale.walletTransactionId,
           totalAmount,
           quantity,
           event: {
