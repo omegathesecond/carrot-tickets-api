@@ -5,6 +5,7 @@ import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentMethod } from '@interfaces/ticket.interface';
 import { TicketService } from '@services/ticket.service';
+import { SmsService } from '@services/sms.service';
 
 // Validation schemas
 const publicEventsQuerySchema = Joi.object({
@@ -250,6 +251,20 @@ export class PublicController {
         soldBy: event.vendorId.toString(),
         soldByType: 'vendor'
       });
+
+      // Best-effort SMS confirmation. Don't await — failure must NOT roll
+      // back the purchase. The service logs its own outcome.
+      if (customerPhone) {
+        SmsService.sendTicketConfirmation(
+          customerPhone,
+          result.tickets.map((t) => ({
+            ticketId: t.ticketId,
+            eventName: event.name,
+            eventDate: event.eventDate.toISOString(),
+            venue: event.venue,
+          })),
+        ).catch((err) => console.error('[SMS] confirmation send threw', err));
+      }
 
       return ApiResponseUtil.created(
         res,
