@@ -5,7 +5,6 @@ import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentMethod } from '@interfaces/ticket.interface';
 import { TicketService } from '@services/ticket.service';
-import { KeshlessPaymentService } from '@services/keshlessPayment.service';
 
 // Validation schemas
 const publicEventsQuerySchema = Joi.object({
@@ -233,24 +232,11 @@ export class PublicController {
         );
       }
 
-      // Process payment via Keshless
-      const paymentResult = await KeshlessPaymentService.acceptPayment({
-        cardNumber: keshlessCardNumber,
-        amount: totalAmount,
-        pin: keshlessPin,
-        description: `Keshless Tickets - ${event.name} (${quantity}x ${ticketType.name})`
-      });
-
-      if (paymentResult.status === 'failed') {
-        return ApiResponseUtil.error(
-          res,
-          paymentResult.message || 'Payment failed',
-          400
-        );
-      }
-
-      // Payment successful - create tickets
-      // For public sales, use the event's vendor as the seller
+      // Delegate payment + ticket creation to TicketService.sellTickets so we
+      // only debit the wallet once. (Previously the controller pre-charged via
+      // KeshlessPaymentService and then sellTickets charged again internally,
+      // failing on the second attempt and 500ing while the first debit had
+      // already cleared.)
       const result = await TicketService.sellTickets({
         vendorId: event.vendorId.toString(),
         eventId,
@@ -260,6 +246,7 @@ export class PublicController {
         customerPhone,
         paymentMethod: PaymentMethod.KESHLESS_WALLET,
         keshlessCardNumber,
+        keshlessPin,
         soldBy: event.vendorId.toString(),
         soldByType: 'vendor'
       });
