@@ -1,32 +1,23 @@
 /**
  * SMS service for Keshless Tickets.
  *
- * Mirrors the canonical YeboLink sender pattern from
- * `keshless/api/src/services/sms/yebolink.sender.ts`:
- *   - reads YEBOLINK_API_KEY, YEBOLINK_BASE_URL, SMS_ENABLED env vars
- *   - posts to /api/v1/messages/send with { to, channel: 'sms', content }
- *   - returns boolean (true = accepted by gateway)
- *   - logs loudly on failure (no silent fallback)
- *   - returns true when SMS_ENABLED!=='true' (dev parity, matches main API)
+ * Routes through the unified Keshless SMS gateway at
+ * POST {KESHLESS_API_URL}/integration/sms — the main keshless-api owns
+ * the provider switching (MTN SMPP via the USSD relay, or YeboLink),
+ * the credit pool, and the central logs. We just shape the body and
+ * authenticate with the existing integration API key.
  *
- * Only one formatted message right now (sendTicketConfirmation). Add more
- * helpers here as the tickets product grows (reminder before event, refund
- * notice, etc.).
+ * Same KESHLESS_API_URL + KESHLESS_API_KEY env vars we already use for
+ * /integration/payment — no new secrets, no new YeboLink wiring on this
+ * service. When a new Keshless sub-product (travels, etc.) needs SMS, it
+ * gets the capability for free as soon as it has an integration key.
  *
  * Per global rule: SMS failures do NOT roll back the ticket purchase.
  * The caller invokes this fire-and-forget and logs the boolean result.
  */
 
-const YEBOLINK_API_KEY = process.env['YEBOLINK_API_KEY'] || '';
-const YEBOLINK_BASE_URL = process.env['YEBOLINK_BASE_URL'] || 'https://api.yebolink.com';
-const SMS_ENABLED = process.env['SMS_ENABLED'] === 'true';
-
-interface YeboLinkResponse {
-  id: string;
-  status: string;       // "queued"
-  creditsUsed: number;
-  createdAt: string;
-}
+const KESHLESS_API_URL = process.env['KESHLESS_API_URL'] || 'http://localhost:3000/api';
+const KESHLESS_API_KEY = process.env['KESHLESS_API_KEY'] || '';
 
 export interface TicketSummary {
   ticketId: string;       // TKT-...
@@ -38,43 +29,34 @@ export interface TicketSummary {
 export class SmsService {
   /**
    * Low-level send. Returns true if the gateway accepted the message
-   * (HTTP 201), false otherwise. Always logs the outcome.
+   * (HTTP 200), false otherwise. Always logs the outcome.
    */
   private static async send(phoneNumber: string, message: string): Promise<boolean> {
-    if (!SMS_ENABLED) {
-      console.warn(`[SMS:yebolink] SMS_ENABLED!=='true' — would have sent to ${phoneNumber}`);
-      return true; // dev-parity with main keshless-api behaviour
-    }
-    if (!YEBOLINK_API_KEY) {
-      console.error('[SMS:yebolink] YEBOLINK_API_KEY missing — cannot send');
+    if (!KESHLESS_API_KEY) {
+      console.error('[SMS] KESHLESS_API_KEY missing — cannot reach unified gateway');
       return false;
     }
 
     try {
-      const response = await fetch(`${YEBOLINK_BASE_URL}/api/v1/messages/send`, {
+      const response = await fetch(`${KESHLESS_API_URL}/integration/sms`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': YEBOLINK_API_KEY,
+          'x-api-key': KESHLESS_API_KEY,
         },
-        body: JSON.stringify({
-          to: phoneNumber,
-          channel: 'sms',
-          content: { text: message, from_name: 'KeshlessTickets' },
-        }),
+        body: JSON.stringify({ to: phoneNumber, message }),
       });
 
-      if (response.status === 201) {
-        const data = (await response.json()) as YeboLinkResponse;
-        console.log(`[SMS:yebolink] Sent to ${phoneNumber} (id=${data.id})`);
+      if (response.ok) {
+        console.log(`[SMS] Dispatched to ${phoneNumber} via Keshless gateway`);
         return true;
       }
 
       const errorText = await response.text().catch(() => '');
-      console.error(`[SMS:yebolink] Send failed: ${response.status} ${errorText.slice(0, 200)}`);
+      console.error(`[SMS] Gateway returned ${response.status}: ${errorText.slice(0, 200)}`);
       return false;
     } catch (error) {
-      console.error('[SMS:yebolink] Error sending SMS', error instanceof Error ? error.message : String(error));
+      console.error('[SMS] Error reaching gateway', error instanceof Error ? error.message : String(error));
       return false;
     }
   }
