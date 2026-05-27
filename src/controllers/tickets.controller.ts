@@ -108,6 +108,33 @@ export class TicketsController {
   }
 
   /**
+   * User: List the authenticated Keshless user's purchased tickets.
+   * Matches on the user's phone number (which the main keshless-api
+   * proxy forwards as `x-user-phone` and the serviceAuth middleware
+   * attaches as `req.ticketsUser.userPhone`). Falls back to the raw
+   * header for direct-call scenarios (curl tests, future SDKs).
+   */
+  static async getMyTickets(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const phone = (ticketsUser?.userPhone as string | undefined)
+        || (req.headers['x-user-phone'] as string | undefined);
+
+      if (!phone) {
+        ApiResponseUtil.unauthorized(res, 'Authenticated user phone required');
+        return;
+      }
+
+      const tickets = await TicketService.findTicketsByCustomerPhone(phone);
+      console.log(`[my-tickets] phone=${phone.replace(/(\+\d{3})\d+(\d{4})/, '$1***$2')} found=${tickets.length}`);
+      ApiResponseUtil.success(res, tickets);
+    } catch (error: any) {
+      console.error('Get my tickets error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch tickets');
+    }
+  }
+
+  /**
    * User: Update profile
    */
   static async updateProfile(req: Request, res: Response): Promise<any> {

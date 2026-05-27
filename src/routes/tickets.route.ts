@@ -28,6 +28,17 @@ router.post('/auth/logout', TicketsController.logout);
 router.get('/auth/me', TicketsController.getMe);
 
 /**
+ * End-customer ticket list — the Keshless user-app calls this to show
+ * a logged-in user every ticket bought with their phone number.
+ * Mounted before the vendor-scoped /events block so the path resolves
+ * cleanly. Auth is the existing dualAuth: when the main keshless-api
+ * proxy forwards a Keshless user JWT, serviceAuth attaches userPhone
+ * to req.ticketsUser; when called directly with a vendor JWT, the
+ * lookup will see no phone and 401.
+ */
+router.get('/my-tickets', TicketsController.getMyTickets);
+
+/**
  * User Account Settings Routes
  */
 router.put('/users/profile', TicketsController.updateProfile);

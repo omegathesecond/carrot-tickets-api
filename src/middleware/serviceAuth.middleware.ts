@@ -21,6 +21,7 @@ export const serviceAuth = (
     const serviceKey = req.headers['x-service-key'] as string;
     const userId = req.headers['x-user-id'] as string;
     const userType = req.headers['x-user-type'] as string;
+    const userPhone = req.headers['x-user-phone'] as string | undefined;
 
     // Validate service key
     const expectedServiceKey = process.env.SERVICE_KEY;
@@ -57,6 +58,7 @@ export const serviceAuth = (
     (req as any).ticketsUser = {
       userId,
       userType,
+      userPhone, // forwarded by the main keshless-api proxy from req.user.phoneNumber
       authenticatedVia: 'service',
       // Grant full permissions for service-authenticated requests
       // Individual endpoints can still validate specific permissions if needed

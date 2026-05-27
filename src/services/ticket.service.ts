@@ -468,6 +468,31 @@ export class TicketService {
   }
 
   /**
+   * Find every ticket whose customerPhone matches an authenticated user's
+   * phone. Used by the Keshless user-app's "My Tickets" tab. Event details
+   * are populated so the Flutter card can render event name/date/venue
+   * without a follow-up call per ticket.
+   *
+   * Phone comparison is exact match on the same string we wrote during
+   * purchase (see ticket creation in sellTickets, line ~160). If users
+   * register their wallet phone in E.164 (+268…) and we also store the
+   * purchase form's phone in E.164, this works. If formats diverge, this
+   * lookup will under-match and we'll need a normalization step here.
+   */
+  static async findTicketsByCustomerPhone(phone: string): Promise<ITicket[]> {
+    try {
+      const tickets = await Ticket.find({ customerPhone: phone })
+        .populate('eventId', 'name venue eventDate startTime endTime posterUrl')
+        .sort({ createdAt: -1 })
+        .lean();
+      return tickets;
+    } catch (error: any) {
+      console.error('[my-tickets] find by phone error:', error);
+      throw new Error(error.message || 'Failed to fetch tickets');
+    }
+  }
+
+  /**
    * Get ticket by ID
    */
   static async getTicketById(ticketId: string, vendorId: string): Promise<ITicket> {
