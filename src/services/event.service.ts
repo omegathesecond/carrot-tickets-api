@@ -1,5 +1,7 @@
 import { Event } from '@models/event.model';
+import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
+import { VerificationStatus } from '@interfaces/vendor.interface';
 import mongoose from 'mongoose';
 
 export interface CreateEventParams {
@@ -290,6 +292,23 @@ export class EventService {
 
       if (event.status !== EventStatus.DRAFT) {
         throw new Error(`Event is already ${event.status.toLowerCase()}`);
+      }
+
+      // Publishing gate: a self-registered organizer can build draft events
+      // freely, but the event only goes live (and sellable) once an admin has
+      // verified the account. Super admins bypass this. (Drafts are unaffected
+      // — this only blocks the DRAFT → PUBLISHED transition.)
+      if (!isSuperAdmin) {
+        const vendor = await Vendor.findById(event.vendorId).select('verificationStatus isActive');
+        if (!vendor) {
+          throw new Error('Organizer account not found');
+        }
+        if (!vendor.isActive) {
+          throw new Error('Your organizer account is inactive. Please contact support.');
+        }
+        if (vendor.verificationStatus !== VerificationStatus.VERIFIED) {
+          throw new Error('Your organizer account is pending approval. You can publish events once it is verified.');
+        }
       }
 
       event.status = EventStatus.PUBLISHED;

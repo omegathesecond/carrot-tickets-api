@@ -24,6 +24,39 @@ export const loginSchema = Joi.object({
     })
 });
 
+/**
+ * Self-service organizer signup. At least one of email / phoneNumber is
+ * required (mirrors the Vendor model, where both are sparse-unique and
+ * either can be the login identifier).
+ */
+export const registerSchema = Joi.object({
+  businessName: Joi.string()
+    .required()
+    .trim()
+    .max(100)
+    .messages({
+      'string.empty': 'Business / organizer name is required',
+      'any.required': 'Business / organizer name is required',
+      'string.max': 'Business name cannot exceed 100 characters'
+    }),
+  email: Joi.string().email().trim().lowercase().optional(),
+  phoneNumber: Joi.string().trim().max(20).optional(),
+  password: Joi.string()
+    .required()
+    .min(6)
+    .messages({
+      'string.empty': 'Password is required',
+      'any.required': 'Password is required',
+      'string.min': 'Password must be at least 6 characters'
+    }),
+  businessType: Joi.string()
+    .valid('event_organizer', 'venue', 'promoter', 'entertainment', 'sports', 'other')
+    .optional(),
+  primaryContact: Joi.string().trim().max(100).optional()
+}).or('email', 'phoneNumber').messages({
+  'object.missing': 'An email address or phone number is required'
+});
+
 export const updateProfileSchema = Joi.object({
   firstName: Joi.string().trim().max(50).optional(),
   lastName: Joi.string().trim().max(50).optional(),

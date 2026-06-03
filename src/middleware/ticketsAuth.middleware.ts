@@ -132,6 +132,46 @@ export const requireTicketsOwner = (req: Request, res: Response, next: NextFunct
 };
 
 /**
+ * Authenticate a buyer (ticket holder) on the public site.
+ *
+ * Buyer tokens carry { app: 'tickets', userType: 'buyer', userPhone } and are
+ * verified with the same secret as vendor tokens. We require userType to be
+ * 'buyer' here so a vendor/sub-user token can't be used to hit buyer routes
+ * (and vice-versa — buyer tokens carry no permissions, so they can't reach the
+ * permission-gated vendor endpoints).
+ */
+export const authenticateBuyer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      ApiResponseUtil.unauthorized(res, 'Please sign in to view your tickets');
+      return;
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      ApiResponseUtil.unauthorized(res, 'No token provided');
+      return;
+    }
+
+    const decoded = TicketsAuthService.verifyToken(token);
+    if ((decoded as any).userType !== 'buyer' || !(decoded as any).userPhone) {
+      ApiResponseUtil.unauthorized(res, 'Invalid buyer token');
+      return;
+    }
+
+    (req as any).ticketsUser = decoded;
+    next();
+  } catch (error: any) {
+    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+  }
+};
+
+/**
  * Attach Tickets user to request (optional - doesn't fail if no token)
  */
 export const optionalTicketsAuth = async (

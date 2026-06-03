@@ -4,6 +4,7 @@ import { Event } from '@models/event.model';
 import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { EventService } from '@services/event.service';
 import { KeshlessPaymentService } from '@services/keshlessPayment.service';
+import { normalizePhone } from '@utils/phone.util';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -481,7 +482,10 @@ export class TicketService {
    */
   static async findTicketsByCustomerPhone(phone: string): Promise<ITicket[]> {
     try {
-      const tickets = await Ticket.find({ customerPhone: phone })
+      // Normalise here so every caller (buyer login, user-app proxy, curl)
+      // matches the same way tickets are written at purchase.
+      const normalized = normalizePhone(phone);
+      const tickets = await Ticket.find({ customerPhone: normalized })
         .populate('eventId', 'name venue eventDate startTime endTime posterUrl')
         .sort({ createdAt: -1 })
         .lean();

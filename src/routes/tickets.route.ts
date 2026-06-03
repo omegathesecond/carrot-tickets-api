@@ -13,6 +13,7 @@ const router = Router();
  * Public routes - no authentication required
  */
 router.post('/auth/login', TicketsController.login);
+router.post('/auth/register', TicketsController.register);
 router.post('/auth/refresh', TicketsController.refresh);
 
 /**

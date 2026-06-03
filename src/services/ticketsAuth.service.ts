@@ -24,6 +24,81 @@ console.log('[TicketsAuth] JWT Configuration:', {
 
 export class TicketsAuthService {
   /**
+   * Self-service organizer signup.
+   *
+   * Creates a Vendor in the PENDING verification state with Tickets access
+   * enabled (the model defaults). A pending organizer can log in and build
+   * DRAFT events immediately, but EventService.publishEvent refuses to go
+   * live until an admin verifies the account. Returns the same token + user
+   * shape as login() so the dashboard can sign the new owner straight in.
+   */
+  static async register(params: {
+    businessName: string;
+    email?: string;
+    phoneNumber?: string;
+    password: string;
+    businessType?: string;
+    primaryContact?: string;
+  }) {
+    const { businessName, email, phoneNumber, password, businessType, primaryContact } = params;
+
+    if (!email && !phoneNumber) {
+      throw new Error('An email address or phone number is required');
+    }
+
+    // Reject duplicates up-front so the caller gets a clean message instead
+    // of a Mongo duplicate-key error leaking out of save().
+    if (email && await Vendor.findOne({ email })) {
+      throw new Error('An account with this email already exists');
+    }
+    if (phoneNumber && await Vendor.findOne({ phoneNumber })) {
+      throw new Error('An account with this phone number already exists');
+    }
+
+    const vendor = new Vendor({
+      businessName,
+      email,
+      phoneNumber,
+      password,
+      businessType,
+      primaryContact,
+      // verificationStatus, isActive, isVerified and apps.tickets.enabled all
+      // fall back to the model defaults (PENDING / true / false / true).
+    });
+    await vendor.save();
+
+    const payload = {
+      vendorId: vendor._id.toString(),
+      userType: 'vendor',
+      app: 'tickets',
+      role: TicketsRole.OWNER,
+      permissions: Object.values(TicketsPermission),
+      isSuperAdmin: false
+    };
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+    const refreshToken = this.generateRefreshToken();
+    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        _id: vendor._id,
+        email: vendor.email,
+        phoneNumber: vendor.phoneNumber,
+        businessName: vendor.businessName,
+        slug: vendor.slug,
+        userType: 'vendor',
+        role: TicketsRole.OWNER,
+        permissions: Object.values(TicketsPermission),
+        isSuperAdmin: false,
+        verificationStatus: vendor.verificationStatus,
+        isVerified: vendor.isVerified
+      }
+    };
+  }
+
+  /**
    * Unified login for Keshless Tickets app
    * Automatically detects user type (Vendor or SubUser) and authenticates accordingly
    */
@@ -72,7 +147,9 @@ export class TicketsAuthService {
           userType: 'vendor',
           role: TicketsRole.OWNER,
           permissions: Object.values(TicketsPermission),
-          isSuperAdmin: vendor.isSuperAdmin || false
+          isSuperAdmin: vendor.isSuperAdmin || false,
+          verificationStatus: vendor.verificationStatus,
+          isVerified: vendor.isVerified
         }
       };
     }
@@ -203,7 +280,9 @@ export class TicketsAuthService {
         userType: 'vendor',
         role: TicketsRole.OWNER,
         permissions: Object.values(TicketsPermission),
-        isSuperAdmin: vendor.isSuperAdmin || false
+        isSuperAdmin: vendor.isSuperAdmin || false,
+        verificationStatus: vendor.verificationStatus,
+        isVerified: vendor.isVerified
       };
     } else {
       const subUser = await VendorSubUser.findById(userId);

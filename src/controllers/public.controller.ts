@@ -6,6 +6,8 @@ import { EventStatus } from '@interfaces/event.interface';
 import { PaymentMethod } from '@interfaces/ticket.interface';
 import { TicketService } from '@services/ticket.service';
 import { SmsService } from '@services/sms.service';
+import { BuyerAuthService } from '@services/buyerAuth.service';
+import { normalizePhone } from '@utils/phone.util';
 
 // Validation schemas
 const publicEventsQuerySchema = Joi.object({
@@ -20,8 +22,16 @@ const publicPurchaseSchema = Joi.object({
   eventId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
   ticketTypeId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
   quantity: Joi.number().integer().min(1).max(10).required(),
-  customerName: Joi.string().optional().max(100).trim(),
-  customerPhone: Joi.string().optional().max(20).trim(),
+  // Name + phone are required so every ticket is tied to a buyer who can
+  // later sign in (phone + OTP) and see it under "My Tickets".
+  customerName: Joi.string().required().max(100).trim().messages({
+    'string.empty': 'Your name is required',
+    'any.required': 'Your name is required'
+  }),
+  customerPhone: Joi.string().required().max(20).trim().messages({
+    'string.empty': 'Your phone number is required so we can deliver your tickets',
+    'any.required': 'Your phone number is required so we can deliver your tickets'
+  }),
   keshlessCardNumber: Joi.string().required().length(8).alphanum().uppercase(),
   keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/)
 });
@@ -191,10 +201,13 @@ export class PublicController {
         ticketTypeId,
         quantity,
         customerName,
-        customerPhone,
         keshlessCardNumber,
         keshlessPin
       } = value;
+
+      // Normalise the buyer's phone the SAME way buyer login does, so the
+      // ticket we write here matches when they sign in to "My Tickets".
+      const customerPhone = normalizePhone(value.customerPhone);
 
       // Get the event
       const event = await Event.findOne({
@@ -290,6 +303,62 @@ export class PublicController {
     } catch (error: any) {
       console.error('Purchase tickets error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to purchase tickets');
+    }
+  }
+
+  /**
+   * Buyer login step 1: request an SMS one-time code.
+   */
+  static async requestBuyerOtp(req: Request, res: Response): Promise<any> {
+    try {
+      const { phone } = req.body;
+      if (!phone || typeof phone !== 'string') {
+        return ApiResponseUtil.error(res, 'Phone number is required', 400);
+      }
+
+      const result = await BuyerAuthService.requestOtp(phone);
+      return ApiResponseUtil.success(res, result, 'We sent a login code to your phone');
+    } catch (error: any) {
+      console.error('Request buyer OTP error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to send login code', 400);
+    }
+  }
+
+  /**
+   * Buyer login step 2: verify the code and receive an access token.
+   */
+  static async verifyBuyerOtp(req: Request, res: Response): Promise<any> {
+    try {
+      const { phone, code } = req.body;
+      if (!phone || !code) {
+        return ApiResponseUtil.error(res, 'Phone number and code are required', 400);
+      }
+
+      const result = await BuyerAuthService.verifyOtp(phone, code);
+      return ApiResponseUtil.success(res, result, 'Signed in successfully');
+    } catch (error: any) {
+      console.error('Verify buyer OTP error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to verify code', 401);
+    }
+  }
+
+  /**
+   * List the signed-in buyer's tickets. authenticateBuyer has already put the
+   * verified phone on req.ticketsUser.userPhone; we reuse the same phone-keyed
+   * lookup the Keshless user-app proxy uses, with matching normalisation.
+   */
+  static async getMyTickets(req: Request, res: Response): Promise<any> {
+    try {
+      const phone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!phone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to view your tickets');
+      }
+
+      const tickets = await TicketService.findTicketsByCustomerPhone(normalizePhone(phone));
+      return ApiResponseUtil.success(res, tickets);
+    } catch (error: any) {
+      console.error('Get buyer tickets error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to fetch tickets');
     }
   }
 }

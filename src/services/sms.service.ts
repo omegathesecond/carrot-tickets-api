@@ -102,4 +102,18 @@ export class SmsService {
 
     return this.send(phoneNumber, body);
   }
+
+  /**
+   * Send a login one-time passcode. Unlike the purchase confirmation, the
+   * OTP send is NOT fire-and-forget — the caller must surface a failure to
+   * the buyer (they can't log in without the code), per the no-silent-
+   * fallback rule. Returns true only if the gateway accepted the message.
+   */
+  static async sendOtp(phoneNumber: string, code: string): Promise<boolean> {
+    if (!phoneNumber || !code) return false;
+    const body =
+      `${code} is your Keshless Tickets login code.\n` +
+      `It expires in 10 minutes. Don't share it with anyone.`;
+    return this.send(phoneNumber, body);
+  }
 }

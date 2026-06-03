@@ -9,6 +9,7 @@ import { AnalyticsService } from '@services/analytics.service';
 import { ExportService } from '@services/export.service';
 import {
   loginSchema,
+  registerSchema,
   updateProfileSchema,
   changePasswordSchema,
   createEventSchema,
@@ -45,6 +46,26 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Login error:', error);
       ApiResponseUtil.error(res, error.message || 'Login failed', 401);
+    }
+  }
+
+  /**
+   * Authentication: Self-service organizer signup
+   */
+  static async register(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = registerSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await TicketsAuthService.register(value);
+
+      ApiResponseUtil.created(res, result, 'Account created. You can start building events now — publishing unlocks once your account is verified.');
+    } catch (error: any) {
+      console.error('Register error:', error);
+      ApiResponseUtil.error(res, error.message || 'Registration failed', 400);
     }
   }
 
