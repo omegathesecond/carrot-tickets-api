@@ -26,11 +26,14 @@ router.get('/events/:eventId', PublicController.getPublicEvent);
 
 /**
  * @route   POST /api/public/purchase
- * @desc    Purchase tickets using Keshless card
- * @access  Public (requires Keshless card number + PIN for amounts >= E50)
- * @body    eventId, ticketTypeId, quantity, customerName?, customerPhone?, keshlessCardNumber, keshlessPin?
+ * @desc    Buy tickets using a Keshless card. The buyer must first prove
+ *          ownership of their phone via the OTP login below — the ticket is
+ *          tied to that VERIFIED phone (taken from the token, never the body),
+ *          so it always shows up under "My Tickets" for the same number.
+ * @access  Buyer (Bearer buyer token). Keshless card number + PIN for >= E50.
+ * @body    eventId, ticketTypeId, quantity, customerName?, keshlessCardNumber, keshlessPin?
  */
-router.post('/purchase', PublicController.purchaseTickets);
+router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 
 /**
  * Buyer (ticket-holder) authentication — phone + SMS one-time code.
