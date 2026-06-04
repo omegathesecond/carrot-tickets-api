@@ -22,16 +22,12 @@ const publicPurchaseSchema = Joi.object({
   eventId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
   ticketTypeId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
   quantity: Joi.number().integer().min(1).max(10).required(),
-  // Name + phone are required so every ticket is tied to a buyer who can
-  // later sign in (phone + OTP) and see it under "My Tickets".
-  customerName: Joi.string().required().max(100).trim().messages({
-    'string.empty': 'Your name is required',
-    'any.required': 'Your name is required'
-  }),
-  customerPhone: Joi.string().required().max(20).trim().messages({
-    'string.empty': 'Your phone number is required so we can deliver your tickets',
-    'any.required': 'Your phone number is required so we can deliver your tickets'
-  }),
+  // The buyer's phone is NO LONGER taken from the body — it comes from the
+  // OTP-verified buyer token (req.ticketsUser.userPhone). This guarantees
+  // every ticket is tied to a phone the buyer actually controls, so it always
+  // surfaces under "My Tickets" for that number. Name stays optional for
+  // personalising the printed ticket.
+  customerName: Joi.string().optional().max(100).trim().allow(''),
   keshlessCardNumber: Joi.string().required().length(8).alphanum().uppercase(),
   keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/)
 });
@@ -200,14 +196,23 @@ export class PublicController {
         eventId,
         ticketTypeId,
         quantity,
-        customerName,
         keshlessCardNumber,
         keshlessPin
       } = value;
 
-      // Normalise the buyer's phone the SAME way buyer login does, so the
-      // ticket we write here matches when they sign in to "My Tickets".
-      const customerPhone = normalizePhone(value.customerPhone);
+      // The buyer is authenticated (authenticateBuyer middleware), so their
+      // phone is already OTP-verified and carried on the token. We trust THAT,
+      // never a client-supplied value — the ticket is bound to the number they
+      // proved they own, so it always appears under their "My Tickets".
+      const tokenPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!tokenPhone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+      }
+      const customerPhone = normalizePhone(tokenPhone);
+
+      // Name only personalises the printed ticket; fall back to the phone so a
+      // ticket is never nameless.
+      const customerName = (value.customerName as string)?.trim() || customerPhone;
 
       // Get the event
       const event = await Event.findOne({
