@@ -60,6 +60,12 @@ router.get(
   TicketsController.getEvent
 );
 
+router.get(
+  '/events/:eventId/creator',
+  requireTicketsPermission(TicketsPermission.VIEW_EVENTS),
+  TicketsController.getEventCreator
+);
+
 router.post(
   '/events',
   requireTicketsPermission(TicketsPermission.CREATE_EVENT),

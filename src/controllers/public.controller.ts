@@ -312,6 +312,29 @@ export class PublicController {
   }
 
   /**
+   * Buyer login — phone + password, with register-on-first-use. Replaces the
+   * SMS one-time-code flow (kept below but unwired) to avoid per-message cost.
+   */
+  static async loginBuyer(req: Request, res: Response): Promise<any> {
+    try {
+      const { phone, password, name } = req.body;
+      if (!phone || !password) {
+        return ApiResponseUtil.error(res, 'Phone number and password are required', 400);
+      }
+
+      const result = await BuyerAuthService.loginOrRegister(phone, password, name);
+      return ApiResponseUtil.success(
+        res,
+        result,
+        result.isNewAccount ? 'Account created — you are signed in' : 'Signed in successfully'
+      );
+    } catch (error: any) {
+      console.error('Buyer login error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
+    }
+  }
+
+  /**
    * Buyer login step 1: request an SMS one-time code.
    */
   static async requestBuyerOtp(req: Request, res: Response): Promise<any> {

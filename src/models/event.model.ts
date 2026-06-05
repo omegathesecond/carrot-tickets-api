@@ -90,10 +90,15 @@ const eventSchema = new Schema<IEvent>({
   },
 
   // Capacity & Tickets
+  // Capacity is no longer collected at event creation — it is derived from
+  // the sum of ticket-type quantities in the pre-save hook below, so the
+  // "tickets sold / capacity" figure always matches the tickets that actually
+  // exist (previously an organiser could set capacity 500 yet add 1000
+  // tickets, producing a misleading 0/500).
   capacity: {
     type: Number,
-    required: [true, 'Capacity is required'],
-    min: [1, 'Capacity must be at least 1']
+    default: 0,
+    min: [0, 'Capacity cannot be negative']
   },
   ticketTypes: {
     type: [ticketTypeSchema],
@@ -174,6 +179,12 @@ eventSchema.pre('save', function(next) {
     // Calculate total tickets sold across all ticket types
     this.totalTicketsSold = this.ticketTypes.reduce((sum, ticketType) => {
       return sum + ticketType.sold;
+    }, 0);
+
+    // Derive capacity from the total tickets created across all types so the
+    // "sold / capacity" figure can never contradict the tickets that exist.
+    this.capacity = this.ticketTypes.reduce((sum, ticketType) => {
+      return sum + ticketType.quantity;
     }, 0);
   }
   next();

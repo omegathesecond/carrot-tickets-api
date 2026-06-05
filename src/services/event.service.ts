@@ -13,7 +13,7 @@ export interface CreateEventParams {
   startTime: Date;
   endTime: Date;
   isMultiDay?: boolean;
-  capacity: number;
+  capacity?: number; // optional — derived from ticket-type quantities server-side
   ticketTypes?: Array<{
     name: string;
     description?: string;
@@ -178,6 +178,54 @@ export class EventService {
       console.error('Get event by ID error:', error);
       throw new Error(error.message || 'Failed to fetch event');
     }
+  }
+
+  /**
+   * Get the creator (vendor) of an event plus a summary of all their events.
+   *
+   * Powers the admin "Creator" panel: who made this event, their contact and
+   * verification status, and a roll-up of every event they own with ticket /
+   * revenue totals. `requesterVendorId` / `isSuperAdmin` enforce access — a
+   * normal organiser may only view their own creator card, superadmins any.
+   */
+  static async getEventCreatorSummary(
+    eventId: string,
+    requesterVendorId: string,
+    isSuperAdmin: boolean = false
+  ) {
+    const event = await Event.findById(eventId).select('vendorId').lean();
+    if (!event) {
+      throw new Error('Event not found');
+    }
+
+    const creatorId = event.vendorId.toString();
+    if (!isSuperAdmin && creatorId !== requesterVendorId) {
+      throw new Error('You do not have access to this creator');
+    }
+
+    const vendor = await Vendor.findById(creatorId)
+      .select('businessName email phoneNumber primaryContact businessType verificationStatus verifiedAt isActive createdAt')
+      .lean();
+    if (!vendor) {
+      throw new Error('Creator not found');
+    }
+
+    const events = await Event.find({ vendorId: creatorId })
+      .select('name status eventDate venue totalTicketsSold totalRevenue capacity posterUrl thumbnailUrl createdAt')
+      .sort({ eventDate: -1, createdAt: -1 })
+      .lean();
+
+    const stats = events.reduce(
+      (acc, e) => {
+        acc.totalEvents += 1;
+        acc.totalTicketsSold += e.totalTicketsSold || 0;
+        acc.totalRevenue += e.totalRevenue || 0;
+        return acc;
+      },
+      { totalEvents: 0, totalTicketsSold: 0, totalRevenue: 0 }
+    );
+
+    return { creator: vendor, stats, events };
   }
 
   /**
