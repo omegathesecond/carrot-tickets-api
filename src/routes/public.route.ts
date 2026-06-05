@@ -36,10 +36,14 @@ router.get('/events/:eventId', PublicController.getPublicEvent);
 router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 
 /**
- * Buyer (ticket-holder) authentication — phone + SMS one-time code.
- * @route   POST /api/public/auth/request-otp   { phone }
- * @route   POST /api/public/auth/verify-otp    { phone, code }  -> { accessToken }
+ * Buyer (ticket-holder) authentication — phone + password (register on first
+ * use). No SMS cost. The legacy OTP endpoints remain for backward compat but
+ * the frontends now use /auth/login.
+ * @route   POST /api/public/auth/login   { phone, password, name? } -> { accessToken }
+ * @route   POST /api/public/auth/request-otp   { phone }            (legacy)
+ * @route   POST /api/public/auth/verify-otp    { phone, code }      (legacy)
  */
+router.post('/auth/login', PublicController.loginBuyer);
 router.post('/auth/request-otp', PublicController.requestBuyerOtp);
 router.post('/auth/verify-otp', PublicController.verifyBuyerOtp);
 

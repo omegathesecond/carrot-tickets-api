@@ -149,13 +149,15 @@ export const createEventSchema = Joi.object({
   qrCodeUrl: Joi.string().uri().optional().trim().messages({
     'string.uri': 'QR Code URL must be a valid URL'
   }),
+  // Capacity is optional — it is derived from the sum of ticket-type
+  // quantities server-side (see event.model pre-save hook). Accepted if sent
+  // for backward compatibility, but never required at event creation.
   capacity: Joi.number()
-    .required()
-    .min(1)
+    .min(0)
     .max(1000000)
+    .optional()
     .messages({
-      'any.required': 'Capacity is required',
-      'number.min': 'Capacity must be at least 1',
+      'number.min': 'Capacity cannot be negative',
       'number.max': 'Capacity cannot exceed 1,000,000'
     }),
   ticketTypes: Joi.array()

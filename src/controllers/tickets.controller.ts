@@ -263,6 +263,28 @@ export class TicketsController {
   }
 
   /**
+   * Events: Get the event's creator (organiser) + their event history.
+   * Powers the admin "Creator" panel.
+   */
+  static async getEventCreator(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const summary = await EventService.getEventCreatorSummary(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
+
+      ApiResponseUtil.success(res, summary);
+    } catch (error: any) {
+      console.error('Get event creator error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch event creator', 404);
+    }
+  }
+
+  /**
    * Events: Create event
    */
   static async createEvent(req: Request, res: Response): Promise<any> {
