@@ -312,22 +312,29 @@ export class PublicController {
   }
 
   /**
-   * Buyer login — phone + password, with register-on-first-use. Replaces the
-   * SMS one-time-code flow (kept below but unwired) to avoid per-message cost.
+   * Buyer sign-in — phone + password for EXISTING accounts.
+   *
+   * If the number has no account yet, registration is OTP-gated: we return
+   * `{ requiresRegistration: true }` (HTTP 200) so the client routes the buyer
+   * to requestBuyerRegistrationOtp -> registerBuyer rather than silently
+   * creating an account for an unproven phone.
    */
   static async loginBuyer(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, password, name } = req.body;
+      const { phone, password } = req.body;
       if (!phone || !password) {
         return ApiResponseUtil.error(res, 'Phone number and password are required', 400);
       }
 
-      const result = await BuyerAuthService.loginOrRegister(phone, password, name);
-      return ApiResponseUtil.success(
-        res,
-        result,
-        result.isNewAccount ? 'Account created — you are signed in' : 'Signed in successfully'
-      );
+      const result = await BuyerAuthService.login(phone, password);
+      if (result.requiresRegistration) {
+        return ApiResponseUtil.success(
+          res,
+          result,
+          'Verify your phone number to create your account'
+        );
+      }
+      return ApiResponseUtil.success(res, result, 'Signed in successfully');
     } catch (error: any) {
       console.error('Buyer login error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
@@ -335,38 +342,40 @@ export class PublicController {
   }
 
   /**
-   * Buyer login step 1: request an SMS one-time code.
+   * Registration step 1: send an SMS verification code to a NEW phone number.
+   * Rejects numbers that already have an account.
    */
-  static async requestBuyerOtp(req: Request, res: Response): Promise<any> {
+  static async requestBuyerRegistrationOtp(req: Request, res: Response): Promise<any> {
     try {
       const { phone } = req.body;
       if (!phone || typeof phone !== 'string') {
         return ApiResponseUtil.error(res, 'Phone number is required', 400);
       }
 
-      const result = await BuyerAuthService.requestOtp(phone);
-      return ApiResponseUtil.success(res, result, 'We sent a login code to your phone');
+      const result = await BuyerAuthService.requestRegistrationOtp(phone);
+      return ApiResponseUtil.success(res, result, 'We sent a verification code to your phone');
     } catch (error: any) {
-      console.error('Request buyer OTP error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to send login code', 400);
+      console.error('Request buyer registration OTP error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to send verification code', 400);
     }
   }
 
   /**
-   * Buyer login step 2: verify the code and receive an access token.
+   * Registration step 2: verify the code, create the account with the chosen
+   * password, and issue an access token.
    */
-  static async verifyBuyerOtp(req: Request, res: Response): Promise<any> {
+  static async registerBuyer(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, code } = req.body;
-      if (!phone || !code) {
-        return ApiResponseUtil.error(res, 'Phone number and code are required', 400);
+      const { phone, code, password, name } = req.body;
+      if (!phone || !code || !password) {
+        return ApiResponseUtil.error(res, 'Phone number, code and password are required', 400);
       }
 
-      const result = await BuyerAuthService.verifyOtp(phone, code);
-      return ApiResponseUtil.success(res, result, 'Signed in successfully');
+      const result = await BuyerAuthService.registerWithOtp(phone, code, password, name);
+      return ApiResponseUtil.success(res, result, 'Account created — you are signed in');
     } catch (error: any) {
-      console.error('Verify buyer OTP error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to verify code', 401);
+      console.error('Register buyer error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to create account', 401);
     }
   }
 

@@ -36,16 +36,20 @@ router.get('/events/:eventId', PublicController.getPublicEvent);
 router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 
 /**
- * Buyer (ticket-holder) authentication — phone + password (register on first
- * use). No SMS cost. The legacy OTP endpoints remain for backward compat but
- * the frontends now use /auth/login.
- * @route   POST /api/public/auth/login   { phone, password, name? } -> { accessToken }
- * @route   POST /api/public/auth/request-otp   { phone }            (legacy)
- * @route   POST /api/public/auth/verify-otp    { phone, code }      (legacy)
+ * Buyer (ticket-holder) authentication.
+ *
+ * Returning buyers sign in with phone + password (/auth/login). First-time
+ * registration is OTP-gated: /auth/login returns { requiresRegistration: true }
+ * for an unknown number, the client requests an SMS code (/auth/request-otp),
+ * then creates the account with code + password (/auth/register). This proves
+ * phone ownership once, at account creation, then relies on the password.
+ * @route   POST /api/public/auth/login        { phone, password }              -> { requiresRegistration } | { accessToken }
+ * @route   POST /api/public/auth/request-otp  { phone }                        -> sends code (new numbers only)
+ * @route   POST /api/public/auth/register     { phone, code, password, name? } -> { accessToken }
  */
 router.post('/auth/login', PublicController.loginBuyer);
-router.post('/auth/request-otp', PublicController.requestBuyerOtp);
-router.post('/auth/verify-otp', PublicController.verifyBuyerOtp);
+router.post('/auth/request-otp', PublicController.requestBuyerRegistrationOtp);
+router.post('/auth/register', PublicController.registerBuyer);
 
 /**
  * @route   GET /api/public/my-tickets
