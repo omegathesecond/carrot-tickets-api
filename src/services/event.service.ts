@@ -1,7 +1,6 @@
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
-import { VerificationStatus } from '@interfaces/vendor.interface';
 import mongoose from 'mongoose';
 
 export interface CreateEventParams {
@@ -310,8 +309,9 @@ export class EventService {
         throw new Error('Event not found');
       }
 
-      // Check if any tickets have been sold
-      if (event.totalTicketsSold > 0) {
+      // Deleting an event with sold tickets destroys buyers' records, so it's
+      // blocked for organizers (they should cancel instead). Admins can override.
+      if (event.totalTicketsSold > 0 && !isSuperAdmin) {
         throw new Error('Cannot delete event with sold tickets. Cancel the event instead.');
       }
 
@@ -324,7 +324,17 @@ export class EventService {
   }
 
   /**
-   * Publish event (make it active)
+   * Publish event.
+   *
+   * Approval is per-EVENT, not per-organizer-account:
+   *  - A regular organizer clicking "Publish" SUBMITS the event for approval
+   *    (DRAFT → PENDING_APPROVAL). It does not go live yet, but the action
+   *    always succeeds — no silent failure, no "verify your account" wall.
+   *  - A superadmin publishing IS the approval (DRAFT or PENDING_APPROVAL →
+   *    PUBLISHED), making the event live and sellable immediately.
+   *
+   * An inactive (suspended) organizer is still blocked outright — that's an
+   * account-level sanction, distinct from the per-event approval flow.
    */
   static async publishEvent(eventId: string, vendorId: string, isSuperAdmin: boolean = false): Promise<IEvent> {
     try {
@@ -338,29 +348,33 @@ export class EventService {
         throw new Error('Event not found');
       }
 
-      if (event.status !== EventStatus.DRAFT) {
-        throw new Error(`Event is already ${event.status.toLowerCase()}`);
+      if (event.status === EventStatus.PUBLISHED) {
+        throw new Error('Event is already published');
+      }
+      if (event.status === EventStatus.CANCELLED || event.status === EventStatus.COMPLETED) {
+        throw new Error(`Cannot publish a ${event.status.toLowerCase()} event`);
       }
 
-      // Publishing gate: a self-registered organizer can build draft events
-      // freely, but the event only goes live (and sellable) once an admin has
-      // verified the account. Super admins bypass this. (Drafts are unaffected
-      // — this only blocks the DRAFT → PUBLISHED transition.)
-      if (!isSuperAdmin) {
-        const vendor = await Vendor.findById(event.vendorId).select('verificationStatus isActive');
+      if (isSuperAdmin) {
+        // Admin approval — the event goes live.
+        event.status = EventStatus.PUBLISHED;
+        event.publishedAt = new Date();
+      } else {
+        // Organizer submission — block only suspended/inactive accounts, then
+        // route the event into the approval queue.
+        const vendor = await Vendor.findById(event.vendorId).select('isActive');
         if (!vendor) {
           throw new Error('Organizer account not found');
         }
         if (!vendor.isActive) {
           throw new Error('Your organizer account is inactive. Please contact support.');
         }
-        if (vendor.verificationStatus !== VerificationStatus.VERIFIED) {
-          throw new Error('Your organizer account is pending approval. You can publish events once it is verified.');
-        }
-      }
 
-      event.status = EventStatus.PUBLISHED;
-      event.publishedAt = new Date();
+        if (event.status === EventStatus.PENDING_APPROVAL) {
+          throw new Error('Event has already been submitted and is awaiting approval');
+        }
+        event.status = EventStatus.PENDING_APPROVAL;
+      }
 
       await event.save();
       return event;
@@ -385,12 +399,15 @@ export class EventService {
         throw new Error('Event not found');
       }
 
-      if (event.status !== EventStatus.PUBLISHED) {
+      // Both live events and events still awaiting approval can be pulled back
+      // to draft (a published event is unpublished; a pending one is withdrawn).
+      if (event.status !== EventStatus.PUBLISHED && event.status !== EventStatus.PENDING_APPROVAL) {
         throw new Error('Event is not published');
       }
 
-      // Check if any tickets have been sold
-      if (event.totalTicketsSold > 0) {
+      // Selling tickets then unpublishing strands buyers, so it's blocked for
+      // organizers. Admins can override (e.g. to pull a problem event offline).
+      if (event.totalTicketsSold > 0 && !isSuperAdmin) {
         throw new Error('Cannot unpublish event with sold tickets');
       }
 

@@ -7,6 +7,7 @@ import { TicketService } from '@services/ticket.service';
 import { ScanService } from '@services/scan.service';
 import { AnalyticsService } from '@services/analytics.service';
 import { ExportService } from '@services/export.service';
+import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
   registerSchema,
@@ -374,7 +375,13 @@ export class TicketsController {
         ticketsUser.isSuperAdmin || false
       );
 
-      ApiResponseUtil.success(res, event, 'Event published successfully');
+      // Message reflects where the event actually landed: a superadmin publish
+      // goes live; an organizer publish is submitted for approval.
+      const message = event.status === EventStatus.PENDING_APPROVAL
+        ? 'Event submitted for approval'
+        : 'Event published successfully';
+
+      ApiResponseUtil.success(res, event, message);
     } catch (error: any) {
       console.error('Publish event error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to publish event');
@@ -603,6 +610,7 @@ export class TicketsController {
 
       const result = await TicketService.getSales({
         vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         ...value
       });
 
@@ -739,6 +747,7 @@ export class TicketsController {
 
       const result = await ScanService.getScans({
         vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         ...value
       });
 

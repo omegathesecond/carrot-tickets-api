@@ -30,6 +30,22 @@ export interface GetSalesQuery {
   endDate?: Date;
   page?: number;
   limit?: number;
+  isSuperAdmin?: boolean;
+}
+
+/**
+ * Mongoose `populate('eventId', ...)` overwrites the `eventId` field with the
+ * full event document. The dashboard, however, expects a string `eventId` plus
+ * a separate populated `event` object. This reshapes a lean record to match —
+ * surfacing the event name (so "Event: N/A" stops appearing) while keeping
+ * `eventId` a usable id.
+ */
+function withEvent<T extends { eventId?: any }>(record: T): T & { event?: any } {
+  const populated = record.eventId;
+  if (populated && typeof populated === 'object' && populated._id) {
+    return { ...record, event: populated, eventId: populated._id };
+  }
+  return record;
 }
 
 export class TicketService {
@@ -300,11 +316,13 @@ export class TicketService {
         startDate,
         endDate,
         page = 1,
-        limit = 20
+        limit = 20,
+        isSuperAdmin = false
       } = query;
 
-      // Build query
-      const filter: any = { vendorId };
+      // Build query — superadmins see sales across every vendor's events.
+      const filter: any = {};
+      if (!isSuperAdmin) filter.vendorId = vendorId;
 
       if (eventId) filter.eventId = eventId;
       if (paymentMethod) filter.paymentMethod = paymentMethod;
@@ -330,7 +348,9 @@ export class TicketService {
       ]);
 
       return {
-        data: sales,
+        // The dashboard reads `sale.event.name`; populate() puts the event doc
+        // on `eventId`, so expose it as `event` and keep `eventId` a plain id.
+        data: sales.map(withEvent),
         pagination: {
           total,
           page,
