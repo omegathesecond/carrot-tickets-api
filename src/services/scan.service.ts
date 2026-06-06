@@ -27,142 +27,73 @@ export interface GetScansQuery {
   endDate?: Date;
   page?: number;
   limit?: number;
+  isSuperAdmin?: boolean;
 }
 
 export interface ScanResult {
   valid: boolean;
   ticket?: ITicket;
-  scan: ITicketScan;
+  event?: any;
+  ticketType?: any;
+  // Present only for check-ins, which persist an audit record. Validation is a
+  // read-only preview and writes nothing, so it returns no scan.
+  scan?: ITicketScan;
   message: string;
 }
 
 export class ScanService {
   /**
-   * Validate ticket without checking in
-   * Used for quick verification before actual check-in
+   * Validate a ticket WITHOUT checking it in.
+   *
+   * This is a read-only preview shown before the operator confirms entry — it
+   * does NOT persist a scan record. (It used to write one on every call, so a
+   * single entry produced two rows in "Recent Scans": one for the validate and
+   * one for the subsequent check-in. Only check-in persists now.)
    */
   static async validateTicket(params: ValidateTicketParams): Promise<ScanResult> {
     try {
-      const { ticketId, vendorId, scannedBy, scannedByType } = params;
+      const { ticketId, vendorId } = params;
 
-      // Find ticket
-      const ticket = await Ticket.findOne({ ticketId })
-        .populate('eventId');
+      const ticket = await Ticket.findOne({ ticketId }).populate('eventId');
 
-      // Validate ticket existence
       if (!ticket) {
-        const scan = await this.createScanRecord({
-          ticketId: undefined,
-          eventId: undefined,
-          vendorId,
-          scannedBy,
-          scannedByType,
-          isValid: false,
-          scanResult: 'invalid_ticket'
-        });
-
-        return {
-          valid: false,
-          scan,
-          message: 'Ticket not found'
-        };
+        return { valid: false, message: 'Ticket not found' };
       }
 
-      // Check vendor ownership
+      // Resolve the populated event + the matching ticket-type so the UI can
+      // show "Event" and "Type" on the validation preview.
+      const event = ticket.eventId && typeof ticket.eventId === 'object' ? ticket.eventId : undefined;
+      const ticketType = (event as any)?.ticketTypes?.find?.(
+        (tt: any) => tt.name === ticket.ticketType
+      );
+
       if (ticket.vendorId.toString() !== vendorId) {
-        const scan = await this.createScanRecord({
-          ticketId: ticket._id,
-          eventId: ticket.eventId,
-          vendorId,
-          scannedBy,
-          scannedByType,
-          isValid: false,
-          scanResult: 'wrong_event'
-        });
-
-        return {
-          valid: false,
-          ticket,
-          scan,
-          message: 'Ticket belongs to different vendor'
-        };
+        return { valid: false, ticket, event, ticketType, message: 'Ticket belongs to different vendor' };
       }
 
-      // Check if ticket is cancelled/refunded
       if (ticket.status === TicketStatus.REFUNDED) {
-        const scan = await this.createScanRecord({
-          ticketId: ticket._id,
-          eventId: ticket.eventId,
-          vendorId,
-          scannedBy,
-          scannedByType,
-          isValid: false,
-          scanResult: 'cancelled'
-        });
-
-        return {
-          valid: false,
-          ticket,
-          scan,
-          message: 'Ticket has been refunded'
-        };
+        return { valid: false, ticket, event, ticketType, message: 'Ticket has been refunded' };
       }
 
-      // Check if already checked in
       if (ticket.status === TicketStatus.CHECKED_IN) {
-        const scan = await this.createScanRecord({
-          ticketId: ticket._id,
-          eventId: ticket.eventId,
-          vendorId,
-          scannedBy,
-          scannedByType,
-          isValid: false,
-          scanResult: 'already_scanned'
-        });
-
         return {
           valid: false,
           ticket,
-          scan,
+          event,
+          ticketType,
           message: `Ticket already checked in at ${ticket.checkedInAt?.toLocaleString()}`
         };
       }
 
-      // Check if ticket is sold
       if (ticket.status !== TicketStatus.SOLD) {
-        const scan = await this.createScanRecord({
-          ticketId: ticket._id,
-          eventId: ticket.eventId,
-          vendorId,
-          scannedBy,
-          scannedByType,
-          isValid: false,
-          scanResult: 'invalid_ticket'
-        });
-
-        return {
-          valid: false,
-          ticket,
-          scan,
-          message: `Ticket status is ${ticket.status}`
-        };
+        return { valid: false, ticket, event, ticketType, message: `Ticket status is ${ticket.status}` };
       }
-
-      // Ticket is valid - create success scan record
-      const scan = await this.createScanRecord({
-        ticketId: ticket._id,
-        eventId: ticket.eventId,
-        vendorId,
-        scannedBy,
-        scannedByType,
-        isValid: true,
-        scanResult: 'success'
-      });
 
       return {
         valid: true,
         ticket,
-        scan,
+        event,
+        ticketType,
         message: 'Ticket is valid for check-in'
       };
     } catch (error: any) {
@@ -353,11 +284,13 @@ export class ScanService {
         startDate,
         endDate,
         page = 1,
-        limit = 20
+        limit = 20,
+        isSuperAdmin = false
       } = query;
 
-      // Build query
-      const filter: any = { vendorId };
+      // Build query — superadmins see scans across every vendor's events.
+      const filter: any = {};
+      if (!isSuperAdmin) filter.vendorId = vendorId;
 
       if (eventId) filter.eventId = eventId;
       if (status) filter.scanResult = status;
@@ -383,7 +316,19 @@ export class ScanService {
       ]);
 
       return {
-        data: scans,
+        // Reshape for the dashboard: expose the populated event as `event` (so
+        // "Event: N/A" stops showing), keep `eventId` a plain id, and map the
+        // internal `scanResult` onto the `status` the table renders.
+        data: scans.map((scan: any) => {
+          const populated = scan.eventId;
+          const hasEvent = populated && typeof populated === 'object' && populated._id;
+          return {
+            ...scan,
+            event: hasEvent ? populated : undefined,
+            eventId: hasEvent ? populated._id : scan.eventId,
+            status: scan.scanResult
+          };
+        }),
         pagination: {
           total,
           page,
