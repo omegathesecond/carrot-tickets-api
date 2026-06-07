@@ -750,6 +750,34 @@ export class TicketsController {
   }
 
   /**
+   * Entry Scanning: Aggregate scan statistics for the Entry Scan analytics row
+   */
+  static async getScanStats(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate query (reuses the analytics schema: eventId/startDate/endDate)
+      const { error, value } = analyticsQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const stats = await ScanService.getScanStats({
+        vendorId: ticketsUser.vendorId as string,
+        eventId: value.eventId,
+        startDate: value.startDate,
+        endDate: value.endDate
+      });
+
+      ApiResponseUtil.success(res, stats);
+    } catch (error: any) {
+      console.error('Get scan stats error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to fetch scan statistics');
+    }
+  }
+
+  /**
    * Analytics: Get dashboard stats
    */
   static async getDashboardStats(req: Request, res: Response): Promise<any> {

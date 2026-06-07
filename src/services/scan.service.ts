@@ -360,7 +360,12 @@ export class ScanService {
       const filter: any = { vendorId };
 
       if (eventId) filter.eventId = eventId;
-      if (status) filter.scanResult = status;
+      // A scan is "successful" only when scanResult === 'success' (isValid).
+      // Everything else (invalid_ticket, wrong_event, cancelled, …) is a
+      // "failed" scan. 'already_scanned' is a distinct, explicit bucket.
+      if (status === 'success') filter.isValid = true;
+      else if (status === 'failed') filter.isValid = false;
+      else if (status === 'already_scanned') filter.scanResult = 'already_scanned';
 
       if (startDate || endDate) {
         filter.scannedAt = {};
@@ -382,8 +387,15 @@ export class ScanService {
         TicketScan.countDocuments(filter)
       ]);
 
+      // Expose a normalized `status` (success | failed) alongside the raw
+      // scanResult so the dashboard can render the status badge consistently.
+      const data = scans.map((scan: any) => ({
+        ...scan,
+        status: scan.isValid ? 'success' : 'failed'
+      }));
+
       return {
-        data: scans,
+        data,
         pagination: {
           total,
           page,
@@ -451,6 +463,50 @@ export class ScanService {
       };
     } catch (error: any) {
       console.error('Get event scan stats error:', error);
+      throw new Error(error.message || 'Failed to fetch scan statistics');
+    }
+  }
+
+  /**
+   * Get aggregate scan statistics for a vendor (optionally filtered by event
+   * and/or date range). Powers the Entry Scan page analytics cards.
+   */
+  static async getScanStats(query: {
+    vendorId: string;
+    eventId?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<{
+    totalScans: number;
+    successfulScans: number;
+    failedScans: number;
+    alreadyScannedCount: number;
+  }> {
+    try {
+      const { vendorId, eventId, startDate, endDate } = query;
+
+      const filter: any = { vendorId };
+      if (eventId) filter.eventId = eventId;
+      if (startDate || endDate) {
+        filter.scannedAt = {};
+        if (startDate) filter.scannedAt.$gte = startDate;
+        if (endDate) filter.scannedAt.$lte = endDate;
+      }
+
+      const [totalScans, successfulScans, alreadyScannedCount] = await Promise.all([
+        TicketScan.countDocuments(filter),
+        TicketScan.countDocuments({ ...filter, scanResult: 'success' }),
+        TicketScan.countDocuments({ ...filter, scanResult: 'already_scanned' })
+      ]);
+
+      return {
+        totalScans,
+        successfulScans,
+        failedScans: totalScans - successfulScans,
+        alreadyScannedCount
+      };
+    } catch (error: any) {
+      console.error('Get scan stats error:', error);
       throw new Error(error.message || 'Failed to fetch scan statistics');
     }
   }

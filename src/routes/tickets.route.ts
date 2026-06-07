@@ -172,6 +172,12 @@ router.post(
 );
 
 router.get(
+  '/scans/stats',
+  requireTicketsPermission(TicketsPermission.VIEW_SCANS),
+  TicketsController.getScanStats
+);
+
+router.get(
   '/scans',
   requireTicketsPermission(TicketsPermission.VIEW_SCANS),
   TicketsController.getScans
