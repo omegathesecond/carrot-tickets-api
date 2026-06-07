@@ -339,6 +339,9 @@ export class TicketService {
       const [sales, total] = await Promise.all([
         TicketSale.find(filter)
           .populate('eventId', 'name venue eventDate')
+          // Populate the individual tickets so the dashboard can show the
+          // ticket type and the scannable ticket code(s) in sales tables.
+          .populate('ticketIds', 'ticketId ticketType status')
           .populate('soldBy')
           .sort({ soldAt: -1 })
           .skip(skip)
