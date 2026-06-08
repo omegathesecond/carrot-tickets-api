@@ -40,6 +40,14 @@ router.get('/auth/me', TicketsController.getMe);
 router.get('/my-tickets', TicketsController.getMyTickets);
 
 /**
+ * In-app ticket purchase for a logged-in Keshless user (card + PIN payment).
+ * Driven by the main keshless-api proxy with the shared service key; the buyer
+ * phone comes from the forwarded x-user-phone. Same flow + cost as the web
+ * buyer checkout (/api/public/purchase) — both call purchaseForCustomer.
+ */
+router.post('/purchase', TicketsController.purchaseAsUser);
+
+/**
  * User Account Settings Routes
  */
 router.put('/users/profile', TicketsController.updateProfile);

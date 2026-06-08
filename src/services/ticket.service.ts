@@ -2,8 +2,10 @@ import { Ticket } from '@models/ticket.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Event } from '@models/event.model';
 import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+import { EventStatus } from '@interfaces/event.interface';
 import { EventService } from '@services/event.service';
 import { KeshlessPaymentService } from '@services/keshlessPayment.service';
+import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
 import mongoose from 'mongoose';
 
@@ -489,6 +491,114 @@ export class TicketService {
       console.error('Get event tickets error:', error);
       throw new Error(error.message || 'Failed to fetch tickets');
     }
+  }
+
+  /**
+   * Buy ticket(s) for an end customer paying with their Keshless wallet.
+   *
+   * This is the single source of truth for the buyer purchase flow: the
+   * public/web buyer checkout (PublicController) and the in-app proxy
+   * checkout (TicketsController.purchaseAsUser) both call it, so the process
+   * and the amount charged are guaranteed identical. The buyer pays exactly
+   * price x quantity — there is no separate add-on fee.
+   */
+  static async purchaseForCustomer(params: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone: string;
+    customerName?: string;
+    keshlessCardNumber: string;
+    keshlessPin?: string;
+  }): Promise<{
+    tickets: Array<{
+      ticketId: string;
+      eventName: string;
+      ticketType: string;
+      eventDate: Date;
+      venue: string;
+    }>;
+    transactionId?: string;
+    totalAmount: number;
+    quantity: number;
+    event: { name: string; date: Date; venue: string };
+  }> {
+    const {
+      eventId,
+      ticketTypeId,
+      quantity,
+      keshlessCardNumber,
+      keshlessPin,
+    } = params;
+
+    const customerPhone = normalizePhone(params.customerPhone);
+    // Name only personalises the printed ticket; fall back to the phone so a
+    // ticket is never nameless.
+    const customerName = params.customerName?.trim() || customerPhone;
+
+    // Only published events are buyable.
+    const event = await Event.findOne({ _id: eventId, status: EventStatus.PUBLISHED });
+    if (!event) {
+      throw new Error('Event not found or not available');
+    }
+
+    const ticketType = event.ticketTypes.find(tt => tt._id?.toString() === ticketTypeId);
+    if (!ticketType) {
+      throw new Error('Ticket type not found');
+    }
+
+    if (ticketType.isSoldOut || ticketType.available < quantity) {
+      throw new Error(`Only ${ticketType.available} tickets available`);
+    }
+
+    const totalAmount = ticketType.price * quantity;
+
+    // PIN is required for wallet charges of E50 or more.
+    if (totalAmount >= 50 && !keshlessPin) {
+      throw new Error('PIN required for purchases of E50 or more');
+    }
+
+    // sellTickets debits the wallet once (price x quantity) and mints tickets.
+    const result = await TicketService.sellTickets({
+      vendorId: event.vendorId.toString(),
+      eventId,
+      ticketTypeId,
+      quantity,
+      customerName,
+      customerPhone,
+      paymentMethod: PaymentMethod.KESHLESS_WALLET,
+      keshlessCardNumber,
+      keshlessPin,
+      soldBy: event.vendorId.toString(),
+      soldByType: 'vendor',
+    });
+
+    // Best-effort SMS confirmation — never roll back the purchase on SMS failure.
+    if (customerPhone) {
+      SmsService.sendTicketConfirmation(
+        customerPhone,
+        result.tickets.map((t) => ({
+          ticketId: t.ticketId,
+          eventName: event.name,
+          eventDate: event.eventDate.toISOString(),
+          venue: event.venue,
+        })),
+      ).catch((err) => console.error('[SMS] confirmation send threw', err));
+    }
+
+    return {
+      tickets: result.tickets.map(ticket => ({
+        ticketId: ticket.ticketId,
+        eventName: event.name,
+        ticketType: ticketType.name,
+        eventDate: event.eventDate,
+        venue: event.venue,
+      })),
+      transactionId: result.sale.walletTransactionId,
+      totalAmount,
+      quantity,
+      event: { name: event.name, date: event.eventDate, venue: event.venue },
+    };
   }
 
   /**

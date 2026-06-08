@@ -138,9 +138,12 @@ export class TicketsController {
    */
   static async getMyTickets(req: Request, res: Response): Promise<any> {
     try {
+      // Trust ONLY the phone the service-auth middleware attached from the
+      // validated proxy request. Never read the raw x-user-phone header here —
+      // that would let any holder of the service key scope the lookup to an
+      // arbitrary number (spoofable-field auth bypass).
       const ticketsUser = (req as any).ticketsUser;
-      const phone = (ticketsUser?.userPhone as string | undefined)
-        || (req.headers['x-user-phone'] as string | undefined);
+      const phone = ticketsUser?.userPhone as string | undefined;
 
       if (!phone) {
         ApiResponseUtil.unauthorized(res, 'Authenticated user phone required');
@@ -153,6 +156,58 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Get my tickets error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to fetch tickets');
+    }
+  }
+
+  /**
+   * In-app ticket purchase for a logged-in Keshless user.
+   *
+   * Reached via the main keshless-api proxy (/tickets/purchase), authenticated
+   * by the shared service key (dualAuth). The buyer phone is taken from the
+   * proxy-forwarded x-user-phone — never the body — so the ticket binds to the
+   * user's own number and shows under their My Tickets. Pays with the user's
+   * Keshless card + PIN, exactly like the web buyer checkout (same shared
+   * TicketService.purchaseForCustomer, same price x quantity, no add-on fee).
+   */
+  static async purchaseAsUser(req: Request, res: Response): Promise<any> {
+    try {
+      const schema = Joi.object({
+        eventId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
+        ticketTypeId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
+        quantity: Joi.number().integer().min(1).max(10).required(),
+        customerName: Joi.string().optional().max(100).trim().allow(''),
+        keshlessCardNumber: Joi.string().required().length(8).alphanum().uppercase(),
+        keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/),
+      });
+
+      const { error, value } = schema.validate(req.body);
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      // Trust ONLY the phone attached by the service-auth middleware from the
+      // validated proxy request — never the raw x-user-phone header (a holder
+      // of the service key could otherwise bind tickets to any number).
+      const ticketsUser = (req as any).ticketsUser;
+      const phone = ticketsUser?.userPhone as string | undefined;
+      if (!phone) {
+        return ApiResponseUtil.unauthorized(res, 'Authenticated user phone required');
+      }
+
+      const result = await TicketService.purchaseForCustomer({
+        eventId: value.eventId,
+        ticketTypeId: value.ticketTypeId,
+        quantity: value.quantity,
+        customerPhone: phone,
+        customerName: value.customerName,
+        keshlessCardNumber: value.keshlessCardNumber,
+        keshlessPin: value.keshlessPin,
+      });
+
+      return ApiResponseUtil.created(res, result, 'Tickets purchased successfully!');
+    } catch (error: any) {
+      console.error('Purchase (in-app) error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to purchase tickets');
     }
   }
 

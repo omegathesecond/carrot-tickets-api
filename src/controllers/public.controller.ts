@@ -3,9 +3,7 @@ import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { PaymentMethod } from '@interfaces/ticket.interface';
 import { TicketService } from '@services/ticket.service';
-import { SmsService } from '@services/sms.service';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
 
@@ -208,103 +206,20 @@ export class PublicController {
       if (!tokenPhone) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
       }
-      const customerPhone = normalizePhone(tokenPhone);
 
-      // Name only personalises the printed ticket; fall back to the phone so a
-      // ticket is never nameless.
-      const customerName = (value.customerName as string)?.trim() || customerPhone;
-
-      // Get the event
-      const event = await Event.findOne({
-        _id: eventId,
-        status: EventStatus.PUBLISHED
-      });
-
-      if (!event) {
-        return ApiResponseUtil.notFound(res, 'Event not found or not available');
-      }
-
-      // Find ticket type
-      const ticketType = event.ticketTypes.find(tt => tt._id?.toString() === ticketTypeId);
-      if (!ticketType) {
-        return ApiResponseUtil.error(res, 'Ticket type not found', 404);
-      }
-
-      // Check availability
-      if (ticketType.isSoldOut || ticketType.available < quantity) {
-        return ApiResponseUtil.error(
-          res,
-          `Only ${ticketType.available} tickets available`,
-          400
-        );
-      }
-
-      // Calculate total amount
-      const totalAmount = ticketType.price * quantity;
-
-      // Check if PIN is required (amount >= 50)
-      if (totalAmount >= 50 && !keshlessPin) {
-        return ApiResponseUtil.error(
-          res,
-          'PIN required for purchases of E50 or more',
-          400
-        );
-      }
-
-      // Delegate payment + ticket creation to TicketService.sellTickets so we
-      // only debit the wallet once. (Previously the controller pre-charged via
-      // KeshlessPaymentService and then sellTickets charged again internally,
-      // failing on the second attempt and 500ing while the first debit had
-      // already cleared.)
-      const result = await TicketService.sellTickets({
-        vendorId: event.vendorId.toString(),
+      // Single source of truth for the buyer purchase flow (shared with the
+      // in-app proxy checkout) so process + amount charged are identical.
+      const result = await TicketService.purchaseForCustomer({
         eventId,
         ticketTypeId,
         quantity,
-        customerName,
-        customerPhone,
-        paymentMethod: PaymentMethod.KESHLESS_WALLET,
+        customerPhone: tokenPhone,
+        customerName: value.customerName as string | undefined,
         keshlessCardNumber,
         keshlessPin,
-        soldBy: event.vendorId.toString(),
-        soldByType: 'vendor'
       });
 
-      // Best-effort SMS confirmation. Don't await — failure must NOT roll
-      // back the purchase. The service logs its own outcome.
-      if (customerPhone) {
-        SmsService.sendTicketConfirmation(
-          customerPhone,
-          result.tickets.map((t) => ({
-            ticketId: t.ticketId,
-            eventName: event.name,
-            eventDate: event.eventDate.toISOString(),
-            venue: event.venue,
-          })),
-        ).catch((err) => console.error('[SMS] confirmation send threw', err));
-      }
-
-      return ApiResponseUtil.created(
-        res,
-        {
-          tickets: result.tickets.map(ticket => ({
-            ticketId: ticket.ticketId,
-            eventName: event.name,
-            ticketType: ticketType.name,
-            eventDate: event.eventDate,
-            venue: event.venue
-          })),
-          transactionId: result.sale.walletTransactionId,
-          totalAmount,
-          quantity,
-          event: {
-            name: event.name,
-            date: event.eventDate,
-            venue: event.venue
-          }
-        },
-        'Tickets purchased successfully!'
-      );
+      return ApiResponseUtil.created(res, result, 'Tickets purchased successfully!');
     } catch (error: any) {
       console.error('Purchase tickets error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to purchase tickets');
