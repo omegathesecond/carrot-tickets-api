@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
+import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
 
 const router = Router();
@@ -57,5 +58,14 @@ router.post('/auth/register', PublicController.registerBuyer);
  * @access  Buyer
  */
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
+
+/**
+ * @route   GET /api/public/tickets/:ticketId/pdf
+ * @desc    Shareable ticket PDF (lazily generated, cached in R2). Same
+ *          generator + R2 object the user-app uses — authorised by the buyer's
+ *          verified phone matching the ticket.
+ * @access  Buyer
+ */
+router.get('/tickets/:ticketId/pdf', authenticateBuyer, TicketPdfController.getTicketPdf);
 
 export default router;

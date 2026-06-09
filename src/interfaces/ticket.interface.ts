@@ -8,6 +8,13 @@ export enum TicketStatus {
   CANCELLED = 'cancelled'
 }
 
+export enum TicketPdfStatus {
+  PENDING = 'pending',
+  GENERATING = 'generating',
+  READY = 'ready',
+  FAILED = 'failed'
+}
+
 export enum PaymentMethod {
   CASH = 'cash',
   KESHLESS_WALLET = 'keshless_wallet'
@@ -45,6 +52,12 @@ export interface ITicket extends Document {
   checkedInAt?: Date;
   checkedInBy?: Types.ObjectId; // Staff who scanned
   checkedInByModel?: string; // 'Vendor' or 'VendorSubUser'
+
+  // Shareable PDF (generated on demand, cached in R2). Lets the user-app and
+  // the keshless-tickets web/dashboard share the SAME ticket PDF.
+  pdfUrl?: string;
+  pdfStatus?: TicketPdfStatus;
+  pdfRequestedAt?: Date; // when generation last started — used to recover from a stalled 'generating'
 
   // Timestamps
   createdAt: Date;

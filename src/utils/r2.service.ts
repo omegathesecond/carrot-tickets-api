@@ -7,11 +7,30 @@ let r2Client: S3Client | null = null;
  * Initialize R2 client lazily
  * R2 is Cloudflare's S3-compatible object storage
  */
+/**
+ * Resolve the R2 S3-compatible endpoint.
+ *
+ * Cloud Run wires the account id (R2_ACCOUNT_ID) rather than a full endpoint,
+ * so derive the canonical `https://<account>.r2.cloudflarestorage.com` URL when
+ * R2_ENDPOINT is absent. A literal R2_ENDPOINT (if ever set) still wins. Without
+ * this, getR2Client() threw "Missing required R2 environment variables:
+ * R2_ENDPOINT" on every upload — i.e. R2 was non-functional in production.
+ */
+function resolveR2Endpoint(): string | undefined {
+  const explicit = process.env['R2_ENDPOINT'];
+  if (explicit) return explicit;
+  const accountId = process.env['R2_ACCOUNT_ID'];
+  if (accountId) return `https://${accountId}.r2.cloudflarestorage.com`;
+  return undefined;
+}
+
 function getR2Client(): S3Client {
   if (!r2Client) {
-    // Validate required environment variables (R2_PUBLIC_URL is optional)
-    const requiredEnvVars = ['R2_ENDPOINT', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME'];
+    // R2_ENDPOINT or R2_ACCOUNT_ID satisfies the endpoint requirement.
+    const endpoint = resolveR2Endpoint();
+    const requiredEnvVars = ['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    if (!endpoint) missingVars.unshift('R2_ENDPOINT (or R2_ACCOUNT_ID)');
 
     if (missingVars.length > 0) {
       throw new Error(`Missing required R2 environment variables: ${missingVars.join(', ')}`);
@@ -19,7 +38,7 @@ function getR2Client(): S3Client {
 
     r2Client = new S3Client({
       region: 'auto',
-      endpoint: process.env['R2_ENDPOINT']!,
+      endpoint,
       credentials: {
         accessKeyId: process.env['R2_ACCESS_KEY_ID']!,
         secretAccessKey: process.env['R2_SECRET_ACCESS_KEY']!,
@@ -151,6 +170,22 @@ export class R2Service {
     const url = this.getPublicUrl(key);
 
     return { key, url };
+  }
+
+  /**
+   * Upload an arbitrary buffer to a given folder and return its public URL.
+   * Generic counterpart to uploadEventMedia for non-event-media artifacts
+   * (e.g. generated ticket PDFs). Key = {folder}/{timestamp}-{fileName}.
+   */
+  static async uploadFile(
+    folder: string,
+    fileName: string,
+    buffer: Buffer,
+    contentType: string
+  ): Promise<{ key: string; url: string }> {
+    const key = this.generateMediaKey(folder, fileName);
+    await this.uploadBufferToR2(key, buffer, contentType);
+    return { key, url: this.getPublicUrl(key) };
   }
 
   /**

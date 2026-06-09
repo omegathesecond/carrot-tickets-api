@@ -1,5 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
-import { ITicket, TicketStatus } from '@interfaces/ticket.interface';
+import { ITicket, TicketStatus, TicketPdfStatus } from '@interfaces/ticket.interface';
 
 const ticketSchema = new Schema<ITicket>({
   // Ticket Identification
@@ -73,6 +73,19 @@ const ticketSchema = new Schema<ITicket>({
   checkedInByModel: {
     type: String,
     enum: ['Vendor', 'VendorSubUser']
+  },
+
+  // Shareable PDF (lazily generated, cached in R2)
+  pdfUrl: {
+    type: String,
+    trim: true
+  },
+  pdfStatus: {
+    type: String,
+    enum: Object.values(TicketPdfStatus)
+  },
+  pdfRequestedAt: {
+    type: Date
   }
 }, {
   timestamps: true
