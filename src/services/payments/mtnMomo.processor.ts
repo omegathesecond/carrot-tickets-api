@@ -11,8 +11,9 @@ export class MtnMomoProcessor implements PaymentProcessor {
   }
 
   // MoMo is async: TicketService.initiateMomoPurchase drives requestToPay directly.
-  // charge() exists for interface symmetry but is not used in the synchronous sellTickets path.
+  // charge() must NEVER be reached via the synchronous sellTickets path — that
+  // path treats non-failed as COMPLETED and would mint tickets without payment.
   async charge(_input: ChargeInput): Promise<ChargeResult> {
-    return { status: 'pending', message: 'MTN MoMo is processed asynchronously' };
+    throw new Error('MTN MoMo is async — use TicketService.initiateMomoPurchase, not the synchronous charge path');
   }
 }

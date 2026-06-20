@@ -55,6 +55,33 @@ function withEvent<T extends { eventId?: any }>(record: T): T & { event?: any } 
 
 export class TicketService {
   /**
+   * Single canonical factory for building a Ticket document.
+   * All three minting sites (sellTickets main loop, sellTickets no-tx fallback,
+   * finalizeMomoSale) call this so field lists can never drift between paths.
+   * saleId is omitted when not supplied — sellTickets sets it later via updateMany.
+   */
+  private static buildTicket(p: {
+    eventId: any;
+    vendorId: any;
+    ticketType: string;
+    price: number;
+    customerName?: string;
+    customerPhone?: string;
+    saleId?: any;
+  }) {
+    return new Ticket({
+      eventId: p.eventId,
+      vendorId: p.vendorId,
+      ticketType: p.ticketType,
+      price: p.price,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      status: TicketStatus.SOLD,
+      ...(p.saleId ? { saleId: p.saleId } : {}),
+    });
+  }
+
+  /**
    * Helper to start a transaction session safely
    * Returns null if transactions are not supported (standalone MongoDB)
    */
@@ -158,14 +185,13 @@ export class TicketService {
       // Create tickets
       const tickets: ITicket[] = [];
       for (let i = 0; i < quantity; i++) {
-        const ticket = new Ticket({
+        const ticket = this.buildTicket({
           eventId,
           vendorId,
           ticketType: ticketTypeData.name,
           price: ticketTypeData.price,
           customerName,
           customerPhone,
-          status: TicketStatus.SOLD
         });
 
         // First save might fail with transaction error, catch and retry
@@ -181,14 +207,13 @@ export class TicketService {
             // Retry all tickets without session
             const ticketsWithoutSession: ITicket[] = [];
             for (let j = 0; j < quantity; j++) {
-              const t = new Ticket({
+              const t = this.buildTicket({
                 eventId,
                 vendorId,
                 ticketType: ticketTypeData.name,
                 price: ticketTypeData.price,
                 customerName,
                 customerPhone,
-                status: TicketStatus.SOLD
               });
               await t.save();
               ticketsWithoutSession.push(t);
@@ -715,6 +740,14 @@ export class TicketService {
   }
 
   /**
+   * Look up a MoMo sale by its MTN referenceId for ownership verification.
+   * Returns null if not found. Never throws.
+   */
+  static async getMomoSaleByReference(referenceId: string): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ momoReferenceId: referenceId });
+  }
+
+  /**
    * Finalize an MTN MoMo sale identified by referenceId. Idempotent.
    * - If sale is not PENDING → return current status immediately.
    * - Query MTN status; PENDING → return pending; FAILED → release + fail.
@@ -757,14 +790,13 @@ export class TicketService {
     const ticketTypeDoc = event?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
     const tickets: ITicket[] = [];
     for (let i = 0; i < sale.quantity; i++) {
-      const t = new Ticket({
+      const t = this.buildTicket({
         eventId: sale.eventId,
         vendorId: sale.vendorId,
         ticketType: ticketTypeDoc?.name || 'Ticket',
         price: sale.totalAmount / sale.quantity,
         customerName: sale.customerName,
         customerPhone: sale.customerPhone,
-        status: TicketStatus.SOLD,
         saleId: sale._id,
       });
       await t.save();

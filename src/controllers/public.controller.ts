@@ -343,10 +343,27 @@ export class PublicController {
 
   /**
    * Poll MTN MoMo payment status and trigger finalization on SUCCESSFUL.
+   * Ownership check: the authenticated buyer's phone must match the sale's
+   * customerPhone (both normalized) — prevents IDOR on the referenceId namespace.
+   * A mismatched or missing sale returns 404 to avoid leaking existence info.
    */
   static async getMomoStatus(req: Request, res: Response): Promise<any> {
     try {
-      const result = await TicketService.finalizeMomoSale(req.params['referenceId']!);
+      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!buyerPhone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const referenceId = req.params['referenceId']!;
+      const sale = await TicketService.getMomoSaleByReference(referenceId);
+
+      // Normalize both phones with the same util used at purchase time.
+      // If sale is missing, or phones don't match → 404 (don't reveal existence).
+      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
+      const result = await TicketService.finalizeMomoSale(referenceId);
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);

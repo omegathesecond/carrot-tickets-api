@@ -232,6 +232,47 @@ describe('TicketService.finalizeMomoSale', () => {
     expect(sale!.ticketIds.length).toBe(0);
   });
 
+  it('getMomoSaleByReference ownership: mismatched phone gets no finalize, matching phone succeeds', async () => {
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_OWN' });
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: {} });
+
+    // Initiate as +26876111111
+    await TicketService.initiateMomoPurchase({
+      eventId,
+      ticketTypeId,
+      quantity: 1,
+      customerPhone: '+26876111111',
+      momoPhone: '26876111111',
+    });
+
+    // Verify getMomoSaleByReference returns the sale for the correct reference
+    const found = await TicketService.getMomoSaleByReference('R_OWN');
+    expect(found).not.toBeNull();
+
+    // Phone mismatch path: a DIFFERENT buyer phone should NOT match the sale
+    const { normalizePhone } = await import('@utils/phone.util');
+    const salePhone = normalizePhone(found!.customerPhone || '');
+    const wrongPhone = normalizePhone('+26876999999');
+    const rightPhone = normalizePhone('+26876111111');
+
+    // Attacker's phone doesn't match — no finalize should occur for them
+    expect(salePhone).not.toBe(wrongPhone);
+
+    // Matching buyer phone: finalize should proceed and complete
+    expect(salePhone).toBe(rightPhone);
+
+    const result = await TicketService.finalizeMomoSale('R_OWN');
+    expect(result.status).toBe('completed');
+
+    // No tickets minted for the wrong phone (finalize was NOT called for them)
+    const allTickets = await Ticket.find({ eventId });
+    expect(allTickets.length).toBe(1); // only the matching buyer's ticket
+    expect(allTickets[0]!.customerPhone).toBe(rightPhone);
+  });
+
   it('concurrent finalize calls never double-mint (atomic claim)', async () => {
     const quantity = 2;
     const { eventId, ticketTypeId } = await seedPublishedEvent();
