@@ -8,6 +8,15 @@ import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 
+// Validation schema for MTN MoMo purchase initiation
+const momoInitiateSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(10).required(),
+  customerName: Joi.string().max(100).optional(),
+  momoPhone: Joi.string().pattern(/^[0-9]{8,15}$/).required(),
+});
+
 // Validation schemas
 const publicEventsQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
@@ -311,6 +320,36 @@ export class PublicController {
     } catch (error: any) {
       console.error('Get public payment methods error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch payment methods');
+    }
+  }
+
+  /**
+   * Initiate an async MTN MoMo purchase.
+   * Phone comes from the buyer token (req.ticketsUser.userPhone), NEVER the body.
+   * momoPhone (the MoMo wallet number) IS from body.
+   */
+  static async initiateMomoPurchase(req: Request, res: Response): Promise<any> {
+    const { error, value } = momoInitiateSchema.validate(req.body);
+    if (error) return ApiResponseUtil.badRequest(res, error.message);
+    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    try {
+      const r = await TicketService.initiateMomoPurchase({ ...value, customerPhone });
+      return ApiResponseUtil.success(res, r);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Could not start MoMo payment', 400);
+    }
+  }
+
+  /**
+   * Poll MTN MoMo payment status and trigger finalization on SUCCESSFUL.
+   */
+  static async getMomoStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const result = await TicketService.finalizeMomoSale(req.params['referenceId']!);
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
     }
   }
 

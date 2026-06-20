@@ -68,4 +68,23 @@ router.post('/auth/register', PublicController.registerBuyer);
  */
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
 
+/**
+ * @route   POST /api/public/purchase/momo
+ * @desc    Initiate an async MTN MoMo ticket purchase. Phone comes from the
+ *          buyer token (req.ticketsUser.userPhone), NOT the body.
+ *          Returns { referenceId, saleId, expiresAt } — buyer polls the status
+ *          endpoint and approves the payment on their phone.
+ * @access  Buyer (Bearer buyer token)
+ * @body    eventId, ticketTypeId, quantity, customerName?, momoPhone
+ */
+router.post('/purchase/momo', authenticateBuyer, PublicController.initiateMomoPurchase);
+
+/**
+ * @route   GET /api/public/purchase/momo/:referenceId/status
+ * @desc    Poll the status of a pending MTN MoMo payment. Also triggers
+ *          finalization (ticket minting) when MTN reports SUCCESSFUL.
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/purchase/momo/:referenceId/status', authenticateBuyer, PublicController.getMomoStatus);
+
 export default router;

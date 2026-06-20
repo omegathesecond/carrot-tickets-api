@@ -7,6 +7,9 @@ import { EventService } from '@services/event.service';
 import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
+import { MtnMomoClient } from '@services/payments/mtnMomo.client';
+import { ReservationService } from '@services/reservation.service';
+import { TicketReservation } from '@models/ticketReservation.model';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -632,6 +635,168 @@ export class TicketService {
       console.error('Get ticket by ID error:', error);
       throw new Error(error.message || 'Failed to fetch ticket');
     }
+  }
+
+  // ── MTN MoMo async payment client (mocked in tests via jest.mock at module level) ──
+  private static momoClient = new MtnMomoClient();
+  private static MOMO_TTL_MS = 5 * 60_000; // 5 minutes
+
+  /**
+   * Initiate an async MTN MoMo purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Call requestToPay on MTN — on failure, release reservation + fail sale + rethrow.
+   */
+  static async initiateMomoPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone: string;
+    customerName?: string;
+    momoPhone: string;
+  }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
+    if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
+
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId: event.vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      totalAmount,
+      paymentMethod: PaymentMethod.MTN_MOMO,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy: event.vendorId,
+      soldByType: 'Vendor',
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.MOMO_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Request to pay (currency from env; sandbox uses EUR)
+    try {
+      const { referenceId } = await this.momoClient.requestToPay({
+        amount: totalAmount,
+        currency: process.env['MTN_MOMO_CURRENCY'] || 'SZL',
+        payerMsisdn: p.momoPhone,
+        externalId: sale.saleId,
+        payerMessage: `Carrot Tickets - ${tt.name} x${p.quantity}`,
+      });
+      sale.momoReferenceId = referenceId;
+      await sale.save();
+      return { referenceId, saleId: sale._id.toString(), expiresAt };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Finalize an MTN MoMo sale identified by referenceId. Idempotent.
+   * - If sale is not PENDING → return current status immediately.
+   * - Query MTN status; PENDING → return pending; FAILED → release + fail.
+   * - SUCCESSFUL → ATOMIC claim via findOneAndUpdate({_id, paymentStatus:PENDING})
+   *   to prevent double-mint from concurrent poll + callback. Then mint tickets,
+   *   confirm reservation (reserved→sold), update event sold count, best-effort SMS.
+   */
+  static async finalizeMomoSale(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ momoReferenceId: referenceId });
+    if (!sale) throw new Error('Sale not found for reference');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const { status } = await this.momoClient.getStatus(referenceId);
+    if (status === 'PENDING') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (status === 'FAILED') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // SUCCESSFUL: atomically CLAIM the sale so concurrent poll + callback can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized it
+
+    // Mint tickets, convert reservation (reserved→sold), SMS
+    const event = await Event.findById(sale.eventId);
+    const ticketTypeDoc = event?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = new Ticket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        status: TicketStatus.SOLD,
+        saleId: sale._id,
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (sale.customerPhone && event) {
+      SmsService.sendTicketConfirmation(
+        sale.customerPhone,
+        tickets.map(t => ({
+          ticketId: t.ticketId,
+          eventName: event.name,
+          eventDate: event.eventDate.toISOString(),
+          venue: event.venue,
+        }))
+      ).catch(err => console.error('[SMS] momo confirmation threw', err));
+    }
+
+    return { status: 'completed' };
   }
 
   /**
