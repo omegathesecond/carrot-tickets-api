@@ -1,0 +1,129 @@
+import mongoose from 'mongoose';
+import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { ReservationService } from '@services/reservation.service';
+import { Event } from '@models/event.model';
+import { TicketSale } from '@models/ticketSale.model';
+import { EventStatus } from '@interfaces/event.interface';
+import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+
+beforeAll(async () => {
+  await connectTestDb();
+});
+
+afterEach(async () => {
+  await clearTestDb();
+});
+
+afterAll(async () => {
+  await disconnectTestDb();
+});
+
+// Helper to create a minimal seeded event + sale for tests
+async function seedEventAndSale(overrides: { reserved?: number; sold?: number } = {}) {
+  const vendorId = new mongoose.Types.ObjectId();
+  const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  const event = await Event.create({
+    vendorId,
+    name: 'Test Event',
+    venue: 'Test Venue',
+    eventDate: futureDate,
+    startTime: futureDate,
+    endTime: new Date(futureDate.getTime() + 2 * 60 * 60 * 1000),
+    status: EventStatus.PUBLISHED,
+    ticketTypes: [
+      {
+        name: 'General',
+        price: 100,
+        quantity: 10,
+        sold: overrides.sold ?? 0,
+        reserved: overrides.reserved ?? 0,
+      },
+    ],
+  });
+
+  const ticketTypeId = event.ticketTypes[0]!._id!.toString();
+
+  const sale = await TicketSale.create({
+    eventId: event._id,
+    vendorId,
+    ticketIds: [],
+    quantity: 3,
+    totalAmount: 300,
+    paymentMethod: PaymentMethod.MTN_MOMO,
+    paymentStatus: PaymentStatus.PENDING,
+    soldBy: vendorId,
+    soldByType: 'Vendor',
+    soldAt: new Date(),
+  });
+
+  return { event, ticketTypeId, saleId: sale._id.toString(), eventId: event._id.toString(), sale };
+}
+
+describe('ReservationService.reserve', () => {
+  it('increments ticketType.reserved and reduces availability', async () => {
+    const { eventId, ticketTypeId, saleId } = await seedEventAndSale();
+
+    const { reservationId } = await ReservationService.reserve({
+      eventId,
+      ticketTypeId,
+      quantity: 3,
+      saleId,
+      ttlMs: 300_000,
+    });
+
+    expect(reservationId).toBeTruthy();
+
+    const updated = await Event.findById(eventId);
+    const tt = updated!.ticketTypes[0]!;
+    expect(tt.reserved).toBe(3);
+    expect(tt.available).toBe(7); // 10 - 0 sold - 3 reserved
+  });
+});
+
+describe('ReservationService.release', () => {
+  it('decrements reserved back to 0 after release', async () => {
+    const { eventId, ticketTypeId, saleId } = await seedEventAndSale();
+
+    await ReservationService.reserve({
+      eventId,
+      ticketTypeId,
+      quantity: 3,
+      saleId,
+      ttlMs: 300_000,
+    });
+
+    await ReservationService.release(saleId);
+
+    const updated = await Event.findById(eventId);
+    const tt = updated!.ticketTypes[0]!;
+    expect(tt.reserved).toBe(0);
+    expect(tt.available).toBe(10);
+  });
+});
+
+describe('ReservationService.sweepExpired', () => {
+  it('releases a lapsed reservation and fails its PENDING sale', async () => {
+    const { eventId, ticketTypeId, saleId } = await seedEventAndSale();
+
+    // create reservation with negative ttl so it is already expired
+    await ReservationService.reserve({
+      eventId,
+      ticketTypeId,
+      quantity: 3,
+      saleId,
+      ttlMs: -1000, // already expired
+    });
+
+    const n = await ReservationService.sweepExpired();
+    expect(n).toBeGreaterThanOrEqual(1);
+
+    const updated = await Event.findById(eventId);
+    const tt = updated!.ticketTypes[0]!;
+    expect(tt.reserved).toBe(0);
+    expect(tt.available).toBe(10);
+
+    const updatedSale = await TicketSale.findById(saleId);
+    expect(updatedSale!.paymentStatus).toBe(PaymentStatus.FAILED);
+  });
+});

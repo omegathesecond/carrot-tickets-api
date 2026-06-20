@@ -46,6 +46,9 @@ if (isSentryEnabled()) {
   }
 }
 
+// Import services
+import { ReservationService } from '@services/reservation.service';
+
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
 import mediaRoutes from '@routes/media.route';
@@ -158,6 +161,14 @@ mongoose
     console.log(`📦 Database: ${mongoose.connection.name}`);
     // Log detailed database configuration
     logDatabaseConfig();
+
+    // Start the reservation expiry sweep (skipped in test env so app.ts imports don't spawn timers)
+    if (process.env['NODE_ENV'] !== 'test') {
+      const SWEEP_MS = 60_000;
+      setInterval(() => {
+        ReservationService.sweepExpired().catch(err => console.error('[reservation-sweep] error', err));
+      }, SWEEP_MS);
+    }
   })
   .catch((error) => {
     console.error('❌ MongoDB connection error:', error);
