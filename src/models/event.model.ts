@@ -32,6 +32,7 @@ const ticketTypeSchema = new Schema<ITicketType>({
       return this.quantity - this.sold;
     }
   },
+  reserved:    { type: Number, default: 0, min: 0 },
   isSoldOut: {
     type: Boolean,
     default: false
@@ -173,7 +174,7 @@ eventSchema.pre('save', function(next) {
   if (this.ticketTypes && this.ticketTypes.length > 0) {
     // Update available count for each ticket type
     this.ticketTypes.forEach(ticketType => {
-      ticketType.available = ticketType.quantity - ticketType.sold;
+      ticketType.available = Math.max(0, ticketType.quantity - ticketType.sold - (ticketType.reserved || 0));
     });
 
     // Calculate total tickets sold across all ticket types

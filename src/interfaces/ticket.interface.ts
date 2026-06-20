@@ -10,7 +10,8 @@ export enum TicketStatus {
 
 export enum PaymentMethod {
   CASH = 'cash',
-  KESHLESS_WALLET = 'keshless_wallet'
+  KESHLESS_WALLET = 'keshless_wallet',
+  MTN_MOMO = 'mtn_momo'
 }
 
 export enum PaymentStatus {
@@ -77,6 +78,8 @@ export interface ITicketSale extends Document {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   walletTransactionId?: string; // Keshless transaction ID
+  momoReferenceId?: string;      // MTN MoMo X-Reference-Id (UUID) for async collections
+  reservationExpiresAt?: Date;   // when a PENDING MoMo reservation lapses
 
   // Staff
   soldBy: Types.ObjectId; // Staff member who made the sale

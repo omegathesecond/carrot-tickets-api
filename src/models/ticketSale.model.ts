@@ -72,6 +72,16 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     sparse: true,
     trim: true
   },
+  momoReferenceId: {
+    type: String,
+    sparse: true,
+    index: true,
+    trim: true
+  },
+  reservationExpiresAt: {
+    type: Date,
+    index: true
+  },
 
   // Staff
   soldBy: {

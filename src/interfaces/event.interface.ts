@@ -19,7 +19,8 @@ export interface ITicketType {
   price: number;
   quantity: number; // Total tickets of this type
   sold: number; // Number sold
-  available: number; // quantity - sold
+  reserved: number;  // tickets held by in-flight (PENDING) async payments
+  available: number; // quantity - sold - reserved
   isSoldOut?: boolean; // Manual sold-out flag
 }
 

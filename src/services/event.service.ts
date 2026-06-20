@@ -49,6 +49,10 @@ export interface GetEventsQuery {
   isSuperAdmin?: boolean;
 }
 
+export function computeAvailable(t: { quantity: number; sold: number; reserved?: number }): number {
+  return Math.max(0, t.quantity - t.sold - (t.reserved || 0));
+}
+
 export class EventService {
   /**
    * Create a new event
@@ -72,6 +76,7 @@ export class EventService {
           price: tt.price,
           quantity: tt.quantity,
           sold: 0,
+          reserved: 0,
           available: tt.quantity,
           isSoldOut: false
         })) : [],
@@ -280,6 +285,7 @@ export class EventService {
             price: tt.price,
             quantity: tt.quantity,
             sold,
+            reserved: existing ? (existing.reserved || 0) : 0,
             available: tt.quantity - sold,
             isSoldOut
           };
@@ -544,10 +550,10 @@ export class EventService {
         return { available: false, message: 'Ticket type not found' };
       }
 
-      if (ticketTypeObj.available < quantity) {
+      if (computeAvailable(ticketTypeObj) < quantity) {
         return {
           available: false,
-          message: `Only ${ticketTypeObj.available} tickets available`,
+          message: `Only ${computeAvailable(ticketTypeObj)} tickets available`,
           ticketTypeData: ticketTypeObj
         };
       }
@@ -600,6 +606,7 @@ export class EventService {
         price: ticketType.price,
         quantity: ticketType.quantity,
         sold: 0,
+        reserved: 0,
         available: ticketType.quantity,
         isSoldOut: false
       });
