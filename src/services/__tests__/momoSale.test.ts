@@ -231,4 +231,46 @@ describe('TicketService.finalizeMomoSale', () => {
     expect(sale!.paymentStatus).toBe(PaymentStatus.PENDING);
     expect(sale!.ticketIds.length).toBe(0);
   });
+
+  it('concurrent finalize calls never double-mint (atomic claim)', async () => {
+    const quantity = 2;
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R4' });
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: {} });
+
+    await TicketService.initiateMomoPurchase({
+      eventId,
+      ticketTypeId,
+      quantity,
+      customerPhone: '+26876444444',
+      momoPhone: '26876444444',
+    });
+
+    // Fire TWO finalize calls concurrently — only one must win the atomic claim.
+    const [a, b] = await Promise.all([
+      TicketService.finalizeMomoSale('R4'),
+      TicketService.finalizeMomoSale('R4'),
+    ]);
+
+    // Both must resolve to 'completed' (loser returns early after seeing COMPLETED)
+    expect(a.status).toBe('completed');
+    expect(b.status).toBe('completed');
+
+    // Sale must be COMPLETED with EXACTLY `quantity` tickets — no double-mint
+    const sale = await TicketSale.findOne({ momoReferenceId: 'R4' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+    expect(sale!.ticketIds.length).toBe(quantity);
+
+    // Total tickets in DB must also be exactly `quantity`
+    const ticketCount = await Ticket.countDocuments({ eventId });
+    expect(ticketCount).toBe(quantity);
+
+    // Event ticketType: sold === quantity (not 2×), reserved === 0
+    const updatedEvent = await Event.findById(eventId);
+    const tt = updatedEvent!.ticketTypes[0]!;
+    expect(tt.sold).toBe(quantity);
+    expect(tt.reserved).toBe(0);
+  });
 });
