@@ -286,7 +286,7 @@ export class EventService {
             quantity: tt.quantity,
             sold,
             reserved: existing ? (existing.reserved || 0) : 0,
-            available: tt.quantity - sold,
+            available: computeAvailable({ quantity: tt.quantity, sold, reserved: existing ? (existing.reserved || 0) : 0 }),
             isSoldOut
           };
         });
@@ -512,7 +512,7 @@ export class EventService {
       const ticketTypeObj = event.ticketTypes.find(tt => tt._id?.toString() === ticketTypeId);
       if (ticketTypeObj) {
         ticketTypeObj.sold += quantity;
-        ticketTypeObj.available = ticketTypeObj.quantity - ticketTypeObj.sold;
+        ticketTypeObj.available = computeAvailable({ quantity: ticketTypeObj.quantity, sold: ticketTypeObj.sold, reserved: ticketTypeObj.reserved });
       }
 
       // Update event totals
@@ -667,7 +667,7 @@ export class EventService {
       if (updates.price !== undefined) ticketType.price = updates.price;
       if (updates.quantity !== undefined) {
         ticketType.quantity = updates.quantity;
-        ticketType.available = updates.quantity - ticketType.sold;
+        ticketType.available = computeAvailable({ quantity: updates.quantity, sold: ticketType.sold, reserved: ticketType.reserved });
       }
 
       await event.save();
@@ -758,7 +758,7 @@ export class EventService {
 
       // Update quantity
       ticketType.quantity = newQuantity;
-      ticketType.available = newQuantity - ticketType.sold;
+      ticketType.available = computeAvailable({ quantity: newQuantity, sold: ticketType.sold, reserved: ticketType.reserved });
 
       // Recalculate event capacity from all ticket types
       event.capacity = event.ticketTypes.reduce((sum, tt) => sum + tt.quantity, 0);
