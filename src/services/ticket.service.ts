@@ -4,7 +4,7 @@ import { Event } from '@models/event.model';
 import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { EventService } from '@services/event.service';
-import { KeshlessPaymentService } from '@services/keshlessPayment.service';
+import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
 import mongoose from 'mongoose';
@@ -136,36 +136,21 @@ export class TicketService {
       const totalAmount = ticketTypeData.price * quantity;
 
       // Process payment based on method
-      let paymentStatus = PaymentStatus.PENDING;
-      let walletTransactionId: string | undefined;
-      let paymentMessage = '';
-
-      if (paymentMethod === PaymentMethod.CASH) {
-        // Cash payment - mark as completed immediately
-        paymentStatus = PaymentStatus.COMPLETED;
-        paymentMessage = 'Cash payment received';
-      } else if (paymentMethod === PaymentMethod.KESHLESS_WALLET) {
-        // Wallet payment - process via Keshless Payment Service
-        if (!keshlessCardNumber) {
-          throw new Error('Card number is required for Keshless wallet payment');
-        }
-
-        // Call Keshless Payment API
-        const paymentResult = await KeshlessPaymentService.acceptPayment({
-          cardNumber: keshlessCardNumber,
-          amount: totalAmount,
-          pin: keshlessPin,
-          description: `Keshless Tickets - ${ticketTypeData.name} x${quantity}`
-        });
-
-        if (paymentResult.status === 'failed') {
-          throw new Error(paymentResult.message || paymentResult.error || 'Payment failed');
-        }
-
-        paymentStatus = PaymentStatus.COMPLETED;
-        walletTransactionId = paymentResult.transactionId;
-        paymentMessage = paymentResult.message || 'Wallet payment successful';
+      const proc = getProcessor(paymentMethod);
+      const charge = await proc.charge({
+        method: paymentMethod,
+        amount: totalAmount,
+        description: `Carrot Tickets - ${ticketTypeData.name} x${quantity}`,
+        keshlessCardNumber,
+        keshlessPin,
+      });
+      if (charge.status === 'failed') {
+        throw new Error(charge.message);
       }
+      // Phase B Task 3 handles only synchronous (completed) methods; async 'pending' is wired in Task 6.
+      let paymentStatus = PaymentStatus.COMPLETED;
+      let walletTransactionId = charge.providerRef;
+      let paymentMessage = charge.message;
 
       // Create tickets
       const tickets: ITicket[] = [];
