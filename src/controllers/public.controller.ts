@@ -6,6 +6,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { TicketService } from '@services/ticket.service';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
+import { PaymentConfigService } from '@services/paymentConfig.service';
 
 // Validation schemas
 const publicEventsQuerySchema = Joi.object({
@@ -291,6 +292,25 @@ export class PublicController {
     } catch (error: any) {
       console.error('Register buyer error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to create account', 401);
+    }
+  }
+
+  /**
+   * Returns the payment methods available to the buyer checkout.
+   * A method is included iff its config toggle is ON and (for MoMo) the
+   * MTN_MOMO_ENABLED env var is 'true' (processor-configured guard for Task 6).
+   * Cash is excluded — not a buyer-online method.
+   */
+  static async getPaymentMethods(_req: Request, res: Response): Promise<any> {
+    try {
+      const cfg = await PaymentConfigService.get();
+      const methods: string[] = [];
+      if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
+      if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
+      return ApiResponseUtil.success(res, { methods });
+    } catch (error: any) {
+      console.error('Get public payment methods error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to fetch payment methods');
     }
   }
 

@@ -10,6 +10,16 @@ const router = Router();
  */
 
 /**
+ * @route   GET /api/public/payment-methods
+ * @desc    Returns the payment methods the buyer checkout may show.
+ *          A method is listed iff its admin toggle is ON and it is configured.
+ *          MoMo additionally requires MTN_MOMO_ENABLED=true in the environment.
+ *          Cash is excluded — it is a POS/outlet-only method.
+ * @access  Public
+ */
+router.get('/payment-methods', PublicController.getPaymentMethods);
+
+/**
  * @route   GET /api/public/events
  * @desc    Get all published events (paginated)
  * @access  Public
