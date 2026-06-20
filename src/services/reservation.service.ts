@@ -5,9 +5,9 @@ import { PaymentStatus } from '@interfaces/ticket.interface';
 
 async function adjustReserved(eventId: unknown, ticketTypeId: string, delta: number): Promise<void> {
   const event = await Event.findById(eventId);
-  if (!event) return;
+  if (!event) throw new Error(`adjustReserved: event ${eventId} / ticketType ${ticketTypeId} not found`);
   const tt = event.ticketTypes.find((t) => t._id?.toString() === ticketTypeId);
-  if (!tt) return;
+  if (!tt) throw new Error(`adjustReserved: event ${eventId} / ticketType ${ticketTypeId} not found`);
   tt.reserved = Math.max(0, (tt.reserved || 0) + delta);
   await event.save(); // pre-save hook recomputes available
 }
@@ -53,14 +53,18 @@ export class ReservationService {
     const lapsed = await TicketReservation.find({ status: 'held', expiresAt: { $lt: new Date() } });
     let n = 0;
     for (const r of lapsed) {
-      await adjustReserved(r.eventId, r.ticketTypeId, -r.quantity);
-      r.status = 'released';
-      await r.save();
-      await TicketSale.updateOne(
-        { _id: r.saleId, paymentStatus: PaymentStatus.PENDING },
-        { $set: { paymentStatus: PaymentStatus.FAILED } }
-      );
-      n++;
+      try {
+        await adjustReserved(r.eventId, r.ticketTypeId, -r.quantity);
+        r.status = 'released';
+        await r.save();
+        await TicketSale.updateOne(
+          { _id: r.saleId, paymentStatus: PaymentStatus.PENDING },
+          { $set: { paymentStatus: PaymentStatus.FAILED } }
+        );
+        n++;
+      } catch (err) {
+        console.error(`[reservation-sweep] failed for sale ${r.saleId}`, err);
+      }
     }
     return n;
   }

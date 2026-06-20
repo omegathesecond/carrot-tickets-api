@@ -60,6 +60,47 @@ async function seedEventAndSale(overrides: { reserved?: number; sold?: number } 
   return { event, ticketTypeId, saleId: sale._id.toString(), eventId: event._id.toString(), sale };
 }
 
+describe('ReservationService.reserve — missing event/ticketType', () => {
+  it('throws when event does not exist and does NOT create a reservation', async () => {
+    const { ticketTypeId, saleId } = await seedEventAndSale();
+    const fakeEventId = new mongoose.Types.ObjectId().toString();
+
+    await expect(
+      ReservationService.reserve({
+        eventId: fakeEventId,
+        ticketTypeId,
+        quantity: 1,
+        saleId,
+        ttlMs: 300_000,
+      })
+    ).rejects.toThrow(/adjustReserved/);
+
+    // No reservation document should have been created
+    const { TicketReservation } = await import('@models/ticketReservation.model');
+    const count = await TicketReservation.countDocuments({ saleId });
+    expect(count).toBe(0);
+  });
+
+  it('throws when ticketType does not exist on the event', async () => {
+    const { eventId, saleId } = await seedEventAndSale();
+    const fakeTicketTypeId = new mongoose.Types.ObjectId().toString();
+
+    await expect(
+      ReservationService.reserve({
+        eventId,
+        ticketTypeId: fakeTicketTypeId,
+        quantity: 1,
+        saleId,
+        ttlMs: 300_000,
+      })
+    ).rejects.toThrow(/adjustReserved/);
+
+    const { TicketReservation } = await import('@models/ticketReservation.model');
+    const count = await TicketReservation.countDocuments({ saleId });
+    expect(count).toBe(0);
+  });
+});
+
 describe('ReservationService.reserve', () => {
   it('increments ticketType.reserved and reduces availability', async () => {
     const { eventId, ticketTypeId, saleId } = await seedEventAndSale();
