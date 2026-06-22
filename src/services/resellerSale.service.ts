@@ -1,5 +1,6 @@
 import { Reseller } from '@models/reseller.model';
 import { Event } from '@models/event.model';
+import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { TicketService } from '@services/ticket.service';
@@ -110,5 +111,41 @@ export class ResellerSaleService {
       tickets,
       ...(paymentMessage ? { message: paymentMessage } : {}),
     };
+  }
+
+  static async getOperatorSales(params: {
+    operatorId: string;
+    resellerId: string;
+    page?: number;
+    limit?: number;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<{ sales: any[]; total: number; page: number; limit: number }> {
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+
+    const filter: any = {
+      soldBy: params.operatorId,
+      soldByType: 'ResellerOperator',
+      resellerId: params.resellerId,
+    };
+
+    if (params.startDate || params.endDate) {
+      filter.soldAt = {};
+      if (params.startDate) filter.soldAt.$gte = params.startDate;
+      if (params.endDate) filter.soldAt.$lte = params.endDate;
+    }
+
+    const [sales, total] = await Promise.all([
+      TicketSale.find(filter)
+        .populate('eventId', 'name venue eventDate')
+        .sort({ soldAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      TicketSale.countDocuments(filter),
+    ]);
+
+    return { sales, total, page, limit };
   }
 }

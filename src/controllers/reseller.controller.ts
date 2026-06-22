@@ -5,7 +5,6 @@ import { ResellerAuthService } from '@services/resellerAuth.service';
 import { ResellerSaleService } from '@services/resellerSale.service';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { EventService } from '@services/event.service';
-import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 
 export class ResellerController {
@@ -26,8 +25,11 @@ export class ResellerController {
       const result = await ResellerAuthService.login(value.identifier, value.password);
       return ApiResponseUtil.success(res, result, 'Login successful');
     } catch (err: any) {
+      if (err?.message === 'Invalid credentials') {
+        return ApiResponseUtil.unauthorized(res, 'Invalid credentials');
+      }
       console.error('Reseller login error:', err);
-      return ApiResponseUtil.error(res, err.message || 'Login failed', 401);
+      return ApiResponseUtil.error(res, 'Login failed', 500);
     }
   }
 
@@ -93,8 +95,11 @@ export class ResellerController {
 
       return ApiResponseUtil.success(res, { event: { id: event._id, name: event.name, venue: event.venue, eventDate: event.eventDate }, ticketTypes });
     } catch (err: any) {
+      if (/not found/i.test(err?.message)) {
+        return ApiResponseUtil.error(res, 'Event not found', 404);
+      }
       console.error('Reseller get event tickets error:', err);
-      return ApiResponseUtil.error(res, err.message || 'Failed to fetch event tickets', 404);
+      return ApiResponseUtil.error(res, 'Failed to fetch event tickets', 500);
     }
   }
 
@@ -175,28 +180,14 @@ export class ResellerController {
       const { page = 1, limit = 20, startDate, endDate } = value;
 
       // Scope strictly to this operator's own sales — never trust client-supplied ids
-      const filter: any = {
-        soldBy: reseller.operatorId,
-        soldByType: 'ResellerOperator',
+      const { sales, total } = await ResellerSaleService.getOperatorSales({
+        operatorId: reseller.operatorId,
         resellerId: reseller.resellerId,
-      };
-
-      if (startDate || endDate) {
-        filter.soldAt = {};
-        if (startDate) filter.soldAt.$gte = startDate;
-        if (endDate) filter.soldAt.$lte = endDate;
-      }
-
-      const skip = (page - 1) * limit;
-      const [sales, total] = await Promise.all([
-        TicketSale.find(filter)
-          .populate('eventId', 'name venue eventDate')
-          .sort({ soldAt: -1 })
-          .skip(skip)
-          .limit(limit)
-          .lean(),
-        TicketSale.countDocuments(filter),
-      ]);
+        page,
+        limit,
+        startDate,
+        endDate,
+      });
 
       return ApiResponseUtil.success(res, {
         data: sales,
