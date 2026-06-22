@@ -206,7 +206,7 @@ export class SettlementService {
 
   /**
    * Mark a frozen reseller settlement as paid.
-   * Sets status:'settled' + audit fields, then stamps all covered reseller-cash sales
+   * Atomically transitions status to 'settled' + audit fields, then stamps all covered reseller-cash sales
    * (resellerId, fundsCustody:'reseller', within the period) as resellerRemitted:true
    * so their proceeds become availableProceeds in Ledger B.
    */
@@ -215,19 +215,21 @@ export class SettlementService {
     adminId: string,
     paymentReference?: string,
   ): Promise<IResellerSettlement> {
-    const settlement = await ResellerSettlement.findById(settlementId);
-    if (!settlement) {
-      throw new Error(`ResellerSettlement ${settlementId} not found`);
-    }
-    if (settlement.status === 'settled') {
-      throw new Error(`ResellerSettlement ${settlementId} is already settled`);
-    }
+    const updatePayload: any = {
+      status: 'settled',
+      settledAt: new Date(),
+      settledBy: adminId,
+    };
+    if (paymentReference) updatePayload.paymentReference = paymentReference;
 
-    settlement.status = 'settled';
-    settlement.settledAt = new Date();
-    settlement.settledBy = adminId;
-    if (paymentReference) settlement.paymentReference = paymentReference;
-    await settlement.save();
+    const settlement = await ResellerSettlement.findOneAndUpdate(
+      { _id: settlementId, status: { $ne: 'settled' } },
+      { $set: updatePayload },
+      { new: true },
+    );
+    if (!settlement) {
+      throw new Error(`ResellerSettlement ${settlementId} not found or already settled`);
+    }
 
     // Stamp covered reseller-cash sales so their proceeds unlock for organizer payout (Ledger B)
     await TicketSale.updateMany(
@@ -268,26 +270,28 @@ export class SettlementService {
 
   /**
    * Mark a frozen organizer payout as paid.
-   * Sets status:'settled' + audit fields.
+   * Atomically transitions status to 'settled' + audit fields.
    */
   static async markOrganizerPayoutPaid(
     payoutId: string,
     adminId: string,
     paymentReference?: string,
   ): Promise<IOrganizerPayout> {
-    const payout = await OrganizerPayout.findById(payoutId);
-    if (!payout) {
-      throw new Error(`OrganizerPayout ${payoutId} not found`);
-    }
-    if (payout.status === 'settled') {
-      throw new Error(`OrganizerPayout ${payoutId} is already settled`);
-    }
+    const updatePayload: any = {
+      status: 'settled',
+      settledAt: new Date(),
+      settledBy: adminId,
+    };
+    if (paymentReference) updatePayload.paymentReference = paymentReference;
 
-    payout.status = 'settled';
-    payout.settledAt = new Date();
-    payout.settledBy = adminId;
-    if (paymentReference) payout.paymentReference = paymentReference;
-    await payout.save();
+    const payout = await OrganizerPayout.findOneAndUpdate(
+      { _id: payoutId, status: { $ne: 'settled' } },
+      { $set: updatePayload },
+      { new: true },
+    );
+    if (!payout) {
+      throw new Error(`OrganizerPayout ${payoutId} not found or already settled`);
+    }
 
     return payout;
   }
