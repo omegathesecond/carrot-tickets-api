@@ -44,6 +44,11 @@ const organizerPayoutSchema = new Schema<IOrganizerPayout>(
   { timestamps: true },
 );
 
+organizerPayoutSchema.index(
+  { vendorId: 1, periodStart: 1, periodEnd: 1 },
+  { unique: true },
+);
+
 export const OrganizerPayout = mongoose.model<IOrganizerPayout>(
   'OrganizerPayout',
   organizerPayoutSchema,

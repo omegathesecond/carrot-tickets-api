@@ -190,6 +190,16 @@ export class SettlementService {
     to: Date,
     adminId: string,
   ): Promise<IResellerSettlement> {
+    const overlapping = await ResellerSettlement.findOne({
+      resellerId: new mongoose.Types.ObjectId(resellerId),
+      status: { $in: ['pending_payment', 'settled'] },
+      periodStart: { $lte: to },
+      periodEnd: { $gte: from },
+    });
+    if (overlapping) {
+      throw new Error('An overlapping reseller settlement period already exists');
+    }
+
     const preview = await SettlementService.previewResellerSettlement(resellerId, from, to);
     return ResellerSettlement.create({
       resellerId: new mongoose.Types.ObjectId(resellerId),
@@ -206,20 +216,44 @@ export class SettlementService {
 
   /**
    * Mark a frozen reseller settlement as paid.
-   * Atomically transitions status to 'settled' + audit fields, then stamps all covered reseller-cash sales
-   * (resellerId, fundsCustody:'reseller', within the period) as resellerRemitted:true
-   * so their proceeds become availableProceeds in Ledger B.
+   *
+   * Crash-safe stamp-then-flip order:
+   * 1. Load the settlement — throw if not found, throw if already settled.
+   * 2. Idempotently stamp all covered reseller-cash sales as resellerRemitted:true FIRST
+   *    so their proceeds unlock for organizer payout (Ledger B).
+   * 3. Atomically flip status to 'settled' LAST — if a concurrent call already flipped it,
+   *    findOneAndUpdate returns null and we throw 'already settled'.
+   *
+   * This order ensures that if the process crashes between steps 2 and 3, re-running is safe:
+   * the stamp is idempotent and the flip has not yet occurred, so the settlement can be retried.
    */
   static async markResellerSettlementPaid(
     settlementId: string,
     adminId: string,
     paymentReference?: string,
   ): Promise<IResellerSettlement> {
-    const updatePayload: any = {
-      status: 'settled',
-      settledAt: new Date(),
-      settledBy: adminId,
-    };
+    // Step 1 — load and validate
+    const existing = await ResellerSettlement.findById(settlementId);
+    if (!existing) {
+      throw new Error(`Settlement not found: ${settlementId}`);
+    }
+    if (existing.status === 'settled') {
+      throw new Error(`Settlement already settled: ${settlementId}`);
+    }
+
+    // Step 2 — idempotent stamp FIRST
+    await TicketSale.updateMany(
+      {
+        resellerId: existing.resellerId,
+        fundsCustody: 'reseller',
+        soldAt: { $gte: existing.periodStart, $lte: existing.periodEnd },
+      },
+      { resellerRemitted: true },
+    );
+
+    // Step 3 — irreversible flip LAST
+    const settledAt = new Date();
+    const updatePayload: any = { status: 'settled', settledAt, settledBy: adminId };
     if (paymentReference) updatePayload.paymentReference = paymentReference;
 
     const settlement = await ResellerSettlement.findOneAndUpdate(
@@ -228,18 +262,8 @@ export class SettlementService {
       { new: true },
     );
     if (!settlement) {
-      throw new Error(`ResellerSettlement ${settlementId} not found or already settled`);
+      throw new Error(`Settlement already settled: ${settlementId}`);
     }
-
-    // Stamp covered reseller-cash sales so their proceeds unlock for organizer payout (Ledger B)
-    await TicketSale.updateMany(
-      {
-        resellerId: settlement.resellerId,
-        fundsCustody: 'reseller',
-        soldAt: { $gte: settlement.periodStart, $lte: settlement.periodEnd },
-      },
-      { resellerRemitted: true },
-    );
 
     return settlement;
   }
@@ -254,6 +278,16 @@ export class SettlementService {
     to: Date,
     adminId: string,
   ): Promise<IOrganizerPayout> {
+    const overlapping = await OrganizerPayout.findOne({
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      status: { $in: ['pending_payment', 'settled'] },
+      periodStart: { $lte: to },
+      periodEnd: { $gte: from },
+    });
+    if (overlapping) {
+      throw new Error('An overlapping organizer payout period already exists');
+    }
+
     const preview = await SettlementService.previewOrganizerPayout(vendorId, from, to);
     return OrganizerPayout.create({
       vendorId: new mongoose.Types.ObjectId(vendorId),

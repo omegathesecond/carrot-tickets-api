@@ -44,6 +44,11 @@ const resellerSettlementSchema = new Schema<IResellerSettlement>(
   { timestamps: true },
 );
 
+resellerSettlementSchema.index(
+  { resellerId: 1, periodStart: 1, periodEnd: 1 },
+  { unique: true },
+);
+
 export const ResellerSettlement = mongoose.model<IResellerSettlement>(
   'ResellerSettlement',
   resellerSettlementSchema,
