@@ -177,7 +177,7 @@ export class ResellerController {
       // Scope strictly to this operator's own sales — never trust client-supplied ids
       const filter: any = {
         soldBy: reseller.operatorId,
-        soldByType: 'reseller-operator',
+        soldByType: 'ResellerOperator',
         resellerId: reseller.resellerId,
       };
 
