@@ -83,10 +83,9 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     index: true
   },
 
-  // Staff — Mixed to support polymorphic refs across Vendor, VendorSubUser, and
-  // ResellerOperator without enforcing ObjectId cast (tests may use short string ids).
+  // Staff
   soldBy: {
-    type: Schema.Types.Mixed,
+    type: Schema.Types.ObjectId,
     required: [true, 'Seller ID is required'],
     refPath: 'soldByType'
   },
@@ -97,10 +96,9 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     default: 'Vendor'
   },
 
-  // Reseller Attribution — Mixed allows both ObjectId and string refs; true ObjectIds
-  // are used in production paths and can be populated, test stubs use short strings.
-  resellerId: { type: Schema.Types.Mixed, ref: 'Reseller', index: true, sparse: true },
-  hubId: { type: Schema.Types.Mixed, ref: 'ResellerHub', index: true, sparse: true },
+  // Reseller Attribution
+  resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', index: true, sparse: true },
+  hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', index: true, sparse: true },
 
   // Economic snapshot — immutable, written at sale time
   faceAmount: { type: Number },

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
 import { Reseller } from '@models/reseller.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -30,7 +31,7 @@ it('rejects a disabled payment method', async () => {
   const r = await Reseller.create({ businessName: 'X', commissionPercent: null });
   const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 50, capacity: 2 });
   await expect(ResellerSaleService.createSale({
-    operatorId: 'o', resellerId: r._id.toString(), hubId: 'h', eventId, ticketTypeId,
+    operatorId: new mongoose.Types.ObjectId().toString(), resellerId: r._id.toString(), hubId: new mongoose.Types.ObjectId().toString(), eventId, ticketTypeId,
     quantity: 1, paymentMethod: 'keshless_wallet',
   })).rejects.toThrow(/not available/i);
 });
@@ -38,7 +39,7 @@ it('rejects a disabled payment method', async () => {
 it('oversell beyond capacity is rejected', async () => {
   const r = await Reseller.create({ businessName: 'Y', commissionPercent: null });
   const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 10, capacity: 1 });
-  const base = { operatorId: 'o', resellerId: r._id.toString(), hubId: 'h', eventId, ticketTypeId, paymentMethod: 'cash' as const };
+  const base = { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: r._id.toString(), hubId: new mongoose.Types.ObjectId().toString(), eventId, ticketTypeId, paymentMethod: 'cash' as const };
   await ResellerSaleService.createSale({ ...base, quantity: 1 });
   await expect(ResellerSaleService.createSale({ ...base, quantity: 1 })).rejects.toThrow();
 });
