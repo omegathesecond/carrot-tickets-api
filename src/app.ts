@@ -55,6 +55,7 @@ import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
 import momoRoutes from '@routes/momo.route';
 import resellerRoutes from '@routes/reseller.route';
+import resellerAdminRoutes from '@routes/resellerAdmin.route';
 
 // Import error handling middleware
 import {
@@ -124,6 +125,7 @@ app.get('/api-docs.json', (_req: Request, res: Response) => {
 // API Routes
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller', resellerRoutes);
+app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/public', publicRoutes);  // Public routes - no auth required
 app.use('/api/momo', momoRoutes);      // MTN MoMo callback (unauthenticated)
