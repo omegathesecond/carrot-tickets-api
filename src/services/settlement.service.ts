@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 import { TicketSale } from '@models/ticketSale.model';
 import {
+  ResellerSettlement,
+  IResellerSettlement,
+} from '@models/resellerSettlement.model';
+import { OrganizerPayout, IOrganizerPayout } from '@models/organizerPayout.model';
+import {
   IResellerSettlementPreview,
   IOrganizerPayoutPreview,
 } from '@interfaces/settlement.interface';
@@ -172,5 +177,118 @@ export class SettlementService {
       availableProceeds,
       netAmount: round2(proceedsOwed - feeOwedByVendor),
     };
+  }
+
+  /**
+   * Freeze a reseller settlement for the given period.
+   * Computes aggregates via previewResellerSettlement and persists an immutable snapshot.
+   * Status is set to 'pending_payment' — aggregates are NEVER recomputed after this point.
+   */
+  static async closeResellerSettlement(
+    resellerId: string,
+    from: Date,
+    to: Date,
+    adminId: string,
+  ): Promise<IResellerSettlement> {
+    const preview = await SettlementService.previewResellerSettlement(resellerId, from, to);
+    return ResellerSettlement.create({
+      resellerId: new mongoose.Types.ObjectId(resellerId),
+      periodStart: from,
+      periodEnd: to,
+      status: 'pending_payment',
+      cashOwedToCarrot: preview.cashOwedToCarrot,
+      commissionOwedByCarrot: preview.commissionOwedByCarrot,
+      netAmount: preview.netAmount,
+      byMethod: preview.byMethod,
+      settledBy: adminId,
+    });
+  }
+
+  /**
+   * Mark a frozen reseller settlement as paid.
+   * Sets status:'settled' + audit fields, then stamps all covered reseller-cash sales
+   * (resellerId, fundsCustody:'reseller', within the period) as resellerRemitted:true
+   * so their proceeds become availableProceeds in Ledger B.
+   */
+  static async markResellerSettlementPaid(
+    settlementId: string,
+    adminId: string,
+    paymentReference?: string,
+  ): Promise<IResellerSettlement> {
+    const settlement = await ResellerSettlement.findById(settlementId);
+    if (!settlement) {
+      throw new Error(`ResellerSettlement ${settlementId} not found`);
+    }
+    if (settlement.status === 'settled') {
+      throw new Error(`ResellerSettlement ${settlementId} is already settled`);
+    }
+
+    settlement.status = 'settled';
+    settlement.settledAt = new Date();
+    settlement.settledBy = adminId;
+    if (paymentReference) settlement.paymentReference = paymentReference;
+    await settlement.save();
+
+    // Stamp covered reseller-cash sales so their proceeds unlock for organizer payout (Ledger B)
+    await TicketSale.updateMany(
+      {
+        resellerId: settlement.resellerId,
+        fundsCustody: 'reseller',
+        soldAt: { $gte: settlement.periodStart, $lte: settlement.periodEnd },
+      },
+      { resellerRemitted: true },
+    );
+
+    return settlement;
+  }
+
+  /**
+   * Freeze an organizer payout for the given period.
+   * Computes aggregates via previewOrganizerPayout and persists an immutable snapshot.
+   */
+  static async closeOrganizerPayout(
+    vendorId: string,
+    from: Date,
+    to: Date,
+    adminId: string,
+  ): Promise<IOrganizerPayout> {
+    const preview = await SettlementService.previewOrganizerPayout(vendorId, from, to);
+    return OrganizerPayout.create({
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      periodStart: from,
+      periodEnd: to,
+      status: 'pending_payment',
+      proceedsOwed: preview.proceedsOwed,
+      feeOwedByVendor: preview.feeOwedByVendor,
+      availableProceeds: preview.availableProceeds,
+      netAmount: preview.netAmount,
+      settledBy: adminId,
+    });
+  }
+
+  /**
+   * Mark a frozen organizer payout as paid.
+   * Sets status:'settled' + audit fields.
+   */
+  static async markOrganizerPayoutPaid(
+    payoutId: string,
+    adminId: string,
+    paymentReference?: string,
+  ): Promise<IOrganizerPayout> {
+    const payout = await OrganizerPayout.findById(payoutId);
+    if (!payout) {
+      throw new Error(`OrganizerPayout ${payoutId} not found`);
+    }
+    if (payout.status === 'settled') {
+      throw new Error(`OrganizerPayout ${payoutId} is already settled`);
+    }
+
+    payout.status = 'settled';
+    payout.settledAt = new Date();
+    payout.settledBy = adminId;
+    if (paymentReference) payout.paymentReference = paymentReference;
+    await payout.save();
+
+    return payout;
   }
 }
