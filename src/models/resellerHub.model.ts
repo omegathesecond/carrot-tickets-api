@@ -2,7 +2,7 @@ import mongoose, { Schema } from 'mongoose';
 import { IResellerHub } from '@interfaces/reseller.interface';
 
 const hubSchema = new Schema<IResellerHub>({
-  resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', required: true, index: true },
+  resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', required: true },
   name: { type: String, required: true, trim: true },
   location: {
     city: { type: String, trim: true },

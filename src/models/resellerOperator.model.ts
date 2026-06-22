@@ -3,8 +3,8 @@ import bcrypt from 'bcrypt';
 import { IResellerOperator } from '@interfaces/reseller.interface';
 
 const operatorSchema = new Schema<IResellerOperator>({
-  hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', required: true, index: true },
-  resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', required: true, index: true },
+  hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', required: true },
+  resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', required: true },
   fullName: { type: String, required: true, trim: true },
   email: { type: String, lowercase: true, trim: true, unique: true, sparse: true },
   phoneNumber: { type: String, trim: true, unique: true, sparse: true },
@@ -52,12 +52,8 @@ operatorSchema.pre('save', async function(next) {
   }
 });
 
-operatorSchema.methods.comparePassword = async function(this: IResellerOperator, candidatePassword: string): Promise<boolean> {
-  try {
-    return await bcrypt.compare(candidatePassword, (this as any).password);
-  } catch (error) {
-    return false;
-  }
+operatorSchema.methods.comparePassword = function(this: IResellerOperator, candidatePassword: string): Promise<boolean> {
+  return bcrypt.compare(candidatePassword, (this as any).password);
 };
 
 operatorSchema.index({ resellerId: 1, isActive: 1 });
