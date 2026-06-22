@@ -366,7 +366,7 @@ export class TicketService {
         paymentMessage
       };
     } catch (error: any) {
-      if (session) {
+      if (session && session.inTransaction()) {
         await session.abortTransaction();
       }
       console.error('Sell tickets error:', error);
