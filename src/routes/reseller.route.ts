@@ -44,6 +44,12 @@ router.post(
   ResellerController.createSale
 );
 
+router.post(
+  '/sales/:referenceId/finalize',
+  requireResellerPermission(ResellerPermission.SELL_TICKETS),
+  ResellerController.finalizeSale
+);
+
 router.get(
   '/sales',
   requireResellerPermission(ResellerPermission.VIEW_OWN_SALES),

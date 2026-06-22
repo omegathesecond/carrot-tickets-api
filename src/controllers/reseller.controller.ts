@@ -136,6 +136,7 @@ export class ResellerController {
         paymentMethod: Joi.string().valid('cash', 'mtn_momo', 'keshless_wallet').required(),
         customerName: Joi.string().optional().max(100).trim().allow(''),
         customerPhone: Joi.string().optional().trim().allow(''),
+        momoPhone: Joi.string().optional().trim().allow(''),
         keshlessCardNumber: Joi.string().optional().length(8).alphanum().uppercase(),
         keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/),
       }).validate(req.body);
@@ -152,10 +153,45 @@ export class ResellerController {
         ...value,
       });
 
-      return ApiResponseUtil.created(res, result, result.message || 'Sale completed');
+      // MoMo is async: surface the PENDING payload (referenceId/expiresAt) so the
+      // till can poll/finalize. Cash/keshless return the completed payload.
+      const message =
+        result.status === 'pending'
+          ? 'MoMo payment initiated — awaiting confirmation'
+          : (result as { message?: string }).message || 'Sale completed';
+
+      return ApiResponseUtil.created(res, result, message);
     } catch (err: any) {
       console.error('Reseller create sale error:', err);
       return ApiResponseUtil.error(res, err.message || 'Failed to create sale');
+    }
+  }
+
+  /**
+   * Sales: Finalize a MoMo sale by referenceId — scoped to the owning reseller.
+   * Maps not-found → 404, ownership failure → 403, else success.
+   */
+  static async finalizeSale(req: Request, res: Response): Promise<any> {
+    try {
+      const reseller = (req as any).reseller;
+      const { referenceId } = req.params;
+
+      const result = await ResellerSaleService.finalizeSale(
+        referenceId as string,
+        reseller.resellerId
+      );
+
+      return ApiResponseUtil.success(res, result, 'Sale finalized');
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (/not found/i.test(msg)) {
+        return ApiResponseUtil.notFound(res, 'Sale not found');
+      }
+      if (/not authorized/i.test(msg)) {
+        return ApiResponseUtil.forbidden(res, 'Not authorized to finalize this sale');
+      }
+      console.error('Reseller finalize sale error:', err);
+      return ApiResponseUtil.error(res, msg || 'Failed to finalize sale');
     }
   }
 

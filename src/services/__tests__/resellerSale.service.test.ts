@@ -2,11 +2,28 @@ import mongoose from 'mongoose';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
 import { Reseller } from '@models/reseller.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
+
+// Mock MtnMomoClient BEFORE importing ResellerSaleService (which pulls in
+// TicketService → MtnMomoClient). Same module-level pattern as momoSale.test.ts.
+const mockMomoInstance = {
+  isConfigured: jest.fn(),
+  requestToPay: jest.fn(),
+  getStatus: jest.fn(),
+};
+jest.mock('@services/payments/mtnMomo.client', () => ({
+  MtnMomoClient: jest.fn().mockImplementation(() => mockMomoInstance),
+}));
+
 import { ResellerSaleService } from '@services/resellerSale.service';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures'; // create: returns {eventId, ticketTypeId, capacity}
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
+afterEach(() => {
+  mockMomoInstance.isConfigured.mockReset();
+  mockMomoInstance.requestToPay.mockReset();
+  mockMomoInstance.getStatus.mockReset();
+});
 
 it('cash sale: completed, snapshot reseller-held', async () => {
   await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, cashEnabled: true });
@@ -42,4 +59,105 @@ it('oversell beyond capacity is rejected', async () => {
   const base = { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: r._id.toString(), hubId: new mongoose.Types.ObjectId().toString(), eventId, ticketTypeId, paymentMethod: 'cash' as const };
   await ResellerSaleService.createSale({ ...base, quantity: 1 });
   await expect(ResellerSaleService.createSale({ ...base, quantity: 1 })).rejects.toThrow();
+});
+
+it('mtn_momo sale: returns pending + referenceId; PENDING sale is reseller-attributed with carrot custody', async () => {
+  await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, mtnMomoEnabled: true });
+  const r = await Reseller.create({ businessName: 'MoMoPnP', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+
+  mockMomoInstance.isConfigured.mockReturnValue(true);
+  mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_RES_SVC' });
+
+  const res = await ResellerSaleService.createSale({
+    operatorId: new mongoose.Types.ObjectId().toString(),
+    resellerId: r._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(),
+    eventId, ticketTypeId, quantity: 1, paymentMethod: 'mtn_momo',
+    customerPhone: '+26878422613',
+  });
+
+  expect(res.status).toBe('pending');
+  if (res.status !== 'pending') throw new Error('expected pending');
+  expect(res.referenceId).toBe('R_RES_SVC');
+  expect(res.saleId).toBeTruthy();
+  expect(res.expiresAt).toBeInstanceOf(Date);
+
+  const { TicketSale } = await import('@models/ticketSale.model');
+  const sale = await TicketSale.findById(res.saleId);
+  expect(sale!.paymentStatus).toBe('pending');
+  expect(sale!.soldByType).toBe('ResellerOperator');
+  expect(sale!.resellerId!.toString()).toBe(r._id.toString());
+  expect(sale!.fundsCustody).toBe('carrot');
+  expect(sale!.organizerProceeds).toBe(92); // face − commission − fee
+});
+
+it('mtn_momo sale: throws when no buyer phone supplied (no silent fallback)', async () => {
+  await PaymentConfigService.update({ mtnMomoEnabled: true });
+  const r = await Reseller.create({ businessName: 'NoPhone', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+
+  mockMomoInstance.isConfigured.mockReturnValue(true);
+
+  await expect(ResellerSaleService.createSale({
+    operatorId: new mongoose.Types.ObjectId().toString(),
+    resellerId: r._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(),
+    eventId, ticketTypeId, quantity: 1, paymentMethod: 'mtn_momo',
+  })).rejects.toThrow(/phone/i);
+});
+
+it('finalizeSale: owning reseller completes the sale', async () => {
+  await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, mtnMomoEnabled: true });
+  const r = await Reseller.create({ businessName: 'FinalPnP', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+
+  mockMomoInstance.isConfigured.mockReturnValue(true);
+  mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_FINAL_OK' });
+
+  const created = await ResellerSaleService.createSale({
+    operatorId: new mongoose.Types.ObjectId().toString(),
+    resellerId: r._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(),
+    eventId, ticketTypeId, quantity: 1, paymentMethod: 'mtn_momo',
+    customerPhone: '+26878422613',
+  });
+  if (created.status !== 'pending') throw new Error('expected pending');
+
+  mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL' });
+
+  const result = await ResellerSaleService.finalizeSale(created.referenceId, r._id.toString());
+  expect(result.status).toBe('completed');
+});
+
+it('finalizeSale: a DIFFERENT reseller cannot finalize (ownership isolation)', async () => {
+  await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, mtnMomoEnabled: true });
+  const owner = await Reseller.create({ businessName: 'OwnerPnP', commissionPercent: null });
+  const attacker = await Reseller.create({ businessName: 'AttackerPnP', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+
+  mockMomoInstance.isConfigured.mockReturnValue(true);
+  mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_OWNED' });
+
+  const created = await ResellerSaleService.createSale({
+    operatorId: new mongoose.Types.ObjectId().toString(),
+    resellerId: owner._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(),
+    eventId, ticketTypeId, quantity: 1, paymentMethod: 'mtn_momo',
+    customerPhone: '+26878422613',
+  });
+  if (created.status !== 'pending') throw new Error('expected pending');
+
+  await expect(
+    ResellerSaleService.finalizeSale(created.referenceId, attacker._id.toString())
+  ).rejects.toThrow(/not authorized|forbidden|ownership/i);
+
+  // getStatus must never be consulted — we reject before touching MTN
+  expect(mockMomoInstance.getStatus).not.toHaveBeenCalled();
+});
+
+it('finalizeSale: unknown referenceId throws not-found', async () => {
+  await expect(
+    ResellerSaleService.finalizeSale('does-not-exist', new mongoose.Types.ObjectId().toString())
+  ).rejects.toThrow(/not found/i);
 });
