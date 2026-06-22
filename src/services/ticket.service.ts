@@ -218,8 +218,20 @@ export class TicketService {
       if (charge.status === 'failed') {
         throw new Error(charge.message);
       }
-      // Phase B Task 3 handles only synchronous (completed) methods; async 'pending' is wired in Task 6.
-      let paymentStatus = PaymentStatus.COMPLETED;
+      // Explicit status mapping — NEVER let a non-completed charge fall through
+      // to COMPLETED. A 'pending' charge (uncollected money) must persist as a
+      // PENDING sale so the organizer-payout/reseller ledgers (which count only
+      // `completed`) cannot credit the organizer for money not yet collected.
+      // Mirrors initiateMomoPurchase's PENDING semantics: no funds confirmed yet.
+      let paymentStatus: PaymentStatus;
+      if (charge.status === 'completed') {
+        paymentStatus = PaymentStatus.COMPLETED;
+      } else if (charge.status === 'pending') {
+        paymentStatus = PaymentStatus.PENDING;
+      } else {
+        // Defensive: any unexpected status is treated as a failure, never completed.
+        throw new Error(charge.message || `Unexpected charge status: ${charge.status}`);
+      }
       let walletTransactionId = charge.providerRef;
       let paymentMessage = charge.message;
 
@@ -739,6 +751,16 @@ export class TicketService {
     customerPhone: string;
     customerName?: string;
     momoPhone: string;
+    // Optional reseller attribution (additive — buyer/vendor callers omit these
+    // and keep the existing vendor-default behavior). When provided, the PENDING
+    // sale carries the SAME snapshot shape as a reseller cash sale except
+    // fundsCustody derives to 'carrot' because MoMo is electronic.
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
   }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
     if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
 
@@ -751,19 +773,33 @@ export class TicketService {
     const event = await Event.findById(p.eventId);
     if (!event) throw new Error('Event not found');
 
-    // Immutable economic snapshot — an electronic (mtn_momo) vendor sale, so
-    // custody derives to 'carrot' and reseller commission is 0. Written now so
-    // the sale is ledger-visible even before tickets are minted at finalize.
+    // Attribution: vendorId is the event organizer (derive from event if absent,
+    // as the buyer/vendor path does today). soldBy defaults to the organizer.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — an electronic (mtn_momo) sale, so custody
+    // derives to 'carrot'. Computed via the SAME DRY helper used everywhere so
+    // a reseller MoMo initiate yields organizerProceeds = face − commission −
+    // fee with soldByType 'ResellerOperator'. Written now so the sale is
+    // ledger-visible even before tickets are minted at finalize.
     const econ = await this.buildSaleSnapshot({
       totalAmount,
       paymentMethod: PaymentMethod.MTN_MOMO,
-      mappedSoldByType: 'Vendor',
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
     });
+    const resellerAttribution = {
+      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+    };
 
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
       eventId: p.eventId,
-      vendorId: event.vendorId,
+      vendorId,
       ticketIds: [],
       quantity: p.quantity,
       customerName: p.customerName,
@@ -771,8 +807,9 @@ export class TicketService {
       totalAmount,
       paymentMethod: PaymentMethod.MTN_MOMO,
       paymentStatus: PaymentStatus.PENDING,
-      soldBy: event.vendorId,
-      soldByType: 'Vendor',
+      soldBy,
+      soldByType: mappedSoldByType,
+      ...resellerAttribution,
       ...econ,
       soldAt: new Date(),
     });
