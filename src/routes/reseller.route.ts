@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ResellerController } from '@controllers/reseller.controller';
+import { ResellerOperatorAdminController } from '@controllers/resellerOperatorAdmin.controller';
 import { authenticateReseller, requireResellerPermission } from '@middleware/resellerAuth.middleware';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
@@ -55,5 +56,21 @@ router.get(
   requireResellerPermission(ResellerPermission.VIEW_OWN_SALES),
   ResellerController.getSales
 );
+
+/**
+ * Operator management (MANAGE_OPERATORS)
+ */
+router.get('/operators',
+  requireResellerPermission(ResellerPermission.MANAGE_OPERATORS),
+  ResellerOperatorAdminController.list);
+router.post('/operators',
+  requireResellerPermission(ResellerPermission.MANAGE_OPERATORS),
+  ResellerOperatorAdminController.create);
+router.post('/operators/:id/reset-pin',
+  requireResellerPermission(ResellerPermission.MANAGE_OPERATORS),
+  ResellerOperatorAdminController.resetPin);
+router.patch('/operators/:id',
+  requireResellerPermission(ResellerPermission.MANAGE_OPERATORS),
+  ResellerOperatorAdminController.update);
 
 export default router;
