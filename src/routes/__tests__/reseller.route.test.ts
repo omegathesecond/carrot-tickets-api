@@ -13,15 +13,13 @@ jest.mock('@services/payments/mtnMomo.client', () => ({
 
 import app from '@/app';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
-import { Reseller } from '@models/reseller.model';
-import { ResellerHub } from '@models/resellerHub.model';
-import { ResellerOperator } from '@models/resellerOperator.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import mongoose from 'mongoose';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { PaymentConfigService } from '@services/paymentConfig.service';
+import { seedOperator } from '../../__tests__/helpers/fixtures';
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
@@ -31,14 +29,28 @@ afterEach(() => {
   mockMomoInstance.getStatus.mockReset();
 });
 
+it('logs in via POST /api/reseller/auth/login with code + PIN', async () => {
+  const { loginCode, pin } = await seedOperator({ pin: '123456' });
+  const res = await request(app)
+    .post('/api/reseller/auth/login')
+    .send({ loginCode, pin });
+  expect(res.status).toBe(200);
+  expect(res.body.data.accessToken).toBeDefined();
+});
+
+it('rejects a wrong PIN with 401', async () => {
+  const { loginCode } = await seedOperator({ pin: '123456' });
+  const res = await request(app)
+    .post('/api/reseller/auth/login')
+    .send({ loginCode, pin: '999999' });
+  expect(res.status).toBe(401);
+});
+
 it('login then list events; vendor route stays blocked', async () => {
-  const r = await Reseller.create({ businessName: 'PnP', commissionPercent: null });
-  const hub = await ResellerHub.create({ resellerId: r._id, name: 'CBD' });
-  await ResellerOperator.create({ hubId: hub._id, resellerId: r._id, fullName: 'Op',
-    phoneNumber: '+26878222222', password: 'secret123', role: 'reseller_operator' });
+  const { loginCode, pin } = await seedOperator({ role: 'reseller_operator' });
 
   const login = await request(app).post('/api/reseller/auth/login')
-    .send({ identifier: '+26878222222', password: 'secret123' });
+    .send({ loginCode, pin });
   expect(login.status).toBe(200);
   const token = login.body.data.accessToken;
 
@@ -57,19 +69,10 @@ it('login then list events; vendor route stays blocked', async () => {
  * to always return empty results even when matching sales exist.
  */
 it('GET /api/reseller/sales returns sales created by this operator', async () => {
-  const r = await Reseller.create({ businessName: 'SalesTest Reseller', commissionPercent: 10 });
-  const hub = await ResellerHub.create({ resellerId: r._id, name: 'Sales Hub' });
-  const operator = await ResellerOperator.create({
-    hubId: hub._id,
-    resellerId: r._id,
-    fullName: 'Sales Op',
-    phoneNumber: '+26878333333',
-    password: 'secret123',
-    role: 'reseller_operator',
-  });
+  const { operator, resellerId, hubId, loginCode, pin } = await seedOperator({ role: 'reseller_operator' });
 
   const login = await request(app).post('/api/reseller/auth/login')
-    .send({ identifier: '+26878333333', password: 'secret123' });
+    .send({ loginCode, pin });
   expect(login.status).toBe(200);
   const token = login.body.data.accessToken;
 
@@ -86,8 +89,8 @@ it('GET /api/reseller/sales returns sales created by this operator', async () =>
     paymentStatus: PaymentStatus.COMPLETED,
     soldBy: operator._id,
     soldByType: 'ResellerOperator',  // persisted enum value — must match filter
-    resellerId: r._id,
-    hubId: hub._id,
+    resellerId: new mongoose.Types.ObjectId(resellerId),
+    hubId: new mongoose.Types.ObjectId(hubId),
   });
 
   const res = await request(app)
@@ -106,12 +109,7 @@ it('GET /api/reseller/sales returns sales created by this operator', async () =>
 it('POST /api/reseller/sales (mtn_momo) → pending + referenceId; finalize → completed', async () => {
   await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, mtnMomoEnabled: true });
 
-  const r = await Reseller.create({ businessName: 'MoMoRoute', commissionPercent: null });
-  const hub = await ResellerHub.create({ resellerId: r._id, name: 'MoMo Hub' });
-  await ResellerOperator.create({
-    hubId: hub._id, resellerId: r._id, fullName: 'MoMo Op',
-    phoneNumber: '+26878444444', password: 'secret123', role: 'reseller_operator',
-  });
+  const { loginCode, pin } = await seedOperator({ role: 'reseller_operator' });
 
   const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const event = await Event.create({
@@ -124,7 +122,7 @@ it('POST /api/reseller/sales (mtn_momo) → pending + referenceId; finalize → 
   const ticketTypeId = event.ticketTypes[0]!._id!.toString();
 
   const login = await request(app).post('/api/reseller/auth/login')
-    .send({ identifier: '+26878444444', password: 'secret123' });
+    .send({ loginCode, pin });
   expect(login.status).toBe(200);
   const token = login.body.data.accessToken;
 

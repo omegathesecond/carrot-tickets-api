@@ -9,24 +9,27 @@ import { EventStatus } from '@interfaces/event.interface';
 
 export class ResellerController {
   /**
-   * Authentication: Login with phone/email + password
+   * Authentication: Login with login code + PIN
    */
   static async login(req: Request, res: Response): Promise<any> {
     try {
       const { error, value } = Joi.object({
-        identifier: Joi.string().required(),
-        password: Joi.string().required(),
+        loginCode: Joi.string().pattern(/^\d{6}$/).required(),
+        pin: Joi.string().pattern(/^\d{6}$/).required(),
       }).validate(req.body);
 
       if (error) {
         return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
-      const result = await ResellerAuthService.login(value.identifier, value.password);
+      const result = await ResellerAuthService.login(value.loginCode, value.pin);
       return ApiResponseUtil.success(res, result, 'Login successful');
     } catch (err: any) {
       if (err?.message === 'Invalid credentials') {
         return ApiResponseUtil.unauthorized(res, 'Invalid credentials');
+      }
+      if (typeof err?.message === 'string' && err.message.includes('locked')) {
+        return ApiResponseUtil.error(res, err.message, 429);
       }
       console.error('Reseller login error:', err);
       return ApiResponseUtil.error(res, 'Login failed', 500);
