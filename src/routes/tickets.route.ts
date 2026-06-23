@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
 import {
-  requireTicketsPermission
+  requireTicketsPermission,
+  requireSuperAdmin,
 } from '@middleware/ticketsAuth.middleware';
 import { dualAuth } from '@middleware/serviceAuth.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
-import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 const router = Router();
 
@@ -25,17 +25,6 @@ router.post('/auth/refresh', TicketsController.refresh);
  * - Service key (x-service-key header) for proxied app requests from main Keshless API
  */
 router.use(dualAuth);
-
-/**
- * Super-admin guard — only users with isSuperAdmin === true may proceed.
- */
-const requireSuperAdmin = (req: any, res: any, next: any): void => {
-  if (!req.ticketsUser?.isSuperAdmin) {
-    ApiResponseUtil.forbidden(res, 'Super admin access required');
-    return;
-  }
-  next();
-};
 
 /**
  * Admin-only settings routes (super admin only)

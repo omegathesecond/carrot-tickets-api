@@ -1,25 +1,39 @@
 import { PaymentMethodConfig } from '@models/paymentMethodConfig.model';
 
-const DEFAULTS = { keshlessWalletEnabled: true, mtnMomoEnabled: true };
+const DEFAULTS = {
+  cashEnabled: true,
+  mtnMomoEnabled: true,
+  keshlessWalletEnabled: false, // Keshless decoupled — off for now
+  defaultResellerCommissionPercent: 0,
+  platformFeePercent: 0,
+};
+
+type PaymentConfig = typeof DEFAULTS;
 
 export class PaymentConfigService {
-  static async get(): Promise<{ keshlessWalletEnabled: boolean; mtnMomoEnabled: boolean }> {
+  static async get(): Promise<PaymentConfig> {
     const doc = await PaymentMethodConfig.findOne({ key: 'global' }).lean();
     return {
-      keshlessWalletEnabled: doc?.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
+      cashEnabled: doc?.cashEnabled ?? DEFAULTS.cashEnabled,
       mtnMomoEnabled: doc?.mtnMomoEnabled ?? DEFAULTS.mtnMomoEnabled,
+      keshlessWalletEnabled: doc?.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
+      defaultResellerCommissionPercent: doc?.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
+      platformFeePercent: doc?.platformFeePercent ?? DEFAULTS.platformFeePercent,
     };
   }
 
-  static async update(patch: Partial<{ keshlessWalletEnabled: boolean; mtnMomoEnabled: boolean }>) {
+  static async update(patch: Partial<PaymentConfig>): Promise<PaymentConfig> {
     const doc = await PaymentMethodConfig.findOneAndUpdate(
       { key: 'global' },
       { $set: patch },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     ).lean();
     return {
-      keshlessWalletEnabled: doc!.keshlessWalletEnabled,
-      mtnMomoEnabled: doc!.mtnMomoEnabled,
+      cashEnabled: doc!.cashEnabled ?? DEFAULTS.cashEnabled,
+      mtnMomoEnabled: doc!.mtnMomoEnabled ?? DEFAULTS.mtnMomoEnabled,
+      keshlessWalletEnabled: doc!.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
+      defaultResellerCommissionPercent: doc!.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
+      platformFeePercent: doc!.platformFeePercent ?? DEFAULTS.platformFeePercent,
     };
   }
 }

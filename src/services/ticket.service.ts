@@ -10,6 +10,8 @@ import { normalizePhone } from '@utils/phone.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
+import { PaymentConfigService } from '@services/paymentConfig.service';
+import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -23,8 +25,23 @@ export interface SellTicketsParams {
   keshlessCardNumber?: string;
   keshlessPin?: string;
   soldBy: string;
-  soldByType: 'vendor' | 'sub-user';
+  soldByType: 'vendor' | 'sub-user' | 'reseller-operator';
+  // Reseller flow (Task 8 supplies these); vendor sales leave them unset.
+  resellerId?: string;
+  hubId?: string;
+  resellerCommissionPercent?: number;
 }
+
+/**
+ * Maps the params `soldByType` union onto the persisted refPath enum value used
+ * by the TicketSale `soldBy` polymorphic ref. Single source of truth so the
+ * three sale-build sites can never drift.
+ */
+const SOLD_BY_TYPE_MAP: Record<SellTicketsParams['soldByType'], SaleSoldByType> = {
+  vendor: 'Vendor',
+  'sub-user': 'VendorSubUser',
+  'reseller-operator': 'ResellerOperator',
+};
 
 export interface GetSalesQuery {
   vendorId: string;
@@ -78,6 +95,30 @@ export class TicketService {
       customerPhone: p.customerPhone,
       status: TicketStatus.SOLD,
       ...(p.saleId ? { saleId: p.saleId } : {}),
+    });
+  }
+
+  /**
+   * Single canonical builder for the immutable economic snapshot persisted on
+   * EVERY TicketSale. Resolves the live platformFeePercent from PaymentConfig,
+   * runs computeSaleEconomics (which owns all money rounding), and returns the
+   * snapshot fields to spread onto `new TicketSale({...})`. All sale-build sites
+   * (vendor main, vendor no-tx fallback, buyer/MoMo) call this so the ledger can
+   * never see a snapshot-less sale.
+   */
+  private static async buildSaleSnapshot(p: {
+    totalAmount: number;
+    paymentMethod: PaymentMethod;
+    mappedSoldByType: SaleSoldByType;
+    resellerCommissionPercent?: number;
+  }): Promise<SaleEconomics> {
+    const cfg = await PaymentConfigService.get();
+    return computeSaleEconomics({
+      faceAmount: p.totalAmount,
+      paymentMethod: p.paymentMethod,
+      soldByType: p.mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent ?? 0,
+      platformFeePercent: cfg.platformFeePercent,
     });
   }
 
@@ -177,10 +218,37 @@ export class TicketService {
       if (charge.status === 'failed') {
         throw new Error(charge.message);
       }
-      // Phase B Task 3 handles only synchronous (completed) methods; async 'pending' is wired in Task 6.
-      let paymentStatus = PaymentStatus.COMPLETED;
+      // Explicit status mapping — NEVER let a non-completed charge fall through
+      // to COMPLETED. A 'pending' charge (uncollected money) must persist as a
+      // PENDING sale so the organizer-payout/reseller ledgers (which count only
+      // `completed`) cannot credit the organizer for money not yet collected.
+      // Mirrors initiateMomoPurchase's PENDING semantics: no funds confirmed yet.
+      let paymentStatus: PaymentStatus;
+      if (charge.status === 'completed') {
+        paymentStatus = PaymentStatus.COMPLETED;
+      } else if (charge.status === 'pending') {
+        paymentStatus = PaymentStatus.PENDING;
+      } else {
+        // Defensive: any unexpected status is treated as a failure, never completed.
+        throw new Error(charge.message || `Unexpected charge status: ${charge.status}`);
+      }
       let walletTransactionId = charge.providerRef;
       let paymentMessage = charge.message;
+
+      // Immutable economic snapshot — computed once, persisted on the sale in
+      // BOTH the main and no-transaction-fallback branches. Without it the sale
+      // would be invisible to the organizer-payout + reseller ledgers.
+      const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+      const econ = await this.buildSaleSnapshot({
+        totalAmount,
+        paymentMethod,
+        mappedSoldByType,
+        resellerCommissionPercent: params.resellerCommissionPercent,
+      });
+      const resellerAttribution = {
+        ...(params.resellerId ? { resellerId: params.resellerId } : {}),
+        ...(params.hubId ? { hubId: params.hubId } : {}),
+      };
 
       // Create tickets
       const tickets: ITicket[] = [];
@@ -232,7 +300,9 @@ export class TicketService {
               paymentStatus,
               walletTransactionId,
               soldBy,
-              soldByType: soldByType === 'vendor' ? 'Vendor' : 'VendorSubUser',
+              soldByType: mappedSoldByType,
+              ...resellerAttribution,
+              ...econ,
               soldAt: new Date()
             });
             await saleWithoutSession.save();
@@ -276,7 +346,9 @@ export class TicketService {
         paymentStatus,
         walletTransactionId,
         soldBy,
-        soldByType: soldByType === 'vendor' ? 'Vendor' : 'VendorSubUser',
+        soldByType: mappedSoldByType,
+        ...resellerAttribution,
+        ...econ,
         soldAt: new Date()
       });
       await sale.save(session ? { session } : undefined);
@@ -306,7 +378,7 @@ export class TicketService {
         paymentMessage
       };
     } catch (error: any) {
-      if (session) {
+      if (session && session.inTransaction()) {
         await session.abortTransaction();
       }
       console.error('Sell tickets error:', error);
@@ -679,6 +751,16 @@ export class TicketService {
     customerPhone: string;
     customerName?: string;
     momoPhone: string;
+    // Optional reseller attribution (additive — buyer/vendor callers omit these
+    // and keep the existing vendor-default behavior). When provided, the PENDING
+    // sale carries the SAME snapshot shape as a reseller cash sale except
+    // fundsCustody derives to 'carrot' because MoMo is electronic.
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
   }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
     if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
 
@@ -691,10 +773,33 @@ export class TicketService {
     const event = await Event.findById(p.eventId);
     if (!event) throw new Error('Event not found');
 
+    // Attribution: vendorId is the event organizer (derive from event if absent,
+    // as the buyer/vendor path does today). soldBy defaults to the organizer.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — an electronic (mtn_momo) sale, so custody
+    // derives to 'carrot'. Computed via the SAME DRY helper used everywhere so
+    // a reseller MoMo initiate yields organizerProceeds = face − commission −
+    // fee with soldByType 'ResellerOperator'. Written now so the sale is
+    // ledger-visible even before tickets are minted at finalize.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.MTN_MOMO,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+    });
+    const resellerAttribution = {
+      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+    };
+
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
       eventId: p.eventId,
-      vendorId: event.vendorId,
+      vendorId,
       ticketIds: [],
       quantity: p.quantity,
       customerName: p.customerName,
@@ -702,8 +807,10 @@ export class TicketService {
       totalAmount,
       paymentMethod: PaymentMethod.MTN_MOMO,
       paymentStatus: PaymentStatus.PENDING,
-      soldBy: event.vendorId,
-      soldByType: 'Vendor',
+      soldBy,
+      soldByType: mappedSoldByType,
+      ...resellerAttribution,
+      ...econ,
       soldAt: new Date(),
     });
     await sale.save();

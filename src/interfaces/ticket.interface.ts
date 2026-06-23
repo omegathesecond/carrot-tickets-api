@@ -83,7 +83,23 @@ export interface ITicketSale extends Document {
 
   // Staff
   soldBy: Types.ObjectId; // Staff member who made the sale
-  soldByType: 'Vendor' | 'VendorSubUser'; // Who sold it
+  soldByType: 'Vendor' | 'VendorSubUser' | 'ResellerOperator'; // Who sold it
+
+  // Reseller Attribution
+  resellerId?: Types.ObjectId;
+  hubId?: Types.ObjectId;
+
+  // Economic Snapshot — immutable, written at sale time
+  faceAmount?: number;
+  resellerCommissionPercent?: number;
+  resellerCommissionAmount?: number;
+  platformFeePercent?: number;
+  platformFeeAmount?: number;
+  organizerProceeds?: number;
+  fundsCustody?: 'carrot' | 'reseller' | 'vendor';
+
+  // Set true when the covering reseller settlement is closed + paid
+  resellerRemitted: boolean;
 
   // Timestamps
   soldAt: Date;

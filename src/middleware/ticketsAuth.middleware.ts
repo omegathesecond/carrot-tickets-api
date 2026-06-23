@@ -172,6 +172,19 @@ export const authenticateBuyer = async (
 };
 
 /**
+ * Require super-admin access.
+ * Checks isSuperAdmin flag on the already-decoded ticketsUser.
+ * Must be used after authenticateTickets.
+ */
+export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  if (!(req as any).ticketsUser?.isSuperAdmin) {
+    ApiResponseUtil.forbidden(res, 'Super admin access required');
+    return;
+  }
+  next();
+};
+
+/**
  * Attach Tickets user to request (optional - doesn't fail if no token)
  */
 export const optionalTicketsAuth = async (
