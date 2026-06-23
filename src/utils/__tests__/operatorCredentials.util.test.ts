@@ -1,4 +1,6 @@
 // api/src/utils/__tests__/operatorCredentials.util.test.ts
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const crypto = require('crypto');
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { generatePin, generateUniqueLoginCode } from '@utils/operatorCredentials.util';
@@ -21,10 +23,11 @@ it('generateUniqueLoginCode returns a 6-digit code in range', async () => {
 });
 
 it('generateUniqueLoginCode retries when a code already exists', async () => {
-  // Seed an operator that owns code "100000" (Math.random -> 0).
+  // Seed an operator that owns code "100000" (the first randomInt result collides).
   await ResellerOperator.collection.insertOne({ loginCode: '100000', fullName: 'x', role: 'reseller_operator', isActive: true } as any);
-  const spy = jest.spyOn(Math, 'random').mockReturnValueOnce(0).mockReturnValueOnce(0.5);
+  const spy = jest.spyOn(crypto, 'randomInt') as unknown as jest.SpyInstance;
+  spy.mockReturnValueOnce(100000).mockReturnValueOnce(550000);
   const code = await generateUniqueLoginCode();
   expect(spy).toHaveBeenCalledTimes(2);
-  expect(code).toBe('550000'); // 100000 + floor(0.5 * 900000)
+  expect(code).toBe('550000'); // first (100000) collides, retry returns 550000
 });
