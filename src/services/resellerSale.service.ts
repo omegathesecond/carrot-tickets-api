@@ -1,9 +1,11 @@
 import { Reseller } from '@models/reseller.model';
 import { Event } from '@models/event.model';
 import { TicketSale } from '@models/ticketSale.model';
+import { Ticket } from '@models/ticket.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { TicketService } from '@services/ticket.service';
+import { SmsService } from '@services/sms.service';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 
 type ResellerPaymentMethod = 'cash' | 'mtn_momo' | 'keshless_wallet';
@@ -184,6 +186,53 @@ export class ResellerSaleService {
 
     const { status } = await TicketService.finalizeMomoSale(referenceId);
     return { status, saleId: sale._id.toString() };
+  }
+
+  /**
+   * Manually (re)send the ticket confirmation SMS for a reseller sale.
+   *
+   * Reseller-INITIATED, so unlike the best-effort auto-send on the wallet/MoMo
+   * paths this is NOT fire-and-forget: we return whether the gateway accepted
+   * the message so the till can surface a failure (no silent success).
+   *
+   * Scope isolation: the sale must belong to the calling reseller.
+   */
+  static async sendSaleSms(
+    saleId: string,
+    resellerId: string,
+  ): Promise<{ sent: boolean }> {
+    const sale = await TicketSale.findById(saleId);
+    if (!sale) {
+      throw new Error(`Sale not found: ${saleId}`);
+    }
+    if (sale.resellerId?.toString() !== resellerId) {
+      throw new Error('Not authorized to send SMS for this sale');
+    }
+    if (!sale.customerPhone) {
+      throw new Error('This sale has no customer phone number');
+    }
+
+    const event = await Event.findById(sale.eventId);
+    if (!event) {
+      throw new Error(`Event not found for sale: ${saleId}`);
+    }
+
+    const tickets = await Ticket.find({ _id: { $in: sale.ticketIds } });
+    if (tickets.length === 0) {
+      throw new Error('This sale has no issued tickets to send');
+    }
+
+    const sent = await SmsService.sendTicketConfirmation(
+      sale.customerPhone,
+      tickets.map((t) => ({
+        ticketId: t.ticketId,
+        eventName: event.name,
+        eventDate: event.eventDate.toISOString(),
+        venue: event.venue,
+      })),
+    );
+
+    return { sent };
   }
 
   static async getOperatorSales(params: {

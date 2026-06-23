@@ -14,15 +14,29 @@ jest.mock('@services/payments/mtnMomo.client', () => ({
   MtnMomoClient: jest.fn().mockImplementation(() => mockMomoInstance),
 }));
 
+const mockSendTicketConfirmation = jest.fn();
+jest.mock('@services/sms.service', () => ({
+  SmsService: {
+    sendTicketConfirmation: (...args: any[]) => mockSendTicketConfirmation(...args),
+    sendOtp: jest.fn(),
+  },
+}));
+
 import { ResellerSaleService } from '@services/resellerSale.service';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures'; // create: returns {eventId, ticketTypeId, capacity}
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
+beforeEach(() => {
+  // Default resolved value so the fire-and-forget .catch() inside finalizeMomoSale
+  // doesn't crash when it calls SmsService.sendTicketConfirmation without a test setup.
+  mockSendTicketConfirmation.mockResolvedValue(true);
+});
 afterEach(() => {
   mockMomoInstance.isConfigured.mockReset();
   mockMomoInstance.requestToPay.mockReset();
   mockMomoInstance.getStatus.mockReset();
+  mockSendTicketConfirmation.mockReset();
 });
 
 it('cash sale: completed, snapshot reseller-held', async () => {
@@ -159,5 +173,56 @@ it('finalizeSale: a DIFFERENT reseller cannot finalize (ownership isolation)', a
 it('finalizeSale: unknown referenceId throws not-found', async () => {
   await expect(
     ResellerSaleService.finalizeSale('does-not-exist', new mongoose.Types.ObjectId().toString())
+  ).rejects.toThrow(/not found/i);
+});
+
+it('sendSaleSms: sends a confirmation for an owned cash sale', async () => {
+  mockSendTicketConfirmation.mockResolvedValue(true);
+  await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, cashEnabled: true });
+  const r = await Reseller.create({ businessName: 'SMSCo', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+
+  const sale = await ResellerSaleService.createSale({
+    operatorId: new mongoose.Types.ObjectId().toString(), resellerId: r._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(), eventId, ticketTypeId, quantity: 2,
+    paymentMethod: 'cash', customerName: 'Test Buyer', customerPhone: '+26878422613',
+  });
+
+  const res = await ResellerSaleService.sendSaleSms(sale.saleId, r._id.toString());
+
+  expect(res.sent).toBe(true);
+  expect(mockSendTicketConfirmation).toHaveBeenCalledTimes(1);
+  const [phone, summaries] = mockSendTicketConfirmation.mock.calls[0];
+  expect(phone).toBe('+26878422613');
+  expect(summaries).toHaveLength(2);
+  expect(summaries[0]).toHaveProperty('ticketId');
+  expect(summaries[0]).toHaveProperty('eventName');
+});
+
+it('sendSaleSms: rejects a sale owned by another reseller and does not send', async () => {
+  mockSendTicketConfirmation.mockResolvedValue(true);
+  await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, cashEnabled: true });
+  const owner = await Reseller.create({ businessName: 'Owner', commissionPercent: null });
+  const other = await Reseller.create({ businessName: 'Other', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 50, capacity: 3 });
+
+  const sale = await ResellerSaleService.createSale({
+    operatorId: new mongoose.Types.ObjectId().toString(), resellerId: owner._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(), eventId, ticketTypeId, quantity: 1,
+    paymentMethod: 'cash', customerPhone: '+26878422613',
+  });
+
+  await expect(
+    ResellerSaleService.sendSaleSms(sale.saleId, other._id.toString())
+  ).rejects.toThrow(/not authorized/i);
+  expect(mockSendTicketConfirmation).not.toHaveBeenCalled();
+});
+
+it('sendSaleSms: throws not found for an unknown sale id', async () => {
+  await expect(
+    ResellerSaleService.sendSaleSms(
+      new mongoose.Types.ObjectId().toString(),
+      new mongoose.Types.ObjectId().toString(),
+    )
   ).rejects.toThrow(/not found/i);
 });
