@@ -52,6 +52,12 @@ router.post(
   ResellerController.finalizeSale
 );
 
+router.post(
+  '/sales/:saleId/send-sms',
+  requireResellerPermission(ResellerPermission.SELL_TICKETS),
+  ResellerController.sendSaleSms
+);
+
 router.get(
   '/sales',
   requireResellerPermission(ResellerPermission.VIEW_OWN_SALES),

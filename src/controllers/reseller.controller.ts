@@ -199,6 +199,46 @@ export class ResellerController {
   }
 
   /**
+   * Sales: (re)send the ticket confirmation SMS for a sale this reseller owns.
+   * Returns the boolean send result; a gateway rejection is surfaced as 502 so
+   * the till never shows success for a message that wasn't accepted.
+   */
+  static async sendSaleSms(req: Request, res: Response): Promise<any> {
+    try {
+      const reseller = (req as any).reseller;
+
+      const { error, value } = Joi.object({
+        saleId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
+      }).validate(req.params);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      const { sent } = await ResellerSaleService.sendSaleSms(value.saleId, reseller.resellerId);
+
+      if (!sent) {
+        return ApiResponseUtil.error(res, 'SMS gateway did not accept the message', 502);
+      }
+
+      return ApiResponseUtil.success(res, { sent }, 'Ticket SMS sent');
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (/not found/i.test(msg)) {
+        return ApiResponseUtil.notFound(res, 'Sale not found');
+      }
+      if (/not authorized/i.test(msg)) {
+        return ApiResponseUtil.forbidden(res, 'Not authorized to send SMS for this sale');
+      }
+      if (/no customer phone|no issued tickets/i.test(msg)) {
+        return ApiResponseUtil.badRequest(res, msg);
+      }
+      console.error('Reseller send sale SMS error:', err);
+      return ApiResponseUtil.error(res, msg || 'Failed to send SMS');
+    }
+  }
+
+  /**
    * Sales: List own sales scoped to req.reseller.operatorId + resellerId
    */
   static async getSales(req: Request, res: Response): Promise<any> {
