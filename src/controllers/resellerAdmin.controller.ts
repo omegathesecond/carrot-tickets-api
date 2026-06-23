@@ -4,6 +4,7 @@ import { ResellerHub } from '@models/resellerHub.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { SettlementService } from '@services/settlement.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 
 function parseDate(raw: unknown, fieldName: string, res: Response): Date | null {
   const d = new Date(raw as string);
@@ -99,13 +100,41 @@ export class ResellerAdminController {
         ApiResponseUtil.notFound(res, 'Hub not found');
         return;
       }
+      const loginCode = await generateUniqueLoginCode();
+      const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
+        ? req.body.pin
+        : generatePin();
       const operator = await ResellerOperator.create({
-        ...req.body,
+        fullName: req.body.fullName,
+        email: req.body.email,
+        phoneNumber: req.body.phoneNumber,
+        role: req.body.role,
         hubId: hub._id,
         resellerId: hub.resellerId,
-        mustChangePassword: true,
+        loginCode,
+        pin,
       });
-      ApiResponseUtil.created(res, operator);
+      ApiResponseUtil.created(res, { operator, loginCode, pin });
+    } catch (err: any) {
+      next(err);
+    }
+  }
+
+  static async resetOperatorPin(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const operator = await ResellerOperator.findById(req.params['id']).select('+pin');
+      if (!operator) {
+        ApiResponseUtil.notFound(res, 'Operator not found');
+        return;
+      }
+      const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
+        ? req.body.pin
+        : generatePin();
+      operator.pin = pin;
+      operator.failedPinAttempts = 0;
+      operator.lockedUntil = null;
+      await operator.save();
+      ApiResponseUtil.success(res, { operatorId: (operator._id as any).toString(), pin });
     } catch (err: any) {
       next(err);
     }

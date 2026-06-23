@@ -23,6 +23,7 @@ router.get('/resellers/:id/hubs', ResellerAdminController.listHubs);
 // ─── Operators ───────────────────────────────────────────────────────────────
 router.post('/hubs/:hubId/operators', ResellerAdminController.createOperator);
 router.get('/hubs/:hubId/operators', ResellerAdminController.listOperators);
+router.post('/operators/:id/reset-pin', ResellerAdminController.resetOperatorPin);
 
 // ─── Ledger A — Reseller Settlement ──────────────────────────────────────────
 router.get('/resellers/:id/settlement', ResellerAdminController.previewResellerSettlement);
