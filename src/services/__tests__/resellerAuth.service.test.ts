@@ -1,26 +1,46 @@
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { Reseller } from '@models/reseller.model';
-import { ResellerHub } from '@models/resellerHub.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { ResellerAuthService } from '@services/resellerAuth.service';
+import { seedOperator } from '../../__tests__/helpers/fixtures';
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 
-it('logs in an operator and issues a reseller-scoped token', async () => {
-  const r = await Reseller.create({ businessName: 'PnP', commissionPercent: null });
-  const hub = await ResellerHub.create({ resellerId: r._id, name: 'CBD' });
-  await ResellerOperator.create({ hubId: hub._id, resellerId: r._id, fullName: 'Op',
-    phoneNumber: '+26878111111', password: 'secret123', role: 'reseller_operator' });
-
-  const { accessToken, operator } = await ResellerAuthService.login('+26878111111', 'secret123');
+it('logs in an operator by login code + PIN and issues a reseller token', async () => {
+  const { resellerId, loginCode, pin } = await seedOperator({ pin: '123456' });
+  const { accessToken, operator } = await ResellerAuthService.login(loginCode, pin);
   expect(operator.role).toBe('reseller_operator');
   const decoded = ResellerAuthService.verifyToken(accessToken);
   expect(decoded.scope).toBe('reseller');
-  expect(decoded.resellerId).toBe(r._id.toString());
+  expect(decoded.resellerId).toBe(resellerId);
   expect(decoded.permissions).toContain('reseller:sell_tickets');
 });
 
-it('rejects bad credentials', async () => {
-  await expect(ResellerAuthService.login('+26878111111', 'wrong')).rejects.toThrow();
+it('rejects an unknown login code', async () => {
+  await expect(ResellerAuthService.login('000001', '123456')).rejects.toThrow('Invalid credentials');
+});
+
+it('rejects a wrong PIN', async () => {
+  const { loginCode } = await seedOperator({ pin: '123456' });
+  await expect(ResellerAuthService.login(loginCode, '999999')).rejects.toThrow('Invalid credentials');
+});
+
+it('locks the account after 5 failed attempts', async () => {
+  const { loginCode } = await seedOperator({ pin: '123456' });
+  for (let i = 0; i < 5; i++) {
+    await expect(ResellerAuthService.login(loginCode, '000000')).rejects.toThrow('Invalid credentials');
+  }
+  // 6th attempt — even with the correct PIN — is rejected while locked.
+  await expect(ResellerAuthService.login(loginCode, '123456')).rejects.toThrow('Account locked');
+  const op = await ResellerOperator.findOne({ loginCode });
+  expect(op!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
+});
+
+it('resets the failed counter on a successful login', async () => {
+  const { loginCode } = await seedOperator({ pin: '123456' });
+  await expect(ResellerAuthService.login(loginCode, '000000')).rejects.toThrow();
+  await ResellerAuthService.login(loginCode, '123456');
+  const op = await ResellerOperator.findOne({ loginCode });
+  expect(op!.failedPinAttempts).toBe(0);
+  expect(op!.lockedUntil).toBeNull();
 });
