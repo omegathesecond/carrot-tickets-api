@@ -1,5 +1,5 @@
 /**
- * SMS service for Keshless Tickets.
+ * SMS service for Carrot Tickets.
  *
  * Routes through the unified Keshless SMS gateway at
  * POST {KESHLESS_API_URL}/integration/sms — the main keshless-api owns
@@ -18,6 +18,12 @@
 
 const KESHLESS_API_URL = process.env['KESHLESS_API_URL'] || 'http://localhost:3000/api';
 const KESHLESS_API_KEY = process.env['KESHLESS_API_KEY'] || '';
+
+// Alphanumeric SMS sender ID shown on the recipient's handset. Capped at 11
+// chars by GSM, so the brand is abbreviated ('Carrot Tickets' → 'CarrotTix').
+// The Keshless gateway uses this per-message and leaves every other product's
+// SMS on the shared 'Keshless' default. Overridable via env if it changes.
+const SMS_SENDER_ID = process.env['SMS_SENDER_ID'] || 'CarrotTix';
 
 export interface TicketSummary {
   ticketId: string;       // TKT-...
@@ -44,7 +50,7 @@ export class SmsService {
           'Content-Type': 'application/json',
           'x-api-key': KESHLESS_API_KEY,
         },
-        body: JSON.stringify({ to: phoneNumber, message }),
+        body: JSON.stringify({ to: phoneNumber, message, senderId: SMS_SENDER_ID }),
       });
 
       if (response.ok) {
@@ -112,7 +118,7 @@ export class SmsService {
   static async sendOtp(phoneNumber: string, code: string): Promise<boolean> {
     if (!phoneNumber || !code) return false;
     const body =
-      `${code} is your Keshless Tickets login code.\n` +
+      `${code} is your Carrot Tickets login code.\n` +
       `It expires in 10 minutes. Don't share it with anyone.`;
     return this.send(phoneNumber, body);
   }
