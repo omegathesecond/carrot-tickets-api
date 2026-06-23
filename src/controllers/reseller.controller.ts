@@ -224,6 +224,10 @@ export class ResellerController {
       return ApiResponseUtil.success(res, { sent }, 'Ticket SMS sent');
     } catch (err: any) {
       const msg = err?.message || '';
+      if (/event not found/i.test(msg)) {
+        console.error('Reseller send sale SMS error (orphaned event):', err);
+        return ApiResponseUtil.error(res, 'Internal error: event data missing for this sale', 500);
+      }
       if (/not found/i.test(msg)) {
         return ApiResponseUtil.notFound(res, 'Sale not found');
       }
