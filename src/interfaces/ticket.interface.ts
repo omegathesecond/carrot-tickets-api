@@ -10,7 +10,8 @@ export enum TicketStatus {
 
 export enum PaymentMethod {
   CASH = 'cash',
-  KESHLESS_WALLET = 'keshless_wallet'
+  KESHLESS_WALLET = 'keshless_wallet',
+  MTN_MOMO = 'mtn_momo'
 }
 
 export enum PaymentStatus {
@@ -77,10 +78,28 @@ export interface ITicketSale extends Document {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   walletTransactionId?: string; // Keshless transaction ID
+  momoReferenceId?: string;      // MTN MoMo X-Reference-Id (UUID) for async collections
+  reservationExpiresAt?: Date;   // when a PENDING MoMo reservation lapses
 
   // Staff
   soldBy: Types.ObjectId; // Staff member who made the sale
-  soldByType: 'Vendor' | 'VendorSubUser'; // Who sold it
+  soldByType: 'Vendor' | 'VendorSubUser' | 'ResellerOperator'; // Who sold it
+
+  // Reseller Attribution
+  resellerId?: Types.ObjectId;
+  hubId?: Types.ObjectId;
+
+  // Economic Snapshot — immutable, written at sale time
+  faceAmount?: number;
+  resellerCommissionPercent?: number;
+  resellerCommissionAmount?: number;
+  platformFeePercent?: number;
+  platformFeeAmount?: number;
+  organizerProceeds?: number;
+  fundsCustody?: 'carrot' | 'reseller' | 'vendor';
+
+  // Set true when the covering reseller settlement is closed + paid
+  resellerRemitted: boolean;
 
   // Timestamps
   soldAt: Date;

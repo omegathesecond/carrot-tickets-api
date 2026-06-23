@@ -72,6 +72,16 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     sparse: true,
     trim: true
   },
+  momoReferenceId: {
+    type: String,
+    sparse: true,
+    index: true,
+    trim: true
+  },
+  reservationExpiresAt: {
+    type: Date,
+    index: true
+  },
 
   // Staff
   soldBy: {
@@ -82,9 +92,25 @@ const ticketSaleSchema = new Schema<ITicketSale>({
   soldByType: {
     type: String,
     required: true,
-    enum: ['Vendor', 'VendorSubUser'],
+    enum: ['Vendor', 'VendorSubUser', 'ResellerOperator'],
     default: 'Vendor'
   },
+
+  // Reseller Attribution
+  resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', index: true, sparse: true },
+  hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', index: true, sparse: true },
+
+  // Economic snapshot — immutable, written at sale time
+  faceAmount: { type: Number },
+  resellerCommissionPercent: { type: Number, default: 0 },
+  resellerCommissionAmount: { type: Number, default: 0 },
+  platformFeePercent: { type: Number, default: 0 },
+  platformFeeAmount: { type: Number, default: 0 },
+  organizerProceeds: { type: Number },
+  fundsCustody: { type: String, enum: ['carrot', 'reseller', 'vendor'] },
+
+  // Set true when the covering reseller settlement is closed + paid
+  resellerRemitted: { type: Boolean, default: false, index: true },
 
   // Timestamps
   soldAt: {

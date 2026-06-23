@@ -10,6 +10,16 @@ const router = Router();
  */
 
 /**
+ * @route   GET /api/public/payment-methods
+ * @desc    Returns the payment methods the buyer checkout may show.
+ *          A method is listed iff its admin toggle is ON and it is configured.
+ *          MoMo additionally requires MTN_MOMO_ENABLED=true in the environment.
+ *          Cash is excluded — it is a POS/outlet-only method.
+ * @access  Public
+ */
+router.get('/payment-methods', PublicController.getPaymentMethods);
+
+/**
  * @route   GET /api/public/events
  * @desc    Get all published events (paginated)
  * @access  Public
@@ -57,5 +67,24 @@ router.post('/auth/register', PublicController.registerBuyer);
  * @access  Buyer
  */
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
+
+/**
+ * @route   POST /api/public/purchase/momo
+ * @desc    Initiate an async MTN MoMo ticket purchase. Phone comes from the
+ *          buyer token (req.ticketsUser.userPhone), NOT the body.
+ *          Returns { referenceId, saleId, expiresAt } — buyer polls the status
+ *          endpoint and approves the payment on their phone.
+ * @access  Buyer (Bearer buyer token)
+ * @body    eventId, ticketTypeId, quantity, customerName?, momoPhone
+ */
+router.post('/purchase/momo', authenticateBuyer, PublicController.initiateMomoPurchase);
+
+/**
+ * @route   GET /api/public/purchase/momo/:referenceId/status
+ * @desc    Poll the status of a pending MTN MoMo payment. Also triggers
+ *          finalization (ticket minting) when MTN reports SUCCESSFUL.
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/purchase/momo/:referenceId/status', authenticateBuyer, PublicController.getMomoStatus);
 
 export default router;

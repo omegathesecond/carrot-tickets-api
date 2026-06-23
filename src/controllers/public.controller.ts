@@ -6,6 +6,16 @@ import { EventStatus } from '@interfaces/event.interface';
 import { TicketService } from '@services/ticket.service';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
+import { PaymentConfigService } from '@services/paymentConfig.service';
+
+// Validation schema for MTN MoMo purchase initiation
+const momoInitiateSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(10).required(),
+  customerName: Joi.string().max(100).optional(),
+  momoPhone: Joi.string().pattern(/^[0-9]{8,15}$/).required(),
+});
 
 // Validation schemas
 const publicEventsQuerySchema = Joi.object({
@@ -291,6 +301,72 @@ export class PublicController {
     } catch (error: any) {
       console.error('Register buyer error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to create account', 401);
+    }
+  }
+
+  /**
+   * Returns the payment methods available to the buyer checkout.
+   * A method is included iff its config toggle is ON and (for MoMo) the
+   * MTN_MOMO_ENABLED env var is 'true' (processor-configured guard for Task 6).
+   * Cash is excluded — not a buyer-online method.
+   */
+  static async getPaymentMethods(_req: Request, res: Response): Promise<any> {
+    try {
+      const cfg = await PaymentConfigService.get();
+      const methods: string[] = [];
+      if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
+      if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
+      return ApiResponseUtil.success(res, { methods });
+    } catch (error: any) {
+      console.error('Get public payment methods error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to fetch payment methods');
+    }
+  }
+
+  /**
+   * Initiate an async MTN MoMo purchase.
+   * Phone comes from the buyer token (req.ticketsUser.userPhone), NEVER the body.
+   * momoPhone (the MoMo wallet number) IS from body.
+   */
+  static async initiateMomoPurchase(req: Request, res: Response): Promise<any> {
+    const { error, value } = momoInitiateSchema.validate(req.body);
+    if (error) return ApiResponseUtil.badRequest(res, error.message);
+    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    try {
+      const r = await TicketService.initiateMomoPurchase({ ...value, customerPhone });
+      return ApiResponseUtil.success(res, r);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Could not start MoMo payment', 400);
+    }
+  }
+
+  /**
+   * Poll MTN MoMo payment status and trigger finalization on SUCCESSFUL.
+   * Ownership check: the authenticated buyer's phone must match the sale's
+   * customerPhone (both normalized) — prevents IDOR on the referenceId namespace.
+   * A mismatched or missing sale returns 404 to avoid leaking existence info.
+   */
+  static async getMomoStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!buyerPhone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const referenceId = req.params['referenceId']!;
+      const sale = await TicketService.getMomoSaleByReference(referenceId);
+
+      // Normalize both phones with the same util used at purchase time.
+      // If sale is missing, or phones don't match → 404 (don't reveal existence).
+      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
+      const result = await TicketService.finalizeMomoSale(referenceId);
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
     }
   }
 

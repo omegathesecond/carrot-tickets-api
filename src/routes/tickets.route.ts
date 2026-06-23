@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
 import {
-  requireTicketsPermission
+  requireTicketsPermission,
+  requireSuperAdmin,
 } from '@middleware/ticketsAuth.middleware';
 import { dualAuth } from '@middleware/serviceAuth.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import { SettingsController } from '@controllers/settings.controller';
 
 const router = Router();
 
@@ -23,6 +25,12 @@ router.post('/auth/refresh', TicketsController.refresh);
  * - Service key (x-service-key header) for proxied app requests from main Keshless API
  */
 router.use(dualAuth);
+
+/**
+ * Admin-only settings routes (super admin only)
+ */
+router.get('/settings/payment-methods', requireSuperAdmin, SettingsController.getPaymentMethods);
+router.put('/settings/payment-methods', requireSuperAdmin, SettingsController.updatePaymentMethods);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);

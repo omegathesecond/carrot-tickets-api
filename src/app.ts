@@ -46,10 +46,16 @@ if (isSentryEnabled()) {
   }
 }
 
+// Import services
+import { ReservationService } from '@services/reservation.service';
+
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
 import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
+import momoRoutes from '@routes/momo.route';
+import resellerRoutes from '@routes/reseller.route';
+import resellerAdminRoutes from '@routes/resellerAdmin.route';
 
 // Import error handling middleware
 import {
@@ -118,8 +124,11 @@ app.get('/api-docs.json', (_req: Request, res: Response) => {
 
 // API Routes
 app.use('/api/tickets', ticketsRoutes);
+app.use('/api/reseller', resellerRoutes);
+app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/public', publicRoutes);  // Public routes - no auth required
+app.use('/api/momo', momoRoutes);      // MTN MoMo callback (unauthenticated)
 
 // 404 handler - must be after all routes
 app.use(notFoundHandler);
@@ -141,28 +150,38 @@ app.use(errorHandler);
 // Export Sentry for use in other parts of the app
 export { Sentry };
 
-// Validate database configuration before connecting
-try {
-  validateEnvironment();
-} catch (error) {
-  process.exit(1);
+// Validate database configuration before connecting (skip in test env)
+if (process.env['NODE_ENV'] !== 'test') {
+  try {
+    validateEnvironment();
+  } catch (error) {
+    process.exit(1);
+  }
 }
 
-// MongoDB connection
-const MONGODB_URI = getDatabaseURI();
+// MongoDB connection — skipped in test env; tests use connectTestDb() from helpers/mongo.ts
+if (process.env['NODE_ENV'] !== 'test') {
+  const MONGODB_URI = getDatabaseURI();
 
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => {
-    console.log('✅ Connected to MongoDB');
-    console.log(`📦 Database: ${mongoose.connection.name}`);
-    // Log detailed database configuration
-    logDatabaseConfig();
-  })
-  .catch((error) => {
-    console.error('❌ MongoDB connection error:', error);
-    process.exit(1);
-  });
+  mongoose
+    .connect(MONGODB_URI)
+    .then(() => {
+      console.log('✅ Connected to MongoDB');
+      console.log(`📦 Database: ${mongoose.connection.name}`);
+      // Log detailed database configuration
+      logDatabaseConfig();
+
+      // Start the reservation expiry sweep
+      const SWEEP_MS = 60_000;
+      setInterval(() => {
+        ReservationService.sweepExpired().catch(err => console.error('[reservation-sweep] error', err));
+      }, SWEEP_MS);
+    })
+    .catch((error) => {
+      console.error('❌ MongoDB connection error:', error);
+      process.exit(1);
+    });
+}
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
@@ -173,22 +192,24 @@ process.on('SIGTERM', () => {
   });
 });
 
-// Start server
-const PORT = process.env['PORT'] || 5000;
+// Start server — skipped in test env; supertest binds its own ephemeral port
+if (process.env['NODE_ENV'] !== 'test') {
+  const PORT = process.env['PORT'] || 5000;
 
-app.listen(PORT, () => {
-  console.log('');
-  console.log('🎫 ====================================== 🎫');
-  console.log('   Keshless Tickets API Server');
-  console.log('🎫 ====================================== 🎫');
-  console.log('');
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
-  console.log(`📍 Base URL: http://localhost:${PORT}`);
-  console.log(`💚 Health check: http://localhost:${PORT}/health`);
-  console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
-  console.log(`🔗 API Endpoint: http://localhost:${PORT}/api`);
-  console.log('');
-});
+  app.listen(PORT, () => {
+    console.log('');
+    console.log('🎫 ====================================== 🎫');
+    console.log('   Keshless Tickets API Server');
+    console.log('🎫 ====================================== 🎫');
+    console.log('');
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
+    console.log(`📍 Base URL: http://localhost:${PORT}`);
+    console.log(`💚 Health check: http://localhost:${PORT}/health`);
+    console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+    console.log(`🔗 API Endpoint: http://localhost:${PORT}/api`);
+    console.log('');
+  });
+}
 
 export default app;

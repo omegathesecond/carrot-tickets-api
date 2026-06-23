@@ -4,9 +4,14 @@ import { Event } from '@models/event.model';
 import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { EventService } from '@services/event.service';
-import { KeshlessPaymentService } from '@services/keshlessPayment.service';
+import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
+import { MtnMomoClient } from '@services/payments/mtnMomo.client';
+import { ReservationService } from '@services/reservation.service';
+import { TicketReservation } from '@models/ticketReservation.model';
+import { PaymentConfigService } from '@services/paymentConfig.service';
+import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -20,8 +25,23 @@ export interface SellTicketsParams {
   keshlessCardNumber?: string;
   keshlessPin?: string;
   soldBy: string;
-  soldByType: 'vendor' | 'sub-user';
+  soldByType: 'vendor' | 'sub-user' | 'reseller-operator';
+  // Reseller flow (Task 8 supplies these); vendor sales leave them unset.
+  resellerId?: string;
+  hubId?: string;
+  resellerCommissionPercent?: number;
 }
+
+/**
+ * Maps the params `soldByType` union onto the persisted refPath enum value used
+ * by the TicketSale `soldBy` polymorphic ref. Single source of truth so the
+ * three sale-build sites can never drift.
+ */
+const SOLD_BY_TYPE_MAP: Record<SellTicketsParams['soldByType'], SaleSoldByType> = {
+  vendor: 'Vendor',
+  'sub-user': 'VendorSubUser',
+  'reseller-operator': 'ResellerOperator',
+};
 
 export interface GetSalesQuery {
   vendorId: string;
@@ -51,6 +71,57 @@ function withEvent<T extends { eventId?: any }>(record: T): T & { event?: any } 
 }
 
 export class TicketService {
+  /**
+   * Single canonical factory for building a Ticket document.
+   * All three minting sites (sellTickets main loop, sellTickets no-tx fallback,
+   * finalizeMomoSale) call this so field lists can never drift between paths.
+   * saleId is omitted when not supplied — sellTickets sets it later via updateMany.
+   */
+  private static buildTicket(p: {
+    eventId: any;
+    vendorId: any;
+    ticketType: string;
+    price: number;
+    customerName?: string;
+    customerPhone?: string;
+    saleId?: any;
+  }) {
+    return new Ticket({
+      eventId: p.eventId,
+      vendorId: p.vendorId,
+      ticketType: p.ticketType,
+      price: p.price,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      status: TicketStatus.SOLD,
+      ...(p.saleId ? { saleId: p.saleId } : {}),
+    });
+  }
+
+  /**
+   * Single canonical builder for the immutable economic snapshot persisted on
+   * EVERY TicketSale. Resolves the live platformFeePercent from PaymentConfig,
+   * runs computeSaleEconomics (which owns all money rounding), and returns the
+   * snapshot fields to spread onto `new TicketSale({...})`. All sale-build sites
+   * (vendor main, vendor no-tx fallback, buyer/MoMo) call this so the ledger can
+   * never see a snapshot-less sale.
+   */
+  private static async buildSaleSnapshot(p: {
+    totalAmount: number;
+    paymentMethod: PaymentMethod;
+    mappedSoldByType: SaleSoldByType;
+    resellerCommissionPercent?: number;
+  }): Promise<SaleEconomics> {
+    const cfg = await PaymentConfigService.get();
+    return computeSaleEconomics({
+      faceAmount: p.totalAmount,
+      paymentMethod: p.paymentMethod,
+      soldByType: p.mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent ?? 0,
+      platformFeePercent: cfg.platformFeePercent,
+    });
+  }
+
   /**
    * Helper to start a transaction session safely
    * Returns null if transactions are not supported (standalone MongoDB)
@@ -136,48 +207,59 @@ export class TicketService {
       const totalAmount = ticketTypeData.price * quantity;
 
       // Process payment based on method
-      let paymentStatus = PaymentStatus.PENDING;
-      let walletTransactionId: string | undefined;
-      let paymentMessage = '';
-
-      if (paymentMethod === PaymentMethod.CASH) {
-        // Cash payment - mark as completed immediately
-        paymentStatus = PaymentStatus.COMPLETED;
-        paymentMessage = 'Cash payment received';
-      } else if (paymentMethod === PaymentMethod.KESHLESS_WALLET) {
-        // Wallet payment - process via Keshless Payment Service
-        if (!keshlessCardNumber) {
-          throw new Error('Card number is required for Keshless wallet payment');
-        }
-
-        // Call Keshless Payment API
-        const paymentResult = await KeshlessPaymentService.acceptPayment({
-          cardNumber: keshlessCardNumber,
-          amount: totalAmount,
-          pin: keshlessPin,
-          description: `Keshless Tickets - ${ticketTypeData.name} x${quantity}`
-        });
-
-        if (paymentResult.status === 'failed') {
-          throw new Error(paymentResult.message || paymentResult.error || 'Payment failed');
-        }
-
-        paymentStatus = PaymentStatus.COMPLETED;
-        walletTransactionId = paymentResult.transactionId;
-        paymentMessage = paymentResult.message || 'Wallet payment successful';
+      const proc = getProcessor(paymentMethod);
+      const charge = await proc.charge({
+        method: paymentMethod,
+        amount: totalAmount,
+        description: `Carrot Tickets - ${ticketTypeData.name} x${quantity}`,
+        keshlessCardNumber,
+        keshlessPin,
+      });
+      if (charge.status === 'failed') {
+        throw new Error(charge.message);
       }
+      // Explicit status mapping — NEVER let a non-completed charge fall through
+      // to COMPLETED. A 'pending' charge (uncollected money) must persist as a
+      // PENDING sale so the organizer-payout/reseller ledgers (which count only
+      // `completed`) cannot credit the organizer for money not yet collected.
+      // Mirrors initiateMomoPurchase's PENDING semantics: no funds confirmed yet.
+      let paymentStatus: PaymentStatus;
+      if (charge.status === 'completed') {
+        paymentStatus = PaymentStatus.COMPLETED;
+      } else if (charge.status === 'pending') {
+        paymentStatus = PaymentStatus.PENDING;
+      } else {
+        // Defensive: any unexpected status is treated as a failure, never completed.
+        throw new Error(charge.message || `Unexpected charge status: ${charge.status}`);
+      }
+      let walletTransactionId = charge.providerRef;
+      let paymentMessage = charge.message;
+
+      // Immutable economic snapshot — computed once, persisted on the sale in
+      // BOTH the main and no-transaction-fallback branches. Without it the sale
+      // would be invisible to the organizer-payout + reseller ledgers.
+      const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+      const econ = await this.buildSaleSnapshot({
+        totalAmount,
+        paymentMethod,
+        mappedSoldByType,
+        resellerCommissionPercent: params.resellerCommissionPercent,
+      });
+      const resellerAttribution = {
+        ...(params.resellerId ? { resellerId: params.resellerId } : {}),
+        ...(params.hubId ? { hubId: params.hubId } : {}),
+      };
 
       // Create tickets
       const tickets: ITicket[] = [];
       for (let i = 0; i < quantity; i++) {
-        const ticket = new Ticket({
+        const ticket = this.buildTicket({
           eventId,
           vendorId,
           ticketType: ticketTypeData.name,
           price: ticketTypeData.price,
           customerName,
           customerPhone,
-          status: TicketStatus.SOLD
         });
 
         // First save might fail with transaction error, catch and retry
@@ -193,14 +275,13 @@ export class TicketService {
             // Retry all tickets without session
             const ticketsWithoutSession: ITicket[] = [];
             for (let j = 0; j < quantity; j++) {
-              const t = new Ticket({
+              const t = this.buildTicket({
                 eventId,
                 vendorId,
                 ticketType: ticketTypeData.name,
                 price: ticketTypeData.price,
                 customerName,
                 customerPhone,
-                status: TicketStatus.SOLD
               });
               await t.save();
               ticketsWithoutSession.push(t);
@@ -219,7 +300,9 @@ export class TicketService {
               paymentStatus,
               walletTransactionId,
               soldBy,
-              soldByType: soldByType === 'vendor' ? 'Vendor' : 'VendorSubUser',
+              soldByType: mappedSoldByType,
+              ...resellerAttribution,
+              ...econ,
               soldAt: new Date()
             });
             await saleWithoutSession.save();
@@ -263,7 +346,9 @@ export class TicketService {
         paymentStatus,
         walletTransactionId,
         soldBy,
-        soldByType: soldByType === 'vendor' ? 'Vendor' : 'VendorSubUser',
+        soldByType: mappedSoldByType,
+        ...resellerAttribution,
+        ...econ,
         soldAt: new Date()
       });
       await sale.save(session ? { session } : undefined);
@@ -293,7 +378,7 @@ export class TicketService {
         paymentMessage
       };
     } catch (error: any) {
-      if (session) {
+      if (session && session.inTransaction()) {
         await session.abortTransaction();
       }
       console.error('Sell tickets error:', error);
@@ -647,6 +732,210 @@ export class TicketService {
       console.error('Get ticket by ID error:', error);
       throw new Error(error.message || 'Failed to fetch ticket');
     }
+  }
+
+  // ── MTN MoMo async payment client (mocked in tests via jest.mock at module level) ──
+  private static momoClient = new MtnMomoClient();
+  private static MOMO_TTL_MS = 5 * 60_000; // 5 minutes
+
+  /**
+   * Initiate an async MTN MoMo purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Call requestToPay on MTN — on failure, release reservation + fail sale + rethrow.
+   */
+  static async initiateMomoPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone: string;
+    customerName?: string;
+    momoPhone: string;
+    // Optional reseller attribution (additive — buyer/vendor callers omit these
+    // and keep the existing vendor-default behavior). When provided, the PENDING
+    // sale carries the SAME snapshot shape as a reseller cash sale except
+    // fundsCustody derives to 'carrot' because MoMo is electronic.
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
+  }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
+    if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
+
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+
+    // Attribution: vendorId is the event organizer (derive from event if absent,
+    // as the buyer/vendor path does today). soldBy defaults to the organizer.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — an electronic (mtn_momo) sale, so custody
+    // derives to 'carrot'. Computed via the SAME DRY helper used everywhere so
+    // a reseller MoMo initiate yields organizerProceeds = face − commission −
+    // fee with soldByType 'ResellerOperator'. Written now so the sale is
+    // ledger-visible even before tickets are minted at finalize.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.MTN_MOMO,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+    });
+    const resellerAttribution = {
+      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+    };
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      totalAmount,
+      paymentMethod: PaymentMethod.MTN_MOMO,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy,
+      soldByType: mappedSoldByType,
+      ...resellerAttribution,
+      ...econ,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.MOMO_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Request to pay (currency from env; sandbox uses EUR)
+    try {
+      const { referenceId } = await this.momoClient.requestToPay({
+        amount: totalAmount,
+        currency: process.env['MTN_MOMO_CURRENCY'] || 'SZL',
+        payerMsisdn: p.momoPhone,
+        externalId: sale.saleId,
+        payerMessage: `Carrot Tickets - ${tt.name} x${p.quantity}`,
+      });
+      sale.momoReferenceId = referenceId;
+      await sale.save();
+      return { referenceId, saleId: sale._id.toString(), expiresAt };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Look up a MoMo sale by its MTN referenceId for ownership verification.
+   * Returns null if not found. Never throws.
+   */
+  static async getMomoSaleByReference(referenceId: string): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ momoReferenceId: referenceId });
+  }
+
+  /**
+   * Finalize an MTN MoMo sale identified by referenceId. Idempotent.
+   * - If sale is not PENDING → return current status immediately.
+   * - Query MTN status; PENDING → return pending; FAILED → release + fail.
+   * - SUCCESSFUL → ATOMIC claim via findOneAndUpdate({_id, paymentStatus:PENDING})
+   *   to prevent double-mint from concurrent poll + callback. Then mint tickets,
+   *   confirm reservation (reserved→sold), update event sold count, best-effort SMS.
+   */
+  static async finalizeMomoSale(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ momoReferenceId: referenceId });
+    if (!sale) throw new Error('Sale not found for reference');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const { status } = await this.momoClient.getStatus(referenceId);
+    if (status === 'PENDING') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (status === 'FAILED') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // SUCCESSFUL: atomically CLAIM the sale so concurrent poll + callback can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized it
+
+    // Mint tickets, convert reservation (reserved→sold), SMS
+    const event = await Event.findById(sale.eventId);
+    const ticketTypeDoc = event?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = this.buildTicket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        saleId: sale._id,
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (sale.customerPhone && event) {
+      SmsService.sendTicketConfirmation(
+        sale.customerPhone,
+        tickets.map(t => ({
+          ticketId: t.ticketId,
+          eventName: event.name,
+          eventDate: event.eventDate.toISOString(),
+          venue: event.venue,
+        }))
+      ).catch(err => console.error('[SMS] momo confirmation threw', err));
+    }
+
+    return { status: 'completed' };
   }
 
   /**
