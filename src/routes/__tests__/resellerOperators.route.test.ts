@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
-import { seedOperator } from '../../__tests__/helpers/fixtures';
+import { seedOperator, seedReseller } from '../../__tests__/helpers/fixtures';
 import { ResellerOperator } from '@models/resellerOperator.model';
 
 beforeAll(connectTestDb);
@@ -64,4 +64,56 @@ it('a reseller admin resets a PIN within their reseller', async () => {
   expect(res.status).toBe(200);
   const op = await ResellerOperator.findById(target.operator._id).select('+pin');
   expect(await op!.comparePin('787878')).toBe(true);
+});
+
+it('a hub manager cannot reset-pin a same-hub reseller_admin (403)', async () => {
+  const mgr = await tokenFor('reseller_hub_manager');
+  const adminTarget = await seedOperator({ resellerId: mgr.resellerId, hubId: mgr.hubId, role: 'reseller_admin' });
+  const res = await request(app).post(`/api/reseller/operators/${adminTarget.operator._id}/reset-pin`)
+    .set('Authorization', `Bearer ${mgr.token}`)
+    .send({});
+  expect(res.status).toBe(403);
+});
+
+it('a hub manager cannot deactivate a same-hub reseller_admin (403)', async () => {
+  const mgr = await tokenFor('reseller_hub_manager');
+  const adminTarget = await seedOperator({ resellerId: mgr.resellerId, hubId: mgr.hubId, role: 'reseller_admin' });
+  const res = await request(app).patch(`/api/reseller/operators/${adminTarget.operator._id}`)
+    .set('Authorization', `Bearer ${mgr.token}`)
+    .send({ isActive: false });
+  expect(res.status).toBe(403);
+});
+
+it('a hub manager cannot escalate a same-hub operator to reseller_admin (403)', async () => {
+  const mgr = await tokenFor('reseller_hub_manager');
+  const target = await seedOperator({ resellerId: mgr.resellerId, hubId: mgr.hubId, role: 'reseller_operator' });
+  const res = await request(app).patch(`/api/reseller/operators/${target.operator._id}`)
+    .set('Authorization', `Bearer ${mgr.token}`)
+    .send({ role: 'reseller_admin' });
+  expect(res.status).toBe(403);
+});
+
+it('a reseller admin cannot create in another reseller\'s hub (403)', async () => {
+  const admin = await tokenFor('reseller_admin');
+  const other = await seedReseller();
+  const res = await request(app).post('/api/reseller/operators')
+    .set('Authorization', `Bearer ${admin.token}`)
+    .send({ fullName: 'X', role: 'reseller_operator', hubId: other.hubId });
+  expect(res.status).toBe(403);
+});
+
+it('reset-pin clears lockout state', async () => {
+  const admin = await tokenFor('reseller_admin');
+  const target = await seedOperator({ resellerId: admin.resellerId, hubId: admin.hubId });
+  await ResellerOperator.updateOne(
+    { _id: target.operator._id },
+    { failedPinAttempts: 5, lockedUntil: new Date(Date.now() + 600000) }
+  );
+  const res = await request(app).post(`/api/reseller/operators/${target.operator._id}/reset-pin`)
+    .set('Authorization', `Bearer ${admin.token}`)
+    .send({});
+  expect(res.status).toBe(200);
+  const op = await ResellerOperator.findById(target.operator._id);
+  expect(op!.failedPinAttempts).toBe(0);
+  expect(op!.lockedUntil).toBeNull();
 });

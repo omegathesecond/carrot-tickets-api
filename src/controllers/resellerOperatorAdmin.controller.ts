@@ -81,6 +81,10 @@ export class ResellerOperatorAdminController {
         ApiResponseUtil.notFound(res, 'Operator not found');
         return;
       }
+      if ((ROLE_RANK[operator.role] ?? 99) >= (ROLE_RANK[actor.role] ?? 0)) {
+        ApiResponseUtil.forbidden(res, 'Cannot manage an operator at or above your own role');
+        return;
+      }
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
@@ -103,6 +107,10 @@ export class ResellerOperatorAdminController {
       });
       if (!operator) {
         ApiResponseUtil.notFound(res, 'Operator not found');
+        return;
+      }
+      if ((ROLE_RANK[operator.role] ?? 99) >= (ROLE_RANK[actor.role] ?? 0)) {
+        ApiResponseUtil.forbidden(res, 'Cannot manage an operator at or above your own role');
         return;
       }
       if ('fullName' in req.body) operator.fullName = req.body.fullName;
