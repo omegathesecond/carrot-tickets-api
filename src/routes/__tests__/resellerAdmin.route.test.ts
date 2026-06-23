@@ -55,3 +55,24 @@ it('resets an operator PIN', async () => {
   const op = await ResellerOperator.findById(operatorId).select('+pin');
   expect(await op!.comparePin('424242')).toBe(true);
 });
+
+it('super-admin gets a single hub and its analytics', async () => {
+  const { hubId } = await seedReseller();
+  const token = signSuperAdminToken();
+
+  const hub = await request(app).get(`/api/admin/hubs/${hubId}`).set('Authorization', `Bearer ${token}`);
+  expect(hub.status).toBe(200);
+  expect(hub.body.data._id).toBe(hubId);
+
+  const analytics = await request(app).get(`/api/admin/hubs/${hubId}/analytics`).set('Authorization', `Bearer ${token}`);
+  expect(analytics.status).toBe(200);
+  expect(analytics.body.data).toMatchObject({ hubId, revenue: 0, ticketsSold: 0, salesCount: 0 });
+  expect(Array.isArray(analytics.body.data.byOperator)).toBe(true);
+});
+
+it('returns 404 for an unknown hub', async () => {
+  const token = signSuperAdminToken();
+  const missing = new (require('mongoose').Types.ObjectId)().toString();
+  const res = await request(app).get(`/api/admin/hubs/${missing}`).set('Authorization', `Bearer ${token}`);
+  expect(res.status).toBe(404);
+});

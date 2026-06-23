@@ -3,6 +3,7 @@ import { Reseller } from '@models/reseller.model';
 import { ResellerHub } from '@models/resellerHub.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { SettlementService } from '@services/settlement.service';
+import { HubAnalyticsService } from '@services/hubAnalytics.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 
@@ -86,6 +87,42 @@ export class ResellerAdminController {
     try {
       const hubs = await ResellerHub.find({ resellerId: req.params['id'] }).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, hubs);
+    } catch (err: any) {
+      next(err);
+    }
+  }
+
+  static async getHub(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const hub = await ResellerHub.findById(req.params['hubId']);
+      if (!hub) {
+        ApiResponseUtil.notFound(res, 'Hub not found');
+        return;
+      }
+      ApiResponseUtil.success(res, hub);
+    } catch (err: any) {
+      next(err);
+    }
+  }
+
+  static async getHubAnalytics(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const hub = await ResellerHub.findById(req.params['hubId']);
+      if (!hub) {
+        ApiResponseUtil.notFound(res, 'Hub not found');
+        return;
+      }
+      let from: Date | undefined;
+      let to: Date | undefined;
+      if (req.query['from'] && req.query['to']) {
+        const f = parseDate(req.query['from'], 'from', res);
+        if (!f) return;
+        const t = parseDate(req.query['to'], 'to', res);
+        if (!t) return;
+        from = f; to = t;
+      }
+      const analytics = await HubAnalyticsService.getHubAnalytics(req.params['hubId']!, from, to);
+      ApiResponseUtil.success(res, analytics);
     } catch (err: any) {
       next(err);
     }

@@ -19,6 +19,8 @@ router.patch('/resellers/:id', ResellerAdminController.updateReseller);
 // ─── Hubs ────────────────────────────────────────────────────────────────────
 router.post('/resellers/:id/hubs', ResellerAdminController.createHub);
 router.get('/resellers/:id/hubs', ResellerAdminController.listHubs);
+router.get('/hubs/:hubId', ResellerAdminController.getHub);
+router.get('/hubs/:hubId/analytics', ResellerAdminController.getHubAnalytics);
 
 // ─── Operators ───────────────────────────────────────────────────────────────
 router.post('/hubs/:hubId/operators', ResellerAdminController.createOperator);
