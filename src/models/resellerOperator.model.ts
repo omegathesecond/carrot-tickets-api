@@ -8,43 +8,43 @@ const operatorSchema = new Schema<IResellerOperator>({
   fullName: { type: String, required: true, trim: true },
   email: { type: String, lowercase: true, trim: true, unique: true, sparse: true },
   phoneNumber: { type: String, trim: true, unique: true, sparse: true },
-  password: {
+  loginCode: { type: String, required: true, unique: true, index: true, trim: true },
+  pin: {
     type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters long'],
-    select: false
+    required: [true, 'PIN is required'],
+    select: false,
   },
   role: {
     type: String,
     required: true,
     enum: ['reseller_admin', 'reseller_hub_manager', 'reseller_operator'],
-    index: true
+    index: true,
   },
   isActive: { type: Boolean, default: true, index: true },
-  mustChangePassword: { type: Boolean, default: true },
-  firstLogin: { type: Boolean, default: true },
+  failedPinAttempts: { type: Number, default: 0 },
+  lockedUntil: { type: Date, default: null },
   lastLoginAt: { type: Date },
 }, {
   timestamps: true,
   toJSON: {
-    transform: function(_doc, ret) {
-      const { password, __v, ...rest } = ret;
+    transform: function (_doc, ret) {
+      const { pin, __v, ...rest } = ret;
       return rest;
-    }
+    },
   },
   toObject: {
-    transform: function(_doc, ret) {
-      const { password, __v, ...rest } = ret;
+    transform: function (_doc, ret) {
+      const { pin, __v, ...rest } = ret;
       return rest;
-    }
-  }
+    },
+  },
 });
 
-operatorSchema.pre('save', async function(next) {
+operatorSchema.pre('save', async function (next) {
   try {
-    if (this.isModified('password')) {
+    if (this.isModified('pin')) {
       const salt = await bcrypt.genSalt(12);
-      this.password = await bcrypt.hash(this.password, salt);
+      this.pin = await bcrypt.hash(this.pin, salt);
     }
     next();
   } catch (error) {
@@ -52,8 +52,8 @@ operatorSchema.pre('save', async function(next) {
   }
 });
 
-operatorSchema.methods.comparePassword = function(this: IResellerOperator, candidatePassword: string): Promise<boolean> {
-  return bcrypt.compare(candidatePassword, (this as any).password);
+operatorSchema.methods.comparePin = function (this: IResellerOperator, candidate: string): Promise<boolean> {
+  return bcrypt.compare(candidate, (this as any).pin);
 };
 
 operatorSchema.index({ resellerId: 1, isActive: 1 });

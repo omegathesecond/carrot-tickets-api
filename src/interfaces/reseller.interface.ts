@@ -24,11 +24,12 @@ export interface IResellerOperator {
   fullName: string;
   email?: string;
   phoneNumber?: string;
-  password: string;
+  loginCode: string;
+  pin: string;
   role: string;
   isActive: boolean;
-  mustChangePassword: boolean;
-  firstLogin: boolean;
+  failedPinAttempts: number;
+  lockedUntil?: Date | null;
   lastLoginAt?: Date;
-  comparePassword(p: string): Promise<boolean>;
+  comparePin(p: string): Promise<boolean>;
 }
