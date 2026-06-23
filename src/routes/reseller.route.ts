@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ResellerController } from '@controllers/reseller.controller';
 import { ResellerOperatorAdminController } from '@controllers/resellerOperatorAdmin.controller';
+import { ResellerHubAdminController } from '@controllers/resellerHubAdmin.controller';
 import { authenticateReseller, requireResellerPermission } from '@middleware/resellerAuth.middleware';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
@@ -56,6 +57,19 @@ router.get(
   requireResellerPermission(ResellerPermission.VIEW_OWN_SALES),
   ResellerController.getSales
 );
+
+/**
+ * Hubs (VIEW_HUB_SALES)
+ */
+router.get('/hubs',
+  requireResellerPermission(ResellerPermission.VIEW_HUB_SALES),
+  ResellerHubAdminController.list);
+router.get('/hubs/:hubId',
+  requireResellerPermission(ResellerPermission.VIEW_HUB_SALES),
+  ResellerHubAdminController.get);
+router.get('/hubs/:hubId/analytics',
+  requireResellerPermission(ResellerPermission.VIEW_HUB_SALES),
+  ResellerHubAdminController.analytics);
 
 /**
  * Operator management (MANAGE_OPERATORS)

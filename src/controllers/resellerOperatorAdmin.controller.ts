@@ -20,7 +20,16 @@ export class ResellerOperatorAdminController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const actor = (req as any).reseller;
-      const operators = await ResellerOperator.find(scopeFilter(actor)).sort({ createdAt: -1 });
+      const filter: Record<string, unknown> = scopeFilter(actor);
+      const requestedHubId = req.query['hubId'];
+      if (typeof requestedHubId === 'string' && requestedHubId) {
+        if (actor.role === 'reseller_hub_manager' && requestedHubId !== actor.hubId) {
+          ApiResponseUtil.forbidden(res, 'Hub is outside your scope');
+          return;
+        }
+        filter['hubId'] = requestedHubId;
+      }
+      const operators = await ResellerOperator.find(filter).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, operators);
     } catch (err: any) {
       next(err);
