@@ -42,3 +42,26 @@ it('rejects a request when balance is zero', async () => {
   await expect(WithdrawalService.requestWithdrawal(resellerId.toString(), 'op-1'))
     .rejects.toThrow('No commission available');
 });
+
+it('markPaid stamps covered sales then flips, and is idempotent', async () => {
+  const resellerId = new mongoose.Types.ObjectId();
+  await mk({ resellerId, soldByType: 'ResellerOperator', resellerCommissionAmount: 20, fundsCustody: 'carrot' });
+  const w = await WithdrawalService.requestWithdrawal(resellerId.toString(), 'op-1');
+  await WithdrawalService.approve((w._id as any).toString(), 'admin-1');
+  const paid = await WithdrawalService.markPaid((w._id as any).toString(), 'admin-1', 'TX123');
+  expect(paid.status).toBe('paid');
+  expect(paid.paymentReference).toBe('TX123');
+  // sales are now stamped → balance is zero
+  expect(await WithdrawalService.availableCommission(resellerId.toString())).toBe(0);
+  // second flip throws
+  await expect(WithdrawalService.markPaid((w._id as any).toString(), 'admin-1'))
+    .rejects.toThrow('already paid');
+});
+
+it('reject does not stamp sales', async () => {
+  const resellerId = new mongoose.Types.ObjectId();
+  await mk({ resellerId, soldByType: 'ResellerOperator', resellerCommissionAmount: 20, fundsCustody: 'carrot' });
+  const w = await WithdrawalService.requestWithdrawal(resellerId.toString(), 'op-1');
+  await WithdrawalService.reject((w._id as any).toString(), 'admin-1', 'bad ref');
+  expect(await WithdrawalService.availableCommission(resellerId.toString())).toBe(20);
+});
