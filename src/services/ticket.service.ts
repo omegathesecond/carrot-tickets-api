@@ -62,6 +62,7 @@ export interface GetSalesQuery {
   eventId?: string;
   paymentMethod?: PaymentMethod;
   paymentStatus?: PaymentStatus;
+  channel?: SalesChannel;
   startDate?: Date;
   endDate?: Date;
   page?: number;
@@ -426,6 +427,7 @@ export class TicketService {
         eventId,
         paymentMethod,
         paymentStatus,
+        channel,
         startDate,
         endDate,
         page = 1,
@@ -440,6 +442,7 @@ export class TicketService {
       if (eventId) filter.eventId = eventId;
       if (paymentMethod) filter.paymentMethod = paymentMethod;
       if (paymentStatus) filter.paymentStatus = paymentStatus;
+      if (channel) filter.channel = channel;
 
       if (startDate || endDate) {
         filter.soldAt = {};
@@ -456,6 +459,8 @@ export class TicketService {
           // ticket type and the scannable ticket code(s) in sales tables.
           .populate('ticketIds', 'ticketId ticketType status')
           .populate('soldBy')
+          .populate('resellerId', 'name')
+          .populate('hubId', 'name')
           .sort({ soldAt: -1 })
           .skip(skip)
           .limit(limit)

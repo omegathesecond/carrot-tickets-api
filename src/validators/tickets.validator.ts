@@ -1,7 +1,7 @@
 import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
-import { TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 /**
  * Authentication Validators
@@ -317,6 +317,7 @@ export const ticketSalesQuerySchema = Joi.object({
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   paymentMethod: Joi.string().valid(...Object.values(PaymentMethod)).optional(),
   paymentStatus: Joi.string().valid(...Object.values(PaymentStatus)).optional(),
+  channel: Joi.string().valid(...Object.values(SalesChannel)).optional(),
   startDate: Joi.date().iso().optional(),
   endDate: Joi.date().iso().min(Joi.ref('startDate')).optional().messages({
     'date.min': 'End date must be after start date'
