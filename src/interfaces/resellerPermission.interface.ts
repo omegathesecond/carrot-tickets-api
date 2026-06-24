@@ -12,6 +12,8 @@ export enum ResellerPermission {
   MANAGE_HUB = 'reseller:manage_hub',
   MANAGE_OPERATORS = 'reseller:manage_operators',
   VIEW_HUB_SALES = 'reseller:view_hub_sales',
+  VIEW_REPORTS = 'reseller:view_reports',
+  REQUEST_PAYOUT = 'reseller:request_payout',
 }
 
 export enum ResellerRole {
@@ -29,6 +31,7 @@ export const RESELLER_ROLE_PERMISSIONS: Record<ResellerRole, ResellerPermission[
     ResellerPermission.VIEW_OWN_SALES,
     ResellerPermission.VIEW_HUB_SALES,
     ResellerPermission.MANAGE_OPERATORS,
+    ResellerPermission.VIEW_REPORTS,
   ],
 
   [ResellerRole.OPERATOR]: [
