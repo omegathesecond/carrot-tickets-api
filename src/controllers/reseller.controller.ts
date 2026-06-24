@@ -115,7 +115,11 @@ export class ResellerController {
 
       const methods: string[] = [];
       if (cfg.cashEnabled) methods.push('cash');
-      if (cfg.mtnMomoEnabled) methods.push('mtn_momo');
+      // MoMo requires BOTH the admin toggle AND the processor being configured
+      // (MTN_MOMO_ENABLED + creds). Mirrors PublicController.getPaymentMethods so
+      // the till never offers MoMo when initiateMomoPurchase would throw
+      // "MTN MoMo is not available".
+      if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
       if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
 
       return ApiResponseUtil.success(res, { methods });
