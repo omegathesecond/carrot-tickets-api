@@ -62,6 +62,7 @@ export class ResellerReportController {
         from: parseDate(req.query['from']),
         to: parseDate(req.query['to']),
         hubId: (req.query['hubId'] as string) || undefined,
+        eventId: (req.query['eventId'] as string) || undefined,
       });
       ApiResponseUtil.success(res, data);
     } catch (err) {

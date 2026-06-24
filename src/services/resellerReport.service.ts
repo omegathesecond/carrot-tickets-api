@@ -113,6 +113,7 @@ export class ResellerReportService {
     from?: Date;
     to?: Date;
     hubId?: string;
+    eventId?: string;
   }): Promise<{
     totals: { revenue: number; tickets: number; salesCount: number };
     byMethod: Array<{ method: string; revenue: number; tickets: number; count: number }>;
@@ -122,6 +123,7 @@ export class ResellerReportService {
   }> {
     const match = scopeMatch(params.scope, params.hubId);
     match['paymentStatus'] = 'completed';
+    if (params.eventId) match['eventId'] = new mongoose.Types.ObjectId(params.eventId);
     const range = dateRange(params.from, params.to);
     if (range) match['soldAt'] = range;
 
