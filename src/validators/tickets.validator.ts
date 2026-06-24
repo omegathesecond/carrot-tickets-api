@@ -379,6 +379,12 @@ export const analyticsQuerySchema = Joi.object({
     .default('daily')
     .messages({
       'any.only': 'Group by must be daily, weekly, or monthly'
+    }),
+  channel: Joi.string()
+    .valid('online', 'box_office', 'reseller_pos')
+    .optional()
+    .messages({
+      'any.only': 'Channel must be online, box_office, or reseller_pos'
     })
 });
 

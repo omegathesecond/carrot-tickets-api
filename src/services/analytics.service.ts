@@ -4,7 +4,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { TicketScan } from '@models/ticketScan.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 export interface AnalyticsQuery {
   vendorId: string;
@@ -12,6 +12,7 @@ export interface AnalyticsQuery {
   endDate?: Date;
   eventId?: string;
   isSuperAdmin?: boolean;
+  channel?: SalesChannel;
 }
 
 export interface DashboardStats {
@@ -80,6 +81,17 @@ export interface RevenueStats {
     date: string;
     revenue: number;
     ticketsSold: number;
+  }>;
+  revenueByChannel: Array<{
+    channel: SalesChannel;
+    amount: number;
+    count: number;
+  }>;
+  topResellerSources: Array<{
+    resellerName: string;
+    hubName: string;
+    amount: number;
+    count: number;
   }>;
 }
 
@@ -371,7 +383,7 @@ export class AnalyticsService {
     query: AnalyticsQuery & { groupBy?: 'daily' | 'weekly' | 'monthly' }
   ): Promise<RevenueStats> {
     try {
-      const { vendorId, startDate, endDate, eventId, groupBy = 'daily', isSuperAdmin = false } = query;
+      const { vendorId, startDate, endDate, eventId, groupBy = 'daily', isSuperAdmin = false, channel } = query;
 
       // Build filter - skip vendorId for superadmin
       const filter: any = {
@@ -382,6 +394,7 @@ export class AnalyticsService {
       }
 
       if (eventId) filter.eventId = new mongoose.Types.ObjectId(eventId);
+      if (channel) filter.channel = channel;
 
       if (startDate || endDate) {
         filter.soldAt = {};
@@ -492,6 +505,34 @@ export class AnalyticsService {
         count: stat.count
       }));
 
+      // Revenue by channel — "where bought"
+      const channelStats = await TicketSale.aggregate([
+        { $match: filter },
+        { $group: { _id: '$channel', amount: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
+        { $sort: { amount: -1 } }
+      ]);
+      const revenueByChannel = channelStats.map(stat => ({
+        channel: stat._id as SalesChannel,
+        amount: stat.amount,
+        count: stat.count
+      }));
+
+      // Top reseller sources (reseller + hub) for the reseller_pos slice
+      const sourceStats = await TicketSale.aggregate([
+        { $match: { ...filter, channel: SalesChannel.RESELLER_POS } },
+        { $group: { _id: { resellerId: '$resellerId', hubId: '$hubId' }, amount: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
+        { $sort: { amount: -1 } },
+        { $limit: 10 },
+        { $lookup: { from: 'resellers', localField: '_id.resellerId', foreignField: '_id', as: 'reseller' } },
+        { $lookup: { from: 'resellerhubs', localField: '_id.hubId', foreignField: '_id', as: 'hub' } }
+      ]);
+      const topResellerSources = sourceStats.map(stat => ({
+        resellerName: stat.reseller?.[0]?.name || 'Unknown reseller',
+        hubName: stat.hub?.[0]?.name || 'Unknown hub',
+        amount: stat.amount,
+        count: stat.count
+      }));
+
       const period = this.getPeriodString(startDate, endDate);
 
       return {
@@ -501,7 +542,9 @@ export class AnalyticsService {
         averageTicketPrice,
         revenueByEvent,
         revenueByPaymentMethod,
-        dailyRevenue
+        dailyRevenue,
+        revenueByChannel,
+        topResellerSources
       };
     } catch (error: any) {
       console.error('Get revenue stats error:', error);
