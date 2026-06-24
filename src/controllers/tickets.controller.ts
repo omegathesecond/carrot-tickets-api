@@ -912,7 +912,6 @@ export class TicketsController {
       const stats = await AnalyticsService.getRevenueStats({
         vendorId: ticketsUser.vendorId as string,
         ...value,
-        channel: req.query['channel'] as any,
         isSuperAdmin: ticketsUser.isSuperAdmin || false
       });
 
