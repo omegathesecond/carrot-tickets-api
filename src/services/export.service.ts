@@ -3,6 +3,9 @@ import { Ticket } from '@models/ticket.model';
 import { TicketScan } from '@models/ticketScan.model';
 import { Event } from '@models/event.model';
 import { PaymentStatus } from '@interfaces/ticket.interface';
+// Register models needed for polymorphic populate (soldBy refPath, resellerId, hubId)
+import '@models/vendor.model';
+import '@models/reseller.model';
 
 export interface ExportQuery {
   vendorId: string;
@@ -37,6 +40,8 @@ export class ExportService {
       const sales = await TicketSale.find(filter)
         .populate('eventId', 'name venue eventDate')
         .populate('soldBy')
+        .populate('resellerId', 'name')
+        .populate('hubId', 'name')
         .sort({ soldAt: -1 })
         .lean();
 
@@ -52,12 +57,17 @@ export class ExportService {
         'Customer Name',
         'Customer Phone',
         'Sold By',
-        'Sold At'
+        'Sold At',
+        'Channel',
+        'Reseller',
+        'Hub'
       ];
 
       const rows = sales.map(sale => {
         const event: any = sale.eventId;
         const soldBy: any = sale.soldBy;
+        const reseller: any = sale.resellerId;
+        const hub: any = sale.hubId;
 
         return [
           sale.saleId,
@@ -70,7 +80,10 @@ export class ExportService {
           sale.customerName || 'N/A',
           sale.customerPhone || 'N/A',
           soldBy?.businessName || soldBy?.username || 'N/A',
-          new Date(sale.soldAt).toLocaleString()
+          new Date(sale.soldAt).toLocaleString(),
+          sale.channel || '',
+          reseller?.name || '',
+          hub?.name || ''
         ];
       });
 
