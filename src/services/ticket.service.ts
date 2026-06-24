@@ -92,7 +92,10 @@ export class TicketService {
       ticketType: p.ticketType,
       price: p.price,
       customerName: p.customerName,
-      customerPhone: p.customerPhone,
+      // Store the phone in the SAME normalized form findTicketsByCustomerPhone
+      // looks tickets up by — otherwise a POS sale typed as "78422613" never
+      // matches a "My Tickets" login that normalizes to "+26878422613".
+      customerPhone: p.customerPhone ? normalizePhone(p.customerPhone) : p.customerPhone,
       status: TicketStatus.SOLD,
       ...(p.saleId ? { saleId: p.saleId } : {}),
     });
@@ -184,13 +187,19 @@ export class TicketService {
         ticketTypeId,
         quantity,
         customerName,
-        customerPhone,
         paymentMethod,
         keshlessCardNumber,
         keshlessPin,
         soldBy,
         soldByType
       } = params;
+
+      // Normalize once so the sale record + confirmation SMS use the same
+      // canonical phone form the tickets are stored under (mirrors
+      // purchaseForCustomer). Prevents POS "78422613" vs login "+26878422613".
+      const customerPhone = params.customerPhone
+        ? normalizePhone(params.customerPhone)
+        : params.customerPhone;
 
       // Check ticket availability
       const availabilityCheck = await EventService.checkTicketAvailability(
