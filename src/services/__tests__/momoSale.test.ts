@@ -143,7 +143,7 @@ describe('TicketService.finalizeMomoSale', () => {
 
     mockMomoInstance.isConfigured.mockReturnValue(true);
     mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R1' });
-    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: {} });
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '200', currency: 'SZL' } });
 
     // Initiate first
     await TicketService.initiateMomoPurchase({
@@ -208,6 +208,60 @@ describe('TicketService.finalizeMomoSale', () => {
     expect(tt.available).toBe(10);
   });
 
+  it('refuses to mint + fails the sale when MTN reports SUCCESSFUL but the amount mismatches', async () => {
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_BAD_AMT' });
+    // SUCCESSFUL but MTN reports 50 against a 200 sale (price 100 x qty 2)
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '50', currency: 'SZL' } });
+
+    await TicketService.initiateMomoPurchase({
+      eventId,
+      ticketTypeId,
+      quantity: 2,
+      customerPhone: '+26876555555',
+      momoPhone: '26876555555',
+    });
+
+    const result = await TicketService.finalizeMomoSale('R_BAD_AMT');
+    expect(result.status).toBe('failed');
+
+    // No tickets minted; sale failed; reservation released
+    const sale = await TicketSale.findOne({ momoReferenceId: 'R_BAD_AMT' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.FAILED);
+    expect(sale!.ticketIds.length).toBe(0);
+
+    const updatedEvent = await Event.findById(eventId);
+    const tt = updatedEvent!.ticketTypes[0]!;
+    expect(tt.reserved).toBe(0);
+    expect(tt.sold).toBe(0);
+  });
+
+  it('refuses to mint when MTN reports SUCCESSFUL but the currency mismatches', async () => {
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_BAD_CCY' });
+    // Correct amount but wrong currency (EUR against an SZL sale)
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '200', currency: 'EUR' } });
+
+    await TicketService.initiateMomoPurchase({
+      eventId,
+      ticketTypeId,
+      quantity: 2,
+      customerPhone: '+26876666666',
+      momoPhone: '26876666666',
+    });
+
+    const result = await TicketService.finalizeMomoSale('R_BAD_CCY');
+    expect(result.status).toBe('failed');
+
+    const sale = await TicketSale.findOne({ momoReferenceId: 'R_BAD_CCY' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.FAILED);
+    expect(sale!.ticketIds.length).toBe(0);
+  });
+
   it('returns pending when MTN status is still PENDING', async () => {
     const { eventId, ticketTypeId } = await seedPublishedEvent();
 
@@ -237,7 +291,7 @@ describe('TicketService.finalizeMomoSale', () => {
 
     mockMomoInstance.isConfigured.mockReturnValue(true);
     mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_OWN' });
-    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: {} });
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '100', currency: 'SZL' } });
 
     // Initiate as +26876111111
     await TicketService.initiateMomoPurchase({
@@ -279,7 +333,7 @@ describe('TicketService.finalizeMomoSale', () => {
 
     mockMomoInstance.isConfigured.mockReturnValue(true);
     mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R4' });
-    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: {} });
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '200', currency: 'SZL' } });
 
     await TicketService.initiateMomoPurchase({
       eventId,

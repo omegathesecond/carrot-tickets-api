@@ -871,7 +871,7 @@ export class TicketService {
       return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
     }
 
-    const { status } = await this.momoClient.getStatus(referenceId);
+    const { status, raw } = await this.momoClient.getStatus(referenceId);
     if (status === 'PENDING') return { status: 'pending' };
 
     const reservation = await TicketReservation.findOne({ saleId: sale._id });
@@ -884,7 +884,29 @@ export class TicketService {
       return { status: 'failed' };
     }
 
-    // SUCCESSFUL: atomically CLAIM the sale so concurrent poll + callback can't double-mint
+    // SUCCESSFUL — but verify MTN confirms the EXACT amount + currency we requested
+    // before minting anything. The payer can only ever approve our requested amount,
+    // so a mismatch means a bug, a currency drift, or a tampered/stale reference:
+    // fail it LOUDLY rather than silently honour a charge that doesn't match the sale.
+    const expectedCurrency = process.env['MTN_MOMO_CURRENCY'] || 'SZL';
+    const confirmedAmount = Number(raw?.amount);
+    if (
+      !Number.isFinite(confirmedAmount) ||
+      confirmedAmount !== sale.totalAmount ||
+      raw?.currency !== expectedCurrency
+    ) {
+      console.error('[momo finalize] amount/currency mismatch — refusing to mint', {
+        referenceId,
+        expected: { amount: sale.totalAmount, currency: expectedCurrency },
+        confirmed: { amount: raw?.amount, currency: raw?.currency },
+      });
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // atomically CLAIM the sale so concurrent poll + callback can't double-mint
     const claimed = await TicketSale.findOneAndUpdate(
       { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
       { $set: { paymentStatus: PaymentStatus.COMPLETED } },
