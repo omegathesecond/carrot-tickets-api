@@ -33,8 +33,10 @@ export interface DashboardStats {
     totalSales: number;
     cashSales: number;
     walletSales: number;
+    momoSales: number;
     cashRevenue: number;
     walletRevenue: number;
+    momoRevenue: number;
   };
   recentActivity: {
     recentSales: any[];
@@ -52,6 +54,7 @@ export interface SalesStats {
   salesByPaymentMethod: {
     cash: { count: number; revenue: number };
     wallet: { count: number; revenue: number };
+    momo: { count: number; revenue: number };
   };
   salesByEvent: Array<{
     eventId: string;
@@ -73,7 +76,7 @@ export interface RevenueStats {
     ticketsSold: number;
   }>;
   revenueByPaymentMethod: Array<{
-    method: 'cash' | 'keshless_wallet';
+    method: 'cash' | 'keshless_wallet' | 'mtn_momo';
     amount: number;
     count: number;
   }>;
@@ -197,8 +200,10 @@ export class AnalyticsService {
         totalSales: 0,
         cashSales: 0,
         walletSales: 0,
+        momoSales: 0,
         cashRevenue: 0,
-        walletRevenue: 0
+        walletRevenue: 0,
+        momoRevenue: 0
       };
 
       salesByMethod.forEach(stat => {
@@ -209,6 +214,9 @@ export class AnalyticsService {
         } else if (stat._id === PaymentMethod.KESHLESS_WALLET) {
           sales.walletSales = stat.count;
           sales.walletRevenue = stat.revenue;
+        } else if (stat._id === PaymentMethod.MTN_MOMO) {
+          sales.momoSales = stat.count;
+          sales.momoRevenue = stat.revenue;
         }
       });
 
@@ -319,7 +327,8 @@ export class AnalyticsService {
 
       const salesByPaymentMethod = {
         cash: { count: 0, revenue: 0 },
-        wallet: { count: 0, revenue: 0 }
+        wallet: { count: 0, revenue: 0 },
+        momo: { count: 0, revenue: 0 }
       };
 
       methodStats.forEach(stat => {
@@ -327,6 +336,8 @@ export class AnalyticsService {
           salesByPaymentMethod.cash = { count: stat.count, revenue: stat.revenue };
         } else if (stat._id === PaymentMethod.KESHLESS_WALLET) {
           salesByPaymentMethod.wallet = { count: stat.count, revenue: stat.revenue };
+        } else if (stat._id === PaymentMethod.MTN_MOMO) {
+          salesByPaymentMethod.momo = { count: stat.count, revenue: stat.revenue };
         }
       });
 
@@ -500,7 +511,7 @@ export class AnalyticsService {
       ]);
 
       const revenueByPaymentMethod = paymentMethodStats.map(stat => ({
-        method: stat._id as 'cash' | 'keshless_wallet',
+        method: stat._id as 'cash' | 'keshless_wallet' | 'mtn_momo',
         amount: stat.amount,
         count: stat.count
       }));
