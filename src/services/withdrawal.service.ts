@@ -73,6 +73,7 @@ export class WithdrawalService {
     // Step 1 — idempotent stamp FIRST
     await TicketSale.updateMany(
       {
+        paymentStatus: 'completed',
         resellerId: existing.resellerId,
         fundsCustody: 'carrot',
         soldByType: 'ResellerOperator',

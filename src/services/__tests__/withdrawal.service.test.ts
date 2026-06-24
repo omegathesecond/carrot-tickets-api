@@ -58,6 +58,23 @@ it('markPaid stamps covered sales then flips, and is idempotent', async () => {
     .rejects.toThrow('already paid');
 });
 
+it('markPaid stamps only completed sales, never pending ones', async () => {
+  const resellerId = new mongoose.Types.ObjectId();
+  await mk({ resellerId, soldByType: 'ResellerOperator', resellerCommissionAmount: 20, fundsCustody: 'carrot' });
+  const pendingSale = await mk({
+    resellerId, soldByType: 'ResellerOperator', resellerCommissionAmount: 10,
+    fundsCustody: 'carrot', paymentStatus: 'pending',
+  });
+  const w = await WithdrawalService.requestWithdrawal(resellerId.toString(), 'op-1');
+  expect(w.amount).toBe(20); // pending excluded from balance
+  await WithdrawalService.approve((w._id as any).toString(), 'admin-1');
+  await WithdrawalService.markPaid((w._id as any).toString(), 'admin-1', 'TX123');
+  // the pending sale later completes
+  await TicketSale.updateOne({ _id: pendingSale._id }, { paymentStatus: 'completed' });
+  // its commission survives because it was never stamped
+  expect(await WithdrawalService.availableCommission(resellerId.toString())).toBe(10);
+});
+
 it('reject does not stamp sales', async () => {
   const resellerId = new mongoose.Types.ObjectId();
   await mk({ resellerId, soldByType: 'ResellerOperator', resellerCommissionAmount: 20, fundsCustody: 'carrot' });
