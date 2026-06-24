@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ResellerController } from '@controllers/reseller.controller';
 import { ResellerOperatorAdminController } from '@controllers/resellerOperatorAdmin.controller';
 import { ResellerHubAdminController } from '@controllers/resellerHubAdmin.controller';
+import { ResellerReportController } from '@controllers/resellerReport.controller';
 import { authenticateReseller, requireResellerPermission } from '@middleware/resellerAuth.middleware';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
@@ -62,6 +63,20 @@ router.get(
   '/sales',
   requireResellerPermission(ResellerPermission.VIEW_OWN_SALES),
   ResellerController.getSales
+);
+
+/**
+ * Manager/admin reporting
+ */
+router.get(
+  '/manager/sales',
+  requireResellerPermission(ResellerPermission.VIEW_HUB_SALES),
+  ResellerReportController.listSales
+);
+router.get(
+  '/reports/summary',
+  requireResellerPermission(ResellerPermission.VIEW_HUB_SALES),
+  ResellerReportController.summary
 );
 
 /**
