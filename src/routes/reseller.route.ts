@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { ResellerController } from '@controllers/reseller.controller';
 import { ResellerOperatorAdminController } from '@controllers/resellerOperatorAdmin.controller';
 import { ResellerHubAdminController } from '@controllers/resellerHubAdmin.controller';
+import { ResellerReportController } from '@controllers/resellerReport.controller';
+import { ResellerPayoutController } from '@controllers/resellerPayout.controller';
 import { authenticateReseller, requireResellerPermission } from '@middleware/resellerAuth.middleware';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
@@ -65,6 +67,20 @@ router.get(
 );
 
 /**
+ * Manager/admin reporting
+ */
+router.get(
+  '/manager/sales',
+  requireResellerPermission(ResellerPermission.VIEW_HUB_SALES),
+  ResellerReportController.listSales
+);
+router.get(
+  '/reports/summary',
+  requireResellerPermission(ResellerPermission.VIEW_REPORTS),
+  ResellerReportController.summary
+);
+
+/**
  * Hubs (VIEW_HUB_SALES)
  */
 router.get('/hubs',
@@ -92,5 +108,15 @@ router.post('/operators/:id/reset-pin',
 router.patch('/operators/:id',
   requireResellerPermission(ResellerPermission.MANAGE_OPERATORS),
   ResellerOperatorAdminController.update);
+
+/**
+ * Payouts (REQUEST_PAYOUT)
+ */
+router.get('/payouts',
+  requireResellerPermission(ResellerPermission.REQUEST_PAYOUT),
+  ResellerPayoutController.overview);
+router.post('/payouts',
+  requireResellerPermission(ResellerPermission.REQUEST_PAYOUT),
+  ResellerPayoutController.request);
 
 export default router;
