@@ -3,9 +3,6 @@ import { Ticket } from '@models/ticket.model';
 import { TicketScan } from '@models/ticketScan.model';
 import { Event } from '@models/event.model';
 import { PaymentStatus } from '@interfaces/ticket.interface';
-// Register models needed for polymorphic populate (soldBy refPath, resellerId, hubId)
-import '@models/vendor.model';
-import '@models/reseller.model';
 
 export interface ExportQuery {
   vendorId: string;

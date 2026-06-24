@@ -3,6 +3,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { TicketSale } from '@models/ticketSale.model';
 import { ExportService } from '@services/export.service';
 import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import '@models/vendor.model';
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
