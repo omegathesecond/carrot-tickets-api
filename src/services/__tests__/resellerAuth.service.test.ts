@@ -44,3 +44,10 @@ it('resets the failed counter on a successful login', async () => {
   expect(op!.failedPinAttempts).toBe(0);
   expect(op!.lockedUntil).toBeNull();
 });
+
+it('returns the permissions array on the operator payload', async () => {
+  const { loginCode, pin } = await seedOperator({ role: 'reseller_admin', pin: '111222' });
+  const result = await ResellerAuthService.login(loginCode, pin);
+  expect(Array.isArray((result.operator as any).permissions)).toBe(true);
+  expect((result.operator as any).permissions).toContain('reseller:request_payout');
+});

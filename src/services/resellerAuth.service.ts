@@ -51,6 +51,7 @@ export class ResellerAuthService {
         role,
         resellerId: payload.resellerId,
         hubId: payload.hubId!,
+        permissions: payload.permissions,
       },
     };
   }
