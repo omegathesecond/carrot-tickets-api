@@ -104,7 +104,7 @@ export class AnalyticsService {
    */
   static async getDashboardStats(query: AnalyticsQuery): Promise<any> {
     try {
-      const { vendorId, startDate, endDate, isSuperAdmin = false } = query;
+      const { vendorId, startDate, endDate, isSuperAdmin = false, channel } = query;
 
       // Build date filter
       const dateFilter: any = {};
@@ -154,6 +154,7 @@ export class AnalyticsService {
         if (startDate) salesFilter.soldAt.$gte = startDate;
         if (endDate) salesFilter.soldAt.$lte = endDate;
       }
+      if (channel) salesFilter.channel = channel;
 
       // Build ticket filter for count
       const ticketFilter: any = { status: TicketStatus.CHECKED_IN, ...dateFilter };
@@ -279,7 +280,7 @@ export class AnalyticsService {
    */
   static async getSalesStats(query: AnalyticsQuery): Promise<SalesStats> {
     try {
-      const { vendorId, startDate, endDate, eventId, isSuperAdmin = false } = query;
+      const { vendorId, startDate, endDate, eventId, isSuperAdmin = false, channel } = query;
 
       // Build filter - skip vendorId for superadmin
       const filter: any = {
@@ -290,6 +291,7 @@ export class AnalyticsService {
       }
 
       if (eventId) filter.eventId = new mongoose.Types.ObjectId(eventId);
+      if (channel) filter.channel = channel;
 
       if (startDate || endDate) {
         filter.soldAt = {};

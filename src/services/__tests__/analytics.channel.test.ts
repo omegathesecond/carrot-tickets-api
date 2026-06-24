@@ -24,6 +24,40 @@ async function sale(channel: SalesChannel, amount: number) {
   });
 }
 
+describe('getSalesStats channel filter', () => {
+  it('filters by channel when provided', async () => {
+    await sale(SalesChannel.ONLINE, 100);
+    await sale(SalesChannel.ONLINE, 200);
+    await sale(SalesChannel.BOX_OFFICE, 50);
+
+    const stats = await AnalyticsService.getSalesStats({
+      vendorId: '',
+      isSuperAdmin: true,
+      channel: SalesChannel.ONLINE,
+    });
+
+    expect(stats.totalSales).toBe(2);
+    expect(stats.totalRevenue).toBe(300);
+  });
+});
+
+describe('getDashboardStats channel filter', () => {
+  it('filters sales block by channel when provided', async () => {
+    await sale(SalesChannel.ONLINE, 100);
+    await sale(SalesChannel.ONLINE, 200);
+    await sale(SalesChannel.BOX_OFFICE, 50);
+
+    const stats = await AnalyticsService.getDashboardStats({
+      vendorId: '',
+      isSuperAdmin: true,
+      channel: SalesChannel.ONLINE,
+    });
+
+    expect(stats.sales.totalSales).toBe(2);
+    expect(stats.tickets.totalRevenue).toBe(300);
+  });
+});
+
 describe('getRevenueStats revenueByChannel', () => {
   it('aggregates revenue + count per channel', async () => {
     await sale(SalesChannel.ONLINE, 100);
