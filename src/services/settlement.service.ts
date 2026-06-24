@@ -25,7 +25,7 @@ export class SettlementService {
    *                         where fundsCustody = 'reseller'
    * commissionOwedByCarrot = Σ resellerCommissionAmount
    *                         where fundsCustody = 'carrot' AND soldByType = 'ResellerOperator'
-   * netAmount              = cashOwedToCarrot − commissionOwedByCarrot
+   * netAmount              = cashOwedToCarrot (commission paid out separately via commission wallet)
    * byMethod               = cashOwedToCarrot broken down by paymentMethod
    */
   static async previewResellerSettlement(
@@ -99,7 +99,7 @@ export class SettlementService {
     return {
       cashOwedToCarrot,
       commissionOwedByCarrot,
-      netAmount: round2(cashOwedToCarrot - commissionOwedByCarrot),
+      netAmount: cashOwedToCarrot, // commission now settled via the commission wallet, not netted here
       byMethod,
     };
   }
