@@ -100,6 +100,7 @@ export interface ITicketSale extends Document {
 
   // Set true when the covering reseller settlement is closed + paid
   resellerRemitted: boolean;
+  commissionWithdrawn?: boolean;
 
   // Timestamps
   soldAt: Date;

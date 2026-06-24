@@ -111,6 +111,7 @@ const ticketSaleSchema = new Schema<ITicketSale>({
 
   // Set true when the covering reseller settlement is closed + paid
   resellerRemitted: { type: Boolean, default: false, index: true },
+  commissionWithdrawn: { type: Boolean, default: false, index: true },
 
   // Timestamps
   soldAt: {
