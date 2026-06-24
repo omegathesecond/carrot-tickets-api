@@ -26,8 +26,8 @@ it('aggregates both ledgers correctly', async () => {
   const from = new Date('2000-01-01'); const to = new Date('2999-01-01');
   const a = await SettlementService.previewResellerSettlement(resellerId.toString(), from, to);
   expect(a.cashOwedToCarrot).toBe(92);
-  expect(a.commissionOwedByCarrot).toBe(8);
-  expect(a.netAmount).toBe(84);
+  expect(a.commissionOwedByCarrot).toBe(8); // still reported for display
+  expect(a.netAmount).toBe(92);             // net = cash only; commission paid via wallet
 
   const b = await SettlementService.previewOrganizerPayout(vendorId.toString(), from, to);
   expect(b.proceedsOwed).toBe(184);          // 92 + 92
