@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ResellerAdminController } from '@controllers/resellerAdmin.controller';
+import { ResellerWithdrawalAdminController } from '@controllers/resellerWithdrawalAdmin.controller';
 import {
   authenticateTickets,
   requireSuperAdmin,
@@ -36,5 +37,12 @@ router.post('/resellers/:id/settlement/:sid/mark-paid', ResellerAdminController.
 router.get('/vendors/:id/payout', ResellerAdminController.previewOrganizerPayout);
 router.post('/vendors/:id/payout/close', ResellerAdminController.closeOrganizerPayout);
 router.post('/vendors/:id/payout/:pid/mark-paid', ResellerAdminController.markOrganizerPayoutPaid);
+
+// ─── Commission Withdrawals ──────────────────────────────────────────────────
+router.get('/withdrawals', ResellerWithdrawalAdminController.list);
+router.get('/resellers/:id/withdrawals', ResellerWithdrawalAdminController.listForReseller);
+router.post('/withdrawals/:id/approve', ResellerWithdrawalAdminController.approve);
+router.post('/withdrawals/:id/mark-paid', ResellerWithdrawalAdminController.markPaid);
+router.post('/withdrawals/:id/reject', ResellerWithdrawalAdminController.reject);
 
 export default router;
