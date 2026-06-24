@@ -1,7 +1,7 @@
 import { Ticket } from '@models/ticket.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Event } from '@models/event.model';
-import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { EventService } from '@services/event.service';
 import { getProcessor } from '@services/payments';
@@ -30,6 +30,9 @@ export interface SellTicketsParams {
   resellerId?: string;
   hubId?: string;
   resellerCommissionPercent?: number;
+  // "Where bought". Defaults via deriveChannel(); the online buyer flow passes
+  // SalesChannel.ONLINE explicitly since soldByType alone can't distinguish it.
+  channel?: SalesChannel;
 }
 
 /**
@@ -42,6 +45,17 @@ const SOLD_BY_TYPE_MAP: Record<SellTicketsParams['soldByType'], SaleSoldByType> 
   'sub-user': 'VendorSubUser',
   'reseller-operator': 'ResellerOperator',
 };
+
+/**
+ * Derives the default sales channel from the persisted soldByType. Reseller
+ * operator sales are reseller_pos; everything else defaults to box_office.
+ * The online buyer flows override this by passing channel explicitly.
+ */
+export function deriveChannel(mappedSoldByType: SaleSoldByType): SalesChannel {
+  return mappedSoldByType === 'ResellerOperator'
+    ? SalesChannel.RESELLER_POS
+    : SalesChannel.BOX_OFFICE;
+}
 
 export interface GetSalesQuery {
   vendorId: string;
@@ -248,6 +262,7 @@ export class TicketService {
       // BOTH the main and no-transaction-fallback branches. Without it the sale
       // would be invisible to the organizer-payout + reseller ledgers.
       const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+      const channel = params.channel ?? deriveChannel(mappedSoldByType);
       const econ = await this.buildSaleSnapshot({
         totalAmount,
         paymentMethod,
@@ -310,6 +325,7 @@ export class TicketService {
               walletTransactionId,
               soldBy,
               soldByType: mappedSoldByType,
+              channel,
               ...resellerAttribution,
               ...econ,
               soldAt: new Date()
@@ -356,6 +372,7 @@ export class TicketService {
         walletTransactionId,
         soldBy,
         soldByType: mappedSoldByType,
+        channel,
         ...resellerAttribution,
         ...econ,
         soldAt: new Date()
@@ -665,6 +682,7 @@ export class TicketService {
       keshlessPin,
       soldBy: event.vendorId.toString(),
       soldByType: 'vendor',
+      channel: SalesChannel.ONLINE,
     });
 
     // Best-effort SMS confirmation — never roll back the purchase on SMS failure.
@@ -770,6 +788,7 @@ export class TicketService {
     resellerId?: string;
     hubId?: string;
     resellerCommissionPercent?: number;
+    channel?: SalesChannel;
   }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
     if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
 
@@ -786,6 +805,7 @@ export class TicketService {
     // as the buyer/vendor path does today). soldBy defaults to the organizer.
     const soldByType = p.soldByType ?? 'vendor';
     const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const channel = p.channel ?? deriveChannel(mappedSoldByType);
     const vendorId = p.vendorId ?? event.vendorId;
     const soldBy = p.soldBy ?? event.vendorId;
 
@@ -818,6 +838,7 @@ export class TicketService {
       paymentStatus: PaymentStatus.PENDING,
       soldBy,
       soldByType: mappedSoldByType,
+      channel,
       ...resellerAttribution,
       ...econ,
       soldAt: new Date(),

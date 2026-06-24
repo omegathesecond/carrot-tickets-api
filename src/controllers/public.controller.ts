@@ -4,6 +4,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { TicketService } from '@services/ticket.service';
+import { SalesChannel } from '@interfaces/ticket.interface';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -334,7 +335,7 @@ export class PublicController {
     const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
     if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
     try {
-      const r = await TicketService.initiateMomoPurchase({ ...value, customerPhone });
+      const r = await TicketService.initiateMomoPurchase({ ...value, customerPhone, channel: SalesChannel.ONLINE });
       return ApiResponseUtil.success(res, r);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Could not start MoMo payment', 400);
