@@ -110,6 +110,27 @@ describe('TicketService.initiateMomoPurchase', () => {
     expect(tt.available).toBe(8); // 10 - 0 sold - 2 reserved
   });
 
+  it('normalises a local MoMo number to the full international MSISDN (no +) for MTN', async () => {
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_MSISDN' });
+
+    await TicketService.initiateMomoPurchase({
+      eventId,
+      ticketTypeId,
+      quantity: 1,
+      customerPhone: '+26876707421',
+      momoPhone: '76707421', // bare local 8-digit number, as a till operator would type
+    });
+
+    // MTN gets 26876707421 (268 prefix, no '+') — not the bare 76707421 that
+    // produces PAYER_NOT_FOUND.
+    expect(mockMomoInstance.requestToPay).toHaveBeenCalledWith(
+      expect.objectContaining({ payerMsisdn: '26876707421' }),
+    );
+  });
+
   it('releases reservation and sets sale FAILED when requestToPay throws', async () => {
     const { eventId, ticketTypeId } = await seedPublishedEvent();
 

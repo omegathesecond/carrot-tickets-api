@@ -827,10 +827,14 @@ export class TicketService {
 
     // 3) Request to pay (currency from env; sandbox uses EUR)
     try {
+      // MTN keys its directory on the FULL international MSISDN with no '+'
+      // (e.g. 26876707421). A bare local number like 76707421 returns
+      // PAYER_NOT_FOUND, so normalise to +268… then strip the leading '+'.
+      const payerMsisdn = normalizePhone(p.momoPhone).replace(/^\+/, '');
       const { referenceId } = await this.momoClient.requestToPay({
         amount: totalAmount,
         currency: process.env['MTN_MOMO_CURRENCY'] || 'SZL',
-        payerMsisdn: p.momoPhone,
+        payerMsisdn,
         externalId: sale.saleId,
         payerMessage: `Carrot Tickets - ${tt.name} x${p.quantity}`,
       });
