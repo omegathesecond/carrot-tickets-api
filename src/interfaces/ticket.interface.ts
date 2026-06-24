@@ -21,6 +21,12 @@ export enum PaymentStatus {
   REFUNDED = 'refunded'
 }
 
+export enum SalesChannel {
+  ONLINE = 'online',          // buyer self-service web/app checkout
+  BOX_OFFICE = 'box_office',  // vendor/sub-user selling in person
+  RESELLER_POS = 'reseller_pos' // reseller operator sale
+}
+
 export interface ITicket extends Document {
   _id: Types.ObjectId;
 
@@ -84,6 +90,10 @@ export interface ITicketSale extends Document {
   // Staff
   soldBy: Types.ObjectId; // Staff member who made the sale
   soldByType: 'Vendor' | 'VendorSubUser' | 'ResellerOperator'; // Who sold it
+
+  // Sales channel — "where bought". Orthogonal to soldByType: a vendor sale can
+  // be online OR box_office. Set at sale-build time; never null for new sales.
+  channel: SalesChannel;
 
   // Reseller Attribution
   resellerId?: Types.ObjectId;

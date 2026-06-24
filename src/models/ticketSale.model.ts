@@ -1,5 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
-import { ITicketSale, PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+import { ITicketSale, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 const ticketSaleSchema = new Schema<ITicketSale>({
   // Sale Identification
@@ -96,6 +96,13 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     default: 'Vendor'
   },
 
+  // Sales channel — "where bought"
+  channel: {
+    type: String,
+    enum: Object.values(SalesChannel),
+    index: true
+  },
+
   // Reseller Attribution
   resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', index: true, sparse: true },
   hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', index: true, sparse: true },
@@ -139,5 +146,6 @@ ticketSaleSchema.index({ eventId: 1, soldAt: -1 });
 ticketSaleSchema.index({ paymentStatus: 1, paymentMethod: 1 });
 ticketSaleSchema.index({ soldBy: 1, soldByType: 1 });
 ticketSaleSchema.index({ customerUserId: 1 });
+ticketSaleSchema.index({ channel: 1, soldAt: -1 });
 
 export const TicketSale = mongoose.model<ITicketSale>('TicketSale', ticketSaleSchema);
