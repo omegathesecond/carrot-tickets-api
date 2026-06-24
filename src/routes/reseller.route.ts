@@ -3,7 +3,6 @@ import { ResellerController } from '@controllers/reseller.controller';
 import { ResellerOperatorAdminController } from '@controllers/resellerOperatorAdmin.controller';
 import { ResellerHubAdminController } from '@controllers/resellerHubAdmin.controller';
 import { ResellerReportController } from '@controllers/resellerReport.controller';
-import { ResellerReportsController } from '@controllers/resellerReports.controller';
 import { ResellerPayoutController } from '@controllers/resellerPayout.controller';
 import { authenticateReseller, requireResellerPermission } from '@middleware/resellerAuth.middleware';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
@@ -79,11 +78,6 @@ router.get(
   '/reports/summary',
   requireResellerPermission(ResellerPermission.VIEW_REPORTS),
   ResellerReportController.summary
-);
-router.get(
-  '/reports',
-  requireResellerPermission(ResellerPermission.VIEW_REPORTS),
-  ResellerReportsController.get
 );
 
 /**
