@@ -493,6 +493,7 @@ export class ScanService {
     eventId?: string;
     startDate?: Date;
     endDate?: Date;
+    isSuperAdmin?: boolean;
   }): Promise<{
     totalScans: number;
     successfulScans: number;
@@ -500,9 +501,13 @@ export class ScanService {
     alreadyScannedCount: number;
   }> {
     try {
-      const { vendorId, eventId, startDate, endDate } = query;
+      const { vendorId, eventId, startDate, endDate, isSuperAdmin = false } = query;
 
-      const filter: any = { vendorId };
+      // Match getScans: platform-scope (super-admin) operators have no single
+      // vendor, so don't filter by vendorId — otherwise every count is 0 even
+      // though their scans succeed and show up in history.
+      const filter: any = {};
+      if (!isSuperAdmin) filter.vendorId = vendorId;
       if (eventId) filter.eventId = eventId;
       if (startDate || endDate) {
         filter.scannedAt = {};
