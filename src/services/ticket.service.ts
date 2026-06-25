@@ -8,6 +8,7 @@ import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
+import { PeachClient } from '@services/payments/peach.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -768,6 +769,8 @@ export class TicketService {
 
   // ── MTN MoMo async payment client (mocked in tests via jest.mock at module level) ──
   private static momoClient = new MtnMomoClient();
+  // ── Peach card async payment client (mocked in tests via jest.mock at module level) ──
+  private static peachClient = new PeachClient();
   private static MOMO_TTL_MS = 5 * 60_000; // 5 minutes
 
   /**
@@ -891,6 +894,119 @@ export class TicketService {
    */
   static async getMomoSaleByReference(referenceId: string): Promise<InstanceType<typeof TicketSale> | null> {
     return TicketSale.findOne({ momoReferenceId: referenceId });
+  }
+
+  /**
+   * Initiate an async Peach card purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Call createPayment on Peach — on failure, release reservation + fail sale + rethrow.
+   *
+   * Mirrors initiateMomoPurchase exactly; differences: no payer phone,
+   * paymentMethod = PaymentMethod.CARD, provider call is peachClient.createPayment.
+   */
+  static async initiateCardPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone?: string;
+    customerName?: string;
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
+    channel?: SalesChannel;
+  }): Promise<{ paymentId: string; redirect: any; saleId: string; expiresAt: Date }> {
+    if (!this.peachClient.isConfigured()) throw new Error('Card payments are not available');
+
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+
+    // Attribution: mirror initiateMomoPurchase defaults exactly.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const channel = p.channel ?? deriveChannel(mappedSoldByType);
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — card is electronic so custody derives to 'carrot'.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.CARD,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+    });
+    const resellerAttribution = {
+      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+    };
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      totalAmount,
+      paymentMethod: PaymentMethod.CARD,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy,
+      soldByType: mappedSoldByType,
+      channel,
+      ...resellerAttribution,
+      ...econ,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.MOMO_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Create Peach payment; on failure release + fail + rethrow (no silent fallback)
+    try {
+      const nonce = sale.saleId + '-' + sale._id.toString();
+      const { id, redirect } = await this.peachClient.createPayment({
+        amount: totalAmount,
+        currency: process.env['CARD_CURRENCY'] || 'ZAR',
+        merchantTransactionId: sale.saleId,
+        shopperResultUrl: process.env['CARD_RESULT_URL'] || '',
+        nonce,
+      });
+      sale.peachPaymentId = id;
+      await sale.save();
+      return { paymentId: id, redirect, saleId: sale._id.toString(), expiresAt };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Look up a card sale by its Peach payment ID.
+   * Returns null if not found. Never throws.
+   */
+  static async getCardSaleByPaymentId(id: string): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ peachPaymentId: id });
   }
 
   /**
