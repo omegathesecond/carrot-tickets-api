@@ -12,7 +12,7 @@ export class PeachClient {
   private userId = process.env['PEACH_USER_ID'] || '';
   private password = process.env['PEACH_PASSWORD'] || '';
   isConfigured(): boolean {
-    return process.env['CARD_PAYMENTS_ENABLED'] === 'true' && !!this.entityId && !!this.userId && !!this.password;
+    return process.env['CARD_PAYMENTS_ENABLED'] === 'true' && !!this.entityId && !!this.userId && !!this.password && !!process.env['CARD_RESULT_URL'];
   }
   private auth() { return { userId: this.userId, password: this.password, entityId: this.entityId }; }
   async createPayment(p: { amount: number; currency: string; merchantTransactionId: string; shopperResultUrl: string; nonce: string }) {

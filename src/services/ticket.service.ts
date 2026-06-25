@@ -772,6 +772,7 @@ export class TicketService {
   // ── Peach card async payment client (mocked in tests via jest.mock at module level) ──
   private static peachClient = new PeachClient();
   private static MOMO_TTL_MS = 5 * 60_000; // 5 minutes
+  private static CARD_TTL_MS = 15 * 60_000; // 15 min — card redirect (3DS/OTP) takes longer than MoMo
 
   /**
    * Initiate an async MTN MoMo purchase:
@@ -975,18 +976,19 @@ export class TicketService {
       ticketTypeId: p.ticketTypeId,
       quantity: p.quantity,
       saleId: sale._id.toString(),
-      ttlMs: this.MOMO_TTL_MS,
+      ttlMs: this.CARD_TTL_MS,
     });
     sale.reservationExpiresAt = expiresAt;
 
     // 3) Create Peach payment; on failure release + fail + rethrow (no silent fallback)
+    if (!process.env['CARD_RESULT_URL']) throw new Error('CARD_RESULT_URL is not configured');
     try {
       const nonce = sale.saleId + '-' + sale._id.toString();
       const { id, redirect } = await this.peachClient.createPayment({
         amount: totalAmount,
         currency: process.env['CARD_CURRENCY'] || 'ZAR',
         merchantTransactionId: sale.saleId,
-        shopperResultUrl: process.env['CARD_RESULT_URL'] || '',
+        shopperResultUrl: process.env['CARD_RESULT_URL']!,
         nonce,
       });
       sale.peachPaymentId = id;

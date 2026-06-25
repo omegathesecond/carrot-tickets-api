@@ -26,6 +26,7 @@ import { TicketService } from '@services/ticket.service';
 
 beforeAll(async () => {
   await connectTestDb();
+  process.env['CARD_RESULT_URL'] = 'https://carrot.test/result';
 });
 
 afterEach(async () => {

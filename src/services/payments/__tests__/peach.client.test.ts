@@ -11,11 +11,13 @@ describe('classifyResultCode', () => {
 describe('PeachClient', () => {
   const OLD = process.env;
   beforeEach(() => { process.env = { ...OLD, CARD_PAYMENTS_ENABLED:'true', PEACH_BASE_URL:'https://api-v2.peachpayments.com',
-    PEACH_ENTITY_ID:'E', PEACH_USER_ID:'U', PEACH_PASSWORD:'P', CARD_CURRENCY:'ZAR' }; });
+    PEACH_ENTITY_ID:'E', PEACH_USER_ID:'U', PEACH_PASSWORD:'P', CARD_CURRENCY:'ZAR', CARD_RESULT_URL:'https://x/r' }; });
   afterEach(() => { process.env = OLD; jest.restoreAllMocks(); });
-  it('isConfigured requires enabled+creds', () => {
+  it('isConfigured requires enabled+creds+CARD_RESULT_URL', () => {
     expect(new PeachClient().isConfigured()).toBe(true);
     process.env.PEACH_USER_ID=''; expect(new PeachClient().isConfigured()).toBe(false);
+    process.env = { ...process.env, PEACH_USER_ID:'U' };
+    delete process.env['CARD_RESULT_URL']; expect(new PeachClient().isConfigured()).toBe(false);
   });
   it('createPayment posts auth+fields, returns id+redirect', async () => {
     const spy = jest.spyOn(global,'fetch' as any).mockResolvedValue({ ok:true, status:200,
