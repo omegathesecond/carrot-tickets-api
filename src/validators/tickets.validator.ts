@@ -334,7 +334,14 @@ export const validateTicketSchema = Joi.object({
     .messages({
       'string.empty': 'Ticket ID is required',
       'any.required': 'Ticket ID is required'
-    })
+    }),
+  // Optional gate guard: when the operator has selected a specific event to
+  // scan for, the client sends it here so the API rejects tickets belonging to
+  // any other show ("wrong event") instead of silently accepting them.
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
 });
 
 export const checkInTicketSchema = Joi.object({
@@ -345,6 +352,10 @@ export const checkInTicketSchema = Joi.object({
       'string.empty': 'Ticket ID is required',
       'any.required': 'Ticket ID is required'
     }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' }),
   notes: Joi.string()
     .optional()
     .max(500)
