@@ -8,7 +8,7 @@ import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
-import { PeachClient } from '@services/payments/peach.client';
+import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -1112,6 +1112,117 @@ export class TicketService {
           venue: event.venue,
         }))
       ).catch(err => console.error('[SMS] momo confirmation threw', err));
+    }
+
+    return { status: 'completed' };
+  }
+
+  /**
+   * Finalize a Peach card sale identified by paymentId. Idempotent.
+   * - If sale is not PENDING → return current status immediately (no re-mint).
+   * - Query Peach status; pending code → return pending; rejected → release + fail.
+   * - Success → AMOUNT/CURRENCY GUARD: Number(amount) must equal sale.totalAmount
+   *   and currency must match CARD_CURRENCY env (default ZAR). Mismatch → release + fail.
+   * - ATOMIC claim via findOneAndUpdate({_id, paymentStatus:PENDING}) to prevent
+   *   double-mint from concurrent poll + webhook. Then mint tickets, confirm
+   *   reservation (reserved→sold), update event sold count, best-effort SMS.
+   *
+   * Mirrors finalizeMomoSale exactly; differences: lookup by peachPaymentId,
+   * status via peachClient.getPaymentStatus, amount guard uses CARD_CURRENCY.
+   */
+  static async finalizeCardSale(paymentId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ peachPaymentId: paymentId });
+    if (!sale) throw new Error('Sale not found for payment id');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const { code, amount, currency } = await this.peachClient.getPaymentStatus(paymentId);
+    const outcome = classifyResultCode(code || '');
+
+    if (outcome === 'pending') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (outcome === 'rejected') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // success — verify the EXACT amount + currency Peach reports before minting.
+    // Peach returns amount as a string (e.g. "50.00"); convert to Number for comparison.
+    const expectedCurrency = process.env['CARD_CURRENCY'] || 'ZAR';
+    const confirmedAmount = Number(amount);
+    if (
+      !Number.isFinite(confirmedAmount) ||
+      confirmedAmount !== sale.totalAmount ||
+      currency !== expectedCurrency
+    ) {
+      console.error('[card finalize] amount/currency mismatch — refusing to mint', {
+        paymentId,
+        expected: { amount: sale.totalAmount, currency: expectedCurrency },
+        confirmed: { amount, currency },
+      });
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // Atomically CLAIM the sale so concurrent poll + webhook can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized
+
+    // Mint tickets, confirm reservation (reserved→sold), best-effort SMS
+    const event = await Event.findById(sale.eventId);
+    const ticketTypeDoc = event?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = this.buildTicket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        saleId: sale._id,
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (sale.customerPhone && event) {
+      SmsService.sendTicketConfirmation(
+        sale.customerPhone,
+        tickets.map(t => ({
+          ticketId: t.ticketId,
+          eventName: event.name,
+          eventDate: event.eventDate.toISOString(),
+          venue: event.venue,
+        }))
+      ).catch(err => console.error('[SMS] card confirmation threw', err));
     }
 
     return { status: 'completed' };
