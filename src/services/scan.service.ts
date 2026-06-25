@@ -2,6 +2,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketScan } from '@models/ticketScan.model';
 import { Event } from '@models/event.model';
 import { ITicket, ITicketScan, TicketStatus } from '@interfaces/ticket.interface';
+import { findTicketByCode } from '@utils/ticketLookup.util';
 import mongoose from 'mongoose';
 
 export interface ValidateTicketParams {
@@ -54,7 +55,8 @@ export class ScanService {
     try {
       const { ticketId, vendorId } = params;
 
-      const ticket = await Ticket.findOne({ ticketId }).populate('eventId');
+      const ticket = await findTicketByCode(ticketId);
+      if (ticket) await ticket.populate('eventId');
 
       if (!ticket) {
         return { valid: false, message: 'Ticket not found' };
@@ -113,9 +115,8 @@ export class ScanService {
       const { ticketId, vendorId, scannedBy, scannedByType, notes } = params;
 
       // Find ticket
-      const ticket = await Ticket.findOne({ ticketId })
-        .populate('eventId')
-        .session(session);
+      const ticket = await findTicketByCode(ticketId, session);
+      if (ticket) await ticket.populate('eventId');
 
       // Validate ticket existence
       if (!ticket) {
