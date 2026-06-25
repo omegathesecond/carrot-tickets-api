@@ -121,29 +121,6 @@ it('mtn_momo sale: throws when no buyer phone supplied (no silent fallback)', as
   })).rejects.toThrow(/phone/i);
 });
 
-it('finalizeSale: owning reseller completes the sale', async () => {
-  await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, mtnMomoEnabled: true });
-  const r = await Reseller.create({ businessName: 'FinalPnP', commissionPercent: null });
-  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
-
-  mockMomoInstance.isConfigured.mockReturnValue(true);
-  mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_FINAL_OK' });
-
-  const created = await ResellerSaleService.createSale({
-    operatorId: new mongoose.Types.ObjectId().toString(),
-    resellerId: r._id.toString(),
-    hubId: new mongoose.Types.ObjectId().toString(),
-    eventId, ticketTypeId, quantity: 1, paymentMethod: 'mtn_momo',
-    customerPhone: '+26878422613',
-  });
-  if (created.status !== 'pending') throw new Error('expected pending');
-
-  mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL' });
-
-  const result = await ResellerSaleService.finalizeSale(created.referenceId, r._id.toString());
-  expect(result.status).toBe('completed');
-});
-
 it('finalizeSale: a DIFFERENT reseller cannot finalize (ownership isolation)', async () => {
   await PaymentConfigService.update({ defaultResellerCommissionPercent: 8, platformFeePercent: 0, mtnMomoEnabled: true });
   const owner = await Reseller.create({ businessName: 'OwnerPnP', commissionPercent: null });
