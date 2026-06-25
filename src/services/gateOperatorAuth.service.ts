@@ -1,7 +1,10 @@
 // api/src/services/gateOperatorAuth.service.ts
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { GateOperator } from '@models/gateOperator.model';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import {
+  TicketsRole,
+  TICKETS_ROLE_PERMISSIONS,
+} from '@interfaces/ticketsPermission.interface';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
@@ -42,7 +45,9 @@ export class GateOperatorAuthService {
       userType: 'gate-operator',
       userId: (operator._id as any).toString(),
       role: 'gate_operator',
-      permissions: [TicketsPermission.SCAN_TICKETS, TicketsPermission.VIEW_SCANS],
+      // Use the canonical SCANNER role set so gate operators can list events
+      // (VIEW_EVENTS) to pick which show they're scanning — not just scan.
+      permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.SCANNER],
       isSuperAdmin,
     };
     if (!isSuperAdmin && operator.vendorId) payload['vendorId'] = operator.vendorId.toString();
