@@ -8,6 +8,7 @@ import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
+import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -768,7 +769,10 @@ export class TicketService {
 
   // ── MTN MoMo async payment client (mocked in tests via jest.mock at module level) ──
   private static momoClient = new MtnMomoClient();
+  // ── Peach card async payment client (mocked in tests via jest.mock at module level) ──
+  private static peachClient = new PeachClient();
   private static MOMO_TTL_MS = 5 * 60_000; // 5 minutes
+  private static CARD_TTL_MS = 15 * 60_000; // 15 min — card redirect (3DS/OTP) takes longer than MoMo
 
   /**
    * Initiate an async MTN MoMo purchase:
@@ -894,6 +898,123 @@ export class TicketService {
   }
 
   /**
+   * Initiate an async Peach card purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Call createPayment on Peach — on failure, release reservation + fail sale + rethrow.
+   *
+   * Mirrors initiateMomoPurchase exactly; differences: no payer phone,
+   * paymentMethod = PaymentMethod.CARD, provider call is peachClient.createPayment.
+   */
+  static async initiateCardPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone?: string;
+    customerName?: string;
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
+    channel?: SalesChannel;
+  }): Promise<{ paymentId: string; redirect: any; saleId: string; expiresAt: Date }> {
+    if (!this.peachClient.isConfigured()) throw new Error('Card payments are not available');
+
+    const cardCfg = await PaymentConfigService.get();
+    if (!cardCfg.cardEnabled) throw new Error('Card payments are not available');
+
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+
+    // Attribution: mirror initiateMomoPurchase defaults exactly.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const channel = p.channel ?? deriveChannel(mappedSoldByType);
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — card is electronic so custody derives to 'carrot'.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.CARD,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+    });
+    const resellerAttribution = {
+      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+    };
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      totalAmount,
+      paymentMethod: PaymentMethod.CARD,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy,
+      soldByType: mappedSoldByType,
+      channel,
+      ...resellerAttribution,
+      ...econ,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.CARD_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Create Peach payment; on failure release + fail + rethrow (no silent fallback)
+    if (!process.env['CARD_RESULT_URL']) throw new Error('CARD_RESULT_URL is not configured');
+    try {
+      const nonce = sale.saleId + '-' + sale._id.toString();
+      const { id, redirect } = await this.peachClient.createPayment({
+        amount: totalAmount,
+        currency: process.env['CARD_CURRENCY'] || 'ZAR',
+        merchantTransactionId: sale.saleId,
+        shopperResultUrl: process.env['CARD_RESULT_URL']!,
+        nonce,
+      });
+      sale.peachPaymentId = id;
+      await sale.save();
+      return { paymentId: id, redirect, saleId: sale._id.toString(), expiresAt };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Look up a card sale by its Peach payment ID.
+   * Returns null if not found. Never throws.
+   */
+  static async getCardSaleByPaymentId(id: string): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ peachPaymentId: id });
+  }
+
+  /**
    * Finalize an MTN MoMo sale identified by referenceId. Idempotent.
    * - If sale is not PENDING → return current status immediately.
    * - Query MTN status; PENDING → return pending; FAILED → release + fail.
@@ -994,6 +1115,117 @@ export class TicketService {
           venue: event.venue,
         }))
       ).catch(err => console.error('[SMS] momo confirmation threw', err));
+    }
+
+    return { status: 'completed' };
+  }
+
+  /**
+   * Finalize a Peach card sale identified by paymentId. Idempotent.
+   * - If sale is not PENDING → return current status immediately (no re-mint).
+   * - Query Peach status; pending code → return pending; rejected → release + fail.
+   * - Success → AMOUNT/CURRENCY GUARD: Number(amount) must equal sale.totalAmount
+   *   and currency must match CARD_CURRENCY env (default ZAR). Mismatch → release + fail.
+   * - ATOMIC claim via findOneAndUpdate({_id, paymentStatus:PENDING}) to prevent
+   *   double-mint from concurrent poll + webhook. Then mint tickets, confirm
+   *   reservation (reserved→sold), update event sold count, best-effort SMS.
+   *
+   * Mirrors finalizeMomoSale exactly; differences: lookup by peachPaymentId,
+   * status via peachClient.getPaymentStatus, amount guard uses CARD_CURRENCY.
+   */
+  static async finalizeCardSale(paymentId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ peachPaymentId: paymentId });
+    if (!sale) throw new Error('Sale not found for payment id');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const { code, amount, currency } = await this.peachClient.getPaymentStatus(paymentId);
+    const outcome = classifyResultCode(code || '');
+
+    if (outcome === 'pending') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (outcome === 'rejected') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // success — verify the EXACT amount + currency Peach reports before minting.
+    // Peach returns amount as a string (e.g. "50.00"); convert to Number for comparison.
+    const expectedCurrency = process.env['CARD_CURRENCY'] || 'ZAR';
+    const confirmedAmount = Number(amount);
+    if (
+      !Number.isFinite(confirmedAmount) ||
+      confirmedAmount !== sale.totalAmount ||
+      currency !== expectedCurrency
+    ) {
+      console.error('[card finalize] amount/currency mismatch — refusing to mint', {
+        paymentId,
+        expected: { amount: sale.totalAmount, currency: expectedCurrency },
+        confirmed: { amount, currency },
+      });
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // Atomically CLAIM the sale so concurrent poll + webhook can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized
+
+    // Mint tickets, confirm reservation (reserved→sold), best-effort SMS
+    const event = await Event.findById(sale.eventId);
+    const ticketTypeDoc = event?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = this.buildTicket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        saleId: sale._id,
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (sale.customerPhone && event) {
+      SmsService.sendTicketConfirmation(
+        sale.customerPhone,
+        tickets.map(t => ({
+          ticketId: t.ticketId,
+          eventName: event.name,
+          eventDate: event.eventDate.toISOString(),
+          venue: event.venue,
+        }))
+      ).catch(err => console.error('[SMS] card confirmation threw', err));
     }
 
     return { status: 'completed' };

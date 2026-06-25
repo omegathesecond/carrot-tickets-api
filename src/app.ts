@@ -54,6 +54,7 @@ import ticketsRoutes from '@routes/tickets.route';
 import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
 import momoRoutes from '@routes/momo.route';
+import cardRoutes from '@routes/card.route';
 import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
@@ -128,8 +129,9 @@ app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);
-app.use('/api/public', publicRoutes);  // Public routes - no auth required
-app.use('/api/momo', momoRoutes);      // MTN MoMo callback (unauthenticated)
+app.use('/api/public', publicRoutes);                  // Public routes - no auth required
+app.use('/api/public/purchase/card', cardRoutes);      // Peach card webhook (unauthenticated)
+app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 
 // 404 handler - must be after all routes

@@ -3,11 +3,13 @@ import { PaymentProcessor } from './types';
 import { CashProcessor } from './cash.processor';
 import { KeshlessWalletProcessor } from './keshlessWallet.processor';
 import { MtnMomoProcessor } from './mtnMomo.processor';
+import { CardProcessor } from './card.processor';
 
 const processors: Record<string, PaymentProcessor> = {
   [PaymentMethod.CASH]: new CashProcessor(),
   [PaymentMethod.KESHLESS_WALLET]: new KeshlessWalletProcessor(),
   [PaymentMethod.MTN_MOMO]: new MtnMomoProcessor(),
+  [PaymentMethod.CARD]: new CardProcessor(),
 };
 
 export function getProcessor(method: PaymentMethod): PaymentProcessor {

@@ -78,6 +78,12 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     index: true,
     trim: true
   },
+  peachPaymentId: {
+    type: String,
+    sparse: true,
+    index: true,
+    trim: true
+  },
   reservationExpiresAt: {
     type: Date,
     index: true

@@ -5,6 +5,7 @@ export interface IPaymentMethodConfig extends mongoose.Document {
   cashEnabled: boolean;
   keshlessWalletEnabled: boolean;
   mtnMomoEnabled: boolean;
+  cardEnabled: boolean;
   defaultResellerCommissionPercent: number;
   platformFeePercent: number;
   updatedAt: Date;
@@ -15,6 +16,7 @@ const schema = new Schema<IPaymentMethodConfig>({
   cashEnabled: { type: Boolean, default: true },
   keshlessWalletEnabled: { type: Boolean, default: false },
   mtnMomoEnabled: { type: Boolean, default: true },
+  cardEnabled: { type: Boolean, default: false },
   defaultResellerCommissionPercent: { type: Number, default: 0 },
   platformFeePercent: { type: Number, default: 0 },
 }, { timestamps: true });

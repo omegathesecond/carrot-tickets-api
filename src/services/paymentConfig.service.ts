@@ -4,6 +4,7 @@ const DEFAULTS = {
   cashEnabled: true,
   mtnMomoEnabled: true,
   keshlessWalletEnabled: false, // Keshless decoupled — off for now
+  cardEnabled: false,
   defaultResellerCommissionPercent: 0,
   platformFeePercent: 0,
 };
@@ -17,6 +18,7 @@ export class PaymentConfigService {
       cashEnabled: doc?.cashEnabled ?? DEFAULTS.cashEnabled,
       mtnMomoEnabled: doc?.mtnMomoEnabled ?? DEFAULTS.mtnMomoEnabled,
       keshlessWalletEnabled: doc?.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
+      cardEnabled: doc?.cardEnabled ?? DEFAULTS.cardEnabled,
       defaultResellerCommissionPercent: doc?.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
       platformFeePercent: doc?.platformFeePercent ?? DEFAULTS.platformFeePercent,
     };
@@ -32,6 +34,7 @@ export class PaymentConfigService {
       cashEnabled: doc!.cashEnabled ?? DEFAULTS.cashEnabled,
       mtnMomoEnabled: doc!.mtnMomoEnabled ?? DEFAULTS.mtnMomoEnabled,
       keshlessWalletEnabled: doc!.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
+      cardEnabled: doc!.cardEnabled ?? DEFAULTS.cardEnabled,
       defaultResellerCommissionPercent: doc!.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
       platformFeePercent: doc!.platformFeePercent ?? DEFAULTS.platformFeePercent,
     };

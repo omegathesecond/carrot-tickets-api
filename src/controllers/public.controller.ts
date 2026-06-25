@@ -8,6 +8,15 @@ import { SalesChannel } from '@interfaces/ticket.interface';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
+import { PeachClient } from '@services/payments/peach.client';
+
+// Validation schema for Peach card purchase initiation
+const cardInitiateSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(10).required(),
+  customerName: Joi.string().max(100).optional(),
+});
 
 // Validation schema for MTN MoMo purchase initiation
 const momoInitiateSchema = Joi.object({
@@ -317,6 +326,7 @@ export class PublicController {
       const methods: string[] = [];
       if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
       if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
+      if (cfg.cardEnabled && new PeachClient().isConfigured()) methods.push('card');
       return ApiResponseUtil.success(res, { methods });
     } catch (error: any) {
       console.error('Get public payment methods error:', error);
@@ -365,6 +375,52 @@ export class PublicController {
       }
 
       const result = await TicketService.finalizeMomoSale(referenceId);
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
+   * Initiate an async Peach card payment.
+   * Phone comes from the buyer token (req.ticketsUser.userPhone), NEVER the body.
+   */
+  static async initiateCardPurchase(req: Request, res: Response): Promise<any> {
+    const { error, value } = cardInitiateSchema.validate(req.body);
+    if (error) return ApiResponseUtil.badRequest(res, error.message);
+    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    try {
+      const r = await TicketService.initiateCardPurchase({ ...value, customerPhone, channel: SalesChannel.ONLINE });
+      return ApiResponseUtil.success(res, r);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Could not start card payment', 400);
+    }
+  }
+
+  /**
+   * Poll Peach card payment status and trigger finalization.
+   * Ownership check: the authenticated buyer's phone must match the sale's
+   * customerPhone (both normalized) — prevents IDOR on the paymentId namespace.
+   * A mismatched or missing sale returns 404 to avoid leaking existence info.
+   */
+  static async getCardStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!buyerPhone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const paymentId = req.params['paymentId']!;
+      const sale = await TicketService.getCardSaleByPaymentId(paymentId);
+
+      // Normalize both phones with the same util used at purchase time.
+      // If sale is missing, or phones don't match → 404 (don't reveal existence).
+      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
+      const result = await TicketService.finalizeCardSale(paymentId);
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
