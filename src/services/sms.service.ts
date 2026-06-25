@@ -16,6 +16,8 @@
  * The caller invokes this fire-and-forget and logs the boolean result.
  */
 
+import { groupTicketCode } from '@utils/ticketCode.util';
+
 const KESHLESS_API_URL = process.env['KESHLESS_API_URL'] || 'http://localhost:3000/api';
 const KESHLESS_API_KEY = process.env['KESHLESS_API_KEY'] || '';
 
@@ -92,11 +94,11 @@ export class SmsService {
     if (tickets.length === 1) {
       body =
         `🎫 ${first.eventName} ticket confirmed!\n` +
-        `Code: ${first.ticketId}\n` +
+        `Code: ${groupTicketCode(first.ticketId)}\n` +
         `${dateShort} • ${first.venue}\n` +
         `Show this code at entry.`;
     } else {
-      const codes = tickets.map((t) => t.ticketId).join('\n');
+      const codes = tickets.map((t) => groupTicketCode(t.ticketId)).join('\n');
       const candidate =
         `🎫 ${tickets.length} ${first.eventName} tickets confirmed!\n` +
         `${codes}\n` +
