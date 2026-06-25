@@ -845,7 +845,8 @@ export class TicketsController {
         vendorId: ticketsUser.vendorId as string,
         eventId: value.eventId,
         startDate: value.startDate,
-        endDate: value.endDate
+        endDate: value.endDate,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false
       });
 
       ApiResponseUtil.success(res, stats);
