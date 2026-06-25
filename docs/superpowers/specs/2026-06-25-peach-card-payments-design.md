@@ -31,14 +31,33 @@ The embedded-widget UX is therefore replaced by a redirect UX. The backend gains
 **webhook decryption** (AES-128-GCM). The MoMo-style lifecycle (PENDING sale → reserve
 inventory → verify → idempotent mint) is unchanged.
 
-### Outstanding credential blocker
+### Outstanding blocker — Peach entity NOT activated (confirmed)
 
-With `userId` == `password's account` == `entityId` as supplied (Username given identical to
-Entity ID), all brands — including Peach's `MOCK` test brand — return `800.900.300 invalid
-authentication` at processing time. Resolution required from the merchant: the real Username
-(expected to differ from the Entity ID) and/or a regenerated Password. Implementation can be
-built and unit-tested (PeachClient mocked) before this is resolved; only the live charge +
-deploy are gated on it.
+Resolved the credential mix-up (real Username `b838cf5…` ≠ Entity ID). With the **correct**
+dashboard credentials (userId=Username, password=Password, entityId=Entity ID), `POST /payments`
+**still** returns `800.900.300 invalid authentication` for every brand — including Peach's `MOCK`
+test brand — on **both** `api-v2` (live) and `testapi-v2` (sandbox). Because the request format
+is verified correct (param validation passes) and the values match the dashboard, this is a
+**Peach-side account/entity activation** issue, not a code or credential problem. Matches the
+merchant's note that they are "waiting for activation."
+
+**Action required (merchant):** contact Peach support to activate the entity for processing, and
+confirm whether to transact on live (`api-v2`) or sandbox (`testapi-v2`) first. Implementation can
+be fully built + unit-tested (PeachClient mocked) now; only the live charge + deploy-enable are
+gated on activation.
+
+### Confirmed API contract (verified by probing prod 2026-06-25)
+
+- **Create:** `POST https://api-v2.peachpayments.com/payments`, JSON body
+  `{ authentication:{ userId, password, entityId }, amount, currency, paymentType:"DB",
+  paymentBrand:"CARD", merchantTransactionId, nonce, shopperResultUrl }`. All three auth fields
+  required. Success → `result.code = 000.200.000` + `redirect:{ url, method, parameters }`.
+- **Status:** `GET https://api-v2.peachpayments.com/payments/{id}` with auth as **query params**:
+  `?authentication.userId=…&authentication.password=…&authentication.entityId=…`. Returns
+  `{ result:{ code }, amount, currency, … }`.
+- **Refund (out of scope):** `POST /payments/{id}/` with `paymentType=RF`.
+- **Webhook:** encrypted AES-128-GCM body; key = the dashboard webhook secret (created when a
+  webhook URL is added — none added yet).
 
 ## Locked decisions
 
