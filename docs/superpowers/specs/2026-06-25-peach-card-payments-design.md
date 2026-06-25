@@ -1,8 +1,8 @@
 # Peach card payments for online ticket buyers — Design
 
 **Date:** 2026-06-25
-**Status:** Approved (brainstorming → spec)
-**Scope:** Add Visa/Mastercard card payments to the **online buyer checkout** of Carrot Tickets via Peach Payments **COPYandPAY** (OPPWA, `card.peachpayments.com/v1`).
+**Status:** Revised after live probing — integration target changed to **Peach Payments API v2** (hosted-redirect), see "Integration pivot" below.
+**Scope:** Add Visa/Mastercard card payments to the **online buyer checkout** of Carrot Tickets.
 
 ## Goal
 
@@ -12,137 +12,130 @@ methods, on the public website (`carrot-tickets-website` / `landing`). Card is a
 pattern** (initiate → external payment → verify status → mint tickets idempotently), **not**
 the synchronous `charge()` path used by cash/wallet.
 
+## Integration pivot (what live probing established 2026-06-25)
+
+The originally-approved design targeted OPPWA **COPYandPAY** (embedded widget on
+`card.peachpayments.com`, auth via a Bearer access token). Probing the merchant's actual
+credentials against Peach prod proved those credentials belong to a **different product**:
+
+- **Product:** Peach **Payments API v2**.
+- **Base URL:** `https://api-v2.peachpayments.com` (sandbox `https://testapi-v2.peachpayments.com`).
+- **Auth:** a JSON `authentication` object in the request body: `{ userId, password, entityId }`
+  (NOT a Bearer access token — that path is the Mobile SDK / COPYandPAY product, which this
+  merchant is not using).
+- **Card UX:** **hosted redirect**, not an embedded in-page widget. `POST /payments` returns a
+  `redirect` object; the buyer is sent to Peach's hosted card page and returns to
+  `shopperResultUrl`.
+
+The embedded-widget UX is therefore replaced by a redirect UX. The backend gains Peach
+**webhook decryption** (AES-128-GCM). The MoMo-style lifecycle (PENDING sale → reserve
+inventory → verify → idempotent mint) is unchanged.
+
+### Outstanding credential blocker
+
+With `userId` == `password's account` == `entityId` as supplied (Username given identical to
+Entity ID), all brands — including Peach's `MOCK` test brand — return `800.900.300 invalid
+authentication` at processing time. Resolution required from the merchant: the real Username
+(expected to differ from the Entity ID) and/or a regenerated Password. Implementation can be
+built and unit-tested (PeachClient mocked) before this is resolved; only the live charge +
+deploy are gated on it.
+
 ## Locked decisions
 
 | Decision | Choice |
 |---|---|
 | Surface | Online buyer checkout only (landing site `PurchaseModal`). No dashboard/POS card. |
-| Peach product | **COPYandPAY** (OPPWA), embedded payment widget. |
-| Environment | **Production** (`card.peachpayments.com`). Sandbox skipped — awaiting Peach sandbox activation. |
-| Currency | `ZAR`, sent 1:1 with the SZL price. Configurable via `CARD_CURRENCY` (default `ZAR`). Buyer still sees `E`. |
-| Payment type | `DB` (immediate debit). |
-| Refunds | Out of scope (purchase only). |
-| Webhook | In scope — optional Peach webhook receiver, in addition to redirect-based verification. |
+| Peach product | **Payments API v2** (`api-v2.peachpayments.com`), hosted-redirect card flow. |
+| Environment | **Production** (live charges permitted — no active buyers). |
+| Currency | `ZAR`, sent 1:1 with the SZL price. Configurable via `CARD_CURRENCY` (default `ZAR`). Buyer sees `E`. |
+| Payment type | `DB` (immediate debit), `paymentBrand=CARD`. No preauth, no refunds in this plan. |
+| Finalisation | Encrypted webhook (primary) + transaction-status check on return to `shopperResultUrl` (secondary). Both idempotent. |
 
-## Peach COPYandPAY flow (production)
+## Confirmed Payments API v2 card flow
 
-1. **Prepare checkout (server):** `POST https://card.peachpayments.com/v1/checkouts`
-   form-encoded body: `entityId`, `amount`, `currency`, `paymentType=DB`, `integrity=true`;
-   header `Authorization: Bearer <access_token>`. Response → `{ id (checkoutId), integrity }`.
-2. **Render widget (frontend):** load
-   `https://card.peachpayments.com/v1/paymentWidgets.js?checkoutId={id}` (with `integrity`),
-   render `<form class="paymentWidgets" action="{CARD_RESULT_URL}?ref={checkoutId}" data-brands="VISA MASTER">`.
-3. **Redirect:** after the buyer pays, Peach redirects the page to
-   `{CARD_RESULT_URL}?ref={checkoutId}&resourcePath=/v1/checkouts/{id}/payment`.
-4. **Get status (server):** `GET https://card.peachpayments.com/v1/checkouts/{id}/payment?entityId=…`
-   header `Authorization: Bearer <access_token>`. Inspect `result.code`:
-   - **Success:** `/^(000\.000\.|000\.100\.1|000\.[36]|000\.400\.000)/`
-   - **Pending:** `/^(000\.200)/`
-   - Anything else → rejected.
+1. **Create payment (server):** `POST https://api-v2.peachpayments.com/payments`, JSON body:
+   - `authentication: { userId, password, entityId }`
+   - `amount` (string, 2dp), `currency` (`ZAR`), `paymentType: "DB"`, `paymentBrand: "CARD"`
+   - `merchantTransactionId` (our `saleId`), `nonce` (idempotency key), `shopperResultUrl`
+   - Response: `result.code = 000.200.000` (pending) + `redirect: { url, method, parameters }`.
+2. **Redirect buyer:** frontend sends the buyer to `redirect.url`. If `method` is `GET`, append
+   `parameters` as query string; if `POST`, auto-submit a form with `parameters` as hidden
+   `x-www-form-urlencoded` fields.
+3. **Return:** Peach redirects the buyer back to `shopperResultUrl` (our `/payment-result`).
+4. **Verify (server):** transaction-status request (exact path from the Peach Postman
+   collection; to be pinned during implementation) → `result.code`. Success = `000.000.000`;
+   pending = `000.200.*`; otherwise failed.
+5. **Webhook (server):** Peach POSTs an **encrypted** body (AES-128-GCM; IV + authTag in
+   headers; key = the dashboard webhook secret). Decrypt → payload includes `id`,
+   `merchantTransactionId`, `amount`, `currency`, `result.code`. Always 200 to Peach. Idempotent.
 
-### Authentication (one open detail — resolved by a spike, not by guessing)
-
-Peach docs state the Bearer access token is "retrieved from the Dashboard", but the provided
-credentials are `entityId` + `username` + `password` (where `username == entityId`). Working
-hypothesis: a token exchange yields a short-lived Bearer token (username → clientId, password →
-secret). `PeachClient.getAccessToken()` encapsulates this and caches the token to its expiry.
-
-**Implementation step 1 is a one-call auth spike** against production to confirm the exact
-request shape (token-exchange endpoint + body, vs. a static dashboard token, vs. Basic auth)
-before anything else is built. The uncertainty is isolated to this single method; the rest of
-the design is unaffected by how the token is obtained.
+### Result-code classification
+- Success: `000.000.000` (and the `000.000.*`/`000.100.1*` family).
+- Pending: `000.200.*`.
+- Else: failed.
 
 ## Backend changes (`carrot-tickets-api`)
 
-1. **Enum** — add `PaymentMethod.CARD = 'card'` to `src/interfaces/ticket.interface.ts`.
-2. **Peach client** — new `src/services/payments/peach.client.ts`:
-   - `isConfigured()` → `CARD_PAYMENTS_ENABLED === 'true'` && `PEACH_ENTITY_ID` && `PEACH_PASSWORD`.
-   - `getAccessToken()` → token exchange + in-memory cache to expiry (see auth note).
-   - `prepareCheckout({ amount, currency, merchantTransactionId })` → `{ checkoutId, integrity }`.
-   - `getPaymentStatus(checkoutId)` → `{ code, amount, currency, raw }`.
-   - Result-code regexes (success/pending) as module constants.
-   - Fail loudly on every Peach error (no silent fallback).
-3. **CardProcessor** — `src/services/payments/card.processor.ts`, registered in `payments/index.ts`.
-   Mirrors `MtnMomoProcessor`: `charge()` **throws** so the synchronous `sellTickets` path can
-   never mint a card sale without confirmed payment.
-4. **TicketSale model** — add `peachCheckoutId` (indexed), mirroring `momoReferenceId`.
-5. **TicketService** — two new methods mirroring the MoMo pair:
-   - `initiateCardPurchase(params)` → check availability; create **PENDING** sale (electronic ⇒
-     `fundsCustody: 'carrot'`, economic snapshot via the existing `buildSaleSnapshot` DRY helper);
-     reserve inventory (`ReservationService.reserve`, MoMo TTL); `prepareCheckout`; store
-     `peachCheckoutId`; return `{ checkoutId, integrity, saleId, expiresAt }`. On Peach failure:
-     release reservation + mark sale FAILED + rethrow.
-   - `finalizeCardSale(checkoutId)` → **idempotent**: non-PENDING returns current status;
-     `getPaymentStatus`; pending → pending; rejected → release + fail; success → **assert returned
-     `amount` and `currency` exactly equal the sale's** (same guard as `finalizeMomoSale`) →
-     atomic `findOneAndUpdate({ _id, paymentStatus: PENDING })` claim → mint tickets via
-     `buildTicket` → confirm reservation (reserved→sold) → `EventService.updateTicketsSold` →
-     best-effort SMS.
-6. **Config toggle** — add `cardEnabled` to `PaymentMethodConfig` model, `PaymentConfigService`
-   DEFAULTS, and both `get`/`update` mappers (default `false`).
-7. **Public payment-methods endpoint** — `getPaymentMethods` pushes `'card'` when
-   `cfg.cardEnabled && PeachClient.isConfigured()` (mirrors the MoMo env-gate).
-8. **Routes** (`src/routes/public.route.ts`):
-   - `POST /api/public/purchase/card` (buyer-auth) → `PublicController.initiateCardPurchase`.
-     Buyer phone comes from the token, never the body (as MoMo does).
-   - `GET /api/public/purchase/card/:checkoutId/status` (buyer-auth) → `PublicController.getCardStatus`
-     (ownership-checked, like `getMomoStatus`) → `finalizeCardSale`.
-   - `POST /api/public/purchase/card/webhook` (unauthenticated) → `CardController.webhook` →
-     `finalizeCardSale(checkoutId from payload)`; always returns 200 (no retry-storm), mirrors the
-     MoMo callback. Safe alongside polling because finalize is idempotent.
-9. **Env** (`api/.env.example`, **additive**):
-   ```
-   # Peach Payments (card via COPYandPAY)
-   CARD_PAYMENTS_ENABLED=false
-   PEACH_BASE_URL=https://card.peachpayments.com
-   PEACH_ENTITY_ID=
-   PEACH_USERNAME=
-   PEACH_PASSWORD=
-   CARD_CURRENCY=ZAR
-   CARD_RESULT_URL=          # landing origin + /payment-result
-   ```
-   `PEACH_PASSWORD` (and possibly `PEACH_ENTITY_ID`) bind as **Secret Manager** secrets on the
-   Cloud Run service, added **additively** (`--update-secrets`), never replacing existing bindings.
+1. **Enum** — add `PaymentMethod.CARD = 'card'`.
+2. **Peach client** — `src/services/payments/peach.client.ts`:
+   - `isConfigured()` → `CARD_PAYMENTS_ENABLED==='true'` && `PEACH_ENTITY_ID` && `PEACH_USER_ID` && `PEACH_PASSWORD`.
+   - `createPayment({ amount, currency, merchantTransactionId, shopperResultUrl, nonce })` →
+     `{ id, redirect: { url, method, parameters }, code }`.
+   - `getPaymentStatus(id)` → `{ code, amount?, currency?, raw }`.
+   - `decryptWebhook({ body, iv, authTag })` → parsed JSON payload (AES-128-GCM, key from `PEACH_WEBHOOK_SECRET`).
+   - `classifyResultCode(code)` → `'success' | 'pending' | 'rejected'`.
+   - Fail loudly on every Peach error.
+3. **CardProcessor** — registered in `payments/index.ts`; `charge()` throws (async-only), mirroring `MtnMomoProcessor`.
+4. **TicketSale model** — add `peachPaymentId` (indexed; the Peach transaction `id`). Keep
+   `merchantTransactionId` == existing `saleId`.
+5. **TicketService**:
+   - `initiateCardPurchase(params)` → PENDING sale (electronic ⇒ `fundsCustody:'carrot'`,
+     snapshot via `buildSaleSnapshot`), reserve inventory, `createPayment`, store `peachPaymentId`,
+     return `{ paymentId, redirect, saleId, expiresAt }`. On failure: release + fail + rethrow.
+   - `finalizeCardSale(peachPaymentId)` → idempotent: non-PENDING returns current; `getPaymentStatus`;
+     pending→pending; rejected→release+fail; success→assert `amount`+`currency` exactly equal the
+     sale's → atomic claim → mint via `buildTicket` → confirm reservation → update sold → best-effort SMS.
+   - `getCardSaleByPaymentId(id)`.
+6. **Config toggle** — `cardEnabled` on `PaymentMethodConfig` + `PaymentConfigService` (default false).
+7. **Public surface**:
+   - `getPaymentMethods` adds `'card'` when `cfg.cardEnabled && new PeachClient().isConfigured()`.
+   - `POST /api/public/purchase/card` (buyer-auth) → `{ paymentId, redirect, saleId }`.
+   - `GET /api/public/purchase/card/:paymentId/status` (buyer-auth, ownership-checked) → `{ status }`.
+   - `POST /api/public/purchase/card/webhook` (unauth) → decrypt → `finalizeCardSale` → always 200.
+8. **Env** (`.env.example`, additive): `CARD_PAYMENTS_ENABLED`, `PEACH_BASE_URL=https://api-v2.peachpayments.com`,
+   `PEACH_ENTITY_ID`, `PEACH_USER_ID`, `PEACH_PASSWORD`, `PEACH_WEBHOOK_SECRET`, `CARD_CURRENCY=ZAR`, `CARD_RESULT_URL`.
+   Secrets (`PEACH_PASSWORD`, `PEACH_WEBHOOK_SECRET`, `PEACH_USER_ID`, `PEACH_ENTITY_ID`) bind on Cloud Run additively.
 
 ## Frontend changes (`carrot-tickets-website` / `landing`)
 
-1. **types** (`src/types/index.ts`) — `PaymentMethodId` += `'card'`; add `CardInitiateResponse
-   { checkoutId, integrity, saleId }`.
-2. **api** (`src/services/api.ts`) — `initiateCardPayment(...)` (POST card), `checkCardPaymentStatus(checkoutId)` (GET status).
-3. **PurchaseModal** — add a **Card (Visa/Mastercard)** method (CreditCard icon) and a new
-   `'card_widget'` state. On "Pay with card": call `initiateCardPayment` → inject the Peach
-   `paymentWidgets.js?checkoutId=…` script (with `integrity`) and render the
-   `<form class="paymentWidgets" action="{CARD_RESULT_URL}?ref={checkoutId}" data-brands="VISA MASTER">`.
-4. **PaymentResultPage** — new page + route `/payment-result` (registered in `App.tsx`). On mount:
-   parse `ref` / `resourcePath` → checkoutId → call `checkCardPaymentStatus` (buyer token persists
-   in `localStorage` across the redirect) → poll briefly while pending → show success (→ My Tickets)
-   or failure (→ retry / back to event).
-5. **Widget config** — `VITE_*` for the Peach widget base URL (prod) and `CARD_RESULT_URL`.
+1. **types** — `PaymentMethodId` += `'card'`; `CardInitiateResponse { paymentId; redirect: { url; method; parameters }; saleId }`.
+2. **api** — `initiateCardPayment(...)`, `checkCardPaymentStatus(paymentId)`.
+3. **PurchaseModal** — add a **Card (Visa/Mastercard)** method. On pay: `initiateCardPayment` →
+   perform the redirect (GET → `window.location`; POST → auto-submit a hidden-field form to `redirect.url`).
+4. **PaymentResultPage** (`/payment-result`) — read the returned id (`merchantTransactionId`/`id`
+   query param Peach appends, plus our own `ref`), call status, poll briefly, show success
+   (→ My Tickets) / failure.
 
-## Security / correctness (matches existing standards)
+## Security / correctness
 
-- Mint tickets **only** after server-side status verification with an **exact amount + currency
-  match** — never on the redirect alone.
-- Idempotent atomic claim prevents double-mint across poll + webhook.
-- Ownership-checked status endpoint; buyer phone always from the token.
-- Fail loudly on every provider error (global no-silent-fallback rule); SMS remains best-effort.
+- Mint only after server-side status (or decrypted-webhook) success **and** exact amount+currency match.
+- Idempotent atomic claim prevents double-mint across webhook + status poll.
+- Webhook body is encrypted; decrypt + verify before acting; always 200 to Peach.
+- Buyer phone always from the token; ownership-checked status endpoint.
+- No silent fallbacks; SMS best-effort.
 
 ## Testing
 
-Unit tests mirroring the MoMo suite (`src/services/__tests__`, `src/routes/__tests__`):
-`PeachClient` with mocked `fetch`, and `finalizeCardSale` covering: pending, rejected →
-release + fail, success → mint, amount/currency mismatch → fail, idempotent double-finalize.
+Unit tests (PeachClient with mocked fetch + a known-vector webhook-decrypt test; finalizeCardSale
+covering pending / rejected→release+fail / success→mint / amount-currency-mismatch→fail / idempotent).
 
 ## Out of scope
 
-Refunds, dashboard/POS card payments, Apple/Google Pay, saved-card tokens.
+Refunds, dashboard/POS card, Apple/Google Pay, tokenisation/saved cards.
 
-## Deployment notes
+## Deployment
 
-- `carrot-tickets-api` → Cloud Run (`europe-west1`), env managed **on the service**; add Peach
-  secrets/env additively. Deploy via `gcloud builds triggers run` (per project convention).
+- `carrot-tickets-api` → Cloud Run (`europe-west1`), env on the service, Peach secrets added additively.
 - `carrot-tickets-website` → Cloudflare Pages (contracts CF account), prod branch `main`.
-- Live testing against production is permitted (no active buyers). Sequence: run the auth spike →
-  do one real live card charge end-to-end → then enable card in prod (`CARD_PAYMENTS_ENABLED=true`
-  + `cardEnabled=true`). The spike-first order stands only so we don't build on a wrong auth shape,
-  not as a prod-safety gate.
+- Sequence once credentials work: deploy → one live card charge end-to-end → enable card
+  (`CARD_PAYMENTS_ENABLED=true` + `cardEnabled=true`).

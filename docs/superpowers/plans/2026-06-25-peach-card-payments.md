@@ -1,5 +1,14 @@
 # Peach Card Payments Implementation Plan
 
+> ⚠️ **SUPERSEDED (2026-06-25).** This plan targets OPPWA COPYandPAY (embedded widget,
+> `card.peachpayments.com`, Bearer access token). Live probing proved the merchant's
+> credentials are for **Peach Payments API v2** (`api-v2.peachpayments.com`, body-auth,
+> hosted-redirect) — see the revised spec `2026-06-25-peach-card-payments-design.md`. This
+> plan will be rewritten to the redirect flow once working credentials allow one successful
+> `POST /payments` call (needed to observe the real `redirect` object shape and pin the
+> transaction-status endpoint). Task 1 (auth spike) is DONE and recorded the pivot. Do not
+> execute Tasks 2+ as written.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add Visa/Mastercard card payments to the Carrot Tickets online buyer checkout via Peach Payments COPYandPAY.
