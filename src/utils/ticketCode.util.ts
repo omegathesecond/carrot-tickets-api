@@ -13,7 +13,12 @@ export function generateTicketCode(): string {
   return out;
 }
 
-/** Canonicalize user/QR input: uppercase, drop everything outside the alphabet set. */
+/**
+ * Canonicalize input for lookup: uppercase and strip separators (spaces,
+ * dashes, and other non-alphanumerics). This is normalization for matching,
+ * NOT validation — an unknown/mistyped code simply fails to match and is
+ * surfaced loudly to the operator (we never silently remap ambiguous chars).
+ */
 export function normalizeTicketCode(input: string): string {
   return (input || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
