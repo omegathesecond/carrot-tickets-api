@@ -35,3 +35,17 @@ it('rejects an unknown login code', async () => {
   const res = await request(app).post('/api/operator/login').send({ loginCode: '999999', pin: '000000' });
   expect(res.status).toBe(401);
 });
+
+it('rejects NoSQL injection: both loginCode and pin are operator objects', async () => {
+  const res = await request(app)
+    .post('/api/operator/login')
+    .send({ loginCode: { $ne: null }, pin: { $ne: null } });
+  expect(res.status).toBe(400);
+});
+
+it('rejects NoSQL injection: object loginCode with string pin', async () => {
+  const res = await request(app)
+    .post('/api/operator/login')
+    .send({ loginCode: { $ne: null }, pin: '123456' });
+  expect(res.status).toBe(400);
+});

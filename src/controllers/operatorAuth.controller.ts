@@ -11,6 +11,10 @@ export class OperatorAuthController {
   static async login(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { loginCode, pin } = req.body || {};
+      if (typeof loginCode !== 'string' || typeof pin !== 'string') {
+        ApiResponseUtil.badRequest(res, 'loginCode and pin must be strings');
+        return;
+      }
       if (!loginCode || !pin) { ApiResponseUtil.badRequest(res, 'loginCode and pin are required'); return; }
 
       const [reseller, gate] = await Promise.all([

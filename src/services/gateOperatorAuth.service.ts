@@ -10,6 +10,9 @@ const LOCK_MINUTES = 15;
 
 export class GateOperatorAuthService {
   static async login(loginCode: string, pin: string) {
+    if (typeof loginCode !== 'string' || typeof pin !== 'string') {
+      throw new Error('Invalid credentials');
+    }
     const operator = await GateOperator.findOne({ loginCode, isActive: true }).select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
