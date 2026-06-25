@@ -1,5 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 import { ITicket, TicketStatus } from '@interfaces/ticket.interface';
+import { generateTicketCode } from '@utils/ticketCode.util';
 
 const ticketSchema = new Schema<ITicket>({
   // Ticket Identification
@@ -78,12 +79,16 @@ const ticketSchema = new Schema<ITicket>({
   timestamps: true
 });
 
-// Pre-save hook to generate ticketId
-ticketSchema.pre('save', function(next) {
+// Pre-save hook to generate a short, unambiguous ticketId (generate-and-check).
+ticketSchema.pre('save', async function (next) {
   if (this.isNew && !this.ticketId) {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    this.ticketId = `TKT-${timestamp}-${random}`;
+    const model = this.constructor as mongoose.Model<ITicket>;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = generateTicketCode();
+      const exists = await model.exists({ ticketId: candidate });
+      if (!exists) { this.ticketId = candidate; return next(); }
+    }
+    return next(new Error('Could not generate a unique ticket code'));
   }
   next();
 });
