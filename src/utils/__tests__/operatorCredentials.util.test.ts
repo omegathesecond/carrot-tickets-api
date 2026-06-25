@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { ResellerOperator } from '@models/resellerOperator.model';
+import { GateOperator } from '@models/gateOperator.model';
 import { generatePin, generateUniqueLoginCode } from '@utils/operatorCredentials.util';
 
 beforeAll(connectTestDb);
@@ -30,4 +31,10 @@ it('generateUniqueLoginCode retries when a code already exists', async () => {
   const code = await generateUniqueLoginCode();
   expect(spy).toHaveBeenCalledTimes(2);
   expect(code).toBe('550000'); // first (100000) collides, retry returns 550000
+});
+
+it('generateUniqueLoginCode avoids codes taken by a gate operator', async () => {
+  await GateOperator.collection.insertOne({ loginCode: '100000', fullName: 'g', scope: 'platform', isActive: true } as any);
+  const code = await generateUniqueLoginCode();
+  expect(code).not.toBe('100000');
 });
