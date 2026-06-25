@@ -11,6 +11,9 @@ export interface ValidateTicketParams {
   scannedBy: string;
   scannedByType: 'vendor' | 'sub-user' | 'gate-operator';
   isSuperAdmin?: boolean;
+  // When set, the ticket must belong to this event or it is rejected as
+  // "wrong event". Lets a gate operator lock scanning to a single show.
+  expectedEventId?: string;
 }
 
 export interface CheckInTicketParams {
@@ -20,7 +23,15 @@ export interface CheckInTicketParams {
   scannedByType: 'vendor' | 'sub-user' | 'gate-operator';
   isSuperAdmin?: boolean;
   notes?: string;
+  expectedEventId?: string;
 }
+
+/** Extract a ticket's event id as a string, whether eventId is populated or raw. */
+const eventIdOf = (ticket: any): string | undefined => {
+  const e = ticket?.eventId;
+  if (!e) return undefined;
+  return (e._id ? e._id.toString() : e.toString());
+};
 
 export interface GetScansQuery {
   vendorId: string;
@@ -61,7 +72,7 @@ export class ScanService {
    */
   static async validateTicket(params: ValidateTicketParams): Promise<ScanResult> {
     try {
-      const { ticketId, vendorId } = params;
+      const { ticketId, vendorId, expectedEventId } = params;
 
       const ticket = await findTicketByCode(ticketId);
       if (ticket) await ticket.populate('eventId');
@@ -79,6 +90,17 @@ export class ScanService {
 
       if (!params.isSuperAdmin && ticket.vendorId.toString() !== vendorId) {
         return { valid: false, ticket, event, ticketType, message: 'Ticket belongs to different vendor' };
+      }
+
+      // Gate guard: reject tickets for a different show than the one selected.
+      if (expectedEventId && eventIdOf(ticket) !== expectedEventId) {
+        return {
+          valid: false,
+          ticket,
+          event,
+          ticketType,
+          message: `Wrong event — this ticket is for ${(event as any)?.name || 'another event'}`
+        };
       }
 
       if (ticket.status === TicketStatus.REFUNDED) {
@@ -135,7 +157,7 @@ export class ScanService {
     }
 
     try {
-      const { ticketId, vendorId, scannedBy, scannedByType, notes } = params;
+      const { ticketId, vendorId, scannedBy, scannedByType, notes, expectedEventId } = params;
 
       // Find ticket
       const ticket = await findTicketByCode(ticketId, session ?? undefined);
@@ -190,6 +212,30 @@ export class ScanService {
           ticket,
           scan,
           message: 'Ticket belongs to different vendor'
+        };
+      }
+
+      // Gate guard: reject (and record) tickets for a different show.
+      if (expectedEventId && eventIdOf(ticket) !== expectedEventId) {
+        if (session) { await session.abortTransaction(); session.endSession(); }
+
+        const scan = await this.createScanRecord({
+          ticketId: ticket._id,
+          eventId: ticket.eventId,
+          vendorId: scanVendorId,
+          scannedBy,
+          scannedByType,
+          isValid: false,
+          scanResult: 'wrong_event',
+          notes
+        });
+
+        const evName = (ticket.eventId as any)?.name;
+        return {
+          valid: false,
+          ticket,
+          scan,
+          message: `Wrong event — this ticket is for ${evName || 'another event'}`
         };
       }
 

@@ -746,6 +746,7 @@ export class TicketsController {
         scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
         scannedByType,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        expectedEventId: value.expectedEventId,
       });
 
       if (result.valid) {
@@ -784,7 +785,8 @@ export class TicketsController {
         scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
         scannedByType,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
-        notes: value.notes
+        notes: value.notes,
+        expectedEventId: value.expectedEventId
       });
 
       if (result.valid) {
