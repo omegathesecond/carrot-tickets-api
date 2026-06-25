@@ -735,11 +735,17 @@ export class TicketsController {
         return;
       }
 
+      const scannedByType =
+        ticketsUser.userType === 'vendor' ? 'vendor'
+        : ticketsUser.userType === 'gate-operator' ? 'gate-operator'
+        : 'sub-user';
+
       const result = await ScanService.validateTicket({
         ticketId: value.ticketId,
         vendorId: ticketsUser.vendorId as string,
         scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
-        scannedByType: ticketsUser.userType === 'vendor' ? 'vendor' : 'sub-user'
+        scannedByType,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
       });
 
       if (result.valid) {
@@ -767,11 +773,17 @@ export class TicketsController {
         return;
       }
 
+      const scannedByType =
+        ticketsUser.userType === 'vendor' ? 'vendor'
+        : ticketsUser.userType === 'gate-operator' ? 'gate-operator'
+        : 'sub-user';
+
       const result = await ScanService.checkInTicket({
         ticketId: value.ticketId,
         vendorId: ticketsUser.vendorId as string,
         scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
-        scannedByType: ticketsUser.userType === 'vendor' ? 'vendor' : 'sub-user',
+        scannedByType,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         notes: value.notes
       });
 

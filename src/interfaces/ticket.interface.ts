@@ -128,7 +128,7 @@ export interface ITicketScan extends Document {
 
   // Scanner Info
   scannedBy: Types.ObjectId;
-  scannedByType: 'vendor' | 'sub_user';
+  scannedByType: 'Vendor' | 'VendorSubUser' | 'GateOperator';
 
   // Scan Result
   isValid: boolean;

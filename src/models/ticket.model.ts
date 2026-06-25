@@ -73,7 +73,7 @@ const ticketSchema = new Schema<ITicket>({
   },
   checkedInByModel: {
     type: String,
-    enum: ['Vendor', 'VendorSubUser']
+    enum: ['Vendor', 'VendorSubUser', 'GateOperator']
   }
 }, {
   timestamps: true

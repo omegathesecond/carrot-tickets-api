@@ -31,7 +31,7 @@ const ticketScanSchema = new Schema<ITicketScan>({
   scannedByType: {
     type: String,
     required: true,
-    enum: ['Vendor', 'VendorSubUser']
+    enum: ['Vendor', 'VendorSubUser', 'GateOperator']
   },
 
   // Scan Result

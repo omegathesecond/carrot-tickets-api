@@ -9,14 +9,16 @@ export interface ValidateTicketParams {
   ticketId: string;
   vendorId: string;
   scannedBy: string;
-  scannedByType: 'vendor' | 'sub-user';
+  scannedByType: 'vendor' | 'sub-user' | 'gate-operator';
+  isSuperAdmin?: boolean;
 }
 
 export interface CheckInTicketParams {
   ticketId: string;
   vendorId: string;
   scannedBy: string;
-  scannedByType: 'vendor' | 'sub-user';
+  scannedByType: 'vendor' | 'sub-user' | 'gate-operator';
+  isSuperAdmin?: boolean;
   notes?: string;
 }
 
@@ -41,6 +43,12 @@ export interface ScanResult {
   scan?: ITicketScan;
   message: string;
 }
+
+const SCANNER_MODEL: Record<'vendor' | 'sub-user' | 'gate-operator', string> = {
+  vendor: 'Vendor',
+  'sub-user': 'VendorSubUser',
+  'gate-operator': 'GateOperator',
+};
 
 export class ScanService {
   /**
@@ -69,7 +77,7 @@ export class ScanService {
         (tt: any) => tt.name === ticket.ticketType
       );
 
-      if (ticket.vendorId.toString() !== vendorId) {
+      if (!params.isSuperAdmin && ticket.vendorId.toString() !== vendorId) {
         return { valid: false, ticket, event, ticketType, message: 'Ticket belongs to different vendor' };
       }
 
@@ -108,31 +116,48 @@ export class ScanService {
    * Check-in ticket (mark as used)
    */
   static async checkInTicket(params: CheckInTicketParams): Promise<ScanResult> {
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    return this._checkInTicketWithSession(params, true);
+  }
+
+  private static async _checkInTicketWithSession(
+    params: CheckInTicketParams,
+    useTransaction: boolean
+  ): Promise<ScanResult> {
+    let session: mongoose.ClientSession | null = null;
+
+    if (useTransaction) {
+      try {
+        session = await mongoose.startSession();
+        session.startTransaction();
+      } catch {
+        session = null;
+      }
+    }
 
     try {
       const { ticketId, vendorId, scannedBy, scannedByType, notes } = params;
 
       // Find ticket
-      const ticket = await findTicketByCode(ticketId, session);
+      const ticket = await findTicketByCode(ticketId, session ?? undefined);
       if (ticket) await ticket.populate('eventId');
 
       // Validate ticket existence
       if (!ticket) {
-        await session.abortTransaction();
-        session.endSession();
+        if (session) { await session.abortTransaction(); session.endSession(); }
 
-        const scan = await this.createScanRecord({
-          ticketId: undefined,
-          eventId: undefined,
-          vendorId,
-          scannedBy,
-          scannedByType,
-          isValid: false,
-          scanResult: 'invalid_ticket',
-          notes
-        });
+        let scan;
+        if (vendorId) {
+          scan = await this.createScanRecord({
+            ticketId: undefined,
+            eventId: undefined,
+            vendorId,
+            scannedBy,
+            scannedByType,
+            isValid: false,
+            scanResult: 'invalid_ticket',
+            notes
+          });
+        }
 
         return {
           valid: false,
@@ -141,10 +166,13 @@ export class ScanService {
         };
       }
 
+      // Resolve the effective vendorId for scan attribution: super-admins have no
+      // single vendor, so stamp from the ticket's organizer for history/stats.
+      const scanVendorId = params.isSuperAdmin && ticket ? ticket.vendorId.toString() : vendorId;
+
       // Check vendor ownership
-      if (ticket.vendorId.toString() !== vendorId) {
-        await session.abortTransaction();
-        session.endSession();
+      if (!params.isSuperAdmin && ticket.vendorId.toString() !== vendorId) {
+        if (session) { await session.abortTransaction(); session.endSession(); }
 
         const scan = await this.createScanRecord({
           ticketId: ticket._id,
@@ -167,13 +195,12 @@ export class ScanService {
 
       // Check if ticket is cancelled/refunded
       if (ticket.status === TicketStatus.REFUNDED) {
-        await session.abortTransaction();
-        session.endSession();
+        if (session) { await session.abortTransaction(); session.endSession(); }
 
         const scan = await this.createScanRecord({
           ticketId: ticket._id,
           eventId: ticket.eventId,
-          vendorId,
+          vendorId: scanVendorId,
           scannedBy,
           scannedByType,
           isValid: false,
@@ -191,13 +218,12 @@ export class ScanService {
 
       // Check if already checked in
       if (ticket.status === TicketStatus.CHECKED_IN) {
-        await session.abortTransaction();
-        session.endSession();
+        if (session) { await session.abortTransaction(); session.endSession(); }
 
         const scan = await this.createScanRecord({
           ticketId: ticket._id,
           eventId: ticket.eventId,
-          vendorId,
+          vendorId: scanVendorId,
           scannedBy,
           scannedByType,
           isValid: false,
@@ -215,13 +241,12 @@ export class ScanService {
 
       // Check if ticket is sold
       if (ticket.status !== TicketStatus.SOLD) {
-        await session.abortTransaction();
-        session.endSession();
+        if (session) { await session.abortTransaction(); session.endSession(); }
 
         const scan = await this.createScanRecord({
           ticketId: ticket._id,
           eventId: ticket.eventId,
-          vendorId,
+          vendorId: scanVendorId,
           scannedBy,
           scannedByType,
           isValid: false,
@@ -241,14 +266,14 @@ export class ScanService {
       ticket.status = TicketStatus.CHECKED_IN;
       ticket.checkedInAt = new Date();
       ticket.checkedInBy = scannedBy as any;
-      ticket.checkedInByModel = scannedByType === 'vendor' ? 'Vendor' : 'VendorSubUser';
-      await ticket.save({ session });
+      ticket.checkedInByModel = SCANNER_MODEL[scannedByType];
+      await ticket.save(session ? { session } : undefined);
 
       // Create success scan record
       const scan = await this.createScanRecord({
         ticketId: ticket._id,
         eventId: ticket.eventId,
-        vendorId,
+        vendorId: scanVendorId,
         scannedBy,
         scannedByType,
         isValid: true,
@@ -256,8 +281,7 @@ export class ScanService {
         notes
       });
 
-      await session.commitTransaction();
-      session.endSession();
+      if (session) { await session.commitTransaction(); session.endSession(); }
 
       return {
         valid: true,
@@ -266,8 +290,16 @@ export class ScanService {
         message: 'Ticket checked in successfully'
       };
     } catch (error: any) {
-      await session.abortTransaction();
-      session.endSession();
+      // On standalone MongoDB (test env) transactions aren't supported — retry without one.
+      if (
+        useTransaction &&
+        (error.message?.includes('Transaction numbers are only allowed on a replica set') ||
+          error.message?.includes('transactions are not supported'))
+      ) {
+        if (session) { try { await session.abortTransaction(); } catch { /* ignore */ } session.endSession(); }
+        return this._checkInTicketWithSession(params, false);
+      }
+      if (session) { await session.abortTransaction(); session.endSession(); }
       console.error('Check-in ticket error:', error);
       throw new Error(error.message || 'Failed to check in ticket');
     }
@@ -458,7 +490,7 @@ export class ScanService {
     eventId: any;
     vendorId: string;
     scannedBy: string;
-    scannedByType: 'vendor' | 'sub-user';
+    scannedByType: 'vendor' | 'sub-user' | 'gate-operator';
     isValid: boolean;
     scanResult: 'success' | 'already_scanned' | 'invalid_ticket' | 'wrong_event' | 'cancelled';
     notes?: string;
@@ -466,7 +498,7 @@ export class ScanService {
     const scanData: any = {
       vendorId: params.vendorId,
       scannedBy: params.scannedBy,
-      scannedByType: params.scannedByType === 'vendor' ? 'Vendor' : 'VendorSubUser',
+      scannedByType: SCANNER_MODEL[params.scannedByType],
       isValid: params.isValid,
       scanResult: params.scanResult,
       notes: params.notes,
