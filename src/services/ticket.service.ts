@@ -922,6 +922,9 @@ export class TicketService {
   }): Promise<{ paymentId: string; redirect: any; saleId: string; expiresAt: Date }> {
     if (!this.peachClient.isConfigured()) throw new Error('Card payments are not available');
 
+    const cardCfg = await PaymentConfigService.get();
+    if (!cardCfg.cardEnabled) throw new Error('Card payments are not available');
+
     const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 

@@ -24,10 +24,17 @@ jest.mock('@services/payments/peach.client', () => ({
 }));
 
 import { TicketService } from '@services/ticket.service';
+import { PaymentConfigService } from '@services/paymentConfig.service';
 
 beforeAll(async () => {
   await connectTestDb();
   process.env['CARD_RESULT_URL'] = 'https://carrot.test/result';
+});
+
+beforeEach(async () => {
+  // cardEnabled must be true for initiate tests to pass the admin toggle check.
+  // Re-seeded each time because clearTestDb() wipes the config document.
+  await PaymentConfigService.update({ cardEnabled: true, platformFeePercent: 0 });
 });
 
 afterEach(async () => {
@@ -126,6 +133,21 @@ describe('initiateCardPurchase', () => {
     const updatedEvent = await Event.findById(eventId);
     const tt = updatedEvent!.ticketTypes[0]!;
     expect(tt.reserved).toBe(0); // released
+  });
+
+  it('throws when cardEnabled toggle is false', async () => {
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+    await PaymentConfigService.update({ cardEnabled: false });
+
+    await expect(
+      TicketService.initiateCardPurchase({
+        eventId,
+        ticketTypeId,
+        quantity: 1,
+        customerPhone: '+26878422613',
+      } as any),
+    ).rejects.toThrow('Card payments are not available');
+    // afterEach clears DB; beforeEach re-seeds cardEnabled:true for subsequent tests
   });
 
   it('getCardSaleByPaymentId returns the sale by peachPaymentId', async () => {
