@@ -29,6 +29,15 @@ export class PeachClient {
     return { id: data.id, code: data?.result?.code, redirect: data.redirect };
   }
   async getPaymentStatus(id: string) {
+    // SECURITY: Peach Payments API v2 mandates auth as query params on this GET
+    // endpoint (verified: GET /payments/{id} rejects with "Missing required request
+    // parameters: [authentication.userId,...]" and offers no header/body variant).
+    // Credentials therefore ride the query string. Invariants that keep this safe:
+    //   - HTTPS only (query encrypted in transit).
+    //   - The URL is NEVER logged and is NEVER interpolated into errors/telemetry
+    //     (the throw below uses only res.status + res.text(), not the URL). Keep it that way.
+    //   - Encrypted webhooks (decryptWebhook) are the preferred finalisation channel;
+    //     this call is the synchronous fallback when the buyer returns to the result page.
     const q = new URLSearchParams({ 'authentication.userId': this.userId, 'authentication.password': this.password, 'authentication.entityId': this.entityId });
     const res = await fetch(`${this.baseUrl}/payments/${encodeURIComponent(id)}?${q.toString()}`);
     if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`Peach getPaymentStatus failed: HTTP ${res.status} ${t}`); }
