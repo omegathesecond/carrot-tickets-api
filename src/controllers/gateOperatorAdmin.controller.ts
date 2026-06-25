@@ -13,7 +13,7 @@ function actorOf(req: Request) {
 function scopeFilter(req: Request): Record<string, unknown> {
   const actor = actorOf(req);
   if (actor.isSuperAdmin) return {};
-  return { vendorId: actor.vendorId };
+  return { scope: 'organizer', vendorId: actor.vendorId };
 }
 
 export class GateOperatorAdminController {
@@ -42,7 +42,7 @@ export class GateOperatorAdminController {
       }
 
       const loginCode = await generateUniqueLoginCode();
-      const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin) ? req.body.pin : generatePin();
+      const pin = generatePin();
       const operator = await GateOperator.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, loginCode, pin });
       ApiResponseUtil.created(res, { operator, loginCode, pin });
     } catch (err) { next(err); }
@@ -52,7 +52,7 @@ export class GateOperatorAdminController {
     try {
       const operator = await GateOperator.findOne({ _id: req.params['id'], ...scopeFilter(req) }).select('+pin');
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
-      const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin) ? req.body.pin : generatePin();
+      const pin = generatePin();
       operator.pin = pin;
       operator.failedPinAttempts = 0;
       operator.lockedUntil = null;
