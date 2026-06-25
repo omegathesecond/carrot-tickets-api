@@ -7,6 +7,7 @@ import {
 import { dualAuth } from '@middleware/serviceAuth.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
+import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 
 const router = Router();
 
@@ -246,5 +247,13 @@ router.get(
   requireTicketsPermission(TicketsPermission.EXPORT_REPORTS),
   TicketsController.exportEventSummary
 );
+
+/**
+ * Gate Operator Admin Routes
+ */
+router.get('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.list);
+router.post('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
+router.patch('/gate-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
+router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
 
 export default router;
