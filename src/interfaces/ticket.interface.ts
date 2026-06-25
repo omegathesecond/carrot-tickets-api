@@ -11,7 +11,8 @@ export enum TicketStatus {
 export enum PaymentMethod {
   CASH = 'cash',
   KESHLESS_WALLET = 'keshless_wallet',
-  MTN_MOMO = 'mtn_momo'
+  MTN_MOMO = 'mtn_momo',
+  CARD = 'card'
 }
 
 export enum PaymentStatus {
