@@ -7,12 +7,54 @@ export class MomoController {
    * Body contains referenceId/externalId. Always returns 200 so MTN doesn't retry-storm.
    */
   static async callback(req: Request, res: Response): Promise<any> {
-    const referenceId = (req.body?.referenceId) || (req.params as any)?.referenceId;
-    if (!referenceId) return res.status(400).json({ ok: false });
+    const receivedAt = new Date().toISOString();
+    // MTN's callback is fire-and-forget (we always 200), so this is the ONLY
+    // place we capture what MTN actually sent. Log the whole envelope verbosely.
+    console.log('[momo callback] ⇩ received', {
+      receivedAt,
+      method: req.method,
+      path: req.originalUrl,
+      ip: req.ip,
+      headers: {
+        'x-reference-id': req.get('X-Reference-Id'),
+        'x-callback-url': req.get('X-Callback-Url'),
+        'content-type': req.get('Content-Type'),
+        'user-agent': req.get('User-Agent'),
+      },
+      params: req.params,
+      query: req.query,
+      body: req.body,
+    });
+
+    const referenceId =
+      (req.body?.referenceId) ||
+      (req.params as any)?.referenceId ||
+      req.get('X-Reference-Id');
+    if (!referenceId) {
+      console.warn('[momo callback] ✗ no referenceId in body/params/headers — ignoring', {
+        receivedAt,
+        body: req.body,
+        params: req.params,
+      });
+      return res.status(400).json({ ok: false });
+    }
+
+    console.log('[momo callback] → finalizing sale', { referenceId, receivedAt });
     try {
-      await TicketService.finalizeMomoSale(referenceId);
+      const result = await TicketService.finalizeMomoSale(referenceId);
+      console.log('[momo callback] ✓ finalized', {
+        referenceId,
+        status: result.status,
+        receivedAt,
+        durationMs: Date.now() - Date.parse(receivedAt),
+      });
     } catch (e) {
-      console.error('[momo callback]', e);
+      console.error('[momo callback] ✗ finalize threw', {
+        referenceId,
+        receivedAt,
+        error: e instanceof Error ? e.message : e,
+        stack: e instanceof Error ? e.stack : undefined,
+      });
     }
     return res.status(200).json({ ok: true }); // always 200 so MTN doesn't retry-storm
   }

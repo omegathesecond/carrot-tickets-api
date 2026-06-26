@@ -65,9 +65,19 @@ export class MtnMomoClient {
         'Ocp-Apim-Subscription-Key': this.subKey,
       },
     });
-    if (!res.ok) throw new Error(`MoMo getStatus failed: HTTP ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error('[momo getStatus] ✗ HTTP error', { referenceId, httpStatus: res.status, body });
+      throw new Error(`MoMo getStatus failed: HTTP ${res.status}`);
+    }
     const data: any = await res.json();
     const status = data.status === 'SUCCESSFUL' ? 'SUCCESSFUL' : data.status === 'FAILED' ? 'FAILED' : 'PENDING';
+    // Authoritative MTN payload — the forensic record for disputes / amount guard.
+    console.log('[momo getStatus] ⇩ MTN response', {
+      referenceId,
+      status,
+      raw: data, // includes amount, currency, payer, financialTransactionId, reason
+    });
     return { status, raw: data };
   }
 }

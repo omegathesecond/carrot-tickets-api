@@ -1024,20 +1024,45 @@ export class TicketService {
    */
   static async finalizeMomoSale(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
     const sale = await TicketSale.findOne({ momoReferenceId: referenceId });
-    if (!sale) throw new Error('Sale not found for reference');
+    if (!sale) {
+      console.error('[momo finalize] ✗ no sale for reference', { referenceId });
+      throw new Error('Sale not found for reference');
+    }
+    console.log('[momo finalize] → sale found', {
+      referenceId,
+      saleId: sale._id.toString(),
+      paymentStatus: sale.paymentStatus,
+      totalAmount: sale.totalAmount,
+      quantity: sale.quantity,
+      customerPhone: sale.customerPhone,
+      eventId: sale.eventId?.toString(),
+    });
 
     // Already finalized — idempotent return
     if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      console.log('[momo finalize] ↩ already finalized (idempotent)', {
+        referenceId,
+        paymentStatus: sale.paymentStatus,
+      });
       return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
     }
 
     const { status, raw } = await this.momoClient.getStatus(referenceId);
-    if (status === 'PENDING') return { status: 'pending' };
+    console.log('[momo finalize] MTN status', { referenceId, status });
+    if (status === 'PENDING') {
+      console.log('[momo finalize] ↩ still PENDING — not minting yet', { referenceId });
+      return { status: 'pending' };
+    }
 
     const reservation = await TicketReservation.findOne({ saleId: sale._id });
     const ticketTypeId = reservation?.ticketTypeId;
 
     if (status === 'FAILED') {
+      console.warn('[momo finalize] ✗ MTN reports FAILED — releasing reservation', {
+        referenceId,
+        saleId: sale._id.toString(),
+        reason: raw?.reason,
+      });
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
       await sale.save();
@@ -1072,7 +1097,19 @@ export class TicketService {
       { $set: { paymentStatus: PaymentStatus.COMPLETED } },
       { new: true }
     );
-    if (!claimed) return { status: 'completed' }; // someone else already finalized it
+    if (!claimed) {
+      console.log('[momo finalize] ↩ claim lost — already finalized by concurrent poll/callback', {
+        referenceId,
+        saleId: sale._id.toString(),
+      });
+      return { status: 'completed' }; // someone else already finalized it
+    }
+    console.log('[momo finalize] ✓ claimed sale — minting tickets', {
+      referenceId,
+      saleId: sale._id.toString(),
+      quantity: sale.quantity,
+      financialTransactionId: raw?.financialTransactionId,
+    });
 
     // Mint tickets, convert reservation (reserved→sold), SMS
     const event = await Event.findById(sale.eventId);
@@ -1117,6 +1154,12 @@ export class TicketService {
       ).catch(err => console.error('[SMS] momo confirmation threw', err));
     }
 
+    console.log('[momo finalize] ✓ completed — tickets minted', {
+      referenceId,
+      saleId: sale._id.toString(),
+      ticketCount: tickets.length,
+      ticketIds: tickets.map(t => t.ticketId),
+    });
     return { status: 'completed' };
   }
 
