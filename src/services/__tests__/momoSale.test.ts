@@ -348,6 +348,35 @@ describe('TicketService.finalizeMomoSale', () => {
     expect(allTickets[0]!.customerPhone).toBe(rightPhone);
   });
 
+  it('getMomoSaleByExternalId resolves the sale + referenceId from MTN externalId (callback correlation)', async () => {
+    const { eventId, ticketTypeId } = await seedPublishedEvent();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_EXT' });
+
+    // initiate sets externalId = sale.saleId (the SALE-… string) and stores momoReferenceId
+    await TicketService.initiateMomoPurchase({
+      eventId,
+      ticketTypeId,
+      quantity: 1,
+      customerPhone: '+26876222222',
+      momoPhone: '26876222222',
+    });
+
+    // The externalId MTN echoes back is the sale's `saleId` field (SALE-…), which is
+    // exactly what requestToPay was called with — fetch it to mirror the real callback.
+    const created = await TicketSale.findOne({ momoReferenceId: 'R_EXT' });
+    const externalId = created!.saleId; // SALE-…
+
+    // MTN's callback carries this externalId, NOT the referenceId UUID.
+    const sale = await TicketService.getMomoSaleByExternalId(externalId);
+    expect(sale).not.toBeNull();
+    expect(sale!.momoReferenceId).toBe('R_EXT');
+
+    // Unknown externalId resolves to null (callback would 400, not crash)
+    expect(await TicketService.getMomoSaleByExternalId('SALE-does-not-exist')).toBeNull();
+  });
+
   it('concurrent finalize calls never double-mint (atomic claim)', async () => {
     const quantity = 2;
     const { eventId, ticketTypeId } = await seedPublishedEvent();

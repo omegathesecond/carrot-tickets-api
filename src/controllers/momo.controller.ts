@@ -26,13 +26,30 @@ export class MomoController {
       body: req.body,
     });
 
-    const referenceId =
+    let referenceId =
       (req.body?.referenceId) ||
       (req.params as any)?.referenceId ||
       req.get('X-Reference-Id');
-    if (!referenceId) {
-      console.warn('[momo callback] ✗ no referenceId in body/params/headers — ignoring', {
+
+    // MTN's requesttopay callback keys on `externalId` (= our sale.saleId), and
+    // carries NO X-Reference-Id at all. When referenceId is absent, correlate the
+    // sale by externalId and pull its stored momoReferenceId.
+    const externalId = req.body?.externalId;
+    if (!referenceId && externalId) {
+      const sale = await TicketService.getMomoSaleByExternalId(externalId);
+      referenceId = sale?.momoReferenceId;
+      console.log('[momo callback] resolved referenceId via externalId', {
+        externalId,
+        referenceId: referenceId ?? null,
+        saleFound: !!sale,
         receivedAt,
+      });
+    }
+
+    if (!referenceId) {
+      console.warn('[momo callback] ✗ could not resolve referenceId (no referenceId/externalId match) — ignoring', {
+        receivedAt,
+        externalId: externalId ?? null,
         body: req.body,
         params: req.params,
       });

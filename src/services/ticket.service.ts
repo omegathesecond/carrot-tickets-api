@@ -898,6 +898,16 @@ export class TicketService {
   }
 
   /**
+   * Look up a MoMo sale by the externalId we sent to MTN (= sale.saleId).
+   * MTN's requesttopay callback carries `externalId`, NOT our X-Reference-Id,
+   * so this is how we correlate an inbound callback back to its sale.
+   * Returns null if not found. Never throws.
+   */
+  static async getMomoSaleByExternalId(externalId: string): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ saleId: externalId });
+  }
+
+  /**
    * Initiate an async Peach card purchase:
    * 1) Create PENDING sale with no tickets yet.
    * 2) Reserve inventory (prevent oversell during the async window).
