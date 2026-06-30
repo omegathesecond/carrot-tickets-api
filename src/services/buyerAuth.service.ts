@@ -4,6 +4,7 @@ import { BuyerOtp } from '@models/buyerOtp.model';
 import { Buyer } from '@models/buyer.model';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone, isValidPhone } from '@utils/phone.util';
+import { JWT_SECRET } from '@config/secrets.config';
 
 /**
  * Buyer (ticket-holder) authentication.
@@ -23,7 +24,6 @@ import { normalizePhone, isValidPhone } from '@utils/phone.util';
  * already accepts, so "My Tickets" / purchase (which key off userPhone) keep
  * working unchanged.
  */
-const JWT_SECRET: string = process.env['JWT_SECRET'] || 'your-secret-key';
 const BUYER_JWT_EXPIRY: string = process.env['BUYER_JWT_EXPIRY'] || '30d';
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_ATTEMPTS = 5;

@@ -1,5 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+
+/**
+ * Constant-time string comparison. Avoids leaking how many leading characters of
+ * the shared service key an attacker has guessed via response-timing differences.
+ * Returns false on any length mismatch (timingSafeEqual requires equal lengths).
+ */
+const safeEqual = (a: string, b: string): boolean => {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+};
 
 /**
  * Service-to-Service Authentication Middleware
@@ -37,7 +49,7 @@ export const serviceAuth = (
       return;
     }
 
-    if (serviceKey !== expectedServiceKey) {
+    if (!safeEqual(serviceKey, expectedServiceKey)) {
       console.warn('[Service Auth] Invalid service key attempted');
       ApiResponseUtil.unauthorized(res, 'Invalid service key');
       return;
