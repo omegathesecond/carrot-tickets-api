@@ -78,6 +78,13 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     index: true,
     trim: true
   },
+  // MTN's failure reason enum (e.g. NOT_ENOUGH_FUNDS, PAYER_NOT_FOUND, EXPIRED)
+  // captured at finalize so a poll arriving AFTER the callback can still tell the
+  // buyer why it failed. Stored verbatim; the frontend maps it to friendly copy.
+  momoFailureReason: {
+    type: String,
+    trim: true
+  },
   peachPaymentId: {
     type: String,
     sparse: true,

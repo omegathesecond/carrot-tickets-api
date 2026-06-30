@@ -173,7 +173,7 @@ export class ResellerSaleService {
   static async finalizeSale(
     referenceId: string,
     resellerId: string
-  ): Promise<{ status: 'completed' | 'failed' | 'pending'; saleId: string }> {
+  ): Promise<{ status: 'completed' | 'failed' | 'pending'; saleId: string; reason?: string }> {
     const sale = await TicketService.getMomoSaleByReference(referenceId);
     if (!sale) {
       throw new Error(`Sale not found for reference: ${referenceId}`);
@@ -184,8 +184,8 @@ export class ResellerSaleService {
       throw new Error('Not authorized to finalize this sale');
     }
 
-    const { status } = await TicketService.finalizeMomoSale(referenceId);
-    return { status, saleId: sale._id.toString() };
+    const { status, reason } = await TicketService.finalizeMomoSale(referenceId);
+    return { status, saleId: sale._id.toString(), reason };
   }
 
   /**
