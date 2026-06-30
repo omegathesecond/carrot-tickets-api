@@ -1032,7 +1032,7 @@ export class TicketService {
    *   to prevent double-mint from concurrent poll + callback. Then mint tickets,
    *   confirm reservation (reserved→sold), update event sold count, best-effort SMS.
    */
-  static async finalizeMomoSale(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+  static async finalizeMomoSale(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending'; reason?: string }> {
     const sale = await TicketSale.findOne({ momoReferenceId: referenceId });
     if (!sale) {
       console.error('[momo finalize] ✗ no sale for reference', { referenceId });
@@ -1054,7 +1054,9 @@ export class TicketService {
         referenceId,
         paymentStatus: sale.paymentStatus,
       });
-      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+      return sale.paymentStatus === PaymentStatus.COMPLETED
+        ? { status: 'completed' }
+        : { status: 'failed', reason: sale.momoFailureReason };
     }
 
     const { status, raw } = await this.momoClient.getStatus(referenceId);
@@ -1068,15 +1070,17 @@ export class TicketService {
     const ticketTypeId = reservation?.ticketTypeId;
 
     if (status === 'FAILED') {
+      const reason = typeof raw?.reason === 'string' ? raw.reason : undefined;
       console.warn('[momo finalize] ✗ MTN reports FAILED — releasing reservation', {
         referenceId,
         saleId: sale._id.toString(),
-        reason: raw?.reason,
+        reason,
       });
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
+      if (reason) sale.momoFailureReason = reason;
       await sale.save();
-      return { status: 'failed' };
+      return { status: 'failed', reason };
     }
 
     // SUCCESSFUL — but verify MTN confirms the EXACT amount + currency we requested
@@ -1097,8 +1101,9 @@ export class TicketService {
       });
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
+      sale.momoFailureReason = 'AMOUNT_MISMATCH';
       await sale.save();
-      return { status: 'failed' };
+      return { status: 'failed', reason: 'AMOUNT_MISMATCH' };
     }
 
     // atomically CLAIM the sale so concurrent poll + callback can't double-mint

@@ -57,7 +57,7 @@ All errors follow a consistent format:
       `,
       contact: {
         name: 'Keshless Tickets API Support',
-        email: 'support@keshless.app',
+        email: 'support@carrottickets.com',
       },
       license: {
         name: 'Proprietary',
@@ -69,11 +69,11 @@ All errors follow a consistent format:
         description: 'Development server',
       },
       {
-        url: 'https://dev-api-tickets.keshless.app/api',
+        url: 'https://dev-api.carrottickets.com/api',
         description: 'Development environment',
       },
       {
-        url: 'https://api-tickets.keshless.app/api',
+        url: 'https://api.carrottickets.com/api',
         description: 'Production environment',
       },
     ],

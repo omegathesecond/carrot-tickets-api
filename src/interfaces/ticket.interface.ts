@@ -86,6 +86,7 @@ export interface ITicketSale extends Document {
   paymentStatus: PaymentStatus;
   walletTransactionId?: string; // Keshless transaction ID
   momoReferenceId?: string;      // MTN MoMo X-Reference-Id (UUID) for async collections
+  momoFailureReason?: string;    // MTN failure reason enum (e.g. NOT_ENOUGH_FUNDS) for buyer messaging
   peachPaymentId?: string;       // Peach Payments payment ID for card transactions
   reservationExpiresAt?: Date;   // when a PENDING MoMo reservation lapses
 
