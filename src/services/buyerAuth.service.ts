@@ -158,6 +158,75 @@ export class BuyerAuthService {
   }
 
   /**
+   * Step 1 of password reset: SMS a one-time code to a phone that DOES have an
+   * account. The mirror image of requestRegistrationOtp — that one rejects
+   * existing accounts, this one requires one. Reuses the same BuyerOtp plumbing.
+   *
+   * Throws if the number has no account (consistent with how login already
+   * surfaces account existence via requiresRegistration) or if the SMS gateway
+   * rejects the send (caller must surface the failure — no silent fallback).
+   */
+  static async requestPasswordResetOtp(rawPhone: string): Promise<{ phone: string }> {
+    const phone = this.normalizeAndValidatePhone(rawPhone);
+
+    const existing = await Buyer.findOne({ phone });
+    if (!existing) {
+      throw new Error("We couldn't find an account for this number. Please sign up instead.");
+    }
+
+    // Invalidate any outstanding codes for this number so only the newest works.
+    await BuyerOtp.updateMany({ phone, consumed: false }, { consumed: true });
+
+    const code = crypto.randomInt(100000, 1000000).toString(); // 6 digits
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    await BuyerOtp.create({
+      phone,
+      codeHash,
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+      attempts: 0,
+      consumed: false
+    });
+
+    const sent = await SmsService.sendOtp(phone, code);
+    if (!sent) {
+      throw new Error('We could not send your reset code right now. Please try again.');
+    }
+
+    return { phone };
+  }
+
+  /**
+   * Step 2 of password reset: verify the SMS code, set the new password (the
+   * model's pre-save hook re-hashes it), and issue a fresh access token so the
+   * buyer is signed straight in. Proving phone ownership via the OTP is what
+   * authorises the password change.
+   */
+  static async resetPassword(
+    rawPhone: string,
+    code: string,
+    newPassword: string
+  ): Promise<{ accessToken: string; phone: string }> {
+    const phone = this.normalizeAndValidatePhone(rawPhone);
+    if (!newPassword || newPassword.length < MIN_PASSWORD_LENGTH) {
+      throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    }
+
+    const buyer = await Buyer.findOne({ phone }).select('+password');
+    if (!buyer) {
+      throw new Error("We couldn't find an account for this number. Please sign up instead.");
+    }
+
+    await this.consumeOtp(phone, code);
+
+    buyer.password = newPassword;
+    buyer.lastLoginAt = new Date();
+    await buyer.save();
+
+    return { accessToken: this.signToken(buyer.phone), phone };
+  }
+
+  /**
    * Validate + consume the newest unconsumed OTP for a phone. Throws a
    * user-facing Error on any failure (expired, too many attempts, mismatch)
    * and marks the code consumed on success. No token is minted here — the

@@ -53,13 +53,17 @@ router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
  * for an unknown number, the client requests an SMS code (/auth/request-otp),
  * then creates the account with code + password (/auth/register). This proves
  * phone ownership once, at account creation, then relies on the password.
- * @route   POST /api/public/auth/login        { phone, password }              -> { requiresRegistration } | { accessToken }
- * @route   POST /api/public/auth/request-otp  { phone }                        -> sends code (new numbers only)
- * @route   POST /api/public/auth/register     { phone, code, password, name? } -> { accessToken }
+ * @route   POST /api/public/auth/login           { phone, password }              -> { requiresRegistration } | { accessToken }
+ * @route   POST /api/public/auth/request-otp     { phone }                        -> sends code (new numbers only)
+ * @route   POST /api/public/auth/register        { phone, code, password, name? } -> { accessToken }
+ * @route   POST /api/public/auth/forgot-password { phone }                        -> sends reset code (existing numbers only)
+ * @route   POST /api/public/auth/reset-password  { phone, code, password }        -> { accessToken }
  */
 router.post('/auth/login', PublicController.loginBuyer);
 router.post('/auth/request-otp', PublicController.requestBuyerRegistrationOtp);
 router.post('/auth/register', PublicController.registerBuyer);
+router.post('/auth/forgot-password', PublicController.forgotPasswordBuyer);
+router.post('/auth/reset-password', PublicController.resetPasswordBuyer);
 
 /**
  * @route   GET /api/public/my-tickets

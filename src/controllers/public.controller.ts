@@ -315,6 +315,44 @@ export class PublicController {
   }
 
   /**
+   * Password reset step 1: SMS a code to a phone that HAS an account. Rejects
+   * numbers with no account (they must sign up).
+   */
+  static async forgotPasswordBuyer(req: Request, res: Response): Promise<any> {
+    try {
+      const { phone } = req.body;
+      if (!phone || typeof phone !== 'string') {
+        return ApiResponseUtil.error(res, 'Phone number is required', 400);
+      }
+
+      const result = await BuyerAuthService.requestPasswordResetOtp(phone);
+      return ApiResponseUtil.success(res, result, 'We sent a reset code to your phone');
+    } catch (error: any) {
+      console.error('Forgot password buyer error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to send reset code', 400);
+    }
+  }
+
+  /**
+   * Password reset step 2: verify the code, set the new password, and issue an
+   * access token so the buyer is signed straight in.
+   */
+  static async resetPasswordBuyer(req: Request, res: Response): Promise<any> {
+    try {
+      const { phone, code, password } = req.body;
+      if (!phone || !code || !password) {
+        return ApiResponseUtil.error(res, 'Phone number, code and new password are required', 400);
+      }
+
+      const result = await BuyerAuthService.resetPassword(phone, code, password);
+      return ApiResponseUtil.success(res, result, 'Password reset — you are signed in');
+    } catch (error: any) {
+      console.error('Reset password buyer error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to reset password', 401);
+    }
+  }
+
+  /**
    * Returns the payment methods available to the buyer checkout.
    * A method is included iff its config toggle is ON and (for MoMo) the
    * MTN_MOMO_ENABLED env var is 'true' (processor-configured guard for Task 6).
