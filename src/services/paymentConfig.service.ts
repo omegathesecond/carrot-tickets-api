@@ -7,6 +7,11 @@ const DEFAULTS = {
   cardEnabled: false,
   defaultResellerCommissionPercent: 0,
   platformFeePercent: 0,
+  // Live launch values (flat E, added on top at online checkout). Overridable in
+  // dashboard Settings; an explicit saved value (incl. 0) always wins.
+  keshlessServiceFee: 0,
+  momoServiceFee: 5,
+  cardServiceFee: 10,
 };
 
 type PaymentConfig = typeof DEFAULTS;
@@ -21,6 +26,9 @@ export class PaymentConfigService {
       cardEnabled: doc?.cardEnabled ?? DEFAULTS.cardEnabled,
       defaultResellerCommissionPercent: doc?.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
       platformFeePercent: doc?.platformFeePercent ?? DEFAULTS.platformFeePercent,
+      keshlessServiceFee: doc?.keshlessServiceFee ?? DEFAULTS.keshlessServiceFee,
+      momoServiceFee: doc?.momoServiceFee ?? DEFAULTS.momoServiceFee,
+      cardServiceFee: doc?.cardServiceFee ?? DEFAULTS.cardServiceFee,
     };
   }
 
@@ -37,6 +45,9 @@ export class PaymentConfigService {
       cardEnabled: doc!.cardEnabled ?? DEFAULTS.cardEnabled,
       defaultResellerCommissionPercent: doc!.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
       platformFeePercent: doc!.platformFeePercent ?? DEFAULTS.platformFeePercent,
+      keshlessServiceFee: doc!.keshlessServiceFee ?? DEFAULTS.keshlessServiceFee,
+      momoServiceFee: doc!.momoServiceFee ?? DEFAULTS.momoServiceFee,
+      cardServiceFee: doc!.cardServiceFee ?? DEFAULTS.cardServiceFee,
     };
   }
 }

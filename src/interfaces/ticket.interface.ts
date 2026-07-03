@@ -108,6 +108,8 @@ export interface ITicketSale extends Document {
   resellerCommissionAmount?: number;
   platformFeePercent?: number;
   platformFeeAmount?: number;
+  serviceFeeAmount?: number;
+  amountCharged?: number;
   organizerProceeds?: number;
   fundsCustody?: 'carrot' | 'reseller' | 'vendor';
 

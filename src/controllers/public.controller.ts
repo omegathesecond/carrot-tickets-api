@@ -365,7 +365,14 @@ export class PublicController {
       if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
       if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
       if (cfg.cardEnabled && new PeachClient().isConfigured()) methods.push('card');
-      return ApiResponseUtil.success(res, { methods });
+      // Per-method flat buyer service fee (E) so checkout can show a live
+      // breakdown. The charge is recomputed server-side on purchase (display only).
+      const serviceFees = {
+        keshless_wallet: cfg.keshlessServiceFee,
+        mtn_momo: cfg.momoServiceFee,
+        card: cfg.cardServiceFee,
+      };
+      return ApiResponseUtil.success(res, { methods, serviceFees });
     } catch (error: any) {
       console.error('Get public payment methods error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch payment methods');

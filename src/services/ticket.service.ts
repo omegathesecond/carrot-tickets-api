@@ -12,6 +12,7 @@ import { PeachClient, classifyResultCode } from '@services/payments/peach.client
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
+import { computeServiceFee, round2 } from '@utils/serviceFee.util';
 import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import mongoose from 'mongoose';
 
@@ -34,6 +35,10 @@ export interface SellTicketsParams {
   // "Where bought". Defaults via deriveChannel(); the online buyer flow passes
   // SalesChannel.ONLINE explicitly since soldByType alone can't distinguish it.
   channel?: SalesChannel;
+  // Buyer-paid FLAT service fee (online checkout only). When set, the wallet is
+  // debited totalAmount + serviceFeeAmount, and the fee is recorded on the sale.
+  // POS/reseller callers omit it, so face value is charged unchanged.
+  serviceFeeAmount?: number;
 }
 
 /**
@@ -231,11 +236,17 @@ export class TicketService {
       const ticketTypeData = availabilityCheck.ticketTypeData!;
       const totalAmount = ticketTypeData.price * quantity;
 
+      // Buyer-paid service fee (online only — callers that omit it charge face).
+      // totalAmount stays face value; the wallet is debited amountCharged.
+      const serviceFeeAmount = round2(params.serviceFeeAmount ?? 0);
+      const amountCharged = round2(totalAmount + serviceFeeAmount);
+      const feeSnapshot = { serviceFeeAmount, amountCharged };
+
       // Process payment based on method
       const proc = getProcessor(paymentMethod);
       const charge = await proc.charge({
         method: paymentMethod,
-        amount: totalAmount,
+        amount: amountCharged,
         description: `Carrot Tickets - ${ticketTypeData.name} x${quantity}`,
         keshlessCardNumber,
         keshlessPin,
@@ -330,6 +341,7 @@ export class TicketService {
               channel,
               ...resellerAttribution,
               ...econ,
+              ...feeSnapshot,
               soldAt: new Date()
             });
             await saleWithoutSession.save();
@@ -377,6 +389,7 @@ export class TicketService {
         channel,
         ...resellerAttribution,
         ...econ,
+        ...feeSnapshot,
         soldAt: new Date()
       });
       await sale.save(session ? { session } : undefined);
@@ -670,12 +683,20 @@ export class TicketService {
 
     const totalAmount = ticketType.price * quantity;
 
-    // PIN is required for wallet charges of E50 or more.
+    // PIN threshold keys off the FACE subtotal (the service fee must not shift
+    // the PIN rule). Buyer-paid service fee is added on top of face.
     if (totalAmount >= 50 && !keshlessPin) {
       throw new Error('PIN required for purchases of E50 or more');
     }
 
-    // sellTickets debits the wallet once (price x quantity) and mints tickets.
+    const feeCfg = await PaymentConfigService.get();
+    const { serviceFeeAmount } = computeServiceFee(
+      totalAmount,
+      PaymentMethod.KESHLESS_WALLET,
+      feeCfg,
+    );
+
+    // sellTickets debits the wallet (face + service fee) and mints tickets.
     const result = await TicketService.sellTickets({
       vendorId: event.vendorId.toString(),
       eventId,
@@ -689,6 +710,7 @@ export class TicketService {
       soldBy: event.vendorId.toString(),
       soldByType: 'vendor',
       channel: SalesChannel.ONLINE,
+      serviceFeeAmount,
     });
 
     // Best-effort SMS confirmation — never roll back the purchase on SMS failure.
@@ -834,6 +856,13 @@ export class TicketService {
       ...(p.hubId ? { hubId: p.hubId } : {}),
     };
 
+    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
+    const feeCfg = await PaymentConfigService.get();
+    const { serviceFeeAmount, amountCharged } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, PaymentMethod.MTN_MOMO, feeCfg)
+        : { serviceFeeAmount: 0, amountCharged: totalAmount };
+
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
       eventId: p.eventId,
@@ -850,6 +879,8 @@ export class TicketService {
       channel,
       ...resellerAttribution,
       ...econ,
+      serviceFeeAmount,
+      amountCharged,
       soldAt: new Date(),
     });
     await sale.save();
@@ -871,7 +902,7 @@ export class TicketService {
       // PAYER_NOT_FOUND, so normalise to +268… then strip the leading '+'.
       const payerMsisdn = normalizePhone(p.momoPhone).replace(/^\+/, '');
       const { referenceId } = await this.momoClient.requestToPay({
-        amount: totalAmount,
+        amount: amountCharged,
         currency: process.env['MTN_MOMO_CURRENCY'] || 'SZL',
         payerMsisdn,
         externalId: sale.saleId,
@@ -963,6 +994,12 @@ export class TicketService {
       ...(p.hubId ? { hubId: p.hubId } : {}),
     };
 
+    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
+    const { serviceFeeAmount, amountCharged } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, PaymentMethod.CARD, cardCfg)
+        : { serviceFeeAmount: 0, amountCharged: totalAmount };
+
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
       eventId: p.eventId,
@@ -979,6 +1016,8 @@ export class TicketService {
       channel,
       ...resellerAttribution,
       ...econ,
+      serviceFeeAmount,
+      amountCharged,
       soldAt: new Date(),
     });
     await sale.save();
@@ -998,7 +1037,7 @@ export class TicketService {
     try {
       const nonce = sale.saleId + '-' + sale._id.toString();
       const { id, redirect } = await this.peachClient.createPayment({
-        amount: totalAmount,
+        amount: amountCharged,
         currency: process.env['CARD_CURRENCY'] || 'ZAR',
         merchantTransactionId: sale.saleId,
         shopperResultUrl: process.env['CARD_RESULT_URL']!,
@@ -1088,15 +1127,18 @@ export class TicketService {
     // so a mismatch means a bug, a currency drift, or a tampered/stale reference:
     // fail it LOUDLY rather than silently honour a charge that doesn't match the sale.
     const expectedCurrency = process.env['MTN_MOMO_CURRENCY'] || 'SZL';
+    // Verify against what we actually charged (face + service fee). Fall back to
+    // totalAmount for pre-service-fee sales that have no amountCharged.
+    const expectedAmount = sale.amountCharged ?? sale.totalAmount;
     const confirmedAmount = Number(raw?.amount);
     if (
       !Number.isFinite(confirmedAmount) ||
-      confirmedAmount !== sale.totalAmount ||
+      confirmedAmount !== expectedAmount ||
       raw?.currency !== expectedCurrency
     ) {
       console.error('[momo finalize] amount/currency mismatch — refusing to mint', {
         referenceId,
-        expected: { amount: sale.totalAmount, currency: expectedCurrency },
+        expected: { amount: expectedAmount, currency: expectedCurrency },
         confirmed: { amount: raw?.amount, currency: raw?.currency },
       });
       await ReservationService.release(sale._id.toString());
@@ -1218,15 +1260,18 @@ export class TicketService {
     // success — verify the EXACT amount + currency Peach reports before minting.
     // Peach returns amount as a string (e.g. "50.00"); convert to Number for comparison.
     const expectedCurrency = process.env['CARD_CURRENCY'] || 'ZAR';
+    // Verify against what we actually charged (face + service fee). Fall back to
+    // totalAmount for pre-service-fee sales that have no amountCharged.
+    const expectedAmount = sale.amountCharged ?? sale.totalAmount;
     const confirmedAmount = Number(amount);
     if (
       !Number.isFinite(confirmedAmount) ||
-      confirmedAmount !== sale.totalAmount ||
+      confirmedAmount !== expectedAmount ||
       currency !== expectedCurrency
     ) {
       console.error('[card finalize] amount/currency mismatch — refusing to mint', {
         paymentId,
-        expected: { amount: sale.totalAmount, currency: expectedCurrency },
+        expected: { amount: expectedAmount, currency: expectedCurrency },
         confirmed: { amount, currency },
       });
       await ReservationService.release(sale._id.toString());

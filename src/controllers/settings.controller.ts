@@ -3,9 +3,20 @@ import Joi from 'joi';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
+// Whitelist every updatable field: the dashboard Settings page sends the full
+// config object on each save, so an incomplete schema would reject the whole
+// patch on an unlisted key.
 const patchSchema = Joi.object({
   keshlessWalletEnabled: Joi.boolean(),
   mtnMomoEnabled: Joi.boolean(),
+  cashEnabled: Joi.boolean(),
+  cardEnabled: Joi.boolean(),
+  defaultResellerCommissionPercent: Joi.number().min(0).max(100),
+  platformFeePercent: Joi.number().min(0).max(100),
+  // Buyer-paid FLAT service fee (E) per online method.
+  keshlessServiceFee: Joi.number().min(0).max(100000),
+  momoServiceFee: Joi.number().min(0).max(100000),
+  cardServiceFee: Joi.number().min(0).max(100000),
 }).min(1);
 
 export class SettingsController {

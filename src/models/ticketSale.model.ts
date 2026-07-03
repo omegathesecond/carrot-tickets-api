@@ -126,6 +126,11 @@ const ticketSaleSchema = new Schema<ITicketSale>({
   resellerCommissionAmount: { type: Number, default: 0 },
   platformFeePercent: { type: Number, default: 0 },
   platformFeeAmount: { type: Number, default: 0 },
+  // Buyer-paid FLAT service fee (online checkout, on top of face). totalAmount
+  // stays face value; amountCharged = totalAmount + serviceFeeAmount is what the
+  // buyer was actually charged and what the MoMo/card callback guards verify.
+  serviceFeeAmount: { type: Number, default: 0 },
+  amountCharged: { type: Number },
   organizerProceeds: { type: Number },
   fundsCustody: { type: String, enum: ['carrot', 'reseller', 'vendor'] },
 
