@@ -185,6 +185,27 @@ export const requireSuperAdmin = (req: Request, res: Response, next: NextFunctio
 };
 
 /**
+ * Allow either super-admins OR holders of a specific permission.
+ * requireTicketsPermission alone does not bypass for super-admins, so admin
+ * views that should also be openable by an explicitly-permissioned team member
+ * (e.g. VIEW_USERS) use this.
+ */
+export const requireSuperAdminOrPermission = (permission: TicketsPermission) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const ticketsUser = (req as any).ticketsUser;
+    if (!ticketsUser) {
+      ApiResponseUtil.unauthorized(res, 'Authentication required');
+      return;
+    }
+    if (ticketsUser.isSuperAdmin || (ticketsUser.permissions || []).includes(permission)) {
+      next();
+      return;
+    }
+    ApiResponseUtil.forbidden(res, `Permission required: ${permission}`);
+  };
+};
+
+/**
  * Attach Tickets user to request (optional - doesn't fail if no token)
  */
 export const optionalTicketsAuth = async (

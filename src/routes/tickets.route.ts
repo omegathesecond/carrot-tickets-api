@@ -3,11 +3,13 @@ import { TicketsController } from '@controllers/tickets.controller';
 import {
   requireTicketsPermission,
   requireSuperAdmin,
+  requireSuperAdminOrPermission,
 } from '@middleware/ticketsAuth.middleware';
 import { dualAuth } from '@middleware/serviceAuth.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
+import { AdminUsersController } from '@controllers/adminUsers.controller';
 
 const router = Router();
 
@@ -32,6 +34,22 @@ router.use(dualAuth);
  */
 router.get('/settings/payment-methods', requireSuperAdmin, SettingsController.getPaymentMethods);
 router.put('/settings/payment-methods', requireSuperAdmin, SettingsController.updatePaymentMethods);
+
+/**
+ * Platform Users admin — registered-buyer directory + signup analytics.
+ * Carrot super-admins or team members holding tickets:view_users. Buyers are
+ * platform-wide, so this is intentionally NOT vendor-scoped.
+ */
+router.get(
+  '/admin/users',
+  requireSuperAdminOrPermission(TicketsPermission.VIEW_USERS),
+  AdminUsersController.listUsers,
+);
+router.get(
+  '/admin/users/analytics',
+  requireSuperAdminOrPermission(TicketsPermission.VIEW_USERS),
+  AdminUsersController.analytics,
+);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);

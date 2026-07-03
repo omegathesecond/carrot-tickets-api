@@ -28,7 +28,13 @@ export enum TicketsPermission {
   EXPORT_REPORTS = 'tickets:export_reports',
 
   // Access Management
-  MANAGE_ACCESS = 'tickets:manage_access'
+  MANAGE_ACCESS = 'tickets:manage_access',
+
+  // Platform User Management (Carrot admins/team only) — see the platform-wide
+  // list of registered buyers + signup analytics. Granted to OWNER automatically
+  // (Object.values below) and to super-admins in middleware; never handed to
+  // MANAGER/SALES/SCANNER by default — it must be assigned explicitly.
+  VIEW_USERS = 'tickets:view_users'
 }
 
 export enum TicketsRole {
