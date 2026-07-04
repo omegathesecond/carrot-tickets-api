@@ -4,7 +4,7 @@ import { Vendor } from '@models/vendor.model';
 import { VendorSubUser } from '@models/vendorSubUser.model';
 import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
-import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
 
 const JWT_SECRET: string = process.env['JWT_SECRET'] || 'your-secret-key';
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
@@ -72,7 +72,7 @@ export class TicketsAuthService {
       userType: 'vendor',
       app: 'tickets',
       role: TicketsRole.OWNER,
-      permissions: Object.values(TicketsPermission),
+      permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
       isSuperAdmin: false
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
@@ -90,7 +90,7 @@ export class TicketsAuthService {
         slug: vendor.slug,
         userType: 'vendor',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission),
+        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
         isSuperAdmin: false,
         verificationStatus: vendor.verificationStatus,
         isVerified: vendor.isVerified
@@ -126,7 +126,7 @@ export class TicketsAuthService {
         userType: 'vendor',
         app: 'tickets',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission),
+        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
         isSuperAdmin: vendor.isSuperAdmin || false
       };
       const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
@@ -146,7 +146,7 @@ export class TicketsAuthService {
           slug: vendor.slug,
           userType: 'vendor',
           role: TicketsRole.OWNER,
-          permissions: Object.values(TicketsPermission),
+          permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
           isSuperAdmin: vendor.isSuperAdmin || false,
           verificationStatus: vendor.verificationStatus,
           isVerified: vendor.isVerified
@@ -279,7 +279,7 @@ export class TicketsAuthService {
         slug: vendor.slug,
         userType: 'vendor',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission),
+        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
         isSuperAdmin: vendor.isSuperAdmin || false,
         verificationStatus: vendor.verificationStatus,
         isVerified: vendor.isVerified
@@ -520,7 +520,7 @@ export class TicketsAuthService {
         userType: 'vendor',
         app: 'tickets',
         role: TicketsRole.OWNER,
-        permissions: Object.values(TicketsPermission),
+        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
         isSuperAdmin: vendor.isSuperAdmin || false
       };
     } else {

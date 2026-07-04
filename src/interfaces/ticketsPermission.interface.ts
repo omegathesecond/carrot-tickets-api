@@ -31,9 +31,9 @@ export enum TicketsPermission {
   MANAGE_ACCESS = 'tickets:manage_access',
 
   // Platform User Management (Carrot admins/team only) — see the platform-wide
-  // list of registered buyers + signup analytics. Granted to OWNER automatically
-  // (Object.values below) and to super-admins in middleware; never handed to
-  // MANAGER/SALES/SCANNER by default — it must be assigned explicitly.
+  // list of registered buyers + signup analytics. Super-admins pass via
+  // middleware; everyone else needs this assigned explicitly. NEVER part of any
+  // role's default set — organizers (OWNER) must not see other events' buyers.
   VIEW_USERS = 'tickets:view_users'
 }
 
@@ -45,7 +45,11 @@ export enum TicketsRole {
 }
 
 export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> = {
-  [TicketsRole.OWNER]: Object.values(TicketsPermission),
+  // Every permission EXCEPT the platform-staff-only ones (VIEW_USERS). An
+  // organizer owns their vendor account, not the Carrot platform.
+  [TicketsRole.OWNER]: Object.values(TicketsPermission).filter(
+    (p) => p !== TicketsPermission.VIEW_USERS
+  ),
 
   [TicketsRole.MANAGER]: [
     TicketsPermission.CREATE_EVENT,
