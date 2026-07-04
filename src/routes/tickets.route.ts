@@ -10,6 +10,7 @@ import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
+import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 
 const router = Router();
 
@@ -50,6 +51,13 @@ router.get(
   requireSuperAdminOrPermission(TicketsPermission.VIEW_USERS),
   AdminUsersController.analytics,
 );
+
+/**
+ * Organizers admin — vendor directory + verification lifecycle behind the
+ * dashboard "Organizers" tab. Super-admin only.
+ */
+router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
+router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
