@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { WristbandDesign } from '@models/wristbandDesign.model';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { TicketService } from '@services/ticket.service';
+import { TicketSale } from '@models/ticketSale.model';
+import { SalesChannel } from '@interfaces/ticket.interface';
 
 /**
  * Wristband printing admin API — saved designs for the dashboard's Tyvek
@@ -76,6 +79,61 @@ export class WristbandController {
       const design = await WristbandDesign.findByIdAndDelete(id);
       if (!design) return ApiResponseUtil.notFound(res, 'Design not found');
       return ApiResponseUtil.success(res, { deleted: true });
+    } catch (error: any) {
+      return ApiResponseUtil.serverError(res, error.message);
+    }
+  }
+
+  /** POST /api/tickets/wristbands/batch-issue { eventId, ticketTypeId, quantity } */
+  static async batchIssue(req: Request, res: Response): Promise<any> {
+    try {
+      const { eventId, ticketTypeId, quantity } = req.body;
+      if (!mongoose.isValidObjectId(eventId)) {
+        return ApiResponseUtil.validationError(res, 'eventId is required');
+      }
+      if (!ticketTypeId) {
+        return ApiResponseUtil.validationError(res, 'ticketTypeId is required');
+      }
+      const qty = Number(quantity);
+      if (!Number.isInteger(qty) || qty < 1 || qty > 500) {
+        return ApiResponseUtil.validationError(res, 'quantity must be an integer between 1 and 500');
+      }
+      const ticketsUser = (req as any).ticketsUser;
+      const { sale, tickets } = await TicketService.issueWristbandBatch({
+        eventId, ticketTypeId, quantity: qty,
+        ...(ticketsUser?.vendorId ? { issuedBy: ticketsUser.vendorId } : {}),
+      });
+      return ApiResponseUtil.created(res, {
+        sale,
+        tickets: tickets.map((t) => ({ ticketId: t.ticketId, ticketType: t.ticketType })),
+      });
+    } catch (error: any) {
+      // Availability/oversell and validation problems are caller errors, not 500s.
+      return ApiResponseUtil.badRequest(res, error.message);
+    }
+  }
+
+  /** GET /api/tickets/wristbands/batches?eventId= — recent batches, reprintable. */
+  static async listBatches(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = String(req.query['eventId'] ?? '');
+      if (!mongoose.isValidObjectId(eventId)) {
+        return ApiResponseUtil.validationError(res, 'eventId is required');
+      }
+      const sales = await TicketSale.find({ eventId, channel: SalesChannel.WRISTBAND })
+        .sort({ soldAt: -1 })
+        .limit(50)
+        .populate('ticketIds', 'ticketId status ticketType')
+        .lean();
+      const data = sales.map((s: any) => ({
+        _id: s._id,
+        saleId: s.saleId,
+        quantity: s.quantity,
+        soldAt: s.soldAt,
+        ticketType: s.ticketIds?.[0]?.ticketType ?? '',
+        tickets: (s.ticketIds ?? []).map((t: any) => ({ ticketId: t.ticketId, status: t.status })),
+      }));
+      return ApiResponseUtil.success(res, data);
     } catch (error: any) {
       return ApiResponseUtil.serverError(res, error.message);
     }

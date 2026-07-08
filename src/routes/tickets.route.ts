@@ -70,6 +70,13 @@ router.post('/wristband-designs', requireSuperAdminOrPermission(TicketsPermissio
 router.put('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.updateDesign);
 router.delete('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.deleteDesign);
 
+/**
+ * Wristband batch issuance — zero-amount, real, scannable tickets minted
+ * from the office printer run. Same platform-staff-only gate as above.
+ */
+router.post('/wristbands/batch-issue', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.batchIssue);
+router.get('/wristbands/batches', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.listBatches);
+
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
 router.get('/auth/me', TicketsController.getMe);

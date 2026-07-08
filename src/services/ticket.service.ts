@@ -624,6 +624,79 @@ export class TicketService {
   }
 
   /**
+   * Batch-issue zero-amount tickets for printed wristbands (dashboard
+   * Wristbands tab, platform-staff-only). The tickets are REAL — same
+   * TKT- code space, same scan path — but the sale is recorded on the
+   * `wristband` channel with a 0 economic snapshot, so revenue reports are
+   * unaffected while capacity and scan analytics stay honest.
+   *
+   * Deliberately no mongo session: this is a low-volume admin operation and
+   * the sellTickets transaction/fallback machinery would triple the code for
+   * no customer-facing benefit. Any mid-flight failure surfaces loudly and
+   * the batch is simply re-run.
+   */
+  static async issueWristbandBatch(params: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    issuedBy?: string;
+  }): Promise<{ sale: ITicketSale; tickets: ITicket[] }> {
+    const { eventId, ticketTypeId, quantity } = params;
+
+    const availabilityCheck = await EventService.checkTicketAvailability(eventId, ticketTypeId, quantity);
+    if (!availabilityCheck.available) {
+      throw new Error(availabilityCheck.message || 'Tickets not available');
+    }
+    const ticketTypeData = availabilityCheck.ticketTypeData!;
+
+    const event = await Event.findById(eventId).select('vendorId').lean();
+    if (!event) throw new Error('Event not found');
+    const vendorId = (event as any).vendorId;
+    const soldBy = params.issuedBy ?? vendorId;
+
+    const econ = await this.buildSaleSnapshot({
+      totalAmount: 0,
+      paymentMethod: PaymentMethod.CASH,
+      mappedSoldByType: 'Vendor',
+    });
+
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < quantity; i++) {
+      const ticket = this.buildTicket({
+        eventId,
+        vendorId,
+        ticketType: ticketTypeData.name,
+        price: 0,
+      });
+      await ticket.save();
+      tickets.push(ticket);
+    }
+
+    const sale = new TicketSale({
+      eventId,
+      vendorId,
+      ticketIds: tickets.map((t) => t._id),
+      quantity,
+      totalAmount: 0,
+      paymentMethod: PaymentMethod.CASH,
+      paymentStatus: PaymentStatus.COMPLETED,
+      soldBy,
+      soldByType: 'Vendor',
+      channel: SalesChannel.WRISTBAND,
+      ...econ,
+      serviceFeeAmount: 0,
+      amountCharged: 0,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    await Ticket.updateMany({ _id: { $in: tickets.map((t) => t._id) } }, { saleId: sale._id });
+    await EventService.updateTicketsSold(eventId, ticketTypeId, quantity, 0);
+
+    return { sale, tickets };
+  }
+
+  /**
    * Buy ticket(s) for an end customer paying with their Keshless wallet.
    *
    * This is the single source of truth for the buyer purchase flow: the
