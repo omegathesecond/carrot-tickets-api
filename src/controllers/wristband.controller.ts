@@ -4,7 +4,8 @@ import { WristbandDesign } from '@models/wristbandDesign.model';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { TicketService } from '@services/ticket.service';
 import { TicketSale } from '@models/ticketSale.model';
-import { SalesChannel } from '@interfaces/ticket.interface';
+import { Ticket } from '@models/ticket.model';
+import { SalesChannel, TicketStatus } from '@interfaces/ticket.interface';
 
 /**
  * Wristband printing admin API — saved designs for the dashboard's Tyvek
@@ -134,6 +135,38 @@ export class WristbandController {
         tickets: (s.ticketIds ?? []).map((t: any) => ({ ticketId: t.ticketId, status: t.status })),
       }));
       return ApiResponseUtil.success(res, data);
+    } catch (error: any) {
+      return ApiResponseUtil.serverError(res, error.message);
+    }
+  }
+
+  /**
+   * GET /api/tickets/wristbands/tickets?eventId=&search=
+   * Existing-ticket picker for "print QRs of sold tickets" mode. Only tickets
+   * that can still be worn matter: sold + checked_in (the UI warns on the
+   * latter). Excludes refunded/cancelled.
+   */
+  static async searchTickets(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = String(req.query['eventId'] ?? '');
+      if (!mongoose.isValidObjectId(eventId)) {
+        return ApiResponseUtil.validationError(res, 'eventId is required');
+      }
+      const search = String(req.query['search'] ?? '').trim();
+      const filter: Record<string, unknown> = {
+        eventId,
+        status: { $in: [TicketStatus.SOLD, TicketStatus.CHECKED_IN] },
+      };
+      if (search) {
+        const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        filter['$or'] = [{ ticketId: rx }, { customerName: rx }, { customerPhone: rx }];
+      }
+      const tickets = await Ticket.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .select('ticketId ticketType customerName customerPhone status')
+        .lean();
+      return ApiResponseUtil.success(res, tickets);
     } catch (error: any) {
       return ApiResponseUtil.serverError(res, error.message);
     }

@@ -76,6 +76,7 @@ router.delete('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPer
  */
 router.post('/wristbands/batch-issue', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.batchIssue);
 router.get('/wristbands/batches', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.listBatches);
+router.get('/wristbands/tickets', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.searchTickets);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
