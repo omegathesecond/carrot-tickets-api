@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { R2Service } from '@utils/r2.service';
 import { Event } from '@models/event.model';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
 /**
  * MediaController - Handles event media uploads to Cloudflare R2
@@ -345,6 +346,51 @@ export class MediaController {
     } catch (error: any) {
       console.error('List media error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to list media');
+    }
+  }
+
+  /**
+   * Upload wristband artwork
+   * POST /api/media/events/:eventId/wristband
+   *
+   * Platform-staff only — super-admin or tickets:print_wristbands. Not
+   * vendor-gated: admins print wristbands for any organizer's event on the
+   * office printer, so (unlike the routes above) this is not wired through
+   * validateEventAccess/vendorId scoping.
+   */
+  static async uploadWristbandAsset(req: Request, res: Response): Promise<any> {
+    try {
+      const { eventId } = req.params;
+      const ticketsUser = (req as any).ticketsUser;
+      const file = req.file;
+
+      const allowed = ticketsUser?.isSuperAdmin ||
+        (ticketsUser?.permissions || []).includes(TicketsPermission.PRINT_WRISTBANDS);
+      if (!allowed) {
+        return ApiResponseUtil.forbidden(res, 'Permission required: tickets:print_wristbands');
+      }
+
+      if (!eventId) {
+        return ApiResponseUtil.validationError(res, 'Event ID is required');
+      }
+
+      if (!file) {
+        return ApiResponseUtil.validationError(res, 'No file uploaded');
+      }
+
+      const event = await Event.findById(eventId);
+      if (!event) {
+        return ApiResponseUtil.notFound(res, 'Event not found');
+      }
+
+      const key = R2Service.generateMediaKey(`events/${eventId}/wristbands`, file.originalname);
+      await R2Service.uploadBufferToR2(key, file.buffer, file.mimetype);
+      const url = R2Service.getPublicUrl(key);
+
+      ApiResponseUtil.created(res, { url });
+    } catch (error: any) {
+      console.error('Upload wristband asset error:', error);
+      ApiResponseUtil.serverError(res, error.message || 'Failed to upload wristband artwork');
     }
   }
 }

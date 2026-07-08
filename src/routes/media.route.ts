@@ -6,6 +6,7 @@ import {
   thumbnailUpload,
   galleryUpload,
   qrcodeUpload,
+  wristbandUpload,
   validateFileUpload,
   validateMultipleFileUpload,
   validateEventAccess,
@@ -87,6 +88,22 @@ router.post(
   handleMulterError,
   validateFileUpload,
   MediaController.uploadQRCode
+);
+
+/**
+ * @route   POST /api/media/events/:eventId/wristband
+ * @desc    Upload wristband artwork (platform staff only — checked in controller)
+ * @access  Private (super-admin or tickets:print_wristbands)
+ * @body    multipart/form-data with 'artwork' field
+ * @limits  10MB, JPEG/PNG/WEBP
+ */
+router.post(
+  '/events/:eventId/wristband',
+  authenticateTickets,
+  wristbandUpload.single('artwork'),
+  handleMulterError,
+  validateFileUpload,
+  MediaController.uploadWristbandAsset
 );
 
 /**

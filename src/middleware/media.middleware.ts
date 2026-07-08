@@ -10,6 +10,7 @@ const FILE_SIZE_LIMITS = {
   thumbnail: 2 * 1024 * 1024,   // 2MB for thumbnails
   gallery: 10 * 1024 * 1024,    // 10MB for gallery images
   qrcode: 2 * 1024 * 1024,      // 2MB for QR codes
+  wristband: 10 * 1024 * 1024,  // 10MB for wristband artwork (photo-quality backgrounds)
 };
 
 /**
@@ -83,6 +84,16 @@ export const qrcodeUpload = multer({
     files: 1,
   },
   fileFilter: createFileFilter(ALLOWED_QRCODE_TYPES, 'qrcode'),
+});
+
+// Wristband artwork: photo-quality backgrounds can be large — 10MB, images only.
+export const wristbandUpload = multer({
+  storage,
+  limits: {
+    fileSize: FILE_SIZE_LIMITS.wristband,
+    files: 1,
+  },
+  fileFilter: createFileFilter(ALLOWED_IMAGE_TYPES, 'wristband'),
 });
 
 /**
