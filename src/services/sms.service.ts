@@ -1,22 +1,23 @@
 /**
  * SMS service for Carrot Tickets.
  *
- * Routes through the unified Keshless SMS gateway at
- * POST {KESHLESS_API_URL}/integration/sms — the main keshless-api owns
- * the provider switching (MTN SMPP via the USSD relay, or YeboLink),
- * the credit pool, and the central logs. We just shape the body and
- * authenticate with the existing integration API key.
+ * Routing is split by destination network:
+ *  - Eswatini (+268) numbers go through the unified Keshless SMS gateway at
+ *    POST {KESHLESS_API_URL}/integration/sms — MTN SMPP via the USSD relay,
+ *    cheap and reliable, but it has NO international interconnect.
+ *  - Everything else (e.g. +27 buyers) goes through YeboLink
+ *    (api.yebolink.com → Twilio), which has global SMS termination. Keshless
+ *    silently accepted international sends but never delivered them, locking
+ *    foreign buyers out of OTP login.
  *
- * Same KESHLESS_API_URL + KESHLESS_API_KEY env vars we already use for
- * /integration/payment — no new secrets, no new YeboLink wiring on this
- * service. When a new Keshless sub-product (travels, etc.) needs SMS, it
- * gets the capability for free as soon as it has an integration key.
- *
- * Per global rule: SMS failures do NOT roll back the ticket purchase.
- * The caller invokes this fire-and-forget and logs the boolean result.
+ * Per global rule: purchase-confirmation SMS failures do NOT roll back the
+ * ticket purchase. The caller invokes this fire-and-forget and logs the
+ * boolean result. OTP sends surface failure to the buyer via the caller.
  */
 
 import { groupTicketCode } from '@utils/ticketCode.util';
+import { normalizePhone } from '@utils/phone.util';
+import { YeboLinkClient } from './yebolink.client';
 
 const KESHLESS_API_URL = process.env['KESHLESS_API_URL'] || 'http://localhost:3000/api';
 const KESHLESS_API_KEY = process.env['KESHLESS_API_KEY'] || '';
@@ -36,10 +37,18 @@ export interface TicketSummary {
 
 export class SmsService {
   /**
-   * Low-level send. Returns true if the gateway accepted the message
-   * (HTTP 200), false otherwise. Always logs the outcome.
+   * Low-level send. Picks the gateway by destination: Eswatini numbers via
+   * Keshless (MTN SMPP), international via YeboLink (Twilio). Returns true if
+   * the chosen gateway accepted the message, false otherwise. Always logs the
+   * outcome.
    */
   private static async send(phoneNumber: string, message: string): Promise<boolean> {
+    const normalized = normalizePhone(phoneNumber);
+
+    if (!normalized.startsWith('+268')) {
+      return this.sendInternational(normalized, message);
+    }
+
     if (!KESHLESS_API_KEY) {
       console.error('[SMS] KESHLESS_API_KEY missing — cannot reach unified gateway');
       return false;
@@ -65,6 +74,21 @@ export class SmsService {
       return false;
     } catch (error) {
       console.error('[SMS] Error reaching gateway', error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  /**
+   * International leg — YeboLink (Twilio). The Keshless gateway's MTN SMPP
+   * link cannot terminate outside Eswatini, so any non-+268 number lands here.
+   */
+  private static async sendInternational(phoneNumber: string, message: string): Promise<boolean> {
+    try {
+      const result = await YeboLinkClient.sendSMS(phoneNumber, message, SMS_SENDER_ID);
+      console.log(`[SMS] Dispatched to ${phoneNumber} via YeboLink (international), status=${result.status}`);
+      return true;
+    } catch (error) {
+      console.error('[SMS] YeboLink international send failed', error instanceof Error ? error.message : String(error));
       return false;
     }
   }
