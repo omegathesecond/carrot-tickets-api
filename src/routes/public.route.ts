@@ -73,6 +73,16 @@ router.post('/auth/reset-password', PublicController.resetPasswordBuyer);
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
 
 /**
+ * @route   POST /api/public/contact
+ * @desc    Submit a message from the public "Contact Support" form. Stored
+ *          durably in ContactMessage; best-effort SMS alert to the support
+ *          line. No auth — this is the marketing-site contact form.
+ * @access  Public
+ * @body    name, email, subject, message
+ */
+router.post('/contact', PublicController.submitContactMessage);
+
+/**
  * @route   POST /api/public/purchase/momo
  * @desc    Initiate an async MTN MoMo ticket purchase. Phone comes from the
  *          buyer token (req.ticketsUser.userPhone), NOT the body.

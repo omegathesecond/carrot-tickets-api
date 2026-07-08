@@ -112,6 +112,26 @@ export class SmsService {
   }
 
   /**
+   * Notify the support line that a new contact-form message arrived. This is a
+   * best-effort ALERT only — the message itself is stored durably in the
+   * ContactMessage collection, so a failed/undeliverable SMS never loses data
+   * (hence fire-and-forget, per the telemetry exception to the no-silent-
+   * fallback rule). Sends only when SUPPORT_ALERT_PHONE is configured.
+   */
+  static async sendContactAlert(name: string, subject: string): Promise<boolean> {
+    const to = process.env['SUPPORT_ALERT_PHONE'];
+    if (!to) {
+      console.warn('[SMS] SUPPORT_ALERT_PHONE not set — skipping contact-form alert');
+      return false;
+    }
+    const body =
+      `📨 New Carrot Tickets support message from ${name}.\n` +
+      `Subject: ${subject}\n` +
+      `Check the support inbox to reply.`;
+    return this.send(to, body);
+  }
+
+  /**
    * Send a login one-time passcode. Unlike the purchase confirmation, the
    * OTP send is NOT fire-and-forget — the caller must surface a failure to
    * the buyer (they can't log in without the code), per the no-silent-

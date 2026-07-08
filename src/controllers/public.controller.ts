@@ -9,6 +9,16 @@ import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
+import { ContactMessage } from '@models/contactMessage.model';
+import { SmsService } from '@services/sms.service';
+
+// Validation schema for the public "Contact Support" form.
+const contactMessageSchema = Joi.object({
+  name: Joi.string().trim().min(1).max(100).required(),
+  email: Joi.string().trim().lowercase().email().max(200).required(),
+  subject: Joi.string().trim().min(1).max(150).required(),
+  message: Joi.string().trim().min(1).max(5000).required(),
+});
 
 // Validation schema for Peach card purchase initiation
 const cardInitiateSchema = Joi.object({
@@ -489,6 +499,44 @@ export class PublicController {
     } catch (error: any) {
       console.error('Get buyer tickets error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch tickets');
+    }
+  }
+
+  /**
+   * Receive a message from the public "Contact Support" form. The message is
+   * stored durably (ContactMessage) — that write is the operation's success
+   * condition, so a failure returns 500 rather than pretending it worked. A
+   * best-effort SMS alert to the support line is then fired-and-forgotten so a
+   * human is nudged; its outcome never affects the response the buyer sees.
+   */
+  static async submitContactMessage(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = contactMessageSchema.validate(req.body);
+      if (error) {
+        return ApiResponseUtil.validationError(res, error.details[0]?.message || 'Validation error');
+      }
+
+      await ContactMessage.create({
+        name: value.name,
+        email: value.email,
+        subject: value.subject,
+        message: value.message,
+      });
+
+      // Fire-and-forget notification — must not block or fail the request.
+      SmsService.sendContactAlert(value.name, value.subject).catch((err) =>
+        console.error('[Contact] alert SMS failed', err instanceof Error ? err.message : String(err)),
+      );
+
+      return ApiResponseUtil.success(
+        res,
+        { received: true },
+        "Thanks for reaching out — we've received your message and will get back to you soon.",
+        201,
+      );
+    } catch (error: any) {
+      console.error('Submit contact message error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to send your message');
     }
   }
 }
