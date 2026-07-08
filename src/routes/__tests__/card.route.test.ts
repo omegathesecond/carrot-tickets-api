@@ -67,12 +67,12 @@ describe('POST /api/public/purchase/peach-card/webhook', () => {
 describe('Peach shopperResultUrl return endpoint', () => {
   const PAGE = 'https://carrottickets.com/payment-result';
 
-  it('GET with ?id finalises server-side and 302s to the SPA result page with the id', async () => {
+  it('GET with ?id finalises server-side and 302s to the SPA result page with id + outcome', async () => {
     const res = await request(app).get('/api/public/purchase/peach-card/return?id=pay_get');
 
     expect(res.status).toBe(302);
     expect(mockFinalizeCardSale).toHaveBeenCalledWith('pay_get');
-    expect(res.headers['location']).toBe(`${PAGE}?id=pay_get`);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_get&status=completed`);
   });
 
   it('POST (3DS form-urlencoded) finalises and 302s to the SPA result page', async () => {
@@ -83,7 +83,15 @@ describe('Peach shopperResultUrl return endpoint', () => {
 
     expect(res.status).toBe(302);
     expect(mockFinalizeCardSale).toHaveBeenCalledWith('pay_post');
-    expect(res.headers['location']).toBe(`${PAGE}?id=pay_post`);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_post&status=completed`);
+  });
+
+  it('carries a failed outcome through to the page', async () => {
+    mockFinalizeCardSale.mockResolvedValueOnce({ status: 'failed' });
+    const res = await request(app).get('/api/public/purchase/peach-card/return?id=pay_fail');
+
+    expect(res.status).toBe(302);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_fail&status=failed`);
   });
 
   it('still 302s to the result page (no id) when finalize is impossible', async () => {
@@ -94,7 +102,7 @@ describe('Peach shopperResultUrl return endpoint', () => {
     expect(res.headers['location']).toBe(PAGE);
   });
 
-  it('302s to the result page even if finalize throws (never dead-ends the buyer)', async () => {
+  it('302s with id but no status seed if finalize throws (page falls back to polling)', async () => {
     mockFinalizeCardSale.mockRejectedValueOnce(new Error('DB down'));
     const res = await request(app).get('/api/public/purchase/peach-card/return?id=pay_boom');
 

@@ -66,12 +66,18 @@ export class CardController {
     const pageUrl = process.env['CARD_RESULT_PAGE_URL'] || 'https://carrottickets.com/payment-result';
 
     if (paymentId) {
+      let status: 'completed' | 'failed' | 'pending' | undefined;
       try {
-        await TicketService.finalizeCardSale(paymentId);
+        ({ status } = await TicketService.finalizeCardSale(paymentId));
       } catch (e) {
         console.error('[card return] finalize', e); // best-effort; polling on the page is the backstop
       }
-      return res.redirect(302, `${pageUrl}?id=${encodeURIComponent(paymentId)}`);
+      // Pass the server-side outcome so the SPA can show the result WITHOUT
+      // depending on the buyer being signed in on this device (3DS can return
+      // on a different browser/device). Polling stays the authoritative re-check;
+      // a spoofed &status grants no ticket (minting is server-side only).
+      const q = `?id=${encodeURIComponent(paymentId)}${status ? `&status=${status}` : ''}`;
+      return res.redirect(302, `${pageUrl}${q}`);
     }
     // No id — send the buyer to the result page anyway; it will show a generic state.
     return res.redirect(302, pageUrl);
