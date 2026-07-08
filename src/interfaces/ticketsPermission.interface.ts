@@ -34,7 +34,12 @@ export enum TicketsPermission {
   // list of registered buyers + signup analytics. Super-admins pass via
   // middleware; everyone else needs this assigned explicitly. NEVER part of any
   // role's default set — organizers (OWNER) must not see other events' buyers.
-  VIEW_USERS = 'tickets:view_users'
+  VIEW_USERS = 'tickets:view_users',
+
+  // Wristband printing (Carrot admins/team only) — design + print Tyvek
+  // wristbands from the dashboard and batch-issue zero-amount tickets for
+  // scannable wristbands. NEVER part of any role's default set.
+  PRINT_WRISTBANDS = 'tickets:print_wristbands'
 }
 
 export enum TicketsRole {
@@ -45,10 +50,11 @@ export enum TicketsRole {
 }
 
 export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> = {
-  // Every permission EXCEPT the platform-staff-only ones (VIEW_USERS). An
-  // organizer owns their vendor account, not the Carrot platform.
+  // Every permission EXCEPT the platform-staff-only ones (VIEW_USERS,
+  // PRINT_WRISTBANDS). An organizer owns their vendor account, not the
+  // Carrot platform.
   [TicketsRole.OWNER]: Object.values(TicketsPermission).filter(
-    (p) => p !== TicketsPermission.VIEW_USERS
+    (p) => p !== TicketsPermission.VIEW_USERS && p !== TicketsPermission.PRINT_WRISTBANDS
   ),
 
   [TicketsRole.MANAGER]: [

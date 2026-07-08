@@ -25,7 +25,8 @@ export enum PaymentStatus {
 export enum SalesChannel {
   ONLINE = 'online',          // buyer self-service web/app checkout
   BOX_OFFICE = 'box_office',  // vendor/sub-user selling in person
-  RESELLER_POS = 'reseller_pos' // reseller operator sale
+  RESELLER_POS = 'reseller_pos', // reseller operator sale
+  WRISTBAND = 'wristband'     // platform-printed wristband batch (zero-amount)
 }
 
 export interface ITicket extends Document {
