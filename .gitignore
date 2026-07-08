@@ -36,3 +36,6 @@ coverage/
 tmp/
 temp/
 ._*
+
+# Local Claude Code worktrees/config — never commit
+.claude/
