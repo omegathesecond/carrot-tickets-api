@@ -223,6 +223,12 @@ export class AnalyticsService {
 
       // Get recent activity
       const recentActivityFilter: any = isSuperAdmin ? {} : { vendorId: new mongoose.Types.ObjectId(vendorId) };
+      // Organizers only see paid sales in the Recent Sales widget; failed and
+      // pending payment attempts are visible to Carrot super-admins only.
+      // (Scans have no paymentStatus, so keep this off the shared filter.)
+      const recentSalesFilter: any = isSuperAdmin
+        ? recentActivityFilter
+        : { ...recentActivityFilter, paymentStatus: PaymentStatus.COMPLETED };
       const upcomingEventsFilter: any = {
         status: EventStatus.PUBLISHED,
         eventDate: { $gte: new Date() }
@@ -232,7 +238,7 @@ export class AnalyticsService {
       }
 
       const [recentSales, recentScans, upcomingEvents] = await Promise.all([
-        TicketSale.find(recentActivityFilter)
+        TicketSale.find(recentSalesFilter)
           .populate('eventId', 'name venue')
           .sort({ soldAt: -1 })
           .limit(5)

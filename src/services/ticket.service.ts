@@ -455,7 +455,14 @@ export class TicketService {
 
       if (eventId) filter.eventId = eventId;
       if (paymentMethod) filter.paymentMethod = paymentMethod;
-      if (paymentStatus) filter.paymentStatus = paymentStatus;
+      // Organizers only ever see paid sales — failed/pending online payment
+      // attempts are platform noise reserved for Carrot super-admins, and this
+      // must hold even if the client passes an explicit paymentStatus filter.
+      if (isSuperAdmin) {
+        if (paymentStatus) filter.paymentStatus = paymentStatus;
+      } else {
+        filter.paymentStatus = PaymentStatus.COMPLETED;
+      }
       if (channel) filter.channel = channel;
 
       if (startDate || endDate) {
