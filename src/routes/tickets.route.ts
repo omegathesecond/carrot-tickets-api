@@ -11,6 +11,7 @@ import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
+import { WristbandController } from '@controllers/wristband.controller';
 
 const router = Router();
 
@@ -58,6 +59,16 @@ router.get(
  */
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
+
+/**
+ * Wristband printing — platform staff only (Carrot office printer + Tyvek
+ * stock). Super-admins or team members holding tickets:print_wristbands.
+ * Intentionally NOT vendor-scoped, mirroring /admin/users.
+ */
+router.get('/wristband-designs', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.listDesigns);
+router.post('/wristband-designs', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.createDesign);
+router.put('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.updateDesign);
+router.delete('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.deleteDesign);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
