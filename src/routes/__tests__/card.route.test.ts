@@ -34,10 +34,10 @@ beforeEach(() => {
   mockFinalizeCardSale.mockResolvedValue({ status: 'completed' });
 });
 
-describe('POST /api/public/purchase/card/webhook', () => {
+describe('POST /api/public/purchase/peach-card/webhook', () => {
   it('returns 200 and calls finalizeCardSale when body contains { id }', async () => {
     const res = await request(app)
-      .post('/api/public/purchase/card/webhook')
+      .post('/api/public/purchase/peach-card/webhook')
       .send({ id: 'pay_1' });
 
     expect(res.status).toBe(200);
@@ -48,7 +48,7 @@ describe('POST /api/public/purchase/card/webhook', () => {
     mockFinalizeCardSale.mockRejectedValueOnce(new Error('DB blew up'));
 
     const res = await request(app)
-      .post('/api/public/purchase/card/webhook')
+      .post('/api/public/purchase/peach-card/webhook')
       .send({ id: 'pay_err' });
 
     expect(res.status).toBe(200);
@@ -56,7 +56,7 @@ describe('POST /api/public/purchase/card/webhook', () => {
 
   it('returns 200 and does not call finalizeCardSale for a Peach verification handshake', async () => {
     const res = await request(app)
-      .post('/api/public/purchase/card/webhook')
+      .post('/api/public/purchase/peach-card/webhook')
       .send({ verificationCode: 'abc123' });
 
     expect(res.status).toBe(200);

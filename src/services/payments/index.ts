@@ -9,7 +9,7 @@ const processors: Record<string, PaymentProcessor> = {
   [PaymentMethod.CASH]: new CashProcessor(),
   [PaymentMethod.KESHLESS_WALLET]: new KeshlessWalletProcessor(),
   [PaymentMethod.MTN_MOMO]: new MtnMomoProcessor(),
-  [PaymentMethod.CARD]: new CardProcessor(),
+  [PaymentMethod.PEACH_CARD]: new CardProcessor(),
 };
 
 export function getProcessor(method: PaymentMethod): PaymentProcessor {

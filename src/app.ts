@@ -130,7 +130,7 @@ app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/public', publicRoutes);                  // Public routes - no auth required
-app.use('/api/public/purchase/card', cardRoutes);      // Peach card webhook (unauthenticated)
+app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 

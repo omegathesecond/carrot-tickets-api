@@ -32,9 +32,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  // cardEnabled must be true for initiate tests to pass the admin toggle check.
+  // peachCardEnabled must be true for initiate tests to pass the admin toggle check.
   // Re-seeded each time because clearTestDb() wipes the config document.
-  await PaymentConfigService.update({ cardEnabled: true, platformFeePercent: 0 });
+  await PaymentConfigService.update({ peachCardEnabled: true, platformFeePercent: 0 });
 });
 
 afterEach(async () => {
@@ -102,7 +102,7 @@ describe('initiateCardPurchase', () => {
     expect(sale).not.toBeNull();
     expect(sale!.paymentStatus).toBe(PaymentStatus.PENDING);
     expect(sale!.ticketIds.length).toBe(0);
-    expect(sale!.paymentMethod).toBe(PaymentMethod.CARD);
+    expect(sale!.paymentMethod).toBe(PaymentMethod.PEACH_CARD);
 
     // Event reserved count must be 1
     const updatedEvent = await Event.findById(eventId);
@@ -126,7 +126,7 @@ describe('initiateCardPurchase', () => {
     ).rejects.toThrow('Peach down');
 
     // Sale should be FAILED, reservation released
-    const sale = await TicketSale.findOne({ paymentMethod: PaymentMethod.CARD });
+    const sale = await TicketSale.findOne({ paymentMethod: PaymentMethod.PEACH_CARD });
     expect(sale).not.toBeNull();
     expect(sale!.paymentStatus).toBe(PaymentStatus.FAILED);
 
@@ -135,9 +135,9 @@ describe('initiateCardPurchase', () => {
     expect(tt.reserved).toBe(0); // released
   });
 
-  it('throws when cardEnabled toggle is false', async () => {
+  it('throws when peachCardEnabled toggle is false', async () => {
     const { eventId, ticketTypeId } = await seedPublishedEvent();
-    await PaymentConfigService.update({ cardEnabled: false });
+    await PaymentConfigService.update({ peachCardEnabled: false });
 
     await expect(
       TicketService.initiateCardPurchase({
@@ -147,7 +147,7 @@ describe('initiateCardPurchase', () => {
         customerPhone: '+26878422613',
       } as any),
     ).rejects.toThrow('Card payments are not available');
-    // afterEach clears DB; beforeEach re-seeds cardEnabled:true for subsequent tests
+    // afterEach clears DB; beforeEach re-seeds peachCardEnabled:true for subsequent tests
   });
 
   it('getCardSaleByPaymentId returns the sale by peachPaymentId', async () => {
@@ -169,7 +169,7 @@ describe('initiateCardPurchase', () => {
     const found = await TicketService.getCardSaleByPaymentId('pay_lookup');
     expect(found).not.toBeNull();
     expect(found!.peachPaymentId).toBe('pay_lookup');
-    expect(found!.paymentMethod).toBe(PaymentMethod.CARD);
+    expect(found!.paymentMethod).toBe(PaymentMethod.PEACH_CARD);
   });
 });
 
@@ -207,7 +207,7 @@ async function seedPendingCardSale(overrides?: { paymentStatus?: PaymentStatus }
     customerName: 'Test Buyer',
     customerPhone: '+26878422613',
     totalAmount: 50,
-    paymentMethod: PaymentMethod.CARD,
+    paymentMethod: PaymentMethod.PEACH_CARD,
     paymentStatus: overrides?.paymentStatus ?? PaymentStatus.PENDING,
     peachPaymentId: 'pay_finalize',
     soldBy: vendorId,

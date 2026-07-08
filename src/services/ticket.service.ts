@@ -945,7 +945,7 @@ export class TicketService {
    * 3) Call createPayment on Peach — on failure, release reservation + fail sale + rethrow.
    *
    * Mirrors initiateMomoPurchase exactly; differences: no payer phone,
-   * paymentMethod = PaymentMethod.CARD, provider call is peachClient.createPayment.
+   * paymentMethod = PaymentMethod.PEACH_CARD, provider call is peachClient.createPayment.
    */
   static async initiateCardPurchase(p: {
     eventId: string;
@@ -964,7 +964,7 @@ export class TicketService {
     if (!this.peachClient.isConfigured()) throw new Error('Card payments are not available');
 
     const cardCfg = await PaymentConfigService.get();
-    if (!cardCfg.cardEnabled) throw new Error('Card payments are not available');
+    if (!cardCfg.peachCardEnabled) throw new Error('Card payments are not available');
 
     const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
@@ -985,7 +985,7 @@ export class TicketService {
     // Immutable economic snapshot — card is electronic so custody derives to 'carrot'.
     const econ = await this.buildSaleSnapshot({
       totalAmount,
-      paymentMethod: PaymentMethod.CARD,
+      paymentMethod: PaymentMethod.PEACH_CARD,
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
     });
@@ -997,7 +997,7 @@ export class TicketService {
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
     const { serviceFeeAmount, amountCharged } =
       channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, PaymentMethod.CARD, cardCfg)
+        ? computeServiceFee(totalAmount, PaymentMethod.PEACH_CARD, cardCfg)
         : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
@@ -1009,7 +1009,7 @@ export class TicketService {
       customerName: p.customerName,
       customerPhone: p.customerPhone,
       totalAmount,
-      paymentMethod: PaymentMethod.CARD,
+      paymentMethod: PaymentMethod.PEACH_CARD,
       paymentStatus: PaymentStatus.PENDING,
       soldBy,
       soldByType: mappedSoldByType,

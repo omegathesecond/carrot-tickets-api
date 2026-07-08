@@ -92,7 +92,7 @@ router.post('/purchase/momo', authenticateBuyer, PublicController.initiateMomoPu
 router.get('/purchase/momo/:referenceId/status', authenticateBuyer, PublicController.getMomoStatus);
 
 /**
- * @route   POST /api/public/purchase/card
+ * @route   POST /api/public/purchase/peach-card
  * @desc    Initiate an async Peach card ticket purchase. Phone comes from the
  *          buyer token (req.ticketsUser.userPhone), NOT the body.
  *          Returns { paymentId, redirect, saleId, expiresAt } — buyer is
@@ -100,14 +100,14 @@ router.get('/purchase/momo/:referenceId/status', authenticateBuyer, PublicContro
  * @access  Buyer (Bearer buyer token)
  * @body    eventId, ticketTypeId, quantity, customerName?
  */
-router.post('/purchase/card', authenticateBuyer, PublicController.initiateCardPurchase);
+router.post('/purchase/peach-card', authenticateBuyer, PublicController.initiateCardPurchase);
 
 /**
- * @route   GET /api/public/purchase/card/:paymentId/status
+ * @route   GET /api/public/purchase/peach-card/:paymentId/status
  * @desc    Poll the status of a pending Peach card payment. Also triggers
  *          finalization (ticket minting) when Peach reports success.
  * @access  Buyer (Bearer buyer token)
  */
-router.get('/purchase/card/:paymentId/status', authenticateBuyer, PublicController.getCardStatus);
+router.get('/purchase/peach-card/:paymentId/status', authenticateBuyer, PublicController.getCardStatus);
 
 export default router;

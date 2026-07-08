@@ -10,7 +10,7 @@ const patchSchema = Joi.object({
   keshlessWalletEnabled: Joi.boolean(),
   mtnMomoEnabled: Joi.boolean(),
   cashEnabled: Joi.boolean(),
-  cardEnabled: Joi.boolean(),
+  peachCardEnabled: Joi.boolean(),
   defaultResellerCommissionPercent: Joi.number().min(0).max(100),
   platformFeePercent: Joi.number().min(0).max(100),
   // Buyer-paid FLAT service fee (E) per online method.

@@ -2,7 +2,7 @@ import { PaymentMethod } from '@interfaces/ticket.interface';
 import { ChargeInput, ChargeResult, PaymentProcessor } from './types';
 
 export class CardProcessor implements PaymentProcessor {
-  method = PaymentMethod.CARD;
+  method = PaymentMethod.PEACH_CARD;
 
   isConfigured() {
     return true;

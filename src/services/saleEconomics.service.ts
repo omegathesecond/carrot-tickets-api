@@ -3,7 +3,7 @@ export type SaleSoldByType = 'Vendor' | 'VendorSubUser' | 'ResellerOperator';
 
 export interface SaleEconomicsInput {
   faceAmount: number;
-  paymentMethod: 'cash' | 'mtn_momo' | 'keshless_wallet' | 'card';
+  paymentMethod: 'cash' | 'mtn_momo' | 'keshless_wallet' | 'peach_card';
   soldByType: SaleSoldByType;
   resellerCommissionPercent: number;
   platformFeePercent: number;

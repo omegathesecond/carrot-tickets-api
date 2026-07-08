@@ -27,7 +27,7 @@ export function serviceFeeFor(method: PaymentMethod, cfg: ServiceFeeConfig): num
       return cfg.keshlessServiceFee || 0;
     case PaymentMethod.MTN_MOMO:
       return cfg.momoServiceFee || 0;
-    case PaymentMethod.CARD:
+    case PaymentMethod.PEACH_CARD:
       return cfg.cardServiceFee || 0;
     default:
       return 0;

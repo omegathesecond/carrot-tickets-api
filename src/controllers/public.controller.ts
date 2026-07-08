@@ -364,13 +364,13 @@ export class PublicController {
       const methods: string[] = [];
       if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
       if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
-      if (cfg.cardEnabled && new PeachClient().isConfigured()) methods.push('card');
+      if (cfg.peachCardEnabled && new PeachClient().isConfigured()) methods.push('peach_card');
       // Per-method flat buyer service fee (E) so checkout can show a live
       // breakdown. The charge is recomputed server-side on purchase (display only).
       const serviceFees = {
         keshless_wallet: cfg.keshlessServiceFee,
         mtn_momo: cfg.momoServiceFee,
-        card: cfg.cardServiceFee,
+        peach_card: cfg.cardServiceFee,
       };
       return ApiResponseUtil.success(res, { methods, serviceFees });
     } catch (error: any) {

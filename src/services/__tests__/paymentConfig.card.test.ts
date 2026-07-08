@@ -1,14 +1,14 @@
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PaymentMethodConfig } from '@models/paymentMethodConfig.model';
 jest.mock('@models/paymentMethodConfig.model');
-describe('PaymentConfigService cardEnabled', () => {
+describe('PaymentConfigService peachCardEnabled', () => {
   afterEach(() => jest.clearAllMocks());
-  it('defaults cardEnabled false', async () => {
+  it('defaults peachCardEnabled false', async () => {
     (PaymentMethodConfig.findOne as jest.Mock).mockReturnValue({ lean: () => Promise.resolve(null) });
-    expect((await PaymentConfigService.get()).cardEnabled).toBe(false);
+    expect((await PaymentConfigService.get()).peachCardEnabled).toBe(false);
   });
-  it('reads cardEnabled from doc', async () => {
-    (PaymentMethodConfig.findOne as jest.Mock).mockReturnValue({ lean: () => Promise.resolve({ cardEnabled: true }) });
-    expect((await PaymentConfigService.get()).cardEnabled).toBe(true);
+  it('reads peachCardEnabled from doc', async () => {
+    (PaymentMethodConfig.findOne as jest.Mock).mockReturnValue({ lean: () => Promise.resolve({ peachCardEnabled: true }) });
+    expect((await PaymentConfigService.get()).peachCardEnabled).toBe(true);
   });
 });
