@@ -10,7 +10,6 @@ import { normalizePhone } from '@utils/phone.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { ContactMessage } from '@models/contactMessage.model';
-import { SmsService } from '@services/sms.service';
 
 // Validation schema for the public "Contact Support" form.
 const contactMessageSchema = Joi.object({
@@ -523,11 +522,8 @@ export class PublicController {
         message: value.message,
       });
 
-      // Fire-and-forget notification — must not block or fail the request.
-      SmsService.sendContactAlert(value.name, value.subject).catch((err) =>
-        console.error('[Contact] alert SMS failed', err instanceof Error ? err.message : String(err)),
-      );
-
+      // The message is now durably stored; support reads and replies from the
+      // admin dashboard. No outbound notification is sent.
       return ApiResponseUtil.success(
         res,
         { received: true },
