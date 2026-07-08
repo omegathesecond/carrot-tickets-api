@@ -332,3 +332,47 @@ describe('finalizeCardSale', () => {
     expect(tickets.length).toBe(0);
   });
 });
+
+describe('reconcilePendingCardSales', () => {
+  beforeEach(() => {
+    process.env['CARD_CURRENCY'] = 'ZAR';
+  });
+
+  // olderThanMs is negative so the cutoff is in the future — the just-seeded
+  // sale (createdAt ≈ now) always qualifies as "stuck".
+  const RECONCILE_ALL = -60_000;
+
+  it('mints a paid-but-stuck PENDING card sale (Peach says success)', async () => {
+    await seedPendingCardSale();
+    getPaymentStatus.mockResolvedValue({ code: '000.000.000', amount: '50.00', currency: 'ZAR' });
+
+    const n = await TicketService.reconcilePendingCardSales(RECONCILE_ALL);
+
+    expect(n).toBe(1);
+    const sale = await TicketSale.findOne({ peachPaymentId: 'pay_finalize' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+    expect((await Ticket.find({})).length).toBe(1);
+  });
+
+  it('leaves a genuinely-pending sale untouched (buyer still paying)', async () => {
+    await seedPendingCardSale();
+    getPaymentStatus.mockResolvedValue({ code: '000.200.000', amount: '50.00', currency: 'ZAR' });
+
+    const n = await TicketService.reconcilePendingCardSales(RECONCILE_ALL);
+
+    expect(n).toBe(0);
+    const sale = await TicketSale.findOne({ peachPaymentId: 'pay_finalize' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.PENDING);
+    expect((await Ticket.find({})).length).toBe(0);
+  });
+
+  it('skips brand-new sales inside the grace window (no Peach call)', async () => {
+    await seedPendingCardSale();
+
+    // Default 2-min grace: a just-created sale is younger than the cutoff.
+    const n = await TicketService.reconcilePendingCardSales();
+
+    expect(n).toBe(0);
+    expect(getPaymentStatus).not.toHaveBeenCalled();
+  });
+});

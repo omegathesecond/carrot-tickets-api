@@ -1335,6 +1335,41 @@ export class TicketService {
   }
 
   /**
+   * Reconciliation backstop: finalise Peach card sales that are still PENDING
+   * despite the buyer having (possibly) paid — i.e. the return endpoint, the
+   * webhook AND the SPA poll all missed. Runs on an interval; asks Peach for
+   * each sale's true status via finalizeCardSale (success→mint, rejected→
+   * release+fail, still-pending→left untouched). finalizeCardSale is idempotent
+   * and pending-safe, so re-running is harmless.
+   *
+   * `olderThanMs` skips brand-new sales where the buyer is still on the hosted
+   * page (avoids hammering Peach); the 2-min default sits far inside the 15-min
+   * CARD_TTL_MS reservation hold, so paid sales are recovered long before the
+   * reservation-expiry sweep would fail them.
+   */
+  static async reconcilePendingCardSales(olderThanMs = 2 * 60_000): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await TicketSale.find({
+      paymentMethod: PaymentMethod.PEACH_CARD,
+      paymentStatus: PaymentStatus.PENDING,
+      peachPaymentId: { $exists: true, $nin: [null, ''] },
+      createdAt: { $lt: cutoff },
+    }).limit(50);
+
+    let finalized = 0;
+    for (const sale of stuck) {
+      try {
+        const r = await this.finalizeCardSale(sale.peachPaymentId as string);
+        if (r.status !== 'pending') finalized++;
+      } catch (err) {
+        console.error(`[card-reconcile] failed for sale ${sale.saleId}`, err);
+      }
+    }
+    if (finalized > 0) console.log(`[card-reconcile] finalised ${finalized}/${stuck.length} stuck card sale(s)`);
+    return finalized;
+  }
+
+  /**
    * Get sales statistics
    */
   static async getSalesStats(

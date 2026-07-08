@@ -48,6 +48,7 @@ if (isSentryEnabled()) {
 
 // Import services
 import { ReservationService } from '@services/reservation.service';
+import { TicketService } from '@services/ticket.service';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -180,6 +181,14 @@ if (process.env['NODE_ENV'] !== 'test') {
       setInterval(() => {
         ReservationService.sweepExpired().catch(err => console.error('[reservation-sweep] error', err));
       }, SWEEP_MS);
+
+      // Reconcile paid-but-stuck Peach card sales (return endpoint + webhook +
+      // poll all missed). Runs ahead of the 15-min reservation expiry so a paid
+      // sale is minted, never failed. See TicketService.reconcilePendingCardSales.
+      const CARD_RECONCILE_MS = 60_000;
+      setInterval(() => {
+        TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
+      }, CARD_RECONCILE_MS);
     })
     .catch((error) => {
       console.error('❌ MongoDB connection error:', error);
