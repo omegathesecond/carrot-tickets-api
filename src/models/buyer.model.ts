@@ -14,6 +14,7 @@ export interface IBuyer extends Document {
   phone: string; // normalised, e.g. +26878422613
   password: string; // bcrypt hash (select: false)
   name?: string;
+  avatarUrl?: string; // public R2 URL of the buyer's profile picture (optional)
   lastLoginAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -30,6 +31,7 @@ const buyerSchema = new Schema<IBuyer>(
       select: false
     },
     name: { type: String, trim: true, maxlength: 100 },
+    avatarUrl: { type: String, trim: true },
     lastLoginAt: { type: Date }
   },
   { timestamps: true }

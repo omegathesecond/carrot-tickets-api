@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
+import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
+import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 
 const router = Router();
 
@@ -71,6 +73,25 @@ router.post('/auth/reset-password', PublicController.resetPasswordBuyer);
  * @access  Buyer
  */
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
+
+/**
+ * Buyer profile (ticket-holder). Identity is the verified phone on the buyer
+ * token; only the profile picture is editable here.
+ * @route   GET    /api/public/profile           -> { phone, name, avatarUrl }
+ * @route   POST   /api/public/profile/avatar     multipart 'avatar' -> { avatarUrl }
+ * @route   DELETE /api/public/profile/avatar     -> { avatarUrl: null }
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/profile', authenticateBuyer, BuyerProfileController.getProfile);
+router.post(
+  '/profile/avatar',
+  authenticateBuyer,
+  avatarUpload.single('avatar'),
+  handleMulterError,
+  validateFileUpload,
+  BuyerProfileController.uploadAvatar,
+);
+router.delete('/profile/avatar', authenticateBuyer, BuyerProfileController.deleteAvatar);
 
 /**
  * @route   POST /api/public/contact

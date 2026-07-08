@@ -11,6 +11,7 @@ const FILE_SIZE_LIMITS = {
   gallery: 10 * 1024 * 1024,    // 10MB for gallery images
   qrcode: 2 * 1024 * 1024,      // 2MB for QR codes
   wristband: 10 * 1024 * 1024,  // 10MB for wristband artwork (photo-quality backgrounds)
+  avatar: 5 * 1024 * 1024,      // 5MB for buyer profile pictures (client already downscales)
 };
 
 /**
@@ -94,6 +95,17 @@ export const wristbandUpload = multer({
     files: 1,
   },
   fileFilter: createFileFilter(ALLOWED_IMAGE_TYPES, 'wristband'),
+});
+
+// Buyer profile picture: the public site crops + downscales to a square before
+// upload, so 5MB is plenty. Images only.
+export const avatarUpload = multer({
+  storage,
+  limits: {
+    fileSize: FILE_SIZE_LIMITS.avatar,
+    files: 1,
+  },
+  fileFilter: createFileFilter(ALLOWED_IMAGE_TYPES, 'avatar'),
 });
 
 /**
