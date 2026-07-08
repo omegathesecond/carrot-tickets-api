@@ -30,6 +30,15 @@ router.get('/payment-methods', PublicController.getPaymentMethods);
 router.get('/events', PublicController.getPublicEvents);
 
 /**
+ * @route   GET /api/public/activity
+ * @desc    Recent REAL purchase activity across published events for the live
+ *          FOMO ticker. Names are masked to "Sipho D."; returns [] when quiet.
+ * @access  Public
+ * @query   limit (1–30, default 15)
+ */
+router.get('/activity', PublicController.getActivity);
+
+/**
  * @route   GET /api/public/events/:eventId
  * @desc    Get single published event details
  * @access  Public

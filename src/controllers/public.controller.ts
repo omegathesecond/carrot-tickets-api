@@ -2,14 +2,32 @@ import { Request, Response } from 'express';
 import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
+import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { TicketService } from '@services/ticket.service';
-import { SalesChannel } from '@interfaces/ticket.interface';
+import { SalesChannel, PaymentStatus } from '@interfaces/ticket.interface';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { ContactMessage } from '@models/contactMessage.model';
+
+// "Recent activity" window for the public FOMO surfaces (ticker + trending
+// badges): only sales in the last 48h count as momentum.
+const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+// Privacy-preserving display name for the public activity feed. Turns a stored
+// buyer name into "Sipho D." — first name + last initial — so we can create
+// social proof from REAL purchases without broadcasting anyone's full name or
+// phone. Unknown/blank names become "Someone" (honest — we don't invent one).
+function maskBuyerName(name?: string): string {
+  const cleaned = (name || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return 'Someone';
+  const parts = cleaned.split(' ');
+  const first = parts[0]!.charAt(0).toUpperCase() + parts[0]!.slice(1);
+  if (parts.length === 1) return first;
+  return `${first} ${parts[parts.length - 1]!.charAt(0).toUpperCase()}.`;
+}
 
 // Validation schema for the public "Contact Support" form.
 const contactMessageSchema = Joi.object({
@@ -109,6 +127,33 @@ export class PublicController {
         Event.countDocuments(filter)
       ]);
 
+      // Real recent-sales momentum for trending badges: sum completed (non-
+      // wristband) ticket quantities per event over the last 48h. One
+      // aggregation over just the events on this page. "trending" is the top
+      // few by momentum (with a real floor of >=2), so a badge only ever
+      // reflects genuine recent activity — never a fabricated signal.
+      const eventIds = events.map(e => e._id);
+      const since = new Date(Date.now() - RECENT_WINDOW_MS);
+      const recentAgg = await TicketSale.aggregate([
+        {
+          $match: {
+            eventId: { $in: eventIds },
+            paymentStatus: PaymentStatus.COMPLETED,
+            channel: { $ne: SalesChannel.WRISTBAND },
+            soldAt: { $gte: since },
+          },
+        },
+        { $group: { _id: '$eventId', recent: { $sum: '$quantity' } } },
+      ]);
+      const recentMap = new Map<string, number>(recentAgg.map((a: any) => [String(a._id), a.recent]));
+      const trendingIds = new Set(
+        [...recentMap.entries()]
+          .filter(([, n]) => n >= 2)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([id]) => id),
+      );
+
       // Transform events for public display
       const publicEvents = events.map(event => ({
         _id: event._id,
@@ -132,7 +177,9 @@ export class PublicController {
         priceRange: {
           min: Math.min(...event.ticketTypes.map(tt => tt.price)),
           max: Math.max(...event.ticketTypes.map(tt => tt.price))
-        }
+        },
+        recentSales: recentMap.get(String(event._id)) || 0,
+        trending: trendingIds.has(String(event._id)),
       }));
 
       return ApiResponseUtil.success(res, {
@@ -149,6 +196,50 @@ export class PublicController {
     } catch (error: any) {
       console.error('Get public events error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch events');
+    }
+  }
+
+  /**
+   * GET /api/public/activity
+   * Recent purchase activity across published events, for the public "live"
+   * FOMO ticker. Every item is a REAL completed sale — we never fabricate
+   * activity. Buyer identity is reduced server-side to "Sipho D." so full
+   * names/phones never leave the API. Zero-amount wristband batches are
+   * excluded. Returns [] when there's nothing recent (the UI then shows
+   * nothing rather than inventing activity).
+   */
+  static async getActivity(req: Request, res: Response): Promise<any> {
+    try {
+      const requested = parseInt(String(req.query['limit'] ?? '15'), 10);
+      const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 15, 1), 30);
+
+      // Over-fetch, then keep only sales whose event is currently published
+      // (the populate `match` nulls out the rest), then slice to the limit.
+      const raw = await TicketSale.find({
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: { $ne: SalesChannel.WRISTBAND },
+      })
+        .sort({ soldAt: -1 })
+        .limit(limit * 4)
+        .select('customerName quantity soldAt eventId')
+        .populate({ path: 'eventId', select: 'name status', match: { status: EventStatus.PUBLISHED } })
+        .lean();
+
+      const activity = raw
+        .filter((s: any) => s.eventId)
+        .slice(0, limit)
+        .map((s: any) => ({
+          name: maskBuyerName(s.customerName),
+          quantity: s.quantity,
+          eventId: String(s.eventId._id),
+          eventName: s.eventId.name,
+          soldAt: s.soldAt,
+        }));
+
+      return ApiResponseUtil.success(res, { activity });
+    } catch (error: any) {
+      console.error('Get activity error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to fetch activity');
     }
   }
 
