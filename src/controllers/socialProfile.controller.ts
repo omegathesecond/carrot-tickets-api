@@ -3,7 +3,9 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername, RESERVED_USERNAMES, USERNAME_REGEX } from '@utils/username.util';
-import { updateProfileSchema } from '@validators/community.validator';
+import { updateProfileSchema, blockSchema } from '@validators/community.validator';
+import { BlockService } from '@services/block.service';
+import { HttpError } from '@utils/httpError.util';
 
 export class SocialProfileController {
   /** Own-profile payload. NEVER include the phone — usernames are the public identity. */
@@ -100,6 +102,52 @@ export class SocialProfileController {
     } catch (error: any) {
       console.error('Username availability error:', error);
       return ApiResponseUtil.error(res, error?.message || 'Failed to check username', 500);
+    }
+  }
+
+  private static failSocial(res: Response, error: any, fallback: string) {
+    if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
+    console.error(fallback, error);
+    return ApiResponseUtil.error(res, error?.message || fallback, 500);
+  }
+
+  /** POST /api/social/block */
+  static async blockUser(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const { error, value } = blockSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+      await BlockService.block(buyer, value.userId);
+      return ApiResponseUtil.success(res, { blocked: true }, 'User blocked');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to block user');
+    }
+  }
+
+  /** DELETE /api/social/block/:userId */
+  static async unblockUser(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const userId = String(req.params['userId'] || '');
+      if (!/^[0-9a-f]{24}$/i.test(userId)) return ApiResponseUtil.error(res, 'userId must be a user id', 400);
+      await BlockService.unblock(buyer, userId);
+      return ApiResponseUtil.success(res, { blocked: false }, 'User unblocked');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to unblock user');
+    }
+  }
+
+  /** GET /api/social/me/blocks — feeds client-side hiding of channel messages. */
+  static async myBlocks(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const userIds = await BlockService.listBlockedIds(String(buyer._id));
+      return ApiResponseUtil.success(res, { userIds });
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load blocks');
     }
   }
 }

@@ -10,3 +10,7 @@ export const updateProfileSchema = Joi.object({
   bio: Joi.string().allow('').max(280).optional(),
   dmPrivacy: Joi.string().valid('community', 'friends').optional(),
 }).min(1);
+
+export const blockSchema = Joi.object({
+  userId: Joi.string().hex().length(24).required(),
+});
