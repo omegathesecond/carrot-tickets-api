@@ -60,6 +60,7 @@ import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
 import communityRoutes from '@routes/community.route';
+import socialRoutes from '@routes/social.route';
 
 // Import error handling middleware
 import {
@@ -136,6 +137,7 @@ app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webho
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 app.use('/api/community', communityRoutes);          // Event communities (buyer social)
+app.use('/api/social', socialRoutes);                // Buyer social profiles
 
 // 404 handler - must be after all routes
 app.use(notFoundHandler);
