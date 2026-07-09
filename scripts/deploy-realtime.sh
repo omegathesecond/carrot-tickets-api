@@ -11,22 +11,43 @@ RT_SERVICE=carrot-tickets-realtime
 
 export CLOUDSDK_ACTIVE_CONFIG_NAME=deployer
 
-describe_api() {
-  gcloud run services describe "$API_SERVICE" --region="$REGION" --project="$PROJECT" "$@"
-}
+# One JSON fetch; parse with node (always present in this repo's toolchain).
+# YAML scraping is banned here: YAML quotes values like '*' and the quotes
+# would end up INSIDE the deployed env var, silently breaking CORS.
+SPEC_JSON=$(gcloud run services describe "$API_SERVICE" --region="$REGION" --project="$PROJECT" --format=json)
 
-IMAGE=$(describe_api --format='value(spec.template.spec.containers[0].image)')
+IMAGE=$(printf '%s' "$SPEC_JSON" | node -e '
+  let d = "";
+  process.stdin.on("data", (c) => (d += c));
+  process.stdin.on("end", () => process.stdout.write(JSON.parse(d).spec.template.spec.containers[0].image || ""));
+')
 [ -n "$IMAGE" ] || { echo "FATAL: could not resolve $API_SERVICE image" >&2; exit 1; }
 echo "Deploying $RT_SERVICE from image: $IMAGE"
 
 env_value() {
-  describe_api --format='yaml(spec.template.spec.containers[0].env)' \
-    | awk -v key="$1" '$0 ~ "name: "key"$" { getline; sub(/^ *value: */, ""); print; exit }'
+  printf '%s' "$SPEC_JSON" | node -e '
+    let d = "";
+    process.stdin.on("data", (c) => (d += c));
+    process.stdin.on("end", () => {
+      const key = process.argv[1];
+      const env = (JSON.parse(d).spec.template.spec.containers[0].env || []).find((e) => e.name === key);
+      if (!env) return; // empty output = not set
+      if (env.valueFrom) { process.stdout.write("__SECRET_BOUND__"); return; }
+      process.stdout.write(env.value || "");
+    });
+  ' "$1"
 }
 
 MONGODB_URI=$(env_value MONGODB_URI)
 JWT_SECRET=$(env_value JWT_SECRET)
 CORS_ORIGINS=$(env_value CORS_ORIGINS)
+
+for v in MONGODB_URI JWT_SECRET CORS_ORIGINS; do
+  if [ "${!v:-}" = "__SECRET_BOUND__" ]; then
+    echo "FATAL: $v is bound via Secret Manager on $API_SERVICE — this script only copies plain values. Extend it to use --update-secrets for that var first." >&2
+    exit 1
+  fi
+done
 [ -n "$MONGODB_URI" ] && [ -n "$JWT_SECRET" ] || { echo "FATAL: MONGODB_URI/JWT_SECRET missing on $API_SERVICE" >&2; exit 1; }
 
 # ^;^ sets ';' as the list delimiter — MONGODB_URI/CORS_ORIGINS may contain commas.
