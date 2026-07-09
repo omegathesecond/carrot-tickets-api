@@ -245,4 +245,27 @@ describe('community message routes', () => {
       .send({ body: 'muted!' })
       .expect(403);
   });
+
+  it('rejects malformed limit and before with 400 (never unbounded)', async () => {
+    const { seeded, bySlug, auth } = await seedWorld();
+    await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', auth).expect(200);
+    const general = String(bySlug['general']!._id);
+
+    await request(app)
+      .get(`/api/community/channels/${general}/messages?limit=abc`)
+      .set('Authorization', auth)
+      .expect(400);
+    await request(app)
+      .get(`/api/community/channels/${general}/messages?limit=1&limit=2`)
+      .set('Authorization', auth)
+      .expect(400);
+    await request(app)
+      .get(`/api/community/channels/${general}/messages?limit=0`)
+      .set('Authorization', auth)
+      .expect(400);
+    await request(app)
+      .get(`/api/community/channels/${general}/messages?before=not-an-id`)
+      .set('Authorization', auth)
+      .expect(400);
+  });
 });

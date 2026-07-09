@@ -17,9 +17,24 @@ export class MessageController {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      const rawLimit = req.query['limit'];
+      let limit: number | undefined;
+      if (rawLimit !== undefined) {
+        limit = Number(rawLimit);
+        if (!Number.isInteger(limit) || limit < 1) {
+          return ApiResponseUtil.error(res, 'limit must be a positive integer', 400);
+        }
+      }
+
+      const before = req.query['before'] as string | undefined;
+      if (before !== undefined && !/^[0-9a-f]{24}$/i.test(before)) {
+        return ApiResponseUtil.error(res, 'before must be a message id', 400);
+      }
+
       const messages = await MessageService.listMessages(req.params['channelId'] as string, buyer, {
-        before: req.query['before'] as string | undefined,
-        limit: req.query['limit'] ? Number(req.query['limit']) : undefined,
+        before,
+        limit,
       });
       return ApiResponseUtil.success(res, messages);
     } catch (error: any) {
