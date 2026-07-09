@@ -1,6 +1,11 @@
 import { Schema, model, Document } from 'mongoose';
 import bcrypt from 'bcrypt';
 
+/** Canonical username shape. Lives on the model so the schema validator and
+ *  the generator in @utils/username.util share one definition (the util
+ *  imports from here — the reverse would be a circular import). */
+export const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
+
 /**
  * Buyer (ticket-holder) account for the public site.
  *
@@ -44,7 +49,8 @@ const buyerSchema = new Schema<IBuyer>(
       trim: true,
       lowercase: true,
       minlength: 3,
-      maxlength: 20
+      maxlength: 20,
+      match: [USERNAME_REGEX, 'Usernames are 3-20 characters: a-z, 0-9 and _']
     },
     bio: { type: String, trim: true, maxlength: 280 },
     dmPrivacy: { type: String, enum: ['community', 'friends'], default: 'community' },

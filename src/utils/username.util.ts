@@ -1,6 +1,6 @@
-import { Buyer, IBuyer } from '@models/buyer.model';
+import { Buyer, IBuyer, USERNAME_REGEX } from '@models/buyer.model';
 
-export const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
+export { USERNAME_REGEX };
 
 export const RESERVED_USERNAMES = [
   'admin', 'administrator', 'carrot', 'carrottickets', 'support', 'help',

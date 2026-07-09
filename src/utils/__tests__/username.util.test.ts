@@ -40,4 +40,10 @@ describe('username.util', () => {
     const second = await ensureUsername(first);
     expect(second.username).toBe(assigned);
   });
+
+  it('schema rejects a username that violates the pattern', async () => {
+    await expect(
+      Buyer.create({ phone: '+26878000003', password: 'secret1', username: 'bad name!' })
+    ).rejects.toThrow(/Usernames are 3-20 characters/);
+  });
 });
