@@ -52,10 +52,19 @@ export function registerChannelHandlers(io: Server, socket: Socket): void {
   );
 
   socket.on('channel:leave', async (payload: { channelId?: string }) => {
-    const channelId = String(payload?.channelId || '');
-    if (!CHANNEL_ID_REGEX.test(channelId)) return;
-    await socket.leave(channelRoom(channelId));
-    await broadcastPresence(io, channelId);
+    try {
+      const channelId = String(payload?.channelId || '');
+      if (!CHANNEL_ID_REGEX.test(channelId)) return;
+      // Only sockets actually in the room trigger a broadcast — a stranger
+      // "leaving" a room they never joined must not fan out adapter queries.
+      if (!socket.rooms.has(channelRoom(channelId))) return;
+      await socket.leave(channelRoom(channelId));
+      await broadcastPresence(io, channelId);
+    } catch (err) {
+      // No ack channel on leave; the global unhandledRejection handler
+      // exits the process, so failures must be contained + loud here.
+      console.error('[realtime] channel:leave failed', err);
+    }
   });
 
   socket.on('typing', (payload: { channelId?: string }) => {

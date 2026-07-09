@@ -139,4 +139,30 @@ describe('channel handlers', () => {
     ]);
     expect(presence).toEqual({ channelId: general, count: 1 });
   });
+
+  it('presence counts DISTINCT buyers — a second connection from the same buyer does not double-count', async () => {
+    const { bySlug } = await seedWorld();
+    const general = String(bySlug['general']!._id);
+
+    const first = await client(PHONE_A);
+    const ack1 = await joinChannel(first, general);
+    expect(ack1).toEqual({ ok: true, presence: 1 });
+
+    const second = await client(PHONE_A); // same buyer, second tab
+    const ack2 = await joinChannel(second, general);
+    expect(ack2).toEqual({ ok: true, presence: 1 }); // still one distinct buyer
+  });
+
+  it('channel:leave from a socket that never joined does not broadcast presence', async () => {
+    const { bySlug } = await seedWorld();
+    const general = String(bySlug['general']!._id);
+
+    const member = await client(PHONE_A);
+    await joinChannel(member, general);
+
+    const stranger = await client(PHONE_B); // member of community, never joined the room
+    stranger.emit('channel:leave', { channelId: general });
+
+    await expect(waitForEvent(member, 'presence:update', 500)).rejects.toThrow(/timeout/);
+  });
 });
