@@ -366,6 +366,13 @@ export class EventService {
         // Admin approval — the event goes live.
         event.status = EventStatus.PUBLISHED;
         event.publishedAt = new Date();
+        // The Community tab is the event page's default tab — the community
+        // must exist the moment the event goes live. Runs BEFORE the status
+        // commit so a community failure aborts the publish instead of leaving
+        // a live event whose publish "failed". ensureForEvent is idempotent;
+        // an orphan community from a later save failure is simply adopted by
+        // the next publish attempt.
+        await CommunityService.ensureForEvent(String(event._id), String(event.vendorId));
       } else {
         // Organizer submission — block only suspended/inactive accounts, then
         // route the event into the approval queue.
@@ -384,12 +391,6 @@ export class EventService {
       }
 
       await event.save();
-
-      if (event.status === EventStatus.PUBLISHED) {
-        // The Community tab is the event page's default tab — the community
-        // must exist the moment the event goes live.
-        await CommunityService.ensureForEvent(String(event._id), String(event.vendorId));
-      }
       return event;
     } catch (error: any) {
       console.error('Publish event error:', error);
