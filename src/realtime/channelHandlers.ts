@@ -10,7 +10,7 @@ const CHANNEL_ID_REGEX = /^[0-9a-f]{24}$/i;
 interface JoinAck {
   ok: boolean;
   error?: string;
-  presence?: number;
+  presence?: number | null;
 }
 
 /** Distinct buyers currently in a channel room — adapter-aware, so the count
@@ -42,11 +42,20 @@ export function registerChannelHandlers(io: Server, socket: Socket): void {
         await MessageService.requireChannelAccess(channelId, buyer);
         await socket.join(channelRoom(channelId));
 
-        const count = await presenceCount(io, channelId);
-        socket.to(channelRoom(channelId)).emit('presence:update', { channelId, count });
+        // The join is committed; presence is best-effort decoration. During
+        // instance churn fetchSockets can time out — that must degrade the
+        // count, never the join.
+        let count: number | null = null;
+        try {
+          count = await presenceCount(io, channelId);
+          socket.to(channelRoom(channelId)).emit('presence:update', { channelId, count });
+        } catch (err) {
+          console.error('[realtime] presence after join failed (join still ok):', err);
+        }
         ack?.({ ok: true, presence: count });
       } catch (err: any) {
-        ack?.({ ok: false, error: err?.message || 'Failed to join channel' });
+        const message = err instanceof HttpError ? err.message : 'Failed to join channel';
+        ack?.({ ok: false, error: message });
       }
     }
   );

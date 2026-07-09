@@ -36,4 +36,7 @@ const messageSchema = new Schema<IMessage>(
 // Cursor pagination: newest-first within a channel.
 messageSchema.index({ channelId: 1, _id: -1 });
 
+// Unread badges: countDocuments({ channelId, createdAt: { $gt: since } }).
+messageSchema.index({ channelId: 1, createdAt: -1 });
+
 export const Message = model<IMessage>('Message', messageSchema);

@@ -6,6 +6,7 @@ import { createAdapter } from '@socket.io/mongo-adapter';
 import mongoose from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { ensureAdapterCollection } from '../adapterCollection';
+import { containBusWrites } from '../containBusWrites';
 import { createRealtimeServer } from '../server';
 
 export interface TestRealtime {
@@ -25,7 +26,7 @@ export async function startTestRealtime(withAdapter = false): Promise<TestRealti
   const { httpServer, io } = createRealtimeServer('*');
   if (withAdapter) {
     const collection = await ensureAdapterCollection(mongoose.connection.db! as any);
-    io.adapter(createAdapter(collection as any));
+    io.adapter(createAdapter(containBusWrites(collection as any) as any));
   }
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const port = (httpServer.address() as AddressInfo).port;

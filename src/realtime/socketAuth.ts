@@ -35,7 +35,8 @@ export async function socketAuthMiddleware(
     socket.data.phone = buyer.phone;
     socket.data.username = buyer.username ?? null;
     next();
-  } catch {
+  } catch (err) {
+    console.error('[realtime] socket handshake rejected:', err);
     next(new Error('Invalid or expired token'));
   }
 }

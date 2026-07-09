@@ -165,4 +165,23 @@ describe('channel handlers', () => {
 
     await expect(waitForEvent(member, 'presence:update', 500)).rejects.toThrow(/timeout/);
   });
+
+  it('join still acks ok when presence computation fails', async () => {
+    const { bySlug } = await seedWorld();
+    const general = String(bySlug['general']!._id);
+    const a = await client(PHONE_A);
+
+    const spy = jest.spyOn(rt.io, 'in').mockImplementationOnce(() => {
+      throw new Error('adapter down');
+    });
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const ack = await joinChannel(a, general);
+      expect(ack.ok).toBe(true);
+      expect(ack.presence).toBeNull();
+    } finally {
+      spy.mockRestore();
+      consoleSpy.mockRestore();
+    }
+  });
 });

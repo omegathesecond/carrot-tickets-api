@@ -20,7 +20,7 @@ describe('socket emitter failure containment', () => {
 
     expect(fakeCollection.insertOne).toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[realtime-emit] bus write failed'),
+      expect.stringContaining('[realtime-bus] write failed'),
       expect.any(Error)
     );
     expect(unhandled).not.toHaveBeenCalled();

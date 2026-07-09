@@ -2,6 +2,8 @@
 # Deploy the realtime gateway: the SAME image as carrot-tickets-api with a
 # different container command (node dist/realtime.js). Run AFTER each API
 # deploy so both services run identical code. Idempotent.
+# ORDERING: run this only AFTER the API build/deploy for the same commit is
+# verified — the script ships whatever image carrot-tickets-api currently serves.
 set -euo pipefail
 
 PROJECT=contracts-470406
@@ -58,6 +60,7 @@ gcloud run deploy "$RT_SERVICE" \
   --platform=managed --allow-unauthenticated \
   --session-affinity --min-instances=1 --max-instances=10 \
   --timeout=3600 --memory=512Mi \
+  --concurrency=500 \
   --update-env-vars="^;^NODE_ENV=production;MONGODB_URI=${MONGODB_URI};JWT_SECRET=${JWT_SECRET};CORS_ORIGINS=${CORS_ORIGINS:-*}"
 
 URL=$(gcloud run services describe "$RT_SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')

@@ -199,18 +199,27 @@ if (process.env['NODE_ENV'] !== 'test') {
       }, CARD_RECONCILE_MS);
 
       // Realtime bus: REST-created messages broadcast to the gateway's
-      // channel rooms via the capped-collection adapter. Init failure keeps
-      // the API up (REST is this service's job; clients resync) but is loud.
+      // channel rooms. Init failure keeps the API serving (REST is this
+      // service's job) but retries with backoff — a boot-time Mongo blip
+      // must not permanently disable live delivery on this instance.
       const db = mongoose.connection.db;
       if (db) {
-        ensureAdapterCollection(db as any)
-          .then((collection) => {
-            initSocketEmitter(collection);
-            console.log('📡 Socket emitter ready (realtime broadcast enabled)');
-          })
-          .catch((err) =>
-            console.error('❌ Socket emitter init failed (live broadcast disabled, resync still works):', err)
-          );
+        const initEmitterWithRetry = (attempt: number): void => {
+          ensureAdapterCollection(db as any)
+            .then((collection) => {
+              initSocketEmitter(collection);
+              console.log('📡 Socket emitter ready (realtime broadcast enabled)');
+            })
+            .catch((err) => {
+              const delayMs = Math.min(60_000, 2 ** attempt * 1_000);
+              console.error(
+                `❌ Socket emitter init failed (attempt ${attempt + 1}; retrying in ${delayMs / 1000}s; live broadcast disabled until then, resync still works):`,
+                err
+              );
+              setTimeout(() => initEmitterWithRetry(attempt + 1), delayMs).unref();
+            });
+        };
+        initEmitterWithRetry(0);
       }
     })
     .catch((error) => {
