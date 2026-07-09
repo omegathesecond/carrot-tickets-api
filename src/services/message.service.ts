@@ -72,16 +72,26 @@ export class MessageService {
   static async listMessages(
     channelId: string,
     buyer: IBuyer,
-    opts: { before?: string; limit?: number } = {}
+    opts: { before?: string; after?: string; limit?: number } = {}
   ): Promise<MessageView[]> {
     await MessageService.requireChannelAccess(channelId, buyer);
+    if (opts.before && opts.after) {
+      throw new HttpError(400, 'before and after are mutually exclusive');
+    }
 
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
     const query: Record<string, unknown> = { channelId };
+    let sort: Record<string, 1 | -1> = { _id: -1 }; // history: newest first
     if (opts.before) query['_id'] = { $lt: opts.before };
+    if (opts.after) {
+      // Resync: everything since the client's last-seen id, oldest first so
+      // the client appends in order.
+      query['_id'] = { $gt: opts.after };
+      sort = { _id: 1 };
+    }
 
     const docs = await Message.find(query)
-      .sort({ _id: -1 })
+      .sort(sort)
       .limit(limit)
       .populate('senderId', 'username name avatarUrl');
 
@@ -141,6 +151,13 @@ export class MessageService {
       channelId: String(message.channelId),
       messageId: String(message._id),
     });
+  }
+
+  /** Stamp the buyer's read cursor for a channel (drives unread badges). */
+  static async markRead(channelId: string, buyer: IBuyer): Promise<void> {
+    const { membership } = await MessageService.requireChannelAccess(channelId, buyer);
+    membership.readState.set(channelId, new Date());
+    await membership.save();
   }
 
   private static toView(doc: any): MessageView {

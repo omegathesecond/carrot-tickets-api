@@ -1,6 +1,7 @@
 import { Community } from '@models/community.model';
 import { Channel, IChannel } from '@models/channel.model';
 import { Membership, IMembership } from '@models/membership.model';
+import { Message } from '@models/message.model';
 import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
@@ -12,6 +13,7 @@ export interface ChannelView {
   gated: boolean;
   postPolicy: string;
   locked: boolean;
+  unreadCount: number | null;
 }
 
 export interface CommunityView {
@@ -76,17 +78,37 @@ export class CommunityMembershipService {
   ): Promise<CommunityView> {
     const channels = await Channel.find({ communityId, archived: false }).sort({ createdAt: 1 });
     const verified = Boolean(membership?.ticketVerifiedAt);
+
+    const channelViews: ChannelView[] = await Promise.all(
+      channels.map(async (c: IChannel) => {
+        const locked = c.gated && !verified;
+        let unreadCount: number | null = null;
+        if (membership && !locked) {
+          // Unread since the read cursor, or since joining for never-read
+          // channels. createdAt keeps millisecond precision (an ObjectId
+          // cursor would round to seconds and miscount around a mark-read).
+          const since = membership.readState.get(String(c._id)) ?? membership.createdAt;
+          unreadCount = await Message.countDocuments(
+            { channelId: c._id, createdAt: { $gt: since } },
+            { limit: 99 } // badge caps at 99 — never scan an entire hot channel
+          );
+        }
+        return {
+          id: String(c._id),
+          name: c.name,
+          slug: c.slug,
+          gated: c.gated,
+          postPolicy: c.postPolicy,
+          locked,
+          unreadCount,
+        };
+      })
+    );
+
     return {
       communityId,
       eventId,
-      channels: channels.map((c: IChannel) => ({
-        id: String(c._id),
-        name: c.name,
-        slug: c.slug,
-        gated: c.gated,
-        postPolicy: c.postPolicy,
-        locked: c.gated && !verified,
-      })),
+      channels: channelViews,
       membership: membership
         ? { role: membership.role, ticketVerified: verified, joinedAt: membership.createdAt }
         : null,

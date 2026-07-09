@@ -32,8 +32,14 @@ export class MessageController {
         return ApiResponseUtil.error(res, 'before must be a message id', 400);
       }
 
+      const after = req.query['after'] as string | undefined;
+      if (after !== undefined && !/^[0-9a-f]{24}$/i.test(after)) {
+        return ApiResponseUtil.error(res, 'after must be a message id', 400);
+      }
+
       const messages = await MessageService.listMessages(req.params['channelId'] as string, buyer, {
         before,
+        after,
         limit,
       });
       return ApiResponseUtil.success(res, messages);
@@ -66,6 +72,17 @@ export class MessageController {
       return ApiResponseUtil.success(res, { deleted: true }, 'Message deleted');
     } catch (error: any) {
       return MessageController.fail(res, error, 'Failed to delete message');
+    }
+  }
+
+  static async markRead(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await MessageService.markRead(req.params['channelId'] as string, buyer);
+      return ApiResponseUtil.success(res, { read: true }, 'Channel marked read');
+    } catch (error: any) {
+      return MessageController.fail(res, error, 'Failed to mark channel read');
     }
   }
 }
