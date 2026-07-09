@@ -155,8 +155,11 @@ export class MessageService {
 
   /** Stamp the buyer's read cursor for a channel (drives unread badges). */
   static async markRead(channelId: string, buyer: IBuyer): Promise<void> {
-    const { membership } = await MessageService.requireChannelAccess(channelId, buyer);
-    membership.readState.set(channelId, new Date());
+    const { channel, membership } = await MessageService.requireChannelAccess(channelId, buyer);
+    // Key by the CANONICAL id — the raw param can arrive as uppercase hex,
+    // which casts fine for queries but would orphan the Map entry the view
+    // reads back via String(channel._id).
+    membership.readState.set(String(channel._id), new Date());
     await membership.save();
   }
 

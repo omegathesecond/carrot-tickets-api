@@ -96,4 +96,21 @@ describe('resync, read-state and unread badges', () => {
       .set('Authorization', auth)
       .expect(403);
   });
+
+  it('mark-read with uppercase-hex channelId still clears the badge', async () => {
+    const { seeded, bySlug, auth } = await seedWorld();
+    await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', auth).expect(200);
+    const general = String(bySlug['general']!._id);
+
+    await post(auth, general, 'unread');
+
+    await request(app)
+      .post(`/api/community/channels/${general.toUpperCase()}/read`)
+      .set('Authorization', auth)
+      .expect(200);
+
+    const view = await request(app).get(`/api/community/${seeded.eventId}`).set('Authorization', auth).expect(200);
+    const channels = Object.fromEntries(view.body.data.channels.map((c: any) => [c.slug, c]));
+    expect(channels['general'].unreadCount).toBe(0);
+  });
 });
