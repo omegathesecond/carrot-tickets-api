@@ -55,7 +55,10 @@ export class MessageService {
   /**
    * Best-effort live broadcast AFTER the durable write. Not initialized in
    * tests / when init failed at boot — by design: the write is the success
-   * condition and clients recover via resync, but failures stay loud.
+   * condition and clients recover via resync. Sync failures are caught
+   * here; ASYNC bus-write failures are contained inside the emitter module
+   * (insertOne interception) so they can never become process-fatal
+   * unhandled rejections.
    */
   private static broadcast(channelId: string, event: string, payload: unknown): void {
     if (!isSocketEmitterInitialized()) return;

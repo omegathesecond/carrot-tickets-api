@@ -3,9 +3,30 @@ import type { Collection, Document } from 'mongodb';
 
 let emitter: Emitter | null = null;
 
-/** Called once at API boot, after the adapter collection exists. */
+/**
+ * Called once at API boot, after the adapter collection exists.
+ *
+ * @socket.io/mongo-emitter publishes with a fire-and-forget insertOne —
+ * no await, no .catch(). Left raw, a transient Mongo error on that write
+ * becomes an unhandled rejection, and this codebase's process-wide handler
+ * exits on those. The Proxy intercepts insertOne so bus-write failures are
+ * contained and LOUD instead of fatal: delivery is best-effort by design
+ * (the message is already durable; clients recover via resync).
+ */
 export function initSocketEmitter(collection: Collection<Document>): void {
-  emitter = new Emitter(collection as any);
+  const safeCollection = new Proxy(collection, {
+    get(target, prop, receiver) {
+      if (prop === 'insertOne') {
+        return (...args: unknown[]) =>
+          (target.insertOne as (...a: unknown[]) => Promise<unknown>)(...args).catch((err: unknown) => {
+            console.error('[realtime-emit] bus write failed (clients recover via resync):', err);
+            return { acknowledged: false };
+          });
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  emitter = new Emitter(safeCollection as any);
 }
 
 export function isSocketEmitterInitialized(): boolean {
