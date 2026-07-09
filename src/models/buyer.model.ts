@@ -15,6 +15,10 @@ export interface IBuyer extends Document {
   password: string; // bcrypt hash (select: false)
   name?: string;
   avatarUrl?: string; // public R2 URL of the buyer's profile picture (optional)
+  username?: string; // unique social handle, auto-generated on first social touch
+  bio?: string;
+  dmPrivacy: 'community' | 'friends';
+  usernameCustomizedAt?: Date; // set when the buyer picks their own handle
   lastLoginAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -32,6 +36,19 @@ const buyerSchema = new Schema<IBuyer>(
     },
     name: { type: String, trim: true, maxlength: 100 },
     avatarUrl: { type: String, trim: true },
+    username: {
+      type: String,
+      unique: true,
+      sparse: true, // pre-social buyers have no username yet
+      index: true,
+      trim: true,
+      lowercase: true,
+      minlength: 3,
+      maxlength: 20
+    },
+    bio: { type: String, trim: true, maxlength: 280 },
+    dmPrivacy: { type: String, enum: ['community', 'friends'], default: 'community' },
+    usernameCustomizedAt: { type: Date },
     lastLoginAt: { type: Date }
   },
   { timestamps: true }
