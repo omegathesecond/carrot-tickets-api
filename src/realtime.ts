@@ -3,6 +3,7 @@ import { createAdapter } from '@socket.io/mongo-adapter';
 import { JWT_SECRET } from '@config/jwt.config';
 import { createRealtimeServer } from './realtime/server';
 import { ensureAdapterCollection } from './realtime/adapterCollection';
+import { containBusWrites } from './realtime/containBusWrites';
 
 /**
  * Entrypoint for the carrot-tickets-realtime Cloud Run service. Same image
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
 
   const collection = await ensureAdapterCollection(db as any);
   const { httpServer, io } = createRealtimeServer(corsOrigins);
-  io.adapter(createAdapter(collection as any));
+  io.adapter(createAdapter(containBusWrites(collection as any) as any));
 
   const PORT = Number(process.env['PORT'] || 8080);
   httpServer.listen(PORT, () => {
