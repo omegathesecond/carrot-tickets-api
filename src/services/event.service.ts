@@ -2,6 +2,7 @@ import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
 import mongoose from 'mongoose';
+import { CommunityService } from '@services/community.service';
 
 export interface CreateEventParams {
   vendorId: string;
@@ -383,6 +384,12 @@ export class EventService {
       }
 
       await event.save();
+
+      if (event.status === EventStatus.PUBLISHED) {
+        // The Community tab is the event page's default tab — the community
+        // must exist the moment the event goes live.
+        await CommunityService.ensureForEvent(String(event._id), String(event.vendorId));
+      }
       return event;
     } catch (error: any) {
       console.error('Publish event error:', error);
