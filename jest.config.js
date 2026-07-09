@@ -17,4 +17,5 @@ module.exports = {
     '^@config/(.*)$': '<rootDir>/src/config/$1',
   },
   testTimeout: 30000,
+  setupFiles: ['<rootDir>/jest.setup.ts'],
 };

@@ -1,8 +1,8 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { ResellerRole, RESELLER_ROLE_PERMISSIONS, ResellerToken } from '@interfaces/resellerPermission.interface';
+import { JWT_SECRET } from '@config/jwt.config';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 const MAX_PIN_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;

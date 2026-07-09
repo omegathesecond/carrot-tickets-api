@@ -5,8 +5,8 @@ import { VendorSubUser } from '@models/vendorSubUser.model';
 import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
+import { JWT_SECRET } from '@config/jwt.config';
 
-const JWT_SECRET: string = process.env['JWT_SECRET'] || 'your-secret-key';
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
 const JWT_REFRESH_SECRET: string = process.env['JWT_REFRESH_SECRET'] || 'your-refresh-secret-key';
 const JWT_REFRESH_EXPIRY: string = process.env['JWT_REFRESH_EXPIRY'] || '7d';
