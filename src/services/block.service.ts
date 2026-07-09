@@ -7,15 +7,10 @@ export class BlockService {
     if (String(buyer._id) === targetUserId) throw new HttpError(400, 'You cannot block yourself');
     const exists = await Buyer.exists({ _id: targetUserId });
     if (!exists) throw new HttpError(404, 'User not found');
-
-    // Check if already blocked (idempotent)
-    const alreadyBlocked = await Block.exists({ blockerId: buyer._id, blockedId: targetUserId });
-    if (!alreadyBlocked) {
-      try {
-        await Block.create({ blockerId: buyer._id, blockedId: targetUserId });
-      } catch (err: any) {
-        if (err?.code !== 11000) throw err; // race condition fallback
-      }
+    try {
+      await Block.create({ blockerId: buyer._id, blockedId: targetUserId });
+    } catch (err: any) {
+      if (err?.code !== 11000) throw err; // already blocked — idempotent
     }
   }
 
