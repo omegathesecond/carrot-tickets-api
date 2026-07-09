@@ -62,6 +62,10 @@ import operatorRoutes from '@routes/operator.route';
 import communityRoutes from '@routes/community.route';
 import socialRoutes from '@routes/social.route';
 
+// Realtime bus
+import { ensureAdapterCollection } from '@/realtime/adapterCollection';
+import { initSocketEmitter } from '@/realtime/emitter';
+
 // Import error handling middleware
 import {
   errorHandler,
@@ -193,6 +197,21 @@ if (process.env['NODE_ENV'] !== 'test') {
       setInterval(() => {
         TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
       }, CARD_RECONCILE_MS);
+
+      // Realtime bus: REST-created messages broadcast to the gateway's
+      // channel rooms via the capped-collection adapter. Init failure keeps
+      // the API up (REST is this service's job; clients resync) but is loud.
+      const db = mongoose.connection.db;
+      if (db) {
+        ensureAdapterCollection(db as any)
+          .then((collection) => {
+            initSocketEmitter(collection);
+            console.log('📡 Socket emitter ready (realtime broadcast enabled)');
+          })
+          .catch((err) =>
+            console.error('❌ Socket emitter init failed (live broadcast disabled, resync still works):', err)
+          );
+      }
     })
     .catch((error) => {
       console.error('❌ MongoDB connection error:', error);

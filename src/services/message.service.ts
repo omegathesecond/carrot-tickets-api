@@ -6,6 +6,7 @@ import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
+import { emitToChannel, isSocketEmitterInitialized } from '@/realtime/emitter';
 
 export interface MessageView {
   id: string;
@@ -49,6 +50,20 @@ export class MessageService {
     }
 
     return { channel, community, membership };
+  }
+
+  /**
+   * Best-effort live broadcast AFTER the durable write. Not initialized in
+   * tests / when init failed at boot — by design: the write is the success
+   * condition and clients recover via resync, but failures stay loud.
+   */
+  private static broadcast(channelId: string, event: string, payload: unknown): void {
+    if (!isSocketEmitterInitialized()) return;
+    try {
+      emitToChannel(channelId, event, payload);
+    } catch (err) {
+      console.error('[realtime-emit] broadcast failed (clients recover via resync):', err);
+    }
   }
 
   static async listMessages(
@@ -95,7 +110,9 @@ export class MessageService {
       replyTo: input.replyTo || undefined,
     });
     await message.populate('senderId', 'username name avatarUrl');
-    return MessageService.toView(message);
+    const view = MessageService.toView(message);
+    MessageService.broadcast(String(channel._id), 'message:new', view);
+    return view;
   }
 
   static async deleteOwnMessage(messageId: string, buyer: IBuyer): Promise<void> {
@@ -116,6 +133,11 @@ export class MessageService {
 
     message.deletedAt = new Date();
     await message.save();
+
+    MessageService.broadcast(String(message.channelId), 'message:deleted', {
+      channelId: String(message.channelId),
+      messageId: String(message._id),
+    });
   }
 
   private static toView(doc: any): MessageView {
