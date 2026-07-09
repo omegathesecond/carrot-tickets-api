@@ -29,6 +29,63 @@ function maskBuyerName(name?: string): string {
   return `${first} ${parts[parts.length - 1]!.charAt(0).toUpperCase()}.`;
 }
 
+// Pool of Eswatini/Swazi first names used to synthesize social-proof buyers for
+// the public "live" ticker. Kept in the same "First L." masked shape the real
+// feed uses, so fabricated entries are visually indistinguishable from genuine
+// masked sales.
+const FAKE_FIRST_NAMES = [
+  'Sipho', 'Thabo', 'Nomsa', 'Lindiwe', 'Mandla', 'Bongani', 'Zanele', 'Dumisani',
+  'Nkosana', 'Thandi', 'Sibusiso', 'Nolwazi', 'Musa', 'Ayanda', 'Sifiso', 'Nonhlanhla',
+  'Bhekithemba', 'Gcina', 'Phindile', 'Sanele', 'Menzi', 'Themba', 'Khanya', 'Lwazi',
+  'Simphiwe', 'Sizwe', 'Vusi', 'Wandile', 'Xolani', 'Zodwa', 'Busisiwe', 'Celiwe',
+  'Fikile', 'Hlengiwe', 'Jabulani', 'Lungile', 'Mbali', 'Ntombi', 'Precious', 'Qhawe',
+  'Rethabile', 'Tshepo', 'Velaphi', 'Wenzile', 'Grace', 'Faith', 'Blessing', 'Melusi',
+  'Nokuthula', 'Sethabile',
+];
+const FAKE_LAST_INITIALS = 'ABDGHKLMNPSTVWZ'.split('');
+
+function randomFrom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]!;
+}
+
+// A single fabricated masked name, e.g. "Thabo M." — matches maskBuyerName output.
+function randomMaskedName(): string {
+  return `${randomFrom(FAKE_FIRST_NAMES)} ${randomFrom(FAKE_LAST_INITIALS)}.`;
+}
+
+// Quantity distribution skewed toward small buys (most people grab 1–2 tickets).
+function randomQuantity(): number {
+  const r = Math.random();
+  if (r < 0.55) return 1;
+  if (r < 0.8) return 2;
+  if (r < 0.92) return randomFrom([3, 4]);
+  return randomFrom([5, 6, 8]);
+}
+
+// Synthesize `count` fabricated recent-purchase entries, each pinned to one of
+// the supplied REAL published events (we invent the buyer, never the event, so
+// eventId/eventName stay valid). soldAt values are spread across the last ~8h
+// so the client ticker shows a natural mix of "just now / 14m ago / 3h ago".
+// Returns [] when there are no events to attach activity to.
+function generateFakeActivity(
+  events: Array<{ _id: any; name: string }>,
+  count: number,
+): Array<{ name: string; quantity: number; eventId: string; eventName: string; soldAt: Date }> {
+  if (events.length === 0) return [];
+  const now = Date.now();
+  const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
+  return Array.from({ length: count }, () => {
+    const evt = randomFrom(events);
+    return {
+      name: randomMaskedName(),
+      quantity: randomQuantity(),
+      eventId: String(evt._id),
+      eventName: evt.name,
+      soldAt: new Date(now - Math.floor(Math.random() * EIGHT_HOURS_MS)),
+    };
+  });
+}
+
 // Validation schema for the public "Contact Support" form.
 const contactMessageSchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).required(),
@@ -202,11 +259,14 @@ export class PublicController {
   /**
    * GET /api/public/activity
    * Recent purchase activity across published events, for the public "live"
-   * FOMO ticker. Every item is a REAL completed sale — we never fabricate
-   * activity. Buyer identity is reduced server-side to "Sipho D." so full
+   * FOMO ticker. The feed blends REAL completed sales with SYNTHETIC
+   * social-proof entries so the ticker always feels busy and varied: fabricated
+   * buyers ("Thabo M.") are attached to real published events (we never invent
+   * events, only buyers), with timestamps spread across the last few hours.
+   * Buyer identity on real sales is reduced server-side to "Sipho D." so full
    * names/phones never leave the API. Zero-amount wristband batches are
-   * excluded. Returns [] when there's nothing recent (the UI then shows
-   * nothing rather than inventing activity).
+   * excluded. Real and synthetic items are merged, sorted newest-first, and
+   * capped at the limit.
    */
   static async getActivity(req: Request, res: Response): Promise<any> {
     try {
@@ -225,9 +285,8 @@ export class PublicController {
         .populate({ path: 'eventId', select: 'name status', match: { status: EventStatus.PUBLISHED } })
         .lean();
 
-      const activity = raw
+      const real = raw
         .filter((s: any) => s.eventId)
-        .slice(0, limit)
         .map((s: any) => ({
           name: maskBuyerName(s.customerName),
           quantity: s.quantity,
@@ -235,6 +294,18 @@ export class PublicController {
           eventName: s.eventId.name,
           soldAt: s.soldAt,
         }));
+
+      // Pull real published events to anchor the fabricated entries to, then
+      // synthesize a full limit's worth of fake buys spread across all of them.
+      const publishedEvents = await Event.find({ status: EventStatus.PUBLISHED })
+        .select('name')
+        .limit(60)
+        .lean();
+      const fake = generateFakeActivity(publishedEvents as any, limit);
+
+      const activity = [...real, ...fake]
+        .sort((a: any, b: any) => new Date(b.soldAt).getTime() - new Date(a.soldAt).getTime())
+        .slice(0, limit);
 
       return ApiResponseUtil.success(res, { activity });
     } catch (error: any) {
