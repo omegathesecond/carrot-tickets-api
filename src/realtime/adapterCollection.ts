@@ -4,11 +4,13 @@ export const SOCKET_COLLECTION = 'socketio_events';
 export const SOCKET_COLLECTION_SIZE_BYTES = 1_048_576; // 1 MiB ring buffer
 
 /**
- * The Socket.io mongo adapter fans events out across instances by tailing a
- * capped collection — a fixed-size ring buffer MongoDB serves with a tailable
- * cursor (no replica set / change streams needed). Both the gateway (adapter)
- * and the API (emitter) call this at boot; error code 48 (NamespaceExists)
- * means another instance won the create race, which is fine.
+ * The Socket.io mongo adapter fans events out across instances by opening a
+ * CHANGE STREAM on this capped collection — which means MongoDB MUST be a
+ * replica set (Atlas always is; standalone mongod is NOT enough, and the
+ * adapter's failure mode is a silent 1s retry loop, so a wrong environment
+ * looks like "fan-out never happens" with no error). Both the gateway
+ * (adapter) and the API (emitter) call this at boot; error code 48
+ * (NamespaceExists) means another instance won the create race, which is fine.
  */
 export async function ensureAdapterCollection(db: Db): Promise<Collection<Document>> {
   try {

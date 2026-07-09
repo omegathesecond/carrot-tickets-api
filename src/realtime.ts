@@ -38,7 +38,13 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => {
     console.log('SIGTERM received. Closing realtime gateway...');
     io.close(() => {
-      mongoose.connection.close().then(() => process.exit(0));
+      mongoose.connection.close().then(
+        () => process.exit(0),
+        (err) => {
+          console.error('Error closing MongoDB connection on SIGTERM:', err);
+          process.exit(1);
+        }
+      );
     });
   });
 }
