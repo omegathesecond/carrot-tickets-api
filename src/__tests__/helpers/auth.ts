@@ -19,3 +19,11 @@ export function signSuperAdminToken(): string {
     JWT_SECRET,
   );
 }
+
+/**
+ * Signs a buyer JWT matching the shape BuyerAuthService mints
+ * ({ app, userType: 'buyer', userPhone }) for authenticateBuyer routes.
+ */
+export function signBuyerToken(phone: string): string {
+  return jwt.sign({ app: 'tickets', userType: 'buyer', userPhone: phone }, JWT_SECRET);
+}
