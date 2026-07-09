@@ -6,6 +6,7 @@ import { createAdapter } from '@socket.io/mongo-adapter';
 import mongoose from 'mongoose';
 import { ensureAdapterCollection } from '../adapterCollection';
 import { socketAuthMiddleware } from '../socketAuth';
+import { registerChannelHandlers } from '../channelHandlers';
 
 export interface TestRealtime {
   io: Server;
@@ -28,6 +29,7 @@ export async function startTestRealtime(withAdapter = false): Promise<TestRealti
     io.adapter(createAdapter(collection as any));
   }
   io.use(socketAuthMiddleware);
+  io.on('connection', (socket) => registerChannelHandlers(io, socket));
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const port = (httpServer.address() as AddressInfo).port;
   return {

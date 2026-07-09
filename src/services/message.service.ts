@@ -23,8 +23,12 @@ export class MessageService {
    * Shared authz for reading/writing a channel: member of the community,
    * not banned, and (for gated channels) a verified ticket holder — with an
    * on-demand re-check so a purchase unlocks access without an extra call.
+   *
+   * Also used by the realtime gateway's channel:join (see
+   * src/realtime/channelHandlers.ts), so WS room membership can never be
+   * broader than REST access.
    */
-  private static async requireChannelAccess(channelId: string, buyer: IBuyer) {
+  static async requireChannelAccess(channelId: string, buyer: IBuyer) {
     const channel = await Channel.findById(channelId);
     if (!channel || channel.archived) throw new HttpError(404, 'Channel not found');
 
