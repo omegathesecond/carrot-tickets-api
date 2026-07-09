@@ -8,6 +8,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { CommunityService } from '@services/community.service';
 import { Channel } from '@models/channel.model';
+import { Membership } from '@models/membership.model';
 import { resetBuckets } from '@utils/rateLimit.util';
 
 const PHONE = '+26878422613';
@@ -195,5 +196,53 @@ describe('community message routes', () => {
       .set('Authorization', auth)
       .send({ body: 'x'.repeat(2001) })
       .expect(400);
+  });
+
+  it('banned member is blocked everywhere: read, post, and delete-own', async () => {
+    const { seeded, community, bySlug, auth } = await seedWorld();
+    await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', auth).expect(200);
+    const general = String(bySlug['general']!._id);
+
+    const sent = await request(app)
+      .post(`/api/community/channels/${general}/messages`)
+      .set('Authorization', auth)
+      .send({ body: 'pre-ban message' })
+      .expect(201);
+
+    const buyer = await Buyer.findOne({ phone: PHONE });
+    await Membership.updateOne(
+      { buyerId: buyer!._id, communityId: community._id },
+      { bannedAt: new Date() }
+    );
+
+    await request(app).get(`/api/community/channels/${general}/messages`).set('Authorization', auth).expect(403);
+    await request(app)
+      .post(`/api/community/channels/${general}/messages`)
+      .set('Authorization', auth)
+      .send({ body: 'post-ban' })
+      .expect(403);
+    await request(app)
+      .delete(`/api/community/messages/${sent.body.data.id}`)
+      .set('Authorization', auth)
+      .expect(403);
+  });
+
+  it('muted member can read but not post', async () => {
+    const { seeded, community, bySlug, auth } = await seedWorld();
+    await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', auth).expect(200);
+    const general = String(bySlug['general']!._id);
+
+    const buyer = await Buyer.findOne({ phone: PHONE });
+    await Membership.updateOne(
+      { buyerId: buyer!._id, communityId: community._id },
+      { mutedUntil: new Date(Date.now() + 60 * 60 * 1000) }
+    );
+
+    await request(app).get(`/api/community/channels/${general}/messages`).set('Authorization', auth).expect(200);
+    await request(app)
+      .post(`/api/community/channels/${general}/messages`)
+      .set('Authorization', auth)
+      .send({ body: 'muted!' })
+      .expect(403);
   });
 });

@@ -100,6 +100,16 @@ export class MessageService {
     if (String(message.senderId) !== String(buyer._id)) {
       throw new HttpError(403, 'You can only delete your own messages');
     }
+
+    // "Banned members are blocked everywhere" — including cleaning up their
+    // own history. The message carries communityId, so no channel load needed.
+    const membership = await Membership.findOne({
+      buyerId: buyer._id,
+      communityId: message.communityId,
+    });
+    if (!membership) throw new HttpError(403, 'Join the community first');
+    if (membership.bannedAt) throw new HttpError(403, 'You have been banned from this community');
+
     message.deletedAt = new Date();
     await message.save();
   }
