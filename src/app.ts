@@ -49,6 +49,7 @@ if (isSentryEnabled()) {
 // Import services
 import { ReservationService } from '@services/reservation.service';
 import { TicketService } from '@services/ticket.service';
+import { EventReminderService } from '@services/eventReminder.service';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -203,6 +204,12 @@ if (process.env['NODE_ENV'] !== 'test') {
       setInterval(() => {
         TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
       }, CARD_RECONCILE_MS);
+
+      // Event reminders (spec §6): T-24h and day-of pushes for ticket holders.
+      const REMINDER_SWEEP_MS = 600_000;
+      setInterval(() => {
+        EventReminderService.sweep().catch((err) => console.error('[reminder-sweep] error', err));
+      }, REMINDER_SWEEP_MS);
 
       // Web Push (VAPID): missing keys log loudly and disable push, never
       // crash boot — see @config/vapid.config.
