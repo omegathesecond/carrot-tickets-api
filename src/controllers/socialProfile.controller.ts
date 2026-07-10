@@ -1,10 +1,16 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Buyer, IBuyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
+import { Follow } from '@models/follow.model';
+import { Ticket } from '@models/ticket.model';
+import { TicketStatus } from '@interfaces/ticket.interface';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername, RESERVED_USERNAMES, USERNAME_REGEX } from '@utils/username.util';
-import { updateProfileSchema, blockSchema } from '@validators/community.validator';
+import { toBuyerSummary } from '@utils/buyerSummary.util';
+import { updateProfileSchema, blockSchema, followSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
+import { FollowService } from '@services/follow.service';
 import { HttpError } from '@utils/httpError.util';
 
 export class SocialProfileController {
@@ -27,7 +33,21 @@ export class SocialProfileController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await ensureUsername(buyer);
-      return ApiResponseUtil.success(res, SocialProfileController.toOwnProfile(buyer));
+
+      const myId = String(buyer._id);
+      const [followerCount, followingCount, friendIds, attendedEventIds] = await Promise.all([
+        FollowService.followerCount('buyer', myId),
+        FollowService.followingCount(myId),
+        FollowService.friendIds(myId),
+        Ticket.distinct('eventId', { customerPhone: buyer.phone, status: TicketStatus.CHECKED_IN }),
+      ]);
+      return ApiResponseUtil.success(res, {
+        ...SocialProfileController.toOwnProfile(buyer),
+        followerCount,
+        followingCount,
+        friendCount: friendIds.length,
+        eventsAttended: attendedEventIds.length,
+      });
     } catch (error: any) {
       console.error('Get social profile error:', error);
       return ApiResponseUtil.error(res, error?.message || 'Failed to load profile', 500);
@@ -76,13 +96,35 @@ export class SocialProfileController {
       const username = String(req.params['username'] || '').toLowerCase();
       const buyer = await Buyer.findOne({ username });
       if (!buyer) return ApiResponseUtil.error(res, 'User not found', 404);
+
+      const viewer = await resolveBuyerFromRequest(req);
+      if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const viewerId = String(viewer._id);
+      const targetId = String(buyer._id);
+      const [followerCount, followingCount, attendedEventIds, isFollowing, isFollowedBy, isFriend, isBlocked] =
+        await Promise.all([
+          FollowService.followerCount('buyer', targetId),
+          FollowService.followingCount(targetId),
+          Ticket.distinct('eventId', { customerPhone: buyer.phone, status: TicketStatus.CHECKED_IN }),
+          Follow.exists({ followerId: viewerId, targetType: 'buyer', targetId }).then(Boolean),
+          Follow.exists({ followerId: targetId, targetType: 'buyer', targetId: viewerId }).then(Boolean),
+          FollowService.isFriend(viewerId, targetId),
+          BlockService.isBlockedEitherWay(viewerId, targetId),
+        ]);
       return ApiResponseUtil.success(res, {
-        id: String(buyer._id),
+        id: targetId,
         username: buyer.username,
         name: buyer.name ?? null,
         avatarUrl: buyer.avatarUrl ?? null,
         bio: buyer.bio ?? null,
         joinedAt: buyer.createdAt,
+        followerCount,
+        followingCount,
+        eventsAttended: attendedEventIds.length,
+        isFollowing,
+        isFollowedBy,
+        isFriend,
+        isBlocked,
       });
     } catch (error: any) {
       console.error('Get public profile error:', error);
@@ -109,6 +151,111 @@ export class SocialProfileController {
     if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
     console.error(fallback, error);
     return ApiResponseUtil.error(res, error?.message || fallback, 500);
+  }
+
+  /** POST /api/social/follow */
+  static async followTarget(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const { error, value } = followSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+      await FollowService.follow(buyer, value.targetType, value.targetId);
+      return ApiResponseUtil.success(res, { following: true }, 'Followed');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to follow');
+    }
+  }
+
+  /** DELETE /api/social/follow/:targetType/:targetId */
+  static async unfollowTarget(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const targetType = String(req.params['targetType'] || '');
+      const targetId = String(req.params['targetId'] || '');
+      if (!['buyer', 'organizer'].includes(targetType) || !/^[0-9a-f]{24}$/i.test(targetId)) {
+        return ApiResponseUtil.error(res, 'Invalid follow target', 400);
+      }
+      await FollowService.unfollow(buyer, targetType as 'buyer' | 'organizer', targetId);
+      return ApiResponseUtil.success(res, { following: false }, 'Unfollowed');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to unfollow');
+    }
+  }
+
+  /** GET /api/social/me/following?type=buyer|organizer (default buyer) */
+  static async myFollowing(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const type = req.query['type'] === 'organizer' ? 'organizer' : 'buyer';
+      const ids = await FollowService.followingIds(String(buyer._id), type);
+      if (type === 'organizer') {
+        const vendors = await Vendor.find({ _id: { $in: ids } }).select('businessName slug');
+        return ApiResponseUtil.success(res, vendors.map((v: any) => ({
+          id: String(v._id), businessName: v.businessName, slug: v.slug ?? null,
+        })));
+      }
+      const buyers = await Buyer.find({ _id: { $in: ids } });
+      return ApiResponseUtil.success(res, buyers.map(toBuyerSummary));
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load following');
+    }
+  }
+
+  /** GET /api/social/me/followers */
+  static async myFollowers(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const ids = await FollowService.followerIds(String(buyer._id));
+      const buyers = await Buyer.find({ _id: { $in: ids } });
+      return ApiResponseUtil.success(res, buyers.map(toBuyerSummary));
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load followers');
+    }
+  }
+
+  /** GET /api/social/me/friends */
+  static async myFriends(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const ids = await FollowService.friendIds(String(buyer._id));
+      const buyers = await Buyer.find({ _id: { $in: ids } });
+      return ApiResponseUtil.success(res, buyers.map(toBuyerSummary));
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load friends');
+    }
+  }
+
+  /** GET /api/social/users/search?q= — username prefix; excludes self + blocked either way. */
+  static async searchUsers(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const q = String(req.query['q'] || '').toLowerCase();
+      if (q.length < 2 || q.length > 20) {
+        return ApiResponseUtil.error(res, 'q must be 2-20 characters', 400);
+      }
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const myId = String(buyer._id);
+      const [iBlocked, blockedMe] = await Promise.all([
+        BlockService.listBlockedIds(myId),
+        BlockService.listBlockerIds(myId),
+      ]);
+      const excluded = [myId, ...iBlocked, ...blockedMe];
+
+      const buyers = await Buyer.find({
+        username: { $regex: `^${escaped}` },
+        _id: { $nin: excluded },
+      }).limit(20);
+      return ApiResponseUtil.success(res, buyers.map(toBuyerSummary));
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to search users');
+    }
   }
 
   /** POST /api/social/block */

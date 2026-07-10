@@ -4,6 +4,9 @@ import { CommunityMembershipService } from '@services/communityMembership.servic
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername } from '@utils/username.util';
 import { HttpError } from '@utils/httpError.util';
+import { Membership } from '@models/membership.model';
+import { Community } from '@models/community.model';
+import { toBuyerSummary } from '@utils/buyerSummary.util';
 
 export class CommunityController {
   /** Resolve the buyer and make sure they carry a username before any social action. */
@@ -52,6 +55,42 @@ export class CommunityController {
       return ApiResponseUtil.success(res, view, 'Ticket verification refreshed');
     } catch (error: any) {
       return CommunityController.fail(res, error, 'Failed to verify ticket');
+    }
+  }
+
+  /** GET /api/community/:eventId/members — members see who's here (spec §2.4 find-people). */
+  static async listMembers(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await CommunityController.requireBuyer(req, res);
+      if (!buyer) return;
+      const eventId = req.params['eventId'] as string;
+
+      const community = await Community.findOne({ eventId });
+      if (!community) throw new HttpError(404, 'Community not found for this event');
+      const me = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
+      if (!me || me.bannedAt) throw new HttpError(403, 'Join the community first');
+
+      const limitRaw = req.query['limit'];
+      let limit = 25;
+      if (limitRaw !== undefined) {
+        limit = Number(limitRaw);
+        if (!Number.isInteger(limit) || limit < 1) return ApiResponseUtil.error(res, 'limit must be a positive integer', 400);
+        limit = Math.min(limit, 50);
+      }
+      const before = req.query['before'] as string | undefined;
+      if (before !== undefined && !/^[0-9a-f]{24}$/i.test(before)) {
+        return ApiResponseUtil.error(res, 'before must be a member cursor', 400);
+      }
+
+      const query: Record<string, unknown> = { communityId: community._id, bannedAt: { $exists: false } };
+      if (before) query['_id'] = { $lt: before };
+      const memberships = await Membership.find(query).sort({ _id: -1 }).limit(limit).populate('buyerId');
+      const members = memberships
+        .filter((m: any) => m.buyerId && typeof m.buyerId === 'object')
+        .map((m: any) => toBuyerSummary(m.buyerId));
+      return ApiResponseUtil.success(res, members);
+    } catch (error: any) {
+      return CommunityController.fail(res, error, 'Failed to load members');
     }
   }
 }

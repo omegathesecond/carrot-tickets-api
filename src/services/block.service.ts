@@ -23,6 +23,12 @@ export class BlockService {
     return rows.map((r) => String(r.blockedId));
   }
 
+  /** Buyers who have blocked this buyer (reverse direction). */
+  static async listBlockerIds(buyerId: string): Promise<string[]> {
+    const rows = await Block.find({ blockedId: buyerId }).select('blockerId');
+    return rows.map((r) => String(r.blockerId));
+  }
+
   static async isBlockedEitherWay(buyerIdA: string, buyerIdB: string): Promise<boolean> {
     const hit = await Block.exists({
       $or: [

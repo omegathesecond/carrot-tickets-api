@@ -7,9 +7,16 @@ const router = Router();
 router.get('/me', authenticateBuyer, SocialProfileController.me);
 router.patch('/me', authenticateBuyer, SocialProfileController.update);
 router.get('/me/blocks', authenticateBuyer, SocialProfileController.myBlocks);
+router.get('/me/following', authenticateBuyer, SocialProfileController.myFollowing);
+router.get('/me/followers', authenticateBuyer, SocialProfileController.myFollowers);
+router.get('/me/friends', authenticateBuyer, SocialProfileController.myFriends);
 router.get('/username-available', authenticateBuyer, SocialProfileController.usernameAvailable);
+router.post('/follow', authenticateBuyer, SocialProfileController.followTarget);
+router.delete('/follow/:targetType/:targetId', authenticateBuyer, SocialProfileController.unfollowTarget);
 router.post('/block', authenticateBuyer, SocialProfileController.blockUser);
 router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblockUser);
+// '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
+router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
 router.get('/users/:username', authenticateBuyer, SocialProfileController.publicProfile);
 
 export default router;

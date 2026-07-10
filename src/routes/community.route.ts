@@ -16,5 +16,6 @@ router.delete('/messages/:messageId', authenticateBuyer, MessageController.delet
 router.post('/:eventId/join', authenticateBuyer, CommunityController.join);
 router.get('/:eventId', authenticateBuyer, CommunityController.getView);
 router.post('/:eventId/verify-ticket', authenticateBuyer, CommunityController.reverifyTicket);
+router.get('/:eventId/members', authenticateBuyer, CommunityController.listMembers);
 
 export default router;
