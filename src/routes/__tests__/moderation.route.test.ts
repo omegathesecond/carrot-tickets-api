@@ -366,6 +366,58 @@ describe('organizer moderation routes', () => {
         .expect(200);
     });
 
+    it('deleting a pinned message auto-unpins it and removes it from the pins list', async () => {
+      const { bySlug, buyerAuth, vendorAuth } = await seedWorld();
+      const general = String(bySlug['general']!._id);
+      const sent = await request(app)
+        .post(`/api/community/channels/${general}/messages`)
+        .set('Authorization', buyerAuth)
+        .send({ body: 'pin then delete me' })
+        .expect(201);
+
+      await request(app)
+        .post(`/api/tickets/messages/${sent.body.data.id}/pin`)
+        .set('Authorization', vendorAuth)
+        .expect(200);
+
+      const pinsBefore = await request(app)
+        .get(`/api/community/channels/${general}/pins`)
+        .set('Authorization', buyerAuth)
+        .expect(200);
+      expect(pinsBefore.body.data.map((m: any) => m.id)).toContain(sent.body.data.id);
+
+      await request(app)
+        .delete(`/api/tickets/messages/${sent.body.data.id}`)
+        .set('Authorization', vendorAuth)
+        .expect(200);
+
+      const pinsAfter = await request(app)
+        .get(`/api/community/channels/${general}/pins`)
+        .set('Authorization', buyerAuth)
+        .expect(200);
+      expect(pinsAfter.body.data.map((m: any) => m.id)).not.toContain(sent.body.data.id);
+    });
+
+    it('cannot pin a soft-deleted message (404 — mirrors the delete-any deletedAt guard)', async () => {
+      const { bySlug, buyerAuth, vendorAuth } = await seedWorld();
+      const general = String(bySlug['general']!._id);
+      const sent = await request(app)
+        .post(`/api/community/channels/${general}/messages`)
+        .set('Authorization', buyerAuth)
+        .send({ body: 'will be deleted before pinning' })
+        .expect(201);
+
+      await request(app)
+        .delete(`/api/tickets/messages/${sent.body.data.id}`)
+        .set('Authorization', vendorAuth)
+        .expect(200);
+
+      await request(app)
+        .post(`/api/tickets/messages/${sent.body.data.id}/pin`)
+        .set('Authorization', vendorAuth)
+        .expect(404);
+    });
+
     it('cannot pin a DM message (404)', async () => {
       const { seeded, buyerAuth, vendorAuth } = await seedWorld();
       const OTHER = '+26878000043';

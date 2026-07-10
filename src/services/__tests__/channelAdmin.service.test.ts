@@ -10,7 +10,10 @@ import { Membership } from '@models/membership.model';
 import { resetBuckets } from '@utils/rateLimit.util';
 
 describe('ChannelAdminService', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Channel.init(); // unique {communityId, slug} index must exist before the duplicate-slug 409 tests race it
+  });
   beforeEach(resetBuckets);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);

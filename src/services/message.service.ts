@@ -254,9 +254,13 @@ export class MessageService {
    * delete-any (see ModerationService.deleteMessage) so the broadcast path
    * can never drift between the two callers — do not fork this logic.
    * Caller owns all authz/ownership checks; this only persists + emits.
+   *
+   * Also auto-unpins (deleted messages can never stay pinned) — same write,
+   * no extra save, no new bus event.
    */
   static async softDeleteChannelMessage(message: IMessage): Promise<void> {
     message.deletedAt = new Date();
+    message.pinnedAt = null;
     await message.save();
     MessageService.broadcastRoom(channelRoom(String(message.channelId)), 'message:deleted', {
       channelId: String(message.channelId),

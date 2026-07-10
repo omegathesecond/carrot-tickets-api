@@ -94,6 +94,7 @@ export class ModerationController {
       const messageId = String(req.params['messageId'] || '');
       const message = await ModerationController.requireOwnedChannelMessage(messageId, ticketsUser, res);
       if (!message) return;
+      if (message.deletedAt) return ApiResponseUtil.error(res, 'Message not found', 404);
 
       await ModerationService.pinMessage(message);
       return ApiResponseUtil.success(res, { pinned: true }, 'Message pinned');

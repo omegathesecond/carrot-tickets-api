@@ -29,7 +29,10 @@ async function seedWorld() {
 }
 
 describe('organizer channel management routes', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Channel.init(); // unique {communityId, slug} index must exist before the duplicate-slug 409 test races it
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 

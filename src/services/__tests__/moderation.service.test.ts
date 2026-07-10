@@ -42,6 +42,22 @@ describe('ModerationService', () => {
       const reloaded = await Message.findById(message._id);
       expect(reloaded!.deletedAt).toBeInstanceOf(Date);
     });
+
+    it('auto-unpins a pinned message on delete (deleted↔pinned interplay)', async () => {
+      const { general, community } = await seedCommunity();
+      const { buyer } = await seedMember(community._id as mongoose.Types.ObjectId);
+      const message = await Message.create({
+        channelId: general._id, communityId: community._id, senderId: buyer._id, body: 'pinned then deleted',
+      });
+      await ModerationService.pinMessage(message);
+      expect((await Message.findById(message._id))!.pinnedAt).toBeInstanceOf(Date);
+
+      await ModerationService.deleteMessage((await Message.findById(message._id))!);
+
+      const reloaded = await Message.findById(message._id);
+      expect(reloaded!.deletedAt).toBeInstanceOf(Date);
+      expect(reloaded!.pinnedAt).toBeNull();
+    });
   });
 
   describe('mute / unmute', () => {
@@ -158,6 +174,38 @@ describe('ModerationService', () => {
         statusCode: 400,
         message: 'Pin limit reached',
       });
+    });
+
+    it('over-cap state (10 already pinned, seeded directly): pinning an 11th rolls back to null and rejects 400', async () => {
+      // Seeds the precondition directly against the collection (bypassing
+      // ModerationService.pinMessage) to isolate the rollback branch of the
+      // set-then-recount-then-rollback invariant from the write path that
+      // produced the over-cap state — see the docstring on pinMessage.
+      const { general, community } = await seedCommunity();
+      const { buyer } = await seedMember(community._id as mongoose.Types.ObjectId);
+      const messages = await Promise.all(
+        Array.from({ length: 11 }, (_, i) =>
+          Message.create({
+            channelId: general._id, communityId: community._id, senderId: buyer._id, body: `msg ${i}`,
+          })
+        )
+      );
+      await Message.updateMany(
+        { _id: { $in: messages.slice(0, 10).map((m) => m._id) } },
+        { $set: { pinnedAt: new Date() } }
+      );
+      const preCount = await Message.countDocuments({ channelId: general._id, pinnedAt: { $ne: null } });
+      expect(preCount).toBe(10);
+
+      await expect(ModerationService.pinMessage(messages[10]!)).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Pin limit reached',
+      });
+
+      const reloaded = await Message.findById(messages[10]!._id);
+      expect(reloaded!.pinnedAt).toBeNull();
+      const postCount = await Message.countDocuments({ channelId: general._id, pinnedAt: { $ne: null } });
+      expect(postCount).toBe(10);
     });
 
     it('re-pinning an already-pinned message never counts twice against the cap', async () => {

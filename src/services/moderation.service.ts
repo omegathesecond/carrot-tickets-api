@@ -88,16 +88,34 @@ export class ModerationService {
    * never counts twice against the cap). Cap is enforced with `$ne: null`,
    * which — per Mongo's null-comparison semantics — excludes both explicit
    * `null` (unpinned) and the unset field (never pinned).
+   *
+   * INVARIANT / concurrency note: this is deliberately NOT a
+   * countDocuments-then-save check. That ordering is a TOCTOU race — two
+   * concurrent pins reading a count of 9 both pass "9 < 10" and both save,
+   * landing 11 pinned. Instead we set-then-recount-then-rollback: set
+   * pinnedAt optimistically, recount, and if the cap was exceeded roll THIS
+   * write back. No transaction is used (admin-QPS endpoint, not worth the
+   * complexity) — a transient over-cap state can exist for the instant
+   * between two concurrent saves, but the very next recount on either racer
+   * observes count > PIN_LIMIT and rolls its own write back, so the
+   * collection self-corrects to <= PIN_LIMIT before either request returns
+   * to its caller (whichever request's rollback save wins the row simply
+   * ends up unpinned — the other stays pinned, holding the cap exactly).
    */
   static async pinMessage(message: IMessage): Promise<void> {
     if (message.pinnedAt) return;
-    const pinnedCount = await Message.countDocuments({
+    message.pinnedAt = new Date();
+    await message.save();
+
+    const count = await Message.countDocuments({
       channelId: message.channelId,
       pinnedAt: { $ne: null },
     });
-    if (pinnedCount >= PIN_LIMIT) throw new HttpError(400, 'Pin limit reached');
-    message.pinnedAt = new Date();
-    await message.save();
+    if (count > PIN_LIMIT) {
+      message.pinnedAt = null;
+      await message.save();
+      throw new HttpError(400, 'Pin limit reached');
+    }
   }
 
   static async unpinMessage(message: IMessage): Promise<void> {
