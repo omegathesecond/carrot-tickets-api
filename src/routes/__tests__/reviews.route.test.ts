@@ -87,4 +87,15 @@ describe('review routes', () => {
       .send({ text: 'not mine' })
       .expect(403);
   });
+
+  it('malformed ids are clean 400s, never 500s', async () => {
+    await request(app).get('/api/public/events/not-an-id/reviews').expect(400);
+
+    const seeded = await seedEndedWithTicket();
+    await request(app)
+      .post('/api/tickets/reviews/not-an-id/reply')
+      .set('Authorization', `Bearer ${signVendorToken(seeded.vendorId)}`)
+      .send({ text: 'hi' })
+      .expect(400);
+  });
 });

@@ -64,6 +64,13 @@ export class ReviewService {
     return docs.map((doc) => ReviewService.toView(doc));
   }
 
+  /** View a single review by id (populated reviewer). */
+  static async getView(reviewId: string): Promise<ReviewView> {
+    const doc = await Review.findById(reviewId).populate('buyerId', 'username name avatarUrl');
+    if (!doc) throw new HttpError(404, 'Review not found');
+    return ReviewService.toView(doc);
+  }
+
   static async eventAggregate(eventId: string): Promise<{ average: number | null; count: number }> {
     return ReviewService.aggregateBy({ eventId: new Types.ObjectId(eventId) });
   }

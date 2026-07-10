@@ -35,7 +35,8 @@ export class ReviewController {
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const review = await ReviewService.submitReview(req.params['eventId'] as string, buyer, value);
-      const [view] = await ReviewService.listEventReviews(String(review.eventId), { limit: 1 });
+      // By id — a "latest for event" read could echo a concurrent buyer's review.
+      const view = await ReviewService.getView(String(review._id));
       return ApiResponseUtil.success(res, view, 'Review submitted', 201);
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to submit review');
@@ -49,11 +50,14 @@ export class ReviewController {
       const vendorId = ticketsUser?.vendorId as string | undefined;
       if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Authentication required');
 
+      const reviewId = String(req.params['reviewId'] || '');
+      if (!HEX24.test(reviewId)) return ApiResponseUtil.error(res, 'reviewId must be a review id', 400);
+
       const { error, value } = reviewReplySchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const view = await ReviewService.replyToReview(
-        req.params['reviewId'] as string,
+        reviewId,
         vendorId,
         Boolean(ticketsUser?.isSuperAdmin),
         value.text
