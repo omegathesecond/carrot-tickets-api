@@ -49,6 +49,19 @@ export const announcementSchema = Joi.object({
   body: Joi.string().trim().min(1).max(2000).required(),
 });
 
+export const createChannelSchema = Joi.object({
+  name: Joi.string().trim().min(1).max(40).required(),
+  gated: Joi.boolean().optional(),
+  postPolicy: Joi.string().valid('all', 'organizer').optional(),
+});
+
+export const updateChannelSchema = Joi.object({
+  name: Joi.string().trim().min(1).max(40).optional(),
+  gated: Joi.boolean().optional(),
+  postPolicy: Joi.string().valid('all', 'organizer').optional(),
+  archived: Joi.boolean().optional(),
+}).min(1);
+
 export const pushSubscribeSchema = Joi.object({
   endpoint: Joi.string().uri({ scheme: ['https'] }).max(1000).required(),
   keys: Joi.object({

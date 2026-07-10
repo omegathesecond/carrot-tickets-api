@@ -38,7 +38,8 @@ export class MessageService {
    */
   static async requireChannelAccess(channelId: string, buyer: IBuyer) {
     const channel = await Channel.findById(channelId);
-    if (!channel || channel.archived) throw new HttpError(404, 'Channel not found');
+    if (!channel) throw new HttpError(404, 'Channel not found');
+    if (channel.archived) throw new HttpError(403, 'This channel is archived');
 
     const community = await Community.findById(channel.communityId);
     if (!community) throw new HttpError(404, 'Community not found');

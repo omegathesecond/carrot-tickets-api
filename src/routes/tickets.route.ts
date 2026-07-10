@@ -15,6 +15,7 @@ import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { AnnouncementController } from '@controllers/announcement.controller';
+import { ChannelAdminController } from '@controllers/channelAdmin.controller';
 
 const router = Router();
 
@@ -181,6 +182,30 @@ router.post(
   '/events/:eventId/announcements',
   requireTicketsPermission(TicketsPermission.EDIT_EVENT),
   AnnouncementController.post
+);
+
+/**
+ * Organizer channel management — list/create/patch the text channels inside
+ * an event's community. Same auth shape as announcements: dualAuth
+ * (router-level) authenticates, the permission gate is here, and ownership
+ * (own events only) is checked in the controller.
+ */
+router.get(
+  '/events/:eventId/channels',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ChannelAdminController.list
+);
+
+router.post(
+  '/events/:eventId/channels',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ChannelAdminController.create
+);
+
+router.patch(
+  '/channels/:channelId',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ChannelAdminController.update
 );
 
 /**
