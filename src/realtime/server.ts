@@ -3,6 +3,7 @@ import express from 'express';
 import { Server } from 'socket.io';
 import { socketAuthMiddleware } from './socketAuth';
 import { registerChannelHandlers } from './channelHandlers';
+import { registerDmHandlers } from './dmHandlers';
 
 export interface RealtimeServer {
   httpServer: HttpServer;
@@ -22,7 +23,10 @@ export function createRealtimeServer(corsOrigins: string | string[]): RealtimeSe
   });
 
   io.use(socketAuthMiddleware);
-  io.on('connection', (socket) => registerChannelHandlers(io, socket));
+  io.on('connection', (socket) => {
+    registerChannelHandlers(io, socket);
+    registerDmHandlers(io, socket);
+  });
 
   app.get('/health', (_req, res) => {
     res.status(200).json({
