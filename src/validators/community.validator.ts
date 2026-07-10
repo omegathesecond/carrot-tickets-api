@@ -28,3 +28,12 @@ export const organizerProfileSchema = Joi.object({
   logoUrl: Joi.string().uri().max(500).allow('').optional(),
   bio: Joi.string().max(500).allow('').optional(),
 }).min(1);
+
+export const reviewSchema = Joi.object({
+  rating: Joi.number().integer().min(1).max(5).required(),
+  text: Joi.string().trim().max(1000).allow('').optional(),
+});
+
+export const reviewReplySchema = Joi.object({
+  text: Joi.string().trim().min(1).max(1000).required(),
+});

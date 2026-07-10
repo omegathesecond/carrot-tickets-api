@@ -13,6 +13,7 @@ import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
+import { ReviewController } from '@controllers/review.controller';
 
 const router = Router();
 
@@ -200,6 +201,17 @@ router.patch(
   '/events/:eventId/tickets/:ticketTypeName/sold-out',
   requireTicketsPermission(TicketsPermission.EDIT_EVENT),
   TicketsController.markTicketSoldOut
+);
+
+/**
+ * Review Management Routes — vendor reply to a buyer's post-event review.
+ * dualAuth (router-level) already authenticated the request; this route only
+ * needs the permission gate.
+ */
+router.post(
+  '/reviews/:reviewId/reply',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ReviewController.reply
 );
 
 /**

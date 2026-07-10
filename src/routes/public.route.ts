@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
 import { BuyerProfileController } from '@controllers/buyerProfile.controller';
+import { ReviewController } from '@controllers/review.controller';
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
 import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 
@@ -44,6 +45,23 @@ router.get('/activity', PublicController.getActivity);
  * @access  Public
  */
 router.get('/events/:eventId', PublicController.getPublicEvent);
+
+/**
+ * @route   GET /api/public/events/:eventId/reviews
+ * @desc    Aggregate rating + paginated review list for an event page.
+ * @access  Public
+ * @query   before, limit
+ */
+router.get('/events/:eventId/reviews', ReviewController.listForEvent);
+
+/**
+ * @route   POST /api/public/events/:eventId/reviews
+ * @desc    Submit a verified post-event review. Only ticket holders of an
+ *          event that has ended may post, one review per buyer per event.
+ * @access  Buyer (Bearer buyer token)
+ * @body    rating (1-5), text?
+ */
+router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.submit);
 
 /**
  * @route   POST /api/public/purchase
