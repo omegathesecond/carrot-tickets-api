@@ -45,7 +45,11 @@ export class DmThreadService {
 
   static async openThread(creator: IBuyer, participantIds: string[]): Promise<IDmThread> {
     const creatorId = String(creator._id);
-    const otherIds = [...new Set(participantIds.map(String))].filter((id) => id !== creatorId);
+    // Lowercase before dedupe/pairKey: HEX24 accepts mixed case, but pairKey
+    // dedupe and Mongo's unique index are case-sensitive.
+    const otherIds = [...new Set(participantIds.map((id) => String(id).toLowerCase()))].filter(
+      (id) => id !== creatorId
+    );
     if (otherIds.length < 1 || otherIds.length > 9) {
       throw new HttpError(400, 'A conversation needs 1-9 other people');
     }

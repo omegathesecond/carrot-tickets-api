@@ -78,6 +78,17 @@ describe('DmThreadService', () => {
     }
   });
 
+  it('1:1 dedupe survives mixed-case participant ids', async () => {
+    const a = await seedBuyer('+26878000001');
+    const b = await seedBuyer('+26878000002');
+    await shareCommunity(a, b);
+
+    const t1 = await DmThreadService.openThread(a, [String(b._id)]);
+    const t2 = await DmThreadService.openThread(a, [String(b._id).toUpperCase()]);
+    expect(String(t2._id)).toBe(String(t1._id));
+    expect(await DmThread.countDocuments({})).toBe(1);
+  });
+
   it('groups: 2..9 others ok, 0 or 10+ rejected, creator must pass privacy vs EVERY member', async () => {
     const a = await seedBuyer('+26878000001');
     const others: IBuyer[] = [];
