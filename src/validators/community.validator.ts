@@ -25,7 +25,7 @@ export const createThreadSchema = Joi.object({
 });
 
 export const organizerProfileSchema = Joi.object({
-  logoUrl: Joi.string().uri().max(500).allow('').optional(),
+  logoUrl: Joi.string().uri({ scheme: ['http', 'https'] }).max(500).allow('').optional(),
   bio: Joi.string().max(500).allow('').optional(),
 }).min(1);
 

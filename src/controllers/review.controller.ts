@@ -14,6 +14,7 @@ export class ReviewController {
       if (!HEX24.test(eventId)) return ApiResponseUtil.error(res, 'eventId must be an event id', 400);
       const params = parseMessageCursorParams(req, res);
       if (!params) return;
+      if (params.after) return ApiResponseUtil.error(res, 'after is not supported for reviews', 400);
       const [aggregate, reviews] = await Promise.all([
         ReviewService.eventAggregate(eventId),
         ReviewService.listEventReviews(eventId, { before: params.before, limit: params.limit }),
@@ -31,10 +32,13 @@ export class ReviewController {
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await ensureUsername(buyer);
 
+      const eventId = String(req.params['eventId'] || '');
+      if (!HEX24.test(eventId)) return ApiResponseUtil.error(res, 'eventId must be an event id', 400);
+
       const { error, value } = reviewSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
-      const review = await ReviewService.submitReview(req.params['eventId'] as string, buyer, value);
+      const review = await ReviewService.submitReview(eventId, buyer, value);
       // By id — a "latest for event" read could echo a concurrent buyer's review.
       const view = await ReviewService.getView(String(review._id));
       return ApiResponseUtil.success(res, view, 'Review submitted', 201);

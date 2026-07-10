@@ -51,6 +51,8 @@ describe('organizer own-profile update', () => {
     await request(app).patch('/api/tickets/organizer/profile').set('Authorization', auth).send({}).expect(400);
     await request(app).patch('/api/tickets/organizer/profile').set('Authorization', auth)
       .send({ logoUrl: 'not-a-url' }).expect(400);
+    await request(app).patch('/api/tickets/organizer/profile').set('Authorization', auth)
+      .send({ logoUrl: 'javascript:alert(1)' }).expect(400);
     await request(app).patch('/api/tickets/organizer/profile')
       .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [])}`)
       .send({ bio: 'x' }).expect(403);

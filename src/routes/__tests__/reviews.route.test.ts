@@ -97,5 +97,17 @@ describe('review routes', () => {
       .set('Authorization', `Bearer ${signVendorToken(seeded.vendorId)}`)
       .send({ text: 'hi' })
       .expect(400);
+
+    const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
+    await Buyer.create({ phone: PHONE, password: 'secret1' }).catch(() => null);
+    await request(app)
+      .post('/api/public/events/not-an-id/reviews')
+      .set('Authorization', buyerAuth)
+      .send({ rating: 5 })
+      .expect(400);
+
+    await request(app)
+      .get('/api/public/events/aaaaaaaaaaaaaaaaaaaaaaaa/reviews?after=aaaaaaaaaaaaaaaaaaaaaaaa')
+      .expect(400);
   });
 });
