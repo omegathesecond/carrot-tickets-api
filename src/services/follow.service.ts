@@ -2,6 +2,7 @@ import { Follow, FollowTargetType } from '@models/follow.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { HttpError } from '@utils/httpError.util';
+import { NotificationDispatcher } from '@services/notificationDispatcher.service';
 
 export class FollowService {
   static async follow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
@@ -14,6 +15,16 @@ export class FollowService {
 
     try {
       await Follow.create({ followerId: buyer._id, targetType, targetId });
+      if (targetType === 'buyer' && (await FollowService.isFriend(String(buyer._id), targetId))) {
+        // buyer's follow completed the mutual — tell the other party.
+        NotificationDispatcher.dispatchAsync(
+          [targetId],
+          'friend',
+          buyer.username ?? buyer.name ?? 'Someone',
+          'followed you back — you are now friends',
+          { buyerId: String(buyer._id) }
+        );
+      }
     } catch (err: any) {
       if (err?.code !== 11000) throw err; // already following — idempotent
     }
@@ -61,5 +72,11 @@ export class FollowService {
       targetId: buyerId,
     }).select('followerId');
     return back.map((r) => String(r.followerId));
+  }
+
+  /** Buyers following an organizer — announcement fan-out audience. */
+  static async organizerFollowerIds(vendorId: string): Promise<string[]> {
+    const rows = await Follow.find({ targetType: 'organizer', targetId: vendorId }).select('followerId');
+    return rows.map((r) => String(r.followerId));
   }
 }

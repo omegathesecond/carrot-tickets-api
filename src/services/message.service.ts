@@ -2,7 +2,7 @@ import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { Message } from '@models/message.model';
-import { IBuyer } from '@models/buyer.model';
+import { Buyer, IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
@@ -10,6 +10,8 @@ import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
 import { channelRoom, dmRoom } from '@/realtime/rooms';
 import { DmThreadService } from '@services/dmThread.service';
 import { BlockService } from '@services/block.service';
+import { FollowService } from '@services/follow.service';
+import { NotificationDispatcher } from '@services/notificationDispatcher.service';
 
 export interface MessageView {
   id: string;
@@ -70,6 +72,30 @@ export class MessageService {
     }
   }
 
+  private static trunc(body: string, max = 140): string {
+    return body.length <= max ? body : `${body.slice(0, max - 1)}…`;
+  }
+
+  /** Resolve @username mentions (cap 10) to un-banned members of the
+   *  community, excluding the sender. Returns their buyer ids. */
+  private static async resolveChannelMentions(
+    body: string,
+    communityId: string,
+    senderId: string
+  ): Promise<string[]> {
+    const usernames = [...new Set([...body.matchAll(/@([a-z0-9_]{3,20})/g)].map((m) => m[1]!))].slice(0, 10);
+    if (usernames.length === 0) return [];
+    const buyers = await Buyer.find({ username: { $in: usernames } }).select('_id');
+    const candidateIds = buyers.map((b) => String(b._id)).filter((id) => id !== senderId);
+    if (candidateIds.length === 0) return [];
+    const members = await Membership.find({
+      communityId,
+      buyerId: { $in: candidateIds },
+      bannedAt: { $exists: false },
+    }).select('buyerId');
+    return members.map((m) => String(m.buyerId));
+  }
+
   private static async listWithCursor(
     filter: Record<string, unknown>,
     opts: { before?: string; after?: string; limit?: number }
@@ -128,17 +154,34 @@ export class MessageService {
       throw new HttpError(429, 'You are sending messages too quickly — slow down');
     }
 
+    const mentionIds = await MessageService.resolveChannelMentions(
+      input.body,
+      String(community._id),
+      String(buyer._id)
+    );
+
     const message = await Message.create({
       channelId: channel._id,
       communityId: community._id,
       senderId: buyer._id,
       body: input.body,
       replyTo: input.replyTo || undefined,
+      mentions: mentionIds,
     });
     await message.populate('senderId', 'username name avatarUrl');
     await message.populate('senderVendorId', 'businessName logoUrl');
     const view = MessageService.toView(message);
     MessageService.broadcastRoom(channelRoom(String(channel._id)), 'message:new', view);
+
+    if (mentionIds.length > 0) {
+      NotificationDispatcher.dispatchAsync(
+        mentionIds,
+        'mention',
+        buyer.username ?? buyer.name ?? 'Mention',
+        MessageService.trunc(input.body),
+        { eventId: String(community.eventId), channelId: String(channel._id), messageId: view.id }
+      );
+    }
     return view;
   }
 
@@ -176,6 +219,15 @@ export class MessageService {
     await message.populate('senderVendorId', 'businessName logoUrl');
     const view = MessageService.toView(message);
     MessageService.broadcastRoom(dmRoom(String(thread._id)), 'message:new', view);
+
+    const others = thread.participants.map(String).filter((id) => id !== String(buyer._id));
+    NotificationDispatcher.dispatchAsync(
+      others,
+      'dm',
+      buyer.username ?? buyer.name ?? 'New message',
+      MessageService.trunc(input.body),
+      { threadId: String(thread._id), messageId: view.id }
+    );
     return view;
   }
 
@@ -291,6 +343,19 @@ export class MessageService {
     await message.populate('senderVendorId', 'businessName logoUrl');
     const view = MessageService.toView(message);
     MessageService.broadcastRoom(channelRoom(String(channel._id)), 'message:new', view);
+
+    const [memberRows, followerIds] = await Promise.all([
+      Membership.find({ communityId: community._id, bannedAt: { $exists: false } }).select('buyerId'),
+      FollowService.organizerFollowerIds(vendorId),
+    ]);
+    const recipients = [...new Set([...memberRows.map((m) => String(m.buyerId)), ...followerIds])];
+    NotificationDispatcher.dispatchAsync(
+      recipients,
+      'announcement',
+      view.sender?.name ?? 'Announcement',
+      MessageService.trunc(body),
+      { eventId, channelId: String(channel._id), messageId: view.id }
+    );
     return view;
   }
 }
