@@ -3,12 +3,12 @@ import { Schema, model, Document, Types } from 'mongoose';
 /**
  * A chat message in a community channel. Soft-deleted messages keep their
  * row (history integrity, moderation audit) but the API masks body+sender.
- * DM-thread messages arrive in Plan 3 and will reuse this model with a
- * dmThreadId — for now channelId is required.
+ * A message belongs to exactly ONE container: a channel (with its community) or a DM thread.
  */
 export interface IMessage extends Document {
-  channelId: Types.ObjectId;
-  communityId: Types.ObjectId;
+  channelId?: Types.ObjectId;
+  communityId?: Types.ObjectId;
+  dmThreadId?: Types.ObjectId;
   senderId: Types.ObjectId;
   body: string;
   replyTo?: Types.ObjectId;
@@ -21,8 +21,9 @@ export interface IMessage extends Document {
 
 const messageSchema = new Schema<IMessage>(
   {
-    channelId: { type: Schema.Types.ObjectId, ref: 'Channel', required: true },
-    communityId: { type: Schema.Types.ObjectId, ref: 'Community', required: true, index: true },
+    channelId: { type: Schema.Types.ObjectId, ref: 'Channel' },
+    communityId: { type: Schema.Types.ObjectId, ref: 'Community', index: true },
+    dmThreadId: { type: Schema.Types.ObjectId, ref: 'DmThread' },
     senderId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true, index: true },
     body: { type: String, required: true, trim: true, minlength: 1, maxlength: 2000 },
     replyTo: { type: Schema.Types.ObjectId, ref: 'Message' },
@@ -33,10 +34,28 @@ const messageSchema = new Schema<IMessage>(
   { timestamps: true }
 );
 
+// Exactly one container per message; channel messages carry their community
+// for moderation/authz lookups.
+messageSchema.pre('validate', function (next) {
+  const hasChannel = Boolean(this.channelId);
+  const hasThread = Boolean(this.dmThreadId);
+  if (hasChannel === hasThread) {
+    return next(new Error('Message must have exactly one of channelId or dmThreadId'));
+  }
+  if (hasChannel && !this.communityId) {
+    return next(new Error('Channel messages require communityId'));
+  }
+  next();
+});
+
 // Cursor pagination: newest-first within a channel.
 messageSchema.index({ channelId: 1, _id: -1 });
 
 // Unread badges: countDocuments({ channelId, createdAt: { $gt: since } }).
 messageSchema.index({ channelId: 1, createdAt: -1 });
+
+// DM cursor pagination + unread counts.
+messageSchema.index({ dmThreadId: 1, _id: -1 });
+messageSchema.index({ dmThreadId: 1, createdAt: -1 });
 
 export const Message = model<IMessage>('Message', messageSchema);

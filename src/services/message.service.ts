@@ -10,7 +10,8 @@ import { emitToChannel, isSocketEmitterInitialized } from '@/realtime/emitter';
 
 export interface MessageView {
   id: string;
-  channelId: string;
+  channelId: string | null;
+  dmThreadId: string | null;
   body: string;
   deleted: boolean;
   replyTo: string | null;
@@ -176,7 +177,8 @@ export class MessageService {
         : null;
     return {
       id: String(doc._id),
-      channelId: String(doc.channelId),
+      channelId: doc.channelId ? String(doc.channelId) : null,
+      dmThreadId: doc.dmThreadId ? String(doc.dmThreadId) : null,
       body: deleted ? '' : doc.body,
       deleted,
       replyTo: doc.replyTo ? String(doc.replyTo) : null,
