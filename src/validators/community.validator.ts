@@ -9,6 +9,13 @@ export const updateProfileSchema = Joi.object({
   username: Joi.string().optional(),
   bio: Joi.string().allow('').max(280).optional(),
   dmPrivacy: Joi.string().valid('community', 'friends').optional(),
+  notificationPrefs: Joi.object({
+    announcements: Joi.boolean(),
+    dms: Joi.boolean(),
+    mentions: Joi.boolean(),
+    social: Joi.boolean(),
+    reminders: Joi.boolean(),
+  }).min(1).optional(),
 }).min(1);
 
 export const blockSchema = Joi.object({

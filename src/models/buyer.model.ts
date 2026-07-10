@@ -6,6 +6,14 @@ import bcrypt from 'bcrypt';
  *  imports from here — the reverse would be a circular import). */
 export const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
 
+export interface NotificationPrefs {
+  announcements: boolean;
+  dms: boolean;
+  mentions: boolean;
+  social: boolean;
+  reminders: boolean;
+}
+
 /**
  * Buyer (ticket-holder) account for the public site.
  *
@@ -23,6 +31,7 @@ export interface IBuyer extends Document {
   username?: string; // unique social handle, auto-generated on first social touch
   bio?: string;
   dmPrivacy: 'community' | 'friends';
+  notificationPrefs: NotificationPrefs;
   usernameCustomizedAt?: Date; // set when the buyer picks their own handle
   lastLoginAt?: Date;
   createdAt: Date;
@@ -54,6 +63,19 @@ const buyerSchema = new Schema<IBuyer>(
     },
     bio: { type: String, trim: true, maxlength: 280 },
     dmPrivacy: { type: String, enum: ['community', 'friends'], default: 'community' },
+    notificationPrefs: {
+      type: new Schema<NotificationPrefs>(
+        {
+          announcements: { type: Boolean, default: true },
+          dms: { type: Boolean, default: true },
+          mentions: { type: Boolean, default: true },
+          social: { type: Boolean, default: true },
+          reminders: { type: Boolean, default: true },
+        },
+        { _id: false }
+      ),
+      default: () => ({}),
+    },
     usernameCustomizedAt: { type: Date },
     lastLoginAt: { type: Date }
   },

@@ -25,6 +25,7 @@ export class SocialProfileController {
       avatarUrl: buyer.avatarUrl ?? null,
       bio: buyer.bio ?? null,
       dmPrivacy: buyer.dmPrivacy,
+      notificationPrefs: buyer.notificationPrefs,
     };
   }
 
@@ -77,6 +78,10 @@ export class SocialProfileController {
       }
       if (value.bio !== undefined) buyer.bio = value.bio;
       if (value.dmPrivacy !== undefined) buyer.dmPrivacy = value.dmPrivacy;
+      if (value.notificationPrefs !== undefined) {
+        Object.assign(buyer.notificationPrefs, value.notificationPrefs);
+        buyer.markModified('notificationPrefs');
+      }
 
       try {
         await buyer.save();
