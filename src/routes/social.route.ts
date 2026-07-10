@@ -10,6 +10,8 @@ router.get('/me/blocks', authenticateBuyer, SocialProfileController.myBlocks);
 router.get('/me/following', authenticateBuyer, SocialProfileController.myFollowing);
 router.get('/me/followers', authenticateBuyer, SocialProfileController.myFollowers);
 router.get('/me/friends', authenticateBuyer, SocialProfileController.myFriends);
+router.get('/notifications', authenticateBuyer, SocialProfileController.myNotifications);
+router.post('/notifications/read', authenticateBuyer, SocialProfileController.markNotificationsRead);
 router.get('/username-available', authenticateBuyer, SocialProfileController.usernameAvailable);
 router.post('/follow', authenticateBuyer, SocialProfileController.followTarget);
 router.delete('/follow/:targetType/:targetId', authenticateBuyer, SocialProfileController.unfollowTarget);

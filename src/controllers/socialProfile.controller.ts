@@ -11,7 +11,8 @@ import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { updateProfileSchema, blockSchema, followSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
-import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { NotificationService } from '@services/notification.service';
+import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 
 export class SocialProfileController {
   /** Own-profile payload. NEVER include the phone — usernames are the public identity. */
@@ -293,6 +294,37 @@ export class SocialProfileController {
       return ApiResponseUtil.success(res, { userIds });
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to load blocks');
+    }
+  }
+
+  /** GET /api/social/notifications */
+  static async myNotifications(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const params = parseMessageCursorParams(req, res);
+      if (!params) return;
+      if (params.after) return ApiResponseUtil.error(res, 'after is not supported for notifications', 400);
+      const result = await NotificationService.list(buyer, { before: params.before, limit: params.limit });
+      return ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load notifications');
+    }
+  }
+
+  /** POST /api/social/notifications/read { ids?: string[] } */
+  static async markNotificationsRead(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const ids = req.body?.ids;
+      if (ids !== undefined && (!Array.isArray(ids) || !ids.every((i: unknown) => typeof i === 'string' && HEX24.test(i)))) {
+        return ApiResponseUtil.error(res, 'ids must be an array of notification ids', 400);
+      }
+      await NotificationService.markRead(buyer, ids);
+      return ApiResponseUtil.success(res, { read: true }, 'Notifications marked read');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to mark notifications read');
     }
   }
 }
