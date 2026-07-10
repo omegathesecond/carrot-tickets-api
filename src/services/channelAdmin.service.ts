@@ -84,12 +84,19 @@ export class ChannelAdminService {
    * PATCH /api/tickets/channels/:channelId — default channels (announcements/
    * general/attendees) can have gated/postPolicy toggled but never renamed or
    * archived, since buyers and the realtime gateway assume they always exist.
+   *
+   * Guard is VALUE-CHANGED, not key-present: the dashboard form pre-fills and
+   * resubmits full channel state, so a no-op `{archived: false, name: "<current>"}`
+   * on a default channel must not 400 — only an actual rename or archived-flag
+   * flip does.
+   *
+   * Takes the already-fetched channel doc (caller — the controller — owns the
+   * 404/ownership checks) rather than a channelId, to avoid fetching it twice.
    */
-  static async update(channelId: string, input: UpdateChannelInput): Promise<ChannelAdminView> {
-    const channel = await Channel.findById(channelId);
-    if (!channel) throw new HttpError(404, 'Channel not found');
-
-    if (channel.isDefault && (input.name !== undefined || input.archived !== undefined)) {
+  static async update(channel: IChannel, input: UpdateChannelInput): Promise<ChannelAdminView> {
+    const wantsRename = input.name !== undefined && input.name.trim() !== channel.name;
+    const wantsArchiveChange = input.archived !== undefined && input.archived !== channel.archived;
+    if (channel.isDefault && (wantsRename || wantsArchiveChange)) {
       throw new HttpError(400, 'Default channels cannot be renamed or archived');
     }
 

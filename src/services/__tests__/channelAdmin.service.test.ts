@@ -25,6 +25,14 @@ describe('ChannelAdminService', () => {
     return { eid, vid, community };
   }
 
+  // ChannelAdminService.update now takes the already-fetched channel doc
+  // (the controller owns the 404/ownership lookups to avoid a double fetch).
+  async function updateChannel(channelId: string, input: Parameters<typeof ChannelAdminService.update>[1]) {
+    const channel = await Channel.findById(channelId);
+    if (!channel) throw new Error(`test setup: channel ${channelId} not found`);
+    return ChannelAdminService.update(channel, input);
+  }
+
   describe('list', () => {
     it('returns { communityId, channels } including archived channels', async () => {
       const { eid, community } = await seedCommunity();
@@ -89,7 +97,7 @@ describe('ChannelAdminService', () => {
       const { eid } = await seedCommunity();
       const created = await ChannelAdminService.create(eid, { name: 'VIP Lounge' });
 
-      const updated = await ChannelAdminService.update(created.id, { name: 'VVIP Lounge' });
+      const updated = await updateChannel(created.id, { name: 'VVIP Lounge' });
       expect(updated.name).toBe('VVIP Lounge');
       expect(updated.slug).toBe('vvip-lounge');
     });
@@ -98,7 +106,7 @@ describe('ChannelAdminService', () => {
       const { eid } = await seedCommunity();
       const created = await ChannelAdminService.create(eid, { name: 'VIP Lounge' });
 
-      const updated = await ChannelAdminService.update(created.id, { gated: true, postPolicy: 'organizer' });
+      const updated = await updateChannel(created.id, { gated: true, postPolicy: 'organizer' });
       expect(updated.gated).toBe(true);
       expect(updated.postPolicy).toBe('organizer');
     });
@@ -107,7 +115,7 @@ describe('ChannelAdminService', () => {
       const { eid } = await seedCommunity();
       const created = await ChannelAdminService.create(eid, { name: 'VIP Lounge' });
 
-      const updated = await ChannelAdminService.update(created.id, { archived: true });
+      const updated = await updateChannel(created.id, { archived: true });
       expect(updated.archived).toBe(true);
     });
 
@@ -116,14 +124,8 @@ describe('ChannelAdminService', () => {
       const created = await ChannelAdminService.create(eid, { name: 'VIP Lounge' });
 
       await expect(
-        ChannelAdminService.update(created.id, { name: 'General' })
+        updateChannel(created.id, { name: 'General' })
       ).rejects.toMatchObject({ statusCode: 409 });
-    });
-
-    it('404s for an unknown channel', async () => {
-      await expect(
-        ChannelAdminService.update(new mongoose.Types.ObjectId().toString(), { gated: true })
-      ).rejects.toMatchObject({ statusCode: 404 });
     });
 
     it('rejects renaming a default channel with 400', async () => {
@@ -131,7 +133,7 @@ describe('ChannelAdminService', () => {
       const general = await Channel.findOne({ communityId: community._id, slug: 'general' });
 
       await expect(
-        ChannelAdminService.update(String(general!._id), { name: 'Renamed General' })
+        updateChannel(String(general!._id), { name: 'Renamed General' })
       ).rejects.toMatchObject({
         statusCode: 400,
         message: 'Default channels cannot be renamed or archived',
@@ -143,7 +145,7 @@ describe('ChannelAdminService', () => {
       const general = await Channel.findOne({ communityId: community._id, slug: 'general' });
 
       await expect(
-        ChannelAdminService.update(String(general!._id), { archived: true })
+        updateChannel(String(general!._id), { archived: true })
       ).rejects.toMatchObject({
         statusCode: 400,
         message: 'Default channels cannot be renamed or archived',
@@ -154,13 +156,51 @@ describe('ChannelAdminService', () => {
       const { community } = await seedCommunity();
       const general = await Channel.findOne({ communityId: community._id, slug: 'general' });
 
-      const updated = await ChannelAdminService.update(String(general!._id), {
+      const updated = await updateChannel(String(general!._id), {
         gated: true,
         postPolicy: 'organizer',
       });
       expect(updated.gated).toBe(true);
       expect(updated.postPolicy).toBe('organizer');
       expect(updated.isDefault).toBe(true);
+    });
+
+    it('allows a no-op patch (unchanged name + archived) on a default channel', async () => {
+      const { community } = await seedCommunity();
+      const general = await Channel.findOne({ communityId: community._id, slug: 'general' });
+
+      const updated = await updateChannel(String(general!._id), {
+        name: general!.name,
+        archived: general!.archived,
+      });
+      expect(updated.name).toBe(general!.name);
+      expect(updated.slug).toBe(general!.slug);
+      expect(updated.archived).toBe(general!.archived);
+      expect(updated.isDefault).toBe(true);
+    });
+
+    it('still rejects a real rename on a default channel even when archived is resubmitted unchanged', async () => {
+      const { community } = await seedCommunity();
+      const general = await Channel.findOne({ communityId: community._id, slug: 'general' });
+
+      await expect(
+        updateChannel(String(general!._id), { name: 'Renamed General', archived: general!.archived })
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Default channels cannot be renamed or archived',
+      });
+    });
+
+    it('still rejects a real archive flip on a default channel even when name is resubmitted unchanged', async () => {
+      const { community } = await seedCommunity();
+      const general = await Channel.findOne({ communityId: community._id, slug: 'general' });
+
+      await expect(
+        updateChannel(String(general!._id), { name: general!.name, archived: true })
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Default channels cannot be renamed or archived',
+      });
     });
   });
 
@@ -179,7 +219,7 @@ describe('ChannelAdminService', () => {
       const beforeArchive = await CommunityMembershipService.getView(eid, buyer);
       expect(beforeArchive.channels.map((c) => c.slug)).toContain('pop-up-room');
 
-      await ChannelAdminService.update(created.id, { archived: true });
+      await updateChannel(created.id, { archived: true });
 
       const afterArchive = await CommunityMembershipService.getView(eid, buyer);
       expect(afterArchive.channels.map((c) => c.slug)).not.toContain('pop-up-room');
@@ -193,7 +233,7 @@ describe('ChannelAdminService', () => {
       // sanity: sending works before archiving
       await MessageService.sendMessage(created.id, buyer, { body: 'hello before archive' });
 
-      await ChannelAdminService.update(created.id, { archived: true });
+      await updateChannel(created.id, { archived: true });
 
       await expect(
         MessageService.sendMessage(created.id, buyer, { body: 'hello after archive' })

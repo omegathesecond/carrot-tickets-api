@@ -75,7 +75,7 @@ export class ChannelAdminController {
       const { error, value } = updateChannelSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
-      const channel = await Channel.findById(channelId).select('communityId');
+      const channel = await Channel.findById(channelId);
       if (!channel) return ApiResponseUtil.error(res, 'Channel not found', 404);
       const community = await Community.findById(channel.communityId).select('eventId');
       if (!community) return ApiResponseUtil.error(res, 'Community not found', 404);
@@ -85,7 +85,7 @@ export class ChannelAdminController {
         return ApiResponseUtil.error(res, OWNERSHIP_ERROR, 403);
       }
 
-      const view = await ChannelAdminService.update(channelId, value);
+      const view = await ChannelAdminService.update(channel, value);
       return ApiResponseUtil.success(res, view, 'Channel updated');
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to update channel');

@@ -135,6 +135,23 @@ describe('organizer channel management routes', () => {
       .expect(200);
   });
 
+  it('allows a dashboard resubmit of unchanged name+archived on a default channel (no-op, not a 400)', async () => {
+    const { vendor, general } = await seedWorld();
+    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+
+    // Simulates the dashboard edit form pre-filling with current values and
+    // resubmitting the full channel state without actually changing anything.
+    const res = await request(app)
+      .patch(`/api/tickets/channels/${String(general._id)}`)
+      .set('Authorization', auth)
+      .send({ name: general.name, archived: general.archived })
+      .expect(200);
+    expect(res.body.data.name).toBe(general.name);
+    expect(res.body.data.slug).toBe(general.slug);
+    expect(res.body.data.archived).toBe(general.archived);
+    expect(res.body.data.isDefault).toBe(true);
+  });
+
   it('authz: non-owner vendor 403, missing permission 403, unknown event/channel 404', async () => {
     const { vendor, seeded, general } = await seedWorld();
 
