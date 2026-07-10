@@ -37,3 +37,7 @@ export const reviewSchema = Joi.object({
 export const reviewReplySchema = Joi.object({
   text: Joi.string().trim().min(1).max(1000).required(),
 });
+
+export const announcementSchema = Joi.object({
+  body: Joi.string().trim().min(1).max(2000).required(),
+});

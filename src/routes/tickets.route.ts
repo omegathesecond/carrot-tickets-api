@@ -14,6 +14,7 @@ import { AdminOrganizersController } from '@controllers/adminOrganizers.controll
 import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
+import { AnnouncementController } from '@controllers/announcement.controller';
 
 const router = Router();
 
@@ -168,6 +169,18 @@ router.put(
   '/events/:eventId/unpublish',
   requireTicketsPermission(TicketsPermission.PUBLISH_EVENT),
   TicketsController.unpublishEvent
+);
+
+/**
+ * Organizer announcements — post into the event's #announcements channel.
+ * dualAuth (router-level) already authenticated the request; this route only
+ * needs the permission gate. Ownership (own events only) is checked in the
+ * controller, matching the reviews reply pattern below.
+ */
+router.post(
+  '/events/:eventId/announcements',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  AnnouncementController.post
 );
 
 /**

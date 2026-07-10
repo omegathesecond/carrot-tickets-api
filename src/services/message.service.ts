@@ -19,6 +19,7 @@ export interface MessageView {
   deleted: boolean;
   replyTo: string | null;
   sender: { id: string; username: string | null; name: string | null; avatarUrl: string | null } | null;
+  senderType: 'buyer' | 'organizer';
   createdAt: Date;
   editedAt: Date | null;
 }
@@ -84,7 +85,11 @@ export class MessageService {
       query['_id'] = { $gt: opts.after };
       sort = { _id: 1 };
     }
-    const docs = await Message.find(query).sort(sort).limit(limit).populate('senderId', 'username name avatarUrl');
+    const docs = await Message.find(query)
+      .sort(sort)
+      .limit(limit)
+      .populate('senderId', 'username name avatarUrl')
+      .populate('senderVendorId', 'businessName logoUrl');
     return docs.map((doc) => MessageService.toView(doc));
   }
 
@@ -131,6 +136,7 @@ export class MessageService {
       replyTo: input.replyTo || undefined,
     });
     await message.populate('senderId', 'username name avatarUrl');
+    await message.populate('senderVendorId', 'businessName logoUrl');
     const view = MessageService.toView(message);
     MessageService.broadcastRoom(channelRoom(String(channel._id)), 'message:new', view);
     return view;
@@ -167,6 +173,7 @@ export class MessageService {
     await thread.save();
 
     await message.populate('senderId', 'username name avatarUrl');
+    await message.populate('senderVendorId', 'businessName logoUrl');
     const view = MessageService.toView(message);
     MessageService.broadcastRoom(dmRoom(String(thread._id)), 'message:new', view);
     return view;
@@ -226,15 +233,25 @@ export class MessageService {
 
   private static toView(doc: any): MessageView {
     const deleted = Boolean(doc.deletedAt);
-    const sender =
-      doc.senderId && typeof doc.senderId === 'object' && doc.senderId._id
-        ? {
-            id: String(doc.senderId._id),
-            username: doc.senderId.username ?? null,
-            name: doc.senderId.name ?? null,
-            avatarUrl: doc.senderId.avatarUrl ?? null,
-          }
-        : null;
+    const isOrganizer = Boolean(doc.senderVendorId);
+    let sender: MessageView['sender'] = null;
+    if (!deleted) {
+      if (isOrganizer && typeof doc.senderVendorId === 'object' && doc.senderVendorId._id) {
+        sender = {
+          id: String(doc.senderVendorId._id),
+          username: null,
+          name: doc.senderVendorId.businessName ?? null,
+          avatarUrl: doc.senderVendorId.logoUrl ?? null,
+        };
+      } else if (doc.senderId && typeof doc.senderId === 'object' && doc.senderId._id) {
+        sender = {
+          id: String(doc.senderId._id),
+          username: doc.senderId.username ?? null,
+          name: doc.senderId.name ?? null,
+          avatarUrl: doc.senderId.avatarUrl ?? null,
+        };
+      }
+    }
     return {
       id: String(doc._id),
       channelId: doc.channelId ? String(doc.channelId) : null,
@@ -242,9 +259,38 @@ export class MessageService {
       body: deleted ? '' : doc.body,
       deleted,
       replyTo: doc.replyTo ? String(doc.replyTo) : null,
-      sender: deleted ? null : sender,
+      sender,
+      senderType: isOrganizer ? 'organizer' : 'buyer',
       createdAt: doc.createdAt,
       editedAt: doc.editedAt ?? null,
     };
+  }
+
+  /**
+   * Organizer post into the event's #announcements channel (spec §5.1 write
+   * path — push fan-out arrives in Plan 5). Same durable-write-then-broadcast
+   * shape as buyer sends; the sender is the VENDOR, rendered with brand
+   * identity by toView.
+   */
+  static async postAnnouncement(eventId: string, vendorId: string, body: string): Promise<MessageView> {
+    const community = await Community.findOne({ eventId });
+    if (!community) throw new HttpError(404, 'Community not found for this event');
+    const channel = await Channel.findOne({ communityId: community._id, slug: 'announcements', archived: false });
+    if (!channel) throw new HttpError(404, 'Announcements channel not found');
+
+    if (!consumeToken(`msg:${vendorId}`)) {
+      throw new HttpError(429, 'You are sending messages too quickly — slow down');
+    }
+
+    const message = await Message.create({
+      channelId: channel._id,
+      communityId: community._id,
+      senderVendorId: vendorId,
+      body,
+    });
+    await message.populate('senderVendorId', 'businessName logoUrl');
+    const view = MessageService.toView(message);
+    MessageService.broadcastRoom(channelRoom(String(channel._id)), 'message:new', view);
+    return view;
   }
 }
