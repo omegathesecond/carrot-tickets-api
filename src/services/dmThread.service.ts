@@ -2,11 +2,21 @@ import mongoose from 'mongoose';
 import { DmThread, IDmThread } from '@models/dmThread.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
+import { Message } from '@models/message.model';
 import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
+import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
 
 const HEX24 = /^[0-9a-f]{24}$/i;
+
+export interface DmThreadView {
+  id: string;
+  isGroup: boolean;
+  participants: BuyerSummary[]; // the OTHER participants
+  lastMessageAt: Date | null;
+  unreadCount: number;
+}
 
 export class DmThreadService {
   static pairKeyFor(idA: string, idB: string): string {
@@ -100,5 +110,30 @@ export class DmThreadService {
       throw new HttpError(404, 'Conversation not found');
     }
     return thread;
+  }
+
+  static async buildThreadView(thread: IDmThread, buyer: IBuyer): Promise<DmThreadView> {
+    const me = String(buyer._id);
+    const otherIds = thread.participants.filter((p) => String(p) !== me);
+    const others = await Buyer.find({ _id: { $in: otherIds } });
+    const since = thread.readState.get(me) ?? thread.createdAt;
+    const unreadCount = await Message.countDocuments(
+      { dmThreadId: thread._id, createdAt: { $gt: since }, senderId: { $ne: buyer._id } },
+      { limit: 99 }
+    );
+    return {
+      id: String(thread._id),
+      isGroup: thread.isGroup,
+      participants: others.map(toBuyerSummary),
+      lastMessageAt: thread.lastMessageAt ?? null,
+      unreadCount,
+    };
+  }
+
+  static async listThreads(buyer: IBuyer): Promise<DmThreadView[]> {
+    const threads = await DmThread.find({ participants: buyer._id })
+      .sort({ lastMessageAt: -1 })
+      .limit(50);
+    return Promise.all(threads.map((t) => DmThreadService.buildThreadView(t, buyer)));
   }
 }

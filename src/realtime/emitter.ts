@@ -1,6 +1,7 @@
 import { Emitter } from '@socket.io/mongo-emitter';
 import type { Collection, Document } from 'mongodb';
 import { containBusWrites } from './containBusWrites';
+import { channelRoom } from './rooms';
 
 let emitter: Emitter | null = null;
 
@@ -23,12 +24,16 @@ export function isSocketEmitterInitialized(): boolean {
 }
 
 /**
- * Broadcast to a channel room via the adapter bus. Callers treat this as
+ * Broadcast to any room via the adapter bus. Callers treat this as
  * best-effort delivery ON TOP of an already-persisted write: the message is
  * durable in MongoDB and clients recover via REST resync (?after=<id>), so
  * a bus failure must never fail the request — but it must be LOUD in logs.
  */
-export function emitToChannel(channelId: string, event: string, payload: unknown): void {
+export function emitToRoom(room: string, event: string, payload: unknown): void {
   if (!emitter) throw new Error('Socket emitter not initialized');
-  emitter.to(`channel:${channelId}`).emit(event, payload);
+  emitter.to(room).emit(event, payload);
+}
+
+export function emitToChannel(channelId: string, event: string, payload: unknown): void {
+  emitToRoom(channelRoom(channelId), event, payload);
 }

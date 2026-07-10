@@ -2,8 +2,9 @@ import { Server, Socket } from 'socket.io';
 import { Buyer } from '@models/buyer.model';
 import { MessageService } from '@services/message.service';
 import { HttpError } from '@utils/httpError.util';
+import { channelRoom } from './rooms';
 
-export const channelRoom = (channelId: string): string => `channel:${channelId}`;
+export { channelRoom }; // re-export: existing consumers import it from here
 
 const CHANNEL_ID_REGEX = /^[0-9a-f]{24}$/i;
 

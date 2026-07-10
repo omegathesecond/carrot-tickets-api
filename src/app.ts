@@ -61,6 +61,7 @@ import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
 import communityRoutes from '@routes/community.route';
 import socialRoutes from '@routes/social.route';
+import dmRoutes from '@routes/dm.route';
 
 // Realtime bus
 import { ensureAdapterCollection } from '@/realtime/adapterCollection';
@@ -142,6 +143,7 @@ app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (una
 app.use('/api/operator', operatorRoutes);
 app.use('/api/community', communityRoutes);          // Event communities (buyer social)
 app.use('/api/social', socialRoutes);                // Buyer social profiles
+app.use('/api/dm', dmRoutes);                        // Direct & group messages
 
 // 404 handler - must be after all routes
 app.use(notFoundHandler);

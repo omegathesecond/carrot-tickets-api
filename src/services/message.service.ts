@@ -6,7 +6,10 @@ import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
-import { emitToChannel, isSocketEmitterInitialized } from '@/realtime/emitter';
+import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
+import { channelRoom, dmRoom } from '@/realtime/rooms';
+import { DmThreadService } from '@services/dmThread.service';
+import { BlockService } from '@services/block.service';
 
 export interface MessageView {
   id: string;
@@ -54,20 +57,35 @@ export class MessageService {
   }
 
   /**
-   * Best-effort live broadcast AFTER the durable write. Not initialized in
-   * tests / when init failed at boot — by design: the write is the success
-   * condition and clients recover via resync. Sync failures are caught
-   * here; ASYNC bus-write failures are contained inside the emitter module
-   * (insertOne interception) so they can never become process-fatal
-   * unhandled rejections.
+   * Best-effort live broadcast AFTER the durable write (see emitter module
+   * for why async bus failures can't reach us here).
    */
-  private static broadcast(channelId: string, event: string, payload: unknown): void {
+  private static broadcastRoom(room: string, event: string, payload: unknown): void {
     if (!isSocketEmitterInitialized()) return;
     try {
-      emitToChannel(channelId, event, payload);
+      emitToRoom(room, event, payload);
     } catch (err) {
       console.error('[realtime-emit] broadcast failed (clients recover via resync):', err);
     }
+  }
+
+  private static async listWithCursor(
+    filter: Record<string, unknown>,
+    opts: { before?: string; after?: string; limit?: number }
+  ): Promise<MessageView[]> {
+    if (opts.before && opts.after) {
+      throw new HttpError(400, 'before and after are mutually exclusive');
+    }
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+    const query: Record<string, unknown> = { ...filter };
+    let sort: Record<string, 1 | -1> = { _id: -1 };
+    if (opts.before) query['_id'] = { $lt: opts.before };
+    if (opts.after) {
+      query['_id'] = { $gt: opts.after };
+      sort = { _id: 1 };
+    }
+    const docs = await Message.find(query).sort(sort).limit(limit).populate('senderId', 'username name avatarUrl');
+    return docs.map((doc) => MessageService.toView(doc));
   }
 
   static async listMessages(
@@ -76,27 +94,16 @@ export class MessageService {
     opts: { before?: string; after?: string; limit?: number } = {}
   ): Promise<MessageView[]> {
     await MessageService.requireChannelAccess(channelId, buyer);
-    if (opts.before && opts.after) {
-      throw new HttpError(400, 'before and after are mutually exclusive');
-    }
+    return MessageService.listWithCursor({ channelId }, opts);
+  }
 
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
-    const query: Record<string, unknown> = { channelId };
-    let sort: Record<string, 1 | -1> = { _id: -1 }; // history: newest first
-    if (opts.before) query['_id'] = { $lt: opts.before };
-    if (opts.after) {
-      // Resync: everything since the client's last-seen id, oldest first so
-      // the client appends in order.
-      query['_id'] = { $gt: opts.after };
-      sort = { _id: 1 };
-    }
-
-    const docs = await Message.find(query)
-      .sort(sort)
-      .limit(limit)
-      .populate('senderId', 'username name avatarUrl');
-
-    return docs.map((doc) => MessageService.toView(doc));
+  static async listDmMessages(
+    threadId: string,
+    buyer: IBuyer,
+    opts: { before?: string; after?: string; limit?: number } = {}
+  ): Promise<MessageView[]> {
+    const thread = await DmThreadService.requireDmAccess(threadId, buyer);
+    return MessageService.listWithCursor({ dmThreadId: thread._id }, opts);
   }
 
   static async sendMessage(
@@ -125,8 +132,50 @@ export class MessageService {
     });
     await message.populate('senderId', 'username name avatarUrl');
     const view = MessageService.toView(message);
-    MessageService.broadcast(String(channel._id), 'message:new', view);
+    MessageService.broadcastRoom(channelRoom(String(channel._id)), 'message:new', view);
     return view;
+  }
+
+  static async sendDmMessage(
+    threadId: string,
+    buyer: IBuyer,
+    input: { body: string; replyTo?: string }
+  ): Promise<MessageView> {
+    const thread = await DmThreadService.requireDmAccess(threadId, buyer);
+
+    // Blocks are re-checked at send time for 1:1 threads — "server-refused
+    // DMs" (spec §5.3) must hold even for threads opened before the block.
+    if (!thread.isGroup) {
+      const other = thread.participants.find((p) => String(p) !== String(buyer._id));
+      if (other && (await BlockService.isBlockedEitherWay(String(buyer._id), String(other)))) {
+        throw new HttpError(403, 'You cannot message this user');
+      }
+    }
+
+    if (!consumeToken(`msg:${String(buyer._id)}`)) {
+      throw new HttpError(429, 'You are sending messages too quickly — slow down');
+    }
+
+    const message = await Message.create({
+      dmThreadId: thread._id,
+      senderId: buyer._id,
+      body: input.body,
+      replyTo: input.replyTo || undefined,
+    });
+    thread.lastMessageAt = new Date();
+    thread.readState.set(String(buyer._id), new Date());
+    await thread.save();
+
+    await message.populate('senderId', 'username name avatarUrl');
+    const view = MessageService.toView(message);
+    MessageService.broadcastRoom(dmRoom(String(thread._id)), 'message:new', view);
+    return view;
+  }
+
+  static async markDmRead(threadId: string, buyer: IBuyer): Promise<void> {
+    const thread = await DmThreadService.requireDmAccess(threadId, buyer);
+    thread.readState.set(String(buyer._id), new Date());
+    await thread.save();
   }
 
   static async deleteOwnMessage(messageId: string, buyer: IBuyer): Promise<void> {
@@ -134,6 +183,17 @@ export class MessageService {
     if (!message || message.deletedAt) throw new HttpError(404, 'Message not found');
     if (String(message.senderId) !== String(buyer._id)) {
       throw new HttpError(403, 'You can only delete your own messages');
+    }
+
+    if (message.dmThreadId) {
+      await DmThreadService.requireDmAccess(String(message.dmThreadId), buyer);
+      message.deletedAt = new Date();
+      await message.save();
+      MessageService.broadcastRoom(dmRoom(String(message.dmThreadId)), 'message:deleted', {
+        dmThreadId: String(message.dmThreadId),
+        messageId: String(message._id),
+      });
+      return;
     }
 
     // "Banned members are blocked everywhere" — including cleaning up their
@@ -148,7 +208,7 @@ export class MessageService {
     message.deletedAt = new Date();
     await message.save();
 
-    MessageService.broadcast(String(message.channelId), 'message:deleted', {
+    MessageService.broadcastRoom(channelRoom(String(message.channelId)), 'message:deleted', {
       channelId: String(message.channelId),
       messageId: String(message._id),
     });

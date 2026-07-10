@@ -19,3 +19,7 @@ export const followSchema = Joi.object({
   targetType: Joi.string().valid('buyer', 'organizer').required(),
   targetId: Joi.string().hex().length(24).required(),
 });
+
+export const createThreadSchema = Joi.object({
+  participantIds: Joi.array().items(Joi.string().hex().length(24)).min(1).max(9).required(),
+});
