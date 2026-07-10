@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Deploy the realtime gateway: the SAME image as carrot-tickets-api with a
-# different container command (node dist/realtime.js). Run AFTER each API
-# deploy so both services run identical code. Idempotent.
-# ORDERING: run this only AFTER the API build/deploy for the same commit is
-# verified — the script ships whatever image carrot-tickets-api currently serves.
+# different container command (node dist/realtime.js). Idempotent.
+#
+# NOTE (2026-07-10): the Cloud Build trigger now runs a Deploy-Realtime step,
+# so EVERY normal build deploys BOTH services automatically — routine deploys
+# never need this script. Keep it for recovery, first-time service creation
+# in a new environment, or out-of-band re-syncs.
+# ORDERING if run manually: only AFTER the API build/deploy for the same
+# commit is verified — this ships whatever image carrot-tickets-api serves.
 set -euo pipefail
 
 PROJECT=contracts-470406
