@@ -4,6 +4,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 import { createRealtimeServer } from './realtime/server';
 import { ensureAdapterCollection } from './realtime/adapterCollection';
 import { containBusWrites } from './realtime/containBusWrites';
+import { startPresenceHeartbeat, clearInstancePresence } from './realtime/presence';
 
 /**
  * Entrypoint for the carrot-tickets-realtime Cloud Run service. Same image
@@ -35,9 +36,11 @@ async function main(): Promise<void> {
   httpServer.listen(PORT, () => {
     console.log(`⚡ Carrot Tickets realtime gateway on :${PORT}`);
   });
+  startPresenceHeartbeat();
 
   process.on('SIGTERM', () => {
     console.log('SIGTERM received. Closing realtime gateway...');
+    void clearInstancePresence();
     io.close(() => {
       mongoose.connection.close().then(
         () => process.exit(0),

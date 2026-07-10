@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { socketAuthMiddleware } from './socketAuth';
 import { registerChannelHandlers } from './channelHandlers';
 import { registerDmHandlers } from './dmHandlers';
+import { trackConnection } from './presence';
 
 export interface RealtimeServer {
   httpServer: HttpServer;
@@ -24,6 +25,7 @@ export function createRealtimeServer(corsOrigins: string | string[]): RealtimeSe
 
   io.use(socketAuthMiddleware);
   io.on('connection', (socket) => {
+    trackConnection(socket);
     registerChannelHandlers(io, socket);
     registerDmHandlers(io, socket);
   });
