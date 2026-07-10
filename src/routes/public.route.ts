@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
 import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
+import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
 import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 
@@ -62,6 +63,15 @@ router.get('/events/:eventId/reviews', ReviewController.listForEvent);
  * @body    rating (1-5), text?
  */
 router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.submit);
+
+/**
+ * @route   GET /api/public/organizers/:vendorId
+ * @desc    Public organizer brand page — business card, follower count,
+ *          rating aggregate, and upcoming/past event lists. Never exposes
+ *          email/phoneNumber/keshlessVendorId.
+ * @access  Public
+ */
+router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
 
 /**
  * @route   POST /api/public/purchase

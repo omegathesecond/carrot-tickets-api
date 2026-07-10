@@ -1,8 +1,12 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { Vendor } from '@models/vendor.model';
 import { organizerProfileSchema } from '@validators/community.validator';
+import { FollowService } from '@services/follow.service';
+import { ReviewService } from '@services/review.service';
+import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
 
 export class OrganizerProfileController {
   /** PATCH /api/tickets/organizer/profile — vendor updates its own brand card. */
@@ -29,6 +33,52 @@ export class OrganizerProfileController {
       }, 'Profile updated');
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to update organizer profile');
+    }
+  }
+
+  /** GET /api/public/organizers/:vendorId — PUBLIC brand page (spec §2.5). */
+  static async publicProfile(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = String(req.params['vendorId'] || '');
+      if (!HEX24.test(vendorId)) return ApiResponseUtil.error(res, 'vendorId must be an organizer id', 400);
+
+      const vendor = await Vendor.findById(vendorId).select('businessName slug logoUrl bio isActive');
+      if (!vendor || !vendor.isActive) return ApiResponseUtil.error(res, 'Organizer not found', 404);
+
+      const now = new Date();
+      const eventFields = '_id name eventDate venue';
+      const [followerCount, rating, upcoming, past] = await Promise.all([
+        FollowService.followerCount('organizer', vendorId),
+        ReviewService.vendorAggregate(vendorId),
+        Event.find({ vendorId, status: EventStatus.PUBLISHED, eventDate: { $gte: now } })
+          .select(eventFields).sort({ eventDate: 1 }).limit(20),
+        Event.find({
+          vendorId,
+          status: { $in: [EventStatus.PUBLISHED, EventStatus.COMPLETED] },
+          eventDate: { $lt: now },
+        }).select(eventFields).sort({ eventDate: -1 }).limit(20),
+      ]);
+
+      const toSummary = (e: any) => ({
+        id: String(e._id),
+        name: e.name,
+        eventDate: e.eventDate,
+        venue: e.venue ?? null,
+      });
+
+      return ApiResponseUtil.success(res, {
+        id: String(vendor._id),
+        businessName: vendor.businessName,
+        slug: (vendor as any).slug ?? null,
+        logoUrl: vendor.logoUrl ?? null,
+        bio: vendor.bio ?? null,
+        followerCount,
+        rating,
+        upcomingEvents: upcoming.map(toSummary),
+        pastEvents: past.map(toSummary),
+      });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load organizer profile');
     }
   }
 }
