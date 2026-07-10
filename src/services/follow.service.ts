@@ -33,7 +33,10 @@ export class FollowService {
         'friend',
         buyer.username ?? buyer.name ?? 'Someone',
         'followed you back — you are now friends',
-        { buyerId: String(buyer._id) },
+        // The notified party (targetId) is being told about buyer, their new
+        // friend — username lets the client route straight to buyer's
+        // profile, same identity buyerId already points at.
+        { buyerId: String(buyer._id), username: buyer.username ?? null },
         String(buyer._id)
       );
     }

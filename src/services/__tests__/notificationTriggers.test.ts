@@ -45,6 +45,11 @@ describe('notification triggers', () => {
     const n = await Notification.findOne({ recipientId: a._id, type: 'friend' });
     expect(n).not.toBeNull();
     expect(n!.title).toBe('beta_two');
+    // The notified party (a) is being told about their new friend (b) — the
+    // data payload must carry b's identity so the client can route straight
+    // to b's profile, matching who buyerId already points at.
+    expect(n!.data['buyerId']).toBe(String(b._id));
+    expect(n!.data['username']).toBe('beta_two');
     expect(await Notification.countDocuments({})).toBe(1);
   });
 
