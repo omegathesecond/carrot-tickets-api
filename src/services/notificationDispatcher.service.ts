@@ -2,6 +2,7 @@ import { Buyer, NotificationPrefs } from '@models/buyer.model';
 import { NotificationType } from '@models/notification.model';
 import { NotificationService } from '@services/notification.service';
 import { PushService } from '@services/push.service';
+import { BlockService } from '@services/block.service';
 import { isBuyerOnline } from '@utils/buyerOnline.util';
 
 export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
@@ -25,13 +26,26 @@ export class NotificationDispatcher {
     type: NotificationType,
     title: string,
     body: string,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    actorId?: string
   ): Promise<void> {
     const prefKey = PREF_BY_TYPE[type];
     const unique = [...new Set(recipientIds.map(String))];
 
-    for (let i = 0; i < unique.length; i += CHUNK) {
-      const chunk = unique.slice(i, i + CHUNK);
+    let filtered = unique;
+    if (actorId) {
+      // A blocked relationship in EITHER direction must never generate a
+      // notification (harassment vector once the inbox/push surfaces ship).
+      const [blockedByActor, blockedActor] = await Promise.all([
+        BlockService.listBlockedIds(actorId),
+        BlockService.listBlockerIds(actorId),
+      ]);
+      const excluded = new Set([...blockedByActor, ...blockedActor]);
+      filtered = unique.filter((id) => !excluded.has(id));
+    }
+
+    for (let i = 0; i < filtered.length; i += CHUNK) {
+      const chunk = filtered.slice(i, i + CHUNK);
       const buyers = await Buyer.find({ _id: { $in: chunk } }).select('notificationPrefs');
       await Promise.all(
         buyers.map(async (buyer) => {
@@ -59,9 +73,10 @@ export class NotificationDispatcher {
     type: NotificationType,
     title: string,
     body: string,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    actorId?: string
   ): void {
-    NotificationDispatcher.dispatch(recipientIds, type, title, body, data).catch((err) =>
+    NotificationDispatcher.dispatch(recipientIds, type, title, body, data, actorId).catch((err) =>
       console.error('[notify] dispatch failed:', err)
     );
   }

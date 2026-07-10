@@ -18,8 +18,15 @@ export class NotificationService {
     title: string,
     body: string,
     data: Record<string, unknown>
-  ): Promise<INotification> {
-    return Notification.create({ recipientId, type, title, body, data });
+  ): Promise<INotification | null> {
+    try {
+      return await Notification.create({ recipientId, type, title, body, data });
+    } catch (err: any) {
+      // Concurrent reminder sweeps race the dedupe read; the partial unique
+      // index makes the second insert a no-op instead of a duplicate row.
+      if (err?.code === 11000 && type === 'event_reminder') return null;
+      throw err;
+    }
   }
 
   static async list(

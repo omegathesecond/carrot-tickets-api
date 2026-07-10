@@ -8,8 +8,10 @@ jest.mock('@utils/buyerOnline.util', () => ({
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Buyer } from '@models/buyer.model';
 import { Notification } from '@models/notification.model';
+import { Block } from '@models/block.model';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
 import { NotificationService } from '@services/notification.service';
+import { BlockService } from '@services/block.service';
 import { PushService } from '@services/push.service';
 import { isBuyerOnline } from '@utils/buyerOnline.util';
 
@@ -17,7 +19,10 @@ const push = PushService.sendToBuyer as jest.Mock;
 const online = isBuyerOnline as jest.Mock;
 
 describe('NotificationDispatcher', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Block.init(); // unique index must exist before block-aware dispatch tests race it
+  });
   beforeEach(() => {
     push.mockClear();
     online.mockReset();
@@ -90,5 +95,23 @@ describe('NotificationDispatcher', () => {
     expect(await Notification.countDocuments({})).toBe(1);
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[notify] recipient'), expect.anything());
     consoleSpy.mockRestore();
+  });
+
+  it('a blocked relationship in either direction suppresses the notification for that recipient only', async () => {
+    const a = await Buyer.create({ phone: '+26878000001', password: 'secret1' });
+    const b = await Buyer.create({ phone: '+26878000002', password: 'secret1' });
+    const c = await Buyer.create({ phone: '+26878000003', password: 'secret1' });
+    const cId = String(c._id);
+
+    // a blocked the actor (c) — a's block should still exclude a from c's fan-out.
+    await BlockService.block(a, cId);
+
+    await NotificationDispatcher.dispatch(
+      [String(a._id), String(b._id)],
+      'dm', 'T', 'B', {}, cId
+    );
+
+    expect(await Notification.countDocuments({ recipientId: a._id })).toBe(0);
+    expect(await Notification.countDocuments({ recipientId: b._id })).toBe(1);
   });
 });

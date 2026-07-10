@@ -34,4 +34,12 @@ const notificationSchema = new Schema<INotification>(
 notificationSchema.index({ recipientId: 1, _id: -1 });
 notificationSchema.index({ recipientId: 1, readAt: 1 });
 
+// Reminder dedupe: one (event, kind) reminder per recipient, enforced at the
+// DB so concurrent sweeps (multi-instance API) can never double-dispatch.
+// Partial: only event_reminder rows pay for the index.
+notificationSchema.index(
+  { recipientId: 1, type: 1, 'data.eventId': 1, 'data.kind': 1 },
+  { unique: true, partialFilterExpression: { type: 'event_reminder' } }
+);
+
 export const Notification = model<INotification>('Notification', notificationSchema);

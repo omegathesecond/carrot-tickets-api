@@ -19,7 +19,8 @@ describe('notification inbox', () => {
 
   it('lists newest first with unreadCount; marks selected and all read', async () => {
     const { buyer, auth } = await seed();
-    const first = await NotificationService.create(String(buyer._id), 'dm', 'Alpha', 'sent you a message', { threadId: 'x' });
+    // non-null: this path never hits the event_reminder dedupe branch, so create() always returns a doc here.
+    const first = (await NotificationService.create(String(buyer._id), 'dm', 'Alpha', 'sent you a message', { threadId: 'x' }))!;
     await NotificationService.create(String(buyer._id), 'friend', 'Beta', 'you are now friends', { buyerId: 'y' });
     await NotificationService.create(String(buyer._id), 'announcement', 'Gates', 'open 18:00', { eventId: 'z' });
 

@@ -186,7 +186,8 @@ export class MessageService {
         'mention',
         buyer.username ?? buyer.name ?? 'Mention',
         MessageService.trunc(input.body),
-        { eventId: String(community.eventId), channelId: String(channel._id), messageId: view.id }
+        { eventId: String(community.eventId), channelId: String(channel._id), messageId: view.id },
+        String(buyer._id)
       );
     }
     return view;
@@ -233,7 +234,8 @@ export class MessageService {
       'dm',
       buyer.username ?? buyer.name ?? 'New message',
       MessageService.trunc(input.body),
-      { threadId: String(thread._id), messageId: view.id }
+      { threadId: String(thread._id), messageId: view.id },
+      String(buyer._id)
     );
     return view;
   }

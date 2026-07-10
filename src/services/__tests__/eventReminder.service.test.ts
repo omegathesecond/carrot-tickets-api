@@ -12,6 +12,7 @@ import { Event } from '@models/event.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { Notification } from '@models/notification.model';
+import { NotificationService } from '@services/notification.service';
 import { EventReminderService } from '@services/eventReminder.service';
 
 const PHONE = '+26878422613';
@@ -28,7 +29,10 @@ async function seedEventStartingIn(hours: number, phone = PHONE) {
 }
 
 describe('EventReminderService.sweep', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Notification.init(); // partial unique dedupe index must exist before the race test below
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
@@ -64,5 +68,37 @@ describe('EventReminderService.sweep', () => {
     await EventReminderService.sweep();
     expect(await Notification.countDocuments({ type: 'event_reminder' })).toBe(0);
     void optedOut;
+  });
+
+  it('truncates an oversized event name so the notification title never exceeds the schema maxlength', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1' });
+    const seeded = await seedEventStartingIn(2);
+    await Event.updateOne({ _id: seeded.eventId }, { name: 'X'.repeat(200) });
+
+    await EventReminderService.sweep();
+
+    expect(await Notification.countDocuments({ type: 'event_reminder' })).toBe(1);
+    const note = await Notification.findOne({ type: 'event_reminder' });
+    expect(note!.title.length).toBeLessThanOrEqual(120);
+  });
+
+  it('a racing duplicate reminder insert for the same (recipient, event, kind) resolves null instead of throwing', async () => {
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', username: 'holder_one' });
+    const seeded = await seedEventStartingIn(2);
+
+    await EventReminderService.sweep();
+    const before = await Notification.countDocuments({ type: 'event_reminder' });
+    expect(before).toBe(1);
+
+    const result = await NotificationService.create(
+      String(buyer._id),
+      'event_reminder',
+      'T',
+      'B',
+      { eventId: seeded.eventId, kind: 'dayof' }
+    );
+
+    expect(result).toBeNull();
+    expect(await Notification.countDocuments({ type: 'event_reminder' })).toBe(before);
   });
 });

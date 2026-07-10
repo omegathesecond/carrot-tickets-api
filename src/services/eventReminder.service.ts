@@ -46,7 +46,7 @@ export class EventReminderService {
       await NotificationDispatcher.dispatch(
         recipients,
         'event_reminder',
-        event.name,
+        event.name.length > 120 ? `${event.name.slice(0, 119)}…` : event.name,
         kind === 't24' ? 'Starts in 24 hours 🎫' : 'Starts today 🎉',
         { eventId, kind }
       );

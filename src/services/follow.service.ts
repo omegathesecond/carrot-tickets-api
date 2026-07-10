@@ -13,20 +13,27 @@ export class FollowService {
       targetType === 'buyer' ? await Buyer.exists({ _id: targetId }) : await Vendor.exists({ _id: targetId });
     if (!exists) throw new HttpError(404, 'User not found');
 
+    let created = false;
     try {
       await Follow.create({ followerId: buyer._id, targetType, targetId });
-      if (targetType === 'buyer' && (await FollowService.isFriend(String(buyer._id), targetId))) {
-        // buyer's follow completed the mutual — tell the other party.
-        NotificationDispatcher.dispatchAsync(
-          [targetId],
-          'friend',
-          buyer.username ?? buyer.name ?? 'Someone',
-          'followed you back — you are now friends',
-          { buyerId: String(buyer._id) }
-        );
-      }
+      created = true;
     } catch (err: any) {
       if (err?.code !== 11000) throw err; // already following — idempotent
+    }
+    // Checked OUTSIDE the try so it fires on a fresh create AND survives a
+    // retry after a transient error on the create itself — but never fires
+    // on the pure-duplicate (already-following) path, since `created` stays
+    // false there.
+    if (created && targetType === 'buyer' && (await FollowService.isFriend(String(buyer._id), targetId))) {
+      // buyer's follow completed the mutual — tell the other party.
+      NotificationDispatcher.dispatchAsync(
+        [targetId],
+        'friend',
+        buyer.username ?? buyer.name ?? 'Someone',
+        'followed you back — you are now friends',
+        { buyerId: String(buyer._id) },
+        String(buyer._id)
+      );
     }
   }
 
