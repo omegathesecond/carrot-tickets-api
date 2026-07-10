@@ -65,4 +65,19 @@ describe('notification inbox', () => {
       .send({ ids: [theirs.items[0]!.id] }).expect(200);
     expect((await NotificationService.list(other as any, {})).unreadCount).toBe(1);
   });
+
+  it('empty ids array is a no-op; malformed ids are 400', async () => {
+    const { buyer, auth } = await seed();
+    await NotificationService.create(String(buyer._id), 'dm', 'T', 'b', {});
+
+    await request(app).post('/api/social/notifications/read').set('Authorization', auth)
+      .send({ ids: [] }).expect(200);
+    const res = await request(app).get('/api/social/notifications').set('Authorization', auth).expect(200);
+    expect(res.body.data.unreadCount).toBe(1); // untouched
+
+    await request(app).post('/api/social/notifications/read').set('Authorization', auth)
+      .send({ ids: ['not-hex'] }).expect(400);
+    await request(app).post('/api/social/notifications/read').set('Authorization', auth)
+      .send({ ids: 'nope' }).expect(400);
+  });
 });

@@ -49,11 +49,15 @@ export class NotificationService {
     };
   }
 
-  /** ids omitted → mark ALL of the buyer's notifications read. Scoped to the
-   *  buyer so foreign ids are silently no-ops (never someone else's inbox). */
+  /** ids omitted → mark ALL of the buyer's notifications read; an EMPTY ids
+   *  array is a no-op (an empty selection must never wipe the inbox).
+   *  Scoped to the buyer so foreign ids are silently no-ops. */
   static async markRead(buyer: IBuyer, ids?: string[]): Promise<void> {
     const query: Record<string, unknown> = { recipientId: buyer._id, readAt: { $exists: false } };
-    if (ids && ids.length > 0) query['_id'] = { $in: ids };
+    if (ids !== undefined) {
+      if (ids.length === 0) return;
+      query['_id'] = { $in: ids };
+    }
     await Notification.updateMany(query, { $set: { readAt: new Date() } });
   }
 }
