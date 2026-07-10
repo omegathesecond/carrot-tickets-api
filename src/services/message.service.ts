@@ -83,7 +83,14 @@ export class MessageService {
     communityId: string,
     senderId: string
   ): Promise<string[]> {
-    const usernames = [...new Set([...body.matchAll(/@([a-z0-9_]{3,20})/g)].map((m) => m[1]!))].slice(0, 10);
+    // Case-insensitive with a left boundary: '@Friend_Two' should mention
+    // friend_two (usernames are stored lowercase), while 'foo@gmail.com'
+    // must not treat '@gmail' as a mention.
+    const usernames = [
+      ...new Set(
+        [...body.matchAll(/(?<![a-zA-Z0-9_.])@([a-zA-Z0-9_]{3,20})/g)].map((m) => m[1]!.toLowerCase())
+      ),
+    ].slice(0, 10);
     if (usernames.length === 0) return [];
     const buyers = await Buyer.find({ username: { $in: usernames } }).select('_id');
     const candidateIds = buyers.map((b) => String(b._id)).filter((id) => id !== senderId);

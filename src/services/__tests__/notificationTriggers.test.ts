@@ -109,5 +109,13 @@ describe('notification triggers', () => {
     const { Message } = await import('@models/message.model');
     const stored = await Message.findById(msg.id);
     expect(stored!.mentions.map(String)).toEqual([String(friend._id)]);
+
+    // uppercase mention resolves; email fragments never do
+    resetBuckets();
+    await MessageService.sendMessage(String(general._id), sender, {
+      body: 'ping @FRIEND_TWO — and mail me at contact@friendmail.com',
+    });
+    await flushAsync();
+    expect(await Notification.countDocuments({ recipientId: friend._id, type: 'mention' })).toBe(2);
   });
 });
