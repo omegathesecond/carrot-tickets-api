@@ -4,15 +4,17 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Follow } from '@models/follow.model';
 import { Ticket } from '@models/ticket.model';
+import { PushSubscription } from '@models/pushSubscription.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername, RESERVED_USERNAMES, USERNAME_REGEX } from '@utils/username.util';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
-import { updateProfileSchema, blockSchema, followSchema } from '@validators/community.validator';
+import { updateProfileSchema, blockSchema, followSchema, pushSubscribeSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
 import { NotificationService } from '@services/notification.service';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
+import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
 
 export class SocialProfileController {
   /** Own-profile payload. NEVER include the phone — usernames are the public identity. */
@@ -330,6 +332,51 @@ export class SocialProfileController {
       return ApiResponseUtil.success(res, { read: true }, 'Notifications marked read');
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to mark notifications read');
+    }
+  }
+
+  /** GET /api/social/push/vapid-public-key */
+  static async vapidPublicKey(_req: Request, res: Response): Promise<any> {
+    if (!vapidConfigured) return ApiResponseUtil.error(res, 'Push not configured', 503);
+    return ApiResponseUtil.success(res, { key: VAPID_PUBLIC_KEY });
+  }
+
+  /** POST /api/social/push/subscribe */
+  static async pushSubscribe(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const { error, value } = pushSubscribeSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      await PushSubscription.findOneAndUpdate(
+        { endpoint: value.endpoint },
+        {
+          $set: {
+            buyerId: buyer._id, // endpoint follows whoever is signed in on that browser
+            keys: value.keys,
+            userAgent: String(req.headers['user-agent'] || '').slice(0, 300) || undefined,
+          },
+        },
+        { upsert: true, new: true, runValidators: true }
+      );
+      return ApiResponseUtil.success(res, { subscribed: true }, 'Push subscription saved');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to save push subscription');
+    }
+  }
+
+  /** DELETE /api/social/push/subscribe { endpoint } */
+  static async pushUnsubscribe(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const endpoint = String(req.body?.endpoint || '');
+      if (!endpoint) return ApiResponseUtil.error(res, 'endpoint is required', 400);
+      await PushSubscription.deleteOne({ endpoint, buyerId: buyer._id });
+      return ApiResponseUtil.success(res, { subscribed: false }, 'Push subscription removed');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to remove push subscription');
     }
   }
 }

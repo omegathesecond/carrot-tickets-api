@@ -20,5 +20,8 @@ router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblo
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
 router.get('/users/:username', authenticateBuyer, SocialProfileController.publicProfile);
+router.get('/push/vapid-public-key', authenticateBuyer, SocialProfileController.vapidPublicKey);
+router.post('/push/subscribe', authenticateBuyer, SocialProfileController.pushSubscribe);
+router.delete('/push/subscribe', authenticateBuyer, SocialProfileController.pushUnsubscribe);
 
 export default router;

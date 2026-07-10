@@ -48,3 +48,11 @@ export const reviewReplySchema = Joi.object({
 export const announcementSchema = Joi.object({
   body: Joi.string().trim().min(1).max(2000).required(),
 });
+
+export const pushSubscribeSchema = Joi.object({
+  endpoint: Joi.string().uri({ scheme: ['https'] }).max(1000).required(),
+  keys: Joi.object({
+    p256dh: Joi.string().max(300).required(),
+    auth: Joi.string().max(300).required(),
+  }).required(),
+});

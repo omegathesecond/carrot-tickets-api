@@ -67,6 +67,10 @@ import dmRoutes from '@routes/dm.route';
 import { ensureAdapterCollection } from '@/realtime/adapterCollection';
 import { initSocketEmitter } from '@/realtime/emitter';
 
+// Web Push (VAPID) — delivery-grade: missing env logs loudly but never
+// crashes boot. See @config/vapid.config.
+import { initWebPush } from '@config/vapid.config';
+
 // Import error handling middleware
 import {
   errorHandler,
@@ -199,6 +203,10 @@ if (process.env['NODE_ENV'] !== 'test') {
       setInterval(() => {
         TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
       }, CARD_RECONCILE_MS);
+
+      // Web Push (VAPID): missing keys log loudly and disable push, never
+      // crash boot — see @config/vapid.config.
+      initWebPush();
 
       // Realtime bus: REST-created messages broadcast to the gateway's
       // channel rooms. Init failure keeps the API serving (REST is this
