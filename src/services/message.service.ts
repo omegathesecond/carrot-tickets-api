@@ -1,11 +1,12 @@
 import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
-import { Message } from '@models/message.model';
+import { Message, IMessage } from '@models/message.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
 import { channelRoom, dmRoom } from '@/realtime/rooms';
 import { DmThreadService } from '@services/dmThread.service';
@@ -24,6 +25,7 @@ export interface MessageView {
   senderType: 'buyer' | 'organizer';
   createdAt: Date;
   editedAt: Date | null;
+  pinnedAt: Date | null;
 }
 
 export class MessageService {
@@ -38,7 +40,8 @@ export class MessageService {
    */
   static async requireChannelAccess(channelId: string, buyer: IBuyer) {
     const channel = await Channel.findById(channelId);
-    if (!channel || channel.archived) throw new HttpError(404, 'Channel not found');
+    if (!channel) throw new HttpError(404, 'Channel not found');
+    if (channel.archived) throw new HttpError(403, 'This channel is archived');
 
     const community = await Community.findById(channel.communityId);
     if (!community) throw new HttpError(404, 'Community not found');
@@ -149,6 +152,7 @@ export class MessageService {
     buyer: IBuyer,
     input: { body: string; replyTo?: string }
   ): Promise<MessageView> {
+    assertNotSuspended(buyer);
     const { channel, community, membership } = await MessageService.requireChannelAccess(channelId, buyer);
 
     if (channel.postPolicy === 'organizer') {
@@ -198,6 +202,7 @@ export class MessageService {
     buyer: IBuyer,
     input: { body: string; replyTo?: string }
   ): Promise<MessageView> {
+    assertNotSuspended(buyer);
     const thread = await DmThreadService.requireDmAccess(threadId, buyer);
 
     // Blocks are re-checked at send time for 1:1 threads — "server-refused
@@ -246,6 +251,26 @@ export class MessageService {
     await thread.save();
   }
 
+  /**
+   * Soft-delete a CHANNEL message and broadcast `message:deleted` on its
+   * channel room. Shared by self-delete (below) and organizer moderation
+   * delete-any (see ModerationService.deleteMessage) so the broadcast path
+   * can never drift between the two callers — do not fork this logic.
+   * Caller owns all authz/ownership checks; this only persists + emits.
+   *
+   * Also auto-unpins (deleted messages can never stay pinned) — same write,
+   * no extra save, no new bus event.
+   */
+  static async softDeleteChannelMessage(message: IMessage): Promise<void> {
+    message.deletedAt = new Date();
+    message.pinnedAt = null;
+    await message.save();
+    MessageService.broadcastRoom(channelRoom(String(message.channelId)), 'message:deleted', {
+      channelId: String(message.channelId),
+      messageId: String(message._id),
+    });
+  }
+
   static async deleteOwnMessage(messageId: string, buyer: IBuyer): Promise<void> {
     const message = await Message.findById(messageId);
     if (!message || message.deletedAt) throw new HttpError(404, 'Message not found');
@@ -273,13 +298,22 @@ export class MessageService {
     if (!membership) throw new HttpError(403, 'Join the community first');
     if (membership.bannedAt) throw new HttpError(403, 'You have been banned from this community');
 
-    message.deletedAt = new Date();
-    await message.save();
+    await MessageService.softDeleteChannelMessage(message);
+  }
 
-    MessageService.broadcastRoom(channelRoom(String(message.channelId)), 'message:deleted', {
-      channelId: String(message.channelId),
-      messageId: String(message._id),
-    });
+  /**
+   * GET /api/community/channels/:channelId/pins — buyer read, same access
+   * gate as listMessages (requireChannelAccess). Newest-pinned-first, capped
+   * at 10 (the same cap ModerationService.pinMessage enforces on write).
+   */
+  static async listPinnedMessages(channelId: string, buyer: IBuyer): Promise<MessageView[]> {
+    await MessageService.requireChannelAccess(channelId, buyer);
+    const docs = await Message.find({ channelId, pinnedAt: { $ne: null } })
+      .sort({ pinnedAt: -1 })
+      .limit(10)
+      .populate('senderId', 'username name avatarUrl')
+      .populate('senderVendorId', 'businessName logoUrl');
+    return docs.map((doc) => MessageService.toView(doc));
   }
 
   /** Stamp the buyer's read cursor for a channel (drives unread badges). */
@@ -324,6 +358,7 @@ export class MessageService {
       senderType: isOrganizer ? 'organizer' : 'buyer',
       createdAt: doc.createdAt,
       editedAt: doc.editedAt ?? null,
+      pinnedAt: doc.pinnedAt ?? null,
     };
   }
 

@@ -53,6 +53,19 @@ export class MessageController {
     }
   }
 
+  /** GET /api/community/channels/:channelId/pins — same gating as listing messages. */
+  static async listPins(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      const messages = await MessageService.listPinnedMessages(req.params['channelId'] as string, buyer);
+      return ApiResponseUtil.success(res, messages);
+    } catch (error: any) {
+      return MessageController.fail(res, error, 'Failed to load pinned messages');
+    }
+  }
+
   static async markRead(req: Request, res: Response): Promise<any> {
     try {
       const buyer = await resolveBuyerFromRequest(req);

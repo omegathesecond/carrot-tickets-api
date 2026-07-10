@@ -15,6 +15,9 @@ import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { AnnouncementController } from '@controllers/announcement.controller';
+import { ChannelAdminController } from '@controllers/channelAdmin.controller';
+import { ModerationController } from '@controllers/moderation.controller';
+import { ReportController } from '@controllers/report.controller';
 
 const router = Router();
 
@@ -80,6 +83,18 @@ router.delete('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPer
 router.post('/wristbands/batch-issue', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.batchIssue);
 router.get('/wristbands/batches', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.listBatches);
 router.get('/wristbands/tickets', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.searchTickets);
+
+/**
+ * Social moderation queue — buyer-filed reports against messages/buyers.
+ * Super-admins or team members holding tickets:moderate_social. Intentionally
+ * NOT vendor-scoped, mirroring /admin/users and the wristband routes above.
+ */
+router.get('/reports', requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL), ReportController.list);
+router.post(
+  '/reports/:reportId/resolve',
+  requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL),
+  ReportController.resolve
+);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
@@ -181,6 +196,85 @@ router.post(
   '/events/:eventId/announcements',
   requireTicketsPermission(TicketsPermission.EDIT_EVENT),
   AnnouncementController.post
+);
+
+/**
+ * Organizer channel management — list/create/patch the text channels inside
+ * an event's community. Same auth shape as announcements: dualAuth
+ * (router-level) authenticates, the permission gate is here, and ownership
+ * (own events only) is checked in the controller.
+ */
+router.get(
+  '/events/:eventId/channels',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ChannelAdminController.list
+);
+
+router.post(
+  '/events/:eventId/channels',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ChannelAdminController.create
+);
+
+router.patch(
+  '/channels/:channelId',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ChannelAdminController.update
+);
+
+/**
+ * Organizer moderation — delete-any-message, mute/ban members, pinned
+ * messages, and the admin member roster. Same auth shape as channel
+ * management: dualAuth (router-level) authenticates, the permission gate is
+ * here, and ownership (own events only, community -> event -> vendorId) is
+ * checked in the controller.
+ */
+router.delete(
+  '/messages/:messageId',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.deleteMessage
+);
+
+router.post(
+  '/messages/:messageId/pin',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.pin
+);
+
+router.delete(
+  '/messages/:messageId/pin',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.unpin
+);
+
+router.get(
+  '/communities/:communityId/members',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.listMembers
+);
+
+router.post(
+  '/communities/:communityId/members/:buyerId/mute',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.mute
+);
+
+router.delete(
+  '/communities/:communityId/members/:buyerId/mute',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.unmute
+);
+
+router.post(
+  '/communities/:communityId/members/:buyerId/ban',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.ban
+);
+
+router.delete(
+  '/communities/:communityId/members/:buyerId/ban',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.unban
 );
 
 /**

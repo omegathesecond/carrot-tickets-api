@@ -3,9 +3,11 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { HttpError } from '@utils/httpError.util';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 export class FollowService {
   static async follow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
+    assertNotSuspended(buyer);
     if (targetType === 'buyer' && String(buyer._id) === targetId) {
       throw new HttpError(400, 'You cannot follow yourself');
     }
@@ -31,7 +33,10 @@ export class FollowService {
         'friend',
         buyer.username ?? buyer.name ?? 'Someone',
         'followed you back — you are now friends',
-        { buyerId: String(buyer._id) },
+        // The notified party (targetId) is being told about buyer, their new
+        // friend — username lets the client route straight to buyer's
+        // profile, same identity buyerId already points at.
+        { buyerId: String(buyer._id), username: buyer.username ?? null },
         String(buyer._id)
       );
     }

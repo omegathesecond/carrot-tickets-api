@@ -6,6 +6,7 @@ import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 export interface ReviewView {
   id: string;
@@ -22,6 +23,7 @@ export class ReviewService {
     buyer: IBuyer,
     input: { rating: number; text?: string }
   ): Promise<IReview> {
+    assertNotSuspended(buyer);
     const event = await Event.findById(eventId);
     if (!event || (event.status !== EventStatus.PUBLISHED && event.status !== EventStatus.COMPLETED)) {
       throw new HttpError(404, 'Event not found');

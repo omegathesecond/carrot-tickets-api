@@ -39,7 +39,14 @@ export enum TicketsPermission {
   // Wristband printing (Carrot admins/team only) — design + print Tyvek
   // wristbands from the dashboard and batch-issue zero-amount tickets for
   // scannable wristbands. NEVER part of any role's default set.
-  PRINT_WRISTBANDS = 'tickets:print_wristbands'
+  PRINT_WRISTBANDS = 'tickets:print_wristbands',
+
+  // Social moderation queue (Carrot admins/team only) — review buyer-filed
+  // reports against messages/buyers, delete-any cross-vendor, and suspend a
+  // buyer's platform-wide social access. NEVER part of any role's default
+  // set: organizers (OWNER) only moderate their own community, they don't
+  // get the platform-wide queue.
+  MODERATE_SOCIAL = 'tickets:moderate_social'
 }
 
 export enum TicketsRole {
@@ -51,10 +58,13 @@ export enum TicketsRole {
 
 export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> = {
   // Every permission EXCEPT the platform-staff-only ones (VIEW_USERS,
-  // PRINT_WRISTBANDS). An organizer owns their vendor account, not the
-  // Carrot platform.
+  // PRINT_WRISTBANDS, MODERATE_SOCIAL). An organizer owns their vendor
+  // account, not the Carrot platform.
   [TicketsRole.OWNER]: Object.values(TicketsPermission).filter(
-    (p) => p !== TicketsPermission.VIEW_USERS && p !== TicketsPermission.PRINT_WRISTBANDS
+    (p) =>
+      p !== TicketsPermission.VIEW_USERS &&
+      p !== TicketsPermission.PRINT_WRISTBANDS &&
+      p !== TicketsPermission.MODERATE_SOCIAL
   ),
 
   [TicketsRole.MANAGER]: [

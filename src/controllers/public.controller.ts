@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
+import { Vendor } from '@models/vendor.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { TicketService } from '@services/ticket.service';
@@ -135,6 +136,30 @@ const publicPurchaseSchema = Joi.object({
 });
 
 export class PublicController {
+  /**
+   * Resolve the public-safe organizer identity for an event's vendor.
+   * NEVER include email/phone/keshlessVendorId — this is a public surface.
+   * Missing or inactive vendors resolve to null rather than throwing: a
+   * broken/removed organizer must never break the public event page.
+   */
+  private static async resolveOrganizer(
+    vendorId: unknown
+  ): Promise<{ id: string; businessName: string; logoUrl: string | null } | null> {
+    if (!vendorId) return null;
+    try {
+      const vendor = await Vendor.findById(vendorId).select('businessName logoUrl isActive').lean();
+      if (!vendor || !vendor.isActive) return null;
+      return {
+        id: String(vendor._id),
+        businessName: vendor.businessName,
+        logoUrl: vendor.logoUrl ?? null,
+      };
+    } catch (error) {
+      console.error('Resolve public organizer error:', error);
+      return null;
+    }
+  }
+
   /**
    * Get all published events (no auth required)
    */
@@ -335,6 +360,8 @@ export class PublicController {
         return ApiResponseUtil.notFound(res, 'Event not found or not available');
       }
 
+      const organizer = await PublicController.resolveOrganizer(event.vendorId);
+
       // Transform for public display
       const publicEvent = {
         _id: event._id,
@@ -360,7 +387,8 @@ export class PublicController {
         priceRange: {
           min: Math.min(...event.ticketTypes.map(tt => tt.price)),
           max: Math.max(...event.ticketTypes.map(tt => tt.price))
-        }
+        },
+        organizer,
       };
 
       return ApiResponseUtil.success(res, publicEvent);
