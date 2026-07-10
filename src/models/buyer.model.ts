@@ -34,6 +34,11 @@ export interface IBuyer extends Document {
   notificationPrefs: NotificationPrefs;
   usernameCustomizedAt?: Date; // set when the buyer picks their own handle
   lastLoginAt?: Date;
+  // Platform-wide social suspension (Plan 7 Task 3) — set by a Carrot admin
+  // resolving a report (tickets:moderate_social). Blocks social WRITES only
+  // (see assertNotSuspended in @utils/socialSuspension.util); ticket
+  // ownership, lookup, QR and purchase are never affected.
+  socialSuspendedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidate: string): Promise<boolean>;
@@ -77,7 +82,8 @@ const buyerSchema = new Schema<IBuyer>(
       default: () => ({}),
     },
     usernameCustomizedAt: { type: Date },
-    lastLoginAt: { type: Date }
+    lastLoginAt: { type: Date },
+    socialSuspendedAt: { type: Date, default: null }
   },
   { timestamps: true }
 );

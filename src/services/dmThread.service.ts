@@ -8,6 +8,7 @@ import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
 import { consumeToken } from '@utils/rateLimit.util';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 const HEX24 = /^[0-9a-f]{24}$/i;
 
@@ -55,6 +56,7 @@ export class DmThreadService {
   }
 
   static async openThread(creator: IBuyer, participantIds: string[]): Promise<IDmThread> {
+    assertNotSuspended(creator);
     const creatorId = String(creator._id);
     // Lowercase before dedupe/pairKey: HEX24 accepts mixed case, but pairKey
     // dedupe and Mongo's unique index are case-sensitive.

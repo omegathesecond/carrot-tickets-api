@@ -66,6 +66,24 @@ export const muteSchema = Joi.object({
   minutes: Joi.number().integer().min(5).max(10080).required(),
 });
 
+export const reportSchema = Joi.object({
+  targetType: Joi.string().valid('message', 'buyer').required(),
+  messageId: Joi.string()
+    .hex()
+    .length(24)
+    .when('targetType', { is: 'message', then: Joi.required(), otherwise: Joi.forbidden() }),
+  targetBuyerId: Joi.string()
+    .hex()
+    .length(24)
+    .when('targetType', { is: 'buyer', then: Joi.required(), otherwise: Joi.forbidden() }),
+  reason: Joi.string().trim().min(1).max(500).required(),
+});
+
+export const resolveReportSchema = Joi.object({
+  action: Joi.string().valid('delete_message', 'suspend_buyer', 'unsuspend_buyer', 'dismiss').required(),
+  note: Joi.string().trim().max(500).allow('').optional(),
+});
+
 export const pushSubscribeSchema = Joi.object({
   endpoint: Joi.string().uri({ scheme: ['https'] }).max(1000).required(),
   keys: Joi.object({

@@ -17,6 +17,7 @@ import { ReviewController } from '@controllers/review.controller';
 import { AnnouncementController } from '@controllers/announcement.controller';
 import { ChannelAdminController } from '@controllers/channelAdmin.controller';
 import { ModerationController } from '@controllers/moderation.controller';
+import { ReportController } from '@controllers/report.controller';
 
 const router = Router();
 
@@ -82,6 +83,18 @@ router.delete('/wristband-designs/:id', requireSuperAdminOrPermission(TicketsPer
 router.post('/wristbands/batch-issue', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.batchIssue);
 router.get('/wristbands/batches', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.listBatches);
 router.get('/wristbands/tickets', requireSuperAdminOrPermission(TicketsPermission.PRINT_WRISTBANDS), WristbandController.searchTickets);
+
+/**
+ * Social moderation queue — buyer-filed reports against messages/buyers.
+ * Super-admins or team members holding tickets:moderate_social. Intentionally
+ * NOT vendor-scoped, mirroring /admin/users and the wristband routes above.
+ */
+router.get('/reports', requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL), ReportController.list);
+router.post(
+  '/reports/:reportId/resolve',
+  requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL),
+  ReportController.resolve
+);
 
 // Auth management
 router.post('/auth/logout', TicketsController.logout);

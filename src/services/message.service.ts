@@ -6,6 +6,7 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
 import { channelRoom, dmRoom } from '@/realtime/rooms';
 import { DmThreadService } from '@services/dmThread.service';
@@ -151,6 +152,7 @@ export class MessageService {
     buyer: IBuyer,
     input: { body: string; replyTo?: string }
   ): Promise<MessageView> {
+    assertNotSuspended(buyer);
     const { channel, community, membership } = await MessageService.requireChannelAccess(channelId, buyer);
 
     if (channel.postPolicy === 'organizer') {
@@ -200,6 +202,7 @@ export class MessageService {
     buyer: IBuyer,
     input: { body: string; replyTo?: string }
   ): Promise<MessageView> {
+    assertNotSuspended(buyer);
     const thread = await DmThreadService.requireDmAccess(threadId, buyer);
 
     // Blocks are re-checked at send time for 1:1 threads — "server-refused

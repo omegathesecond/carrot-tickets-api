@@ -5,6 +5,7 @@ import { Message } from '@models/message.model';
 import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 export interface ChannelView {
   id: string;
@@ -25,6 +26,7 @@ export interface CommunityView {
 
 export class CommunityMembershipService {
   static async join(eventId: string, buyer: IBuyer): Promise<CommunityView> {
+    assertNotSuspended(buyer);
     const community = await Community.findOne({ eventId });
     if (!community) throw new HttpError(404, 'Community not found for this event');
 

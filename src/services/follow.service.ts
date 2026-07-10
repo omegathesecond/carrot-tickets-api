@@ -3,9 +3,11 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { HttpError } from '@utils/httpError.util';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 export class FollowService {
   static async follow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
+    assertNotSuspended(buyer);
     if (targetType === 'buyer' && String(buyer._id) === targetId) {
       throw new HttpError(400, 'You cannot follow yourself');
     }
