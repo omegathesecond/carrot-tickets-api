@@ -3,13 +3,17 @@ import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { signBuyerToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
+import { Block } from '@models/block.model';
 import { BlockService } from '@services/block.service';
 
 const PHONE_A = '+26878422613';
 const PHONE_B = '+26878000042';
 
 describe('block routes', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Block.init(); // unique index must exist before idempotency tests race it
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 

@@ -2,11 +2,15 @@ import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
+import { Follow } from '@models/follow.model';
 import { FollowService } from '@services/follow.service';
 import { HttpError } from '@utils/httpError.util';
 
 describe('FollowService', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Follow.init(); // unique index must exist before idempotency tests race it
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 

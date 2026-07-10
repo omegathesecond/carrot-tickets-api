@@ -3,10 +3,11 @@ import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { signBuyerToken } from '../../__tests__/helpers/auth';
-import { Buyer, IBuyer } from '@models/buyer.model';
+import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { CommunityService } from '@services/community.service';
 import { BlockService } from '@services/block.service';
+import { DmThread } from '@models/dmThread.model';
 import { resetBuckets } from '@utils/rateLimit.util';
 
 const PHONE_A = '+26878422613';
@@ -29,7 +30,10 @@ async function openThread(auth: string, otherId: string): Promise<string> {
 }
 
 describe('dm routes', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await DmThread.init(); // unique pairKey index must exist before dedupe races it
+  });
   beforeEach(resetBuckets);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);

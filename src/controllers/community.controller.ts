@@ -7,6 +7,7 @@ import { HttpError } from '@utils/httpError.util';
 import { Membership } from '@models/membership.model';
 import { Community } from '@models/community.model';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
+import { failWithHttpError } from '@utils/controllerHelpers.util';
 
 export class CommunityController {
   /** Resolve the buyer and make sure they carry a username before any social action. */
@@ -20,9 +21,7 @@ export class CommunityController {
   }
 
   private static fail(res: Response, error: any, fallback: string) {
-    if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
-    console.error(fallback, error);
-    return ApiResponseUtil.error(res, error?.message || fallback, 500);
+    return failWithHttpError(res, error, fallback);
   }
 
   static async join(req: Request, res: Response): Promise<any> {
@@ -58,7 +57,10 @@ export class CommunityController {
     }
   }
 
-  /** GET /api/community/:eventId/members — members see who's here (spec §2.4 find-people). */
+  /**
+   * GET /api/community/:eventId/members — members see who's here (spec §2.4 find-people).
+   * `before` = the `cursor` field of the last item in the previous page (a Membership id, not a buyer id).
+   */
   static async listMembers(req: Request, res: Response): Promise<any> {
     try {
       const buyer = await CommunityController.requireBuyer(req, res);
@@ -87,7 +89,7 @@ export class CommunityController {
       const memberships = await Membership.find(query).sort({ _id: -1 }).limit(limit).populate('buyerId');
       const members = memberships
         .filter((m: any) => m.buyerId && typeof m.buyerId === 'object')
-        .map((m: any) => toBuyerSummary(m.buyerId));
+        .map((m: any) => ({ ...toBuyerSummary(m.buyerId), cursor: String(m._id) }));
       return ApiResponseUtil.success(res, members);
     } catch (error: any) {
       return CommunityController.fail(res, error, 'Failed to load members');

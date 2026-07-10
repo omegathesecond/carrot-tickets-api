@@ -7,6 +7,7 @@ import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
+import { consumeToken } from '@utils/rateLimit.util';
 
 const HEX24 = /^[0-9a-f]{24}$/i;
 
@@ -63,6 +64,13 @@ export class DmThreadService {
     if (otherIds.length < 1 || otherIds.length > 9) {
       throw new HttpError(400, 'A conversation needs 1-9 other people');
     }
+
+    // Groups never dedupe, so thread creation must be rate limited — the
+    // same per-buyer budget as message sends.
+    if (!consumeToken(`msg:${creatorId}`)) {
+      throw new HttpError(429, 'You are doing that too quickly — slow down');
+    }
+
     if (!otherIds.every((id) => HEX24.test(id))) {
       throw new HttpError(400, 'Invalid participant id');
     }

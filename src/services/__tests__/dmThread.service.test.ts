@@ -8,6 +8,7 @@ import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
 import { DmThreadService } from '@services/dmThread.service';
 import { DmThread } from '@models/dmThread.model';
+import { resetBuckets } from '@utils/rateLimit.util';
 
 async function seedBuyer(phone: string, dmPrivacy: 'community' | 'friends' = 'community'): Promise<IBuyer> {
   return Buyer.create({ phone, password: 'secret1', name: `B${phone.slice(-4)}`, dmPrivacy });
@@ -25,7 +26,11 @@ async function shareCommunity(...buyers: IBuyer[]) {
 }
 
 describe('DmThreadService', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await DmThread.init(); // unique index must exist before pairKey race test
+  });
+  beforeEach(resetBuckets);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
@@ -105,6 +110,21 @@ describe('DmThreadService', () => {
     await expect(
       DmThreadService.openThread(a, [...others.map((o) => String(o._id)), String(stranger._id)])
     ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('rate limits rapid thread creation', async () => {
+    const a = await seedBuyer('+26878000001');
+    const others: IBuyer[] = [];
+    for (let i = 0; i < 7; i++) others.push(await seedBuyer(`+2687800002${i}`));
+    await shareCommunity(a, ...others);
+
+    resetBuckets();
+    for (let i = 0; i < 5; i++) {
+      await DmThreadService.openThread(a, [String(others[i]!._id), String(others[(i + 1) % 7]!._id)]);
+    }
+    await expect(
+      DmThreadService.openThread(a, [String(others[5]!._id), String(others[6]!._id)])
+    ).rejects.toMatchObject({ statusCode: 429 });
   });
 
   it('requireDmAccess: participant ok; non-participant and unknown get 404', async () => {

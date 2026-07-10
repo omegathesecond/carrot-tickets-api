@@ -11,7 +11,7 @@ import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { updateProfileSchema, blockSchema, followSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
-import { HttpError } from '@utils/httpError.util';
+import { failWithHttpError } from '@utils/controllerHelpers.util';
 
 export class SocialProfileController {
   /** Own-profile payload. NEVER include the phone — usernames are the public identity. */
@@ -148,9 +148,7 @@ export class SocialProfileController {
   }
 
   private static failSocial(res: Response, error: any, fallback: string) {
-    if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
-    console.error(fallback, error);
-    return ApiResponseUtil.error(res, error?.message || fallback, 500);
+    return failWithHttpError(res, error, fallback);
   }
 
   /** POST /api/social/follow */

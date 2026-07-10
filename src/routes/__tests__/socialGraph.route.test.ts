@@ -8,6 +8,8 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { CommunityService } from '@services/community.service';
 import { Membership } from '@models/membership.model';
+import { Block } from '@models/block.model';
+import { Follow } from '@models/follow.model';
 
 const PHONE_A = '+26878422613';
 const PHONE_B = '+26878000042';
@@ -21,7 +23,11 @@ async function seedBuyers() {
 }
 
 describe('social graph routes', () => {
-  beforeAll(connectTestDb);
+  beforeAll(async () => {
+    await connectTestDb();
+    await Block.init(); // unique index must exist before block/follow interactions race it
+    await Follow.init();
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
@@ -102,6 +108,15 @@ describe('social graph routes', () => {
     const members = await request(app)
       .get(`/api/community/${seeded.eventId}/members`).set('Authorization', authA).expect(200);
     expect(members.body.data.map((u: any) => u.username)).toEqual(['beta_two', 'alpha_one']); // newest first, no banned gamma
+
+    const page1 = await request(app)
+      .get(`/api/community/${seeded.eventId}/members?limit=1`).set('Authorization', authA).expect(200);
+    expect(page1.body.data).toHaveLength(1);
+    const page2 = await request(app)
+      .get(`/api/community/${seeded.eventId}/members?limit=1&before=${page1.body.data[0].cursor}`)
+      .set('Authorization', authA).expect(200);
+    expect(page2.body.data).toHaveLength(1);
+    expect(page2.body.data[0].username).not.toBe(page1.body.data[0].username);
 
     // non-member (fresh buyer) is refused
     await Buyer.create({ phone: '+26878000044', password: 'secret1' });
