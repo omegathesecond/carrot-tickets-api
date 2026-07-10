@@ -57,4 +57,13 @@ describe('PushService', () => {
     await PushService.sendToBuyer(String(buyer._id), { title: 'T', body: 'B', data: {} });
     expect(send).not.toHaveBeenCalled();
   });
+
+  it('a rejecting subscription query never propagates (total never-throw)', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      PushService.sendToBuyer('not-a-valid-objectid', { title: 'T', body: 'B', data: {} })
+    ).resolves.toBeUndefined();
+    expect(consoleSpy).toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
 });
