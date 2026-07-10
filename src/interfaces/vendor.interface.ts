@@ -20,6 +20,8 @@ export interface IVendor extends Document {
   slug: string;
   businessType?: string;
   primaryContact?: string;
+  logoUrl?: string;
+  bio?: string;
 
   // Contact Information
   address?: {

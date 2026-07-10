@@ -23,3 +23,8 @@ export const followSchema = Joi.object({
 export const createThreadSchema = Joi.object({
   participantIds: Joi.array().items(Joi.string().hex().length(24)).min(1).max(9).required(),
 });
+
+export const organizerProfileSchema = Joi.object({
+  logoUrl: Joi.string().uri().max(500).allow('').optional(),
+  bio: Joi.string().max(500).allow('').optional(),
+}).min(1);

@@ -12,6 +12,7 @@ import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.cont
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { WristbandController } from '@controllers/wristband.controller';
+import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 
 const router = Router();
 
@@ -106,6 +107,16 @@ router.post('/purchase', TicketsController.purchaseAsUser);
  */
 router.put('/users/profile', TicketsController.updateProfile);
 router.put('/users/password', TicketsController.changePassword);
+
+/**
+ * Organizer own-profile — vendor sets its own public brand card (logo + bio)
+ * consumed by the public organizer profile and organizer-branded chat.
+ */
+router.patch(
+  '/organizer/profile',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  OrganizerProfileController.updateOwn
+);
 
 /**
  * Event Management Routes

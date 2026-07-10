@@ -46,6 +46,16 @@ const vendorSchema = new Schema<IVendor>({
     default: 'other',
     trim: true
   },
+  logoUrl: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Logo URL cannot exceed 500 characters']
+  },
+  bio: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Bio cannot exceed 500 characters']
+  },
   primaryContact: {
     type: String,
     trim: true,
