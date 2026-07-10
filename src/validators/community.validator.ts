@@ -62,6 +62,10 @@ export const updateChannelSchema = Joi.object({
   archived: Joi.boolean().optional(),
 }).min(1);
 
+export const muteSchema = Joi.object({
+  minutes: Joi.number().integer().min(5).max(10080).required(),
+});
+
 export const pushSubscribeSchema = Joi.object({
   endpoint: Joi.string().uri({ scheme: ['https'] }).max(1000).required(),
   keys: Joi.object({

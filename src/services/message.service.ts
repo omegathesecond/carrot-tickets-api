@@ -1,7 +1,7 @@
 import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
-import { Message } from '@models/message.model';
+import { Message, IMessage } from '@models/message.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
@@ -24,6 +24,7 @@ export interface MessageView {
   senderType: 'buyer' | 'organizer';
   createdAt: Date;
   editedAt: Date | null;
+  pinnedAt: Date | null;
 }
 
 export class MessageService {
@@ -247,6 +248,22 @@ export class MessageService {
     await thread.save();
   }
 
+  /**
+   * Soft-delete a CHANNEL message and broadcast `message:deleted` on its
+   * channel room. Shared by self-delete (below) and organizer moderation
+   * delete-any (see ModerationService.deleteMessage) so the broadcast path
+   * can never drift between the two callers — do not fork this logic.
+   * Caller owns all authz/ownership checks; this only persists + emits.
+   */
+  static async softDeleteChannelMessage(message: IMessage): Promise<void> {
+    message.deletedAt = new Date();
+    await message.save();
+    MessageService.broadcastRoom(channelRoom(String(message.channelId)), 'message:deleted', {
+      channelId: String(message.channelId),
+      messageId: String(message._id),
+    });
+  }
+
   static async deleteOwnMessage(messageId: string, buyer: IBuyer): Promise<void> {
     const message = await Message.findById(messageId);
     if (!message || message.deletedAt) throw new HttpError(404, 'Message not found');
@@ -274,13 +291,22 @@ export class MessageService {
     if (!membership) throw new HttpError(403, 'Join the community first');
     if (membership.bannedAt) throw new HttpError(403, 'You have been banned from this community');
 
-    message.deletedAt = new Date();
-    await message.save();
+    await MessageService.softDeleteChannelMessage(message);
+  }
 
-    MessageService.broadcastRoom(channelRoom(String(message.channelId)), 'message:deleted', {
-      channelId: String(message.channelId),
-      messageId: String(message._id),
-    });
+  /**
+   * GET /api/community/channels/:channelId/pins — buyer read, same access
+   * gate as listMessages (requireChannelAccess). Newest-pinned-first, capped
+   * at 10 (the same cap ModerationService.pinMessage enforces on write).
+   */
+  static async listPinnedMessages(channelId: string, buyer: IBuyer): Promise<MessageView[]> {
+    await MessageService.requireChannelAccess(channelId, buyer);
+    const docs = await Message.find({ channelId, pinnedAt: { $ne: null } })
+      .sort({ pinnedAt: -1 })
+      .limit(10)
+      .populate('senderId', 'username name avatarUrl')
+      .populate('senderVendorId', 'businessName logoUrl');
+    return docs.map((doc) => MessageService.toView(doc));
   }
 
   /** Stamp the buyer's read cursor for a channel (drives unread badges). */
@@ -325,6 +351,7 @@ export class MessageService {
       senderType: isOrganizer ? 'organizer' : 'buyer',
       createdAt: doc.createdAt,
       editedAt: doc.editedAt ?? null,
+      pinnedAt: doc.pinnedAt ?? null,
     };
   }
 

@@ -11,6 +11,7 @@ const router = Router();
 router.get('/channels/:channelId/messages', authenticateBuyer, MessageController.list);
 router.post('/channels/:channelId/messages', authenticateBuyer, MessageController.send);
 router.post('/channels/:channelId/read', authenticateBuyer, MessageController.markRead);
+router.get('/channels/:channelId/pins', authenticateBuyer, MessageController.listPins);
 router.delete('/messages/:messageId', authenticateBuyer, MessageController.deleteOwn);
 
 router.post('/:eventId/join', authenticateBuyer, CommunityController.join);

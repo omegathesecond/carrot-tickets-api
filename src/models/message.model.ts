@@ -16,6 +16,7 @@ export interface IMessage extends Document {
   mentions: Types.ObjectId[];
   editedAt?: Date;
   deletedAt?: Date;
+  pinnedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,6 +33,7 @@ const messageSchema = new Schema<IMessage>(
     mentions: [{ type: Schema.Types.ObjectId, ref: 'Buyer' }],
     editedAt: { type: Date },
     deletedAt: { type: Date },
+    pinnedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -65,5 +67,8 @@ messageSchema.index({ channelId: 1, createdAt: -1 });
 // DM cursor pagination + unread counts.
 messageSchema.index({ dmThreadId: 1, _id: -1 });
 messageSchema.index({ dmThreadId: 1, createdAt: -1 });
+
+// Pinned-messages read (organizer pin/unpin, buyer pins list).
+messageSchema.index({ channelId: 1, pinnedAt: 1 });
 
 export const Message = model<IMessage>('Message', messageSchema);

@@ -16,6 +16,7 @@ import { OrganizerProfileController } from '@controllers/organizerProfile.contro
 import { ReviewController } from '@controllers/review.controller';
 import { AnnouncementController } from '@controllers/announcement.controller';
 import { ChannelAdminController } from '@controllers/channelAdmin.controller';
+import { ModerationController } from '@controllers/moderation.controller';
 
 const router = Router();
 
@@ -206,6 +207,61 @@ router.patch(
   '/channels/:channelId',
   requireTicketsPermission(TicketsPermission.EDIT_EVENT),
   ChannelAdminController.update
+);
+
+/**
+ * Organizer moderation — delete-any-message, mute/ban members, pinned
+ * messages, and the admin member roster. Same auth shape as channel
+ * management: dualAuth (router-level) authenticates, the permission gate is
+ * here, and ownership (own events only, community -> event -> vendorId) is
+ * checked in the controller.
+ */
+router.delete(
+  '/messages/:messageId',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.deleteMessage
+);
+
+router.post(
+  '/messages/:messageId/pin',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.pin
+);
+
+router.delete(
+  '/messages/:messageId/pin',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.unpin
+);
+
+router.get(
+  '/communities/:communityId/members',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.listMembers
+);
+
+router.post(
+  '/communities/:communityId/members/:buyerId/mute',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.mute
+);
+
+router.delete(
+  '/communities/:communityId/members/:buyerId/mute',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.unmute
+);
+
+router.post(
+  '/communities/:communityId/members/:buyerId/ban',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.ban
+);
+
+router.delete(
+  '/communities/:communityId/members/:buyerId/ban',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  ModerationController.unban
 );
 
 /**
