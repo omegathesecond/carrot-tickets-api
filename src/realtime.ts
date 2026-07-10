@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   httpServer.listen(PORT, () => {
     console.log(`⚡ Carrot Tickets realtime gateway on :${PORT}`);
   });
-  startPresenceHeartbeat();
+  startPresenceHeartbeat(io);
 
   process.on('SIGTERM', () => {
     console.log('SIGTERM received. Closing realtime gateway...');

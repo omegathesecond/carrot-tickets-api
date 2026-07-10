@@ -20,7 +20,7 @@ const buyerPresenceSchema = new Schema<IBuyerPresence>(
     buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true, index: true },
     socketId: { type: String, required: true, unique: true },
     instanceId: { type: String, required: true, index: true },
-    lastSeenAt: { type: Date, required: true, index: true },
+    lastSeenAt: { type: Date, required: true, index: { expires: 300 } },
   },
   { timestamps: true }
 );

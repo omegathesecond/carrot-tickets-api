@@ -48,4 +48,24 @@ describe('gateway presence', () => {
     client.close();
     await waitFor(async () => (await BuyerPresence.countDocuments({ buyerId: buyer._id })) === 0);
   });
+
+  it('a disconnect racing the create leaves no phantom row', async () => {
+    const buyer = await Buyer.create({ phone: '+26878000042', password: 'secret1' });
+    const listeners: Record<string, () => void> = {};
+    const fakeSocket: any = {
+      id: 'race-socket-1',
+      data: { buyerId: String(buyer._id) },
+      disconnected: false,
+      on: (event: string, cb: () => void) => { listeners[event] = cb; },
+    };
+
+    const { trackConnection } = await import('../presence');
+    trackConnection(fakeSocket);
+    // Disconnect fires while the create is still in flight.
+    fakeSocket.disconnected = true;
+    listeners['disconnect']!();
+
+    await new Promise((r) => setTimeout(r, 300)); // let create + recheck settle
+    expect(await BuyerPresence.countDocuments({ socketId: 'race-socket-1' })).toBe(0);
+  });
 });
