@@ -35,11 +35,17 @@ export class NotificationDispatcher {
       const buyers = await Buyer.find({ _id: { $in: chunk } }).select('notificationPrefs');
       await Promise.all(
         buyers.map(async (buyer) => {
-          if (buyer.notificationPrefs?.[prefKey] === false) return; // toggled off — no inbox, no push
-          const id = String(buyer._id);
-          await NotificationService.create(id, type, title, body, data);
-          if (!(await isBuyerOnline(id))) {
-            await PushService.sendToBuyer(id, { title, body, data: { ...data, type } });
+          try {
+            if (buyer.notificationPrefs?.[prefKey] === false) return; // toggled off — no inbox, no push
+            const id = String(buyer._id);
+            await NotificationService.create(id, type, title, body, data);
+            if (!(await isBuyerOnline(id))) {
+              await PushService.sendToBuyer(id, { title, body, data: { ...data, type } });
+            }
+          } catch (err) {
+            // Per-recipient isolation: one failure must never drop the rest
+            // of the fan-out. Loud, then continue.
+            console.error(`[notify] recipient ${String(buyer._id)} failed:`, err);
           }
         })
       );

@@ -9,6 +9,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { Buyer } from '@models/buyer.model';
 import { Notification } from '@models/notification.model';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
+import { NotificationService } from '@services/notification.service';
 import { PushService } from '@services/push.service';
 import { isBuyerOnline } from '@utils/buyerOnline.util';
 
@@ -65,6 +66,29 @@ describe('NotificationDispatcher', () => {
     ).not.toThrow();
     await new Promise((r) => setTimeout(r, 100));
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[notify]'), expect.anything());
+    consoleSpy.mockRestore();
+  });
+
+  it('one failing recipient never drops the rest of the fan-out', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const a = await Buyer.create({ phone: '+26878000001', password: 'secret1' });
+    const b = await Buyer.create({ phone: '+26878000002', password: 'secret1' });
+
+    const createSpy = jest
+      .spyOn(NotificationService, 'create')
+      .mockRejectedValueOnce(new Error('transient write failure'));
+    try {
+      await NotificationDispatcher.dispatch(
+        [String(a._id), String(b._id)],
+        'dm', 'T', 'B', {}
+      );
+    } finally {
+      createSpy.mockRestore();
+    }
+
+    // exactly one of the two got dropped; the other landed
+    expect(await Notification.countDocuments({})).toBe(1);
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[notify] recipient'), expect.anything());
     consoleSpy.mockRestore();
   });
 });
