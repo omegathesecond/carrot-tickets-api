@@ -22,7 +22,13 @@ const reviewSchema = new Schema<IReview>(
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', required: true },
     buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true },
-    rating: { type: Number, required: true, min: 1, max: 5 },
+    rating: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 5,
+      validate: { validator: Number.isInteger, message: 'Rating must be a whole number' },
+    },
     text: { type: String, trim: true, maxlength: 1000 },
     verified: { type: Boolean, required: true, default: false },
     organizerReply: {

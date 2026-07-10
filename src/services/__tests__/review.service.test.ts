@@ -91,4 +91,39 @@ describe('ReviewService', () => {
     expect(list[0]!.reviewer.username).toBe('reviewer_one');
     expect(list[0]!.organizerReply!.text).toBe('Fixed for next time');
   });
+
+  it('rejects a fractional rating at the schema layer', async () => {
+    const seeded = await seedEndedEventWithTicket();
+    await expect(
+      ReviewService.submitReview(seeded.eventId, buyer, { rating: 3.5 as any })
+    ).rejects.toThrow(/whole number/i);
+  });
+
+  it('reply-once holds even when the pre-check reads a stale document (atomic guard)', async () => {
+    const seeded = await seedEndedEventWithTicket();
+    const review = await ReviewService.submitReview(seeded.eventId, buyer, { rating: 4 });
+
+    // Another request already replied AFTER our findById would have read the
+    // doc: simulate by writing the reply directly, then stubbing findById to
+    // return a stale copy with no organizerReply.
+    await Review.updateOne(
+      { _id: review._id },
+      { $set: { organizerReply: { text: 'first!', repliedAt: new Date() } } }
+    );
+    const stale = await Review.findById(review._id).select('vendorId organizerReply');
+    stale!.organizerReply = undefined;
+    const spy = jest.spyOn(Review, 'findById').mockReturnValueOnce({
+      select: () => Promise.resolve(stale),
+    } as any);
+    try {
+      await expect(
+        ReviewService.replyToReview(String(review._id), seeded.vendorId, false, 'second!')
+      ).rejects.toMatchObject({ statusCode: 409 });
+    } finally {
+      spy.mockRestore();
+    }
+
+    const final = await Review.findById(review._id);
+    expect(final!.organizerReply!.text).toBe('first!'); // first reply survives untouched
+  });
 });

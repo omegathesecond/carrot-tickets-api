@@ -87,17 +87,22 @@ export class ReviewService {
     isSuperAdmin: boolean,
     text: string
   ): Promise<ReviewView> {
-    const review = await Review.findById(reviewId).populate('buyerId', 'username name avatarUrl');
+    const review = await Review.findById(reviewId).select('vendorId organizerReply');
     if (!review) throw new HttpError(404, 'Review not found');
     if (!isSuperAdmin && String(review.vendorId) !== String(vendorId)) {
       throw new HttpError(403, 'You can only reply to reviews of your own events');
     }
-    if (review.organizerReply) {
-      throw new HttpError(409, 'You have already replied to this review');
-    }
-    review.organizerReply = { text, repliedAt: new Date() };
-    await review.save();
-    return ReviewService.toView(review);
+
+    // Atomic reply-once: the filter only matches while no reply exists, so
+    // concurrent replies can never both win (mirrors the unique-index
+    // pattern submitReview uses for duplicates).
+    const updated = await Review.findOneAndUpdate(
+      { _id: reviewId, organizerReply: { $exists: false } },
+      { $set: { organizerReply: { text, repliedAt: new Date() } } },
+      { new: true, runValidators: true }
+    ).populate('buyerId', 'username name avatarUrl');
+    if (!updated) throw new HttpError(409, 'You have already replied to this review');
+    return ReviewService.toView(updated);
   }
 
   private static toView(doc: any): ReviewView {
