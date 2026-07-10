@@ -271,6 +271,63 @@ describe('ReportService', () => {
       ).rejects.toMatchObject({ statusCode: 409 });
     });
 
+    it('a second resolve of an already-resolved report 409s and does NOT re-fire side effects (suspend then dismiss leaves the buyer suspended and the status from the first resolve)', async () => {
+      const reporter = await seedBuyer('+26878200042', 'Reporter');
+      const target = await seedBuyer('+26878200043', 'Target');
+      const { report } = await ReportService.fileReport(reporter, {
+        targetType: 'buyer',
+        targetBuyerId: String(target._id),
+        reason: 'x',
+      });
+
+      await ReportService.resolve(String(report._id), { vendorId: 'admin-1' }, { action: 'suspend_buyer' });
+      const afterFirst = await Buyer.findById(target._id);
+      expect(afterFirst!.socialSuspendedAt).toBeInstanceOf(Date);
+
+      // A second admin racing to dismiss the same (now-resolved) report must 409,
+      // not re-run dismiss's (no-op) side effect path or clobber the resolved status.
+      await expect(
+        ReportService.resolve(String(report._id), { vendorId: 'admin-2' }, { action: 'dismiss' })
+      ).rejects.toMatchObject({ statusCode: 409 });
+
+      const afterSecond = await Buyer.findById(target._id);
+      expect(afterSecond!.socialSuspendedAt).toBeInstanceOf(Date); // still suspended — untouched by the losing resolve
+
+      const reloadedReport = await Report.findById(report._id);
+      expect(reloadedReport!.status).toBe('resolved'); // stays from the first (winning) resolve, never became 'dismissed'
+      expect(reloadedReport!.resolvedBy).toBe('admin-1');
+    });
+
+    it('a side-effect failure after the claim reverts the report back to open (not stuck resolved-without-action)', async () => {
+      const { general, community } = await seedCommunityWithChannel();
+      const sender = await seedBuyer('+26878200044', 'Sender');
+      const reporter = await seedBuyer('+26878200045', 'Reporter');
+      const message = await seedChannelMessage(general, community, sender);
+      const { report } = await ReportService.fileReport(reporter, {
+        targetType: 'message',
+        messageId: String(message._id),
+        reason: 'spam',
+      });
+      // Simulate the side effect blowing up post-claim: hard-remove the message
+      // (not soft-delete) so resolveDeleteMessage's Message.findById 404s.
+      await Message.deleteOne({ _id: message._id });
+
+      await expect(
+        ReportService.resolve(String(report._id), { vendorId: 'admin-1' }, { action: 'delete_message' })
+      ).rejects.toMatchObject({ statusCode: 404 });
+
+      const reloaded = await Report.findById(report._id);
+      expect(reloaded!.status).toBe('open');
+      expect(reloaded!.resolvedBy).toBeUndefined();
+      expect(reloaded!.resolvedAt).toBeUndefined();
+      expect(reloaded!.resolutionNote).toBeUndefined();
+
+      // And the claim being reverted means a subsequent resolve can still succeed.
+      await ReportService.resolve(String(report._id), { vendorId: 'admin-2' }, { action: 'dismiss' });
+      const finalReport = await Report.findById(report._id);
+      expect(finalReport!.status).toBe('dismissed');
+    });
+
     it('dismiss sets status dismissed + resolvedBy/resolvedAt/resolutionNote', async () => {
       const reporter = await seedBuyer('+26878200050', 'Reporter');
       const target = await seedBuyer('+26878200051', 'Target');

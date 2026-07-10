@@ -110,41 +110,76 @@ export class ReportService {
     return Promise.all(reports.map((r) => ReportService.toAdminView(r)));
   }
 
+  private static readonly RESOLVE_ACTIONS: ReportResolveAction[] = [
+    'delete_message',
+    'suspend_buyer',
+    'unsuspend_buyer',
+    'dismiss',
+  ];
+
   /**
    * POST /api/tickets/reports/:reportId/resolve — every action sets
    * status/resolvedBy/resolvedAt (+ resolutionNote if given). Only 'open'
    * reports can be resolved (mirrors ReviewService's reply-once 409 shape).
+   *
+   * Atomic claim FIRST, side effects SECOND (same shape as TicketSale's
+   * paymentStatus:PENDING claim in ticket.service.ts): findOneAndUpdate's
+   * filter only matches while status is still 'open', so two concurrent
+   * admins resolving the same report can never both pass — the loser's
+   * write hits zero documents instead of racing the side effect against a
+   * status write that lands after it. If the side effect throws post-claim
+   * (e.g. the message a delete_message targets was hard-removed), the claim
+   * is reverted back to 'open' so the report doesn't end up resolved with
+   * no action actually taken.
    */
   static async resolve(
     reportId: string,
     actor: { userId?: string; vendorId: string },
     input: { action: ReportResolveAction; note?: string }
   ): Promise<ReportAdminView> {
-    const report = await Report.findById(reportId);
-    if (!report) throw new HttpError(404, 'Report not found');
-    if (report.status !== 'open') throw new HttpError(409, 'Report has already been resolved');
-
-    switch (input.action) {
-      case 'delete_message':
-        await ReportService.resolveDeleteMessage(report);
-        break;
-      case 'suspend_buyer':
-        await ReportService.resolveSuspension(report, true);
-        break;
-      case 'unsuspend_buyer':
-        await ReportService.resolveSuspension(report, false);
-        break;
-      case 'dismiss':
-        break;
-      default:
-        throw new HttpError(400, 'Unknown action');
+    if (!ReportService.RESOLVE_ACTIONS.includes(input.action)) {
+      throw new HttpError(400, 'Unknown action');
     }
 
-    report.status = input.action === 'dismiss' ? 'dismissed' : 'resolved';
-    report.resolvedBy = actor.userId || actor.vendorId;
-    report.resolvedAt = new Date();
-    if (input.note) report.resolutionNote = input.note;
-    await report.save();
+    const targetStatus: ReportStatus = input.action === 'dismiss' ? 'dismissed' : 'resolved';
+    const report = await Report.findOneAndUpdate(
+      { _id: reportId, status: 'open' },
+      {
+        $set: {
+          status: targetStatus,
+          resolvedBy: actor.userId || actor.vendorId,
+          resolvedAt: new Date(),
+          resolutionNote: input.note ?? null,
+        },
+      },
+      { new: true }
+    );
+    if (!report) {
+      const exists = await Report.exists({ _id: reportId });
+      throw new HttpError(exists ? 409 : 404, exists ? 'Report has already been resolved' : 'Report not found');
+    }
+
+    try {
+      switch (input.action) {
+        case 'delete_message':
+          await ReportService.resolveDeleteMessage(report);
+          break;
+        case 'suspend_buyer':
+          await ReportService.resolveSuspension(report, true);
+          break;
+        case 'unsuspend_buyer':
+          await ReportService.resolveSuspension(report, false);
+          break;
+        case 'dismiss':
+          break;
+      }
+    } catch (err) {
+      await Report.updateOne(
+        { _id: reportId },
+        { $set: { status: 'open' }, $unset: { resolvedBy: 1, resolvedAt: 1, resolutionNote: 1 } }
+      ).catch(() => undefined);
+      throw err;
+    }
 
     return ReportService.toAdminView(report);
   }
