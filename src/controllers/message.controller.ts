@@ -1,16 +1,14 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { MessageService } from '@services/message.service';
-import { HttpError } from '@utils/httpError.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername } from '@utils/username.util';
 import { sendMessageSchema } from '@validators/community.validator';
+import { failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 
 export class MessageController {
   private static fail(res: Response, error: any, fallback: string) {
-    if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
-    console.error(fallback, error);
-    return ApiResponseUtil.error(res, error?.message || fallback, 500);
+    return failWithHttpError(res, error, fallback);
   }
 
   static async list(req: Request, res: Response): Promise<any> {
@@ -18,30 +16,10 @@ export class MessageController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
 
-      const rawLimit = req.query['limit'];
-      let limit: number | undefined;
-      if (rawLimit !== undefined) {
-        limit = Number(rawLimit);
-        if (!Number.isInteger(limit) || limit < 1) {
-          return ApiResponseUtil.error(res, 'limit must be a positive integer', 400);
-        }
-      }
+      const params = parseMessageCursorParams(req, res);
+      if (!params) return;
 
-      const before = req.query['before'] as string | undefined;
-      if (before !== undefined && !/^[0-9a-f]{24}$/i.test(before)) {
-        return ApiResponseUtil.error(res, 'before must be a message id', 400);
-      }
-
-      const after = req.query['after'] as string | undefined;
-      if (after !== undefined && !/^[0-9a-f]{24}$/i.test(after)) {
-        return ApiResponseUtil.error(res, 'after must be a message id', 400);
-      }
-
-      const messages = await MessageService.listMessages(req.params['channelId'] as string, buyer, {
-        before,
-        after,
-        limit,
-      });
+      const messages = await MessageService.listMessages(req.params['channelId'] as string, buyer, params);
       return ApiResponseUtil.success(res, messages);
     } catch (error: any) {
       return MessageController.fail(res, error, 'Failed to load messages');

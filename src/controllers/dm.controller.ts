@@ -1,19 +1,15 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { HttpError } from '@utils/httpError.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername } from '@utils/username.util';
 import { DmThreadService } from '@services/dmThread.service';
 import { MessageService } from '@services/message.service';
 import { createThreadSchema, sendMessageSchema } from '@validators/community.validator';
-
-const HEX24 = /^[0-9a-f]{24}$/i;
+import { failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 
 export class DmController {
   private static fail(res: Response, error: any, fallback: string) {
-    if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
-    console.error(fallback, error);
-    return ApiResponseUtil.error(res, error?.message || fallback, 500);
+    return failWithHttpError(res, error, fallback);
   }
 
   private static async requireBuyer(req: Request, res: Response) {
@@ -57,28 +53,10 @@ export class DmController {
       const buyer = await DmController.requireBuyer(req, res);
       if (!buyer) return;
 
-      const rawLimit = req.query['limit'];
-      let limit: number | undefined;
-      if (rawLimit !== undefined) {
-        limit = Number(rawLimit);
-        if (!Number.isInteger(limit) || limit < 1) {
-          return ApiResponseUtil.error(res, 'limit must be a positive integer', 400);
-        }
-      }
-      const before = req.query['before'] as string | undefined;
-      if (before !== undefined && !HEX24.test(before)) {
-        return ApiResponseUtil.error(res, 'before must be a message id', 400);
-      }
-      const after = req.query['after'] as string | undefined;
-      if (after !== undefined && !HEX24.test(after)) {
-        return ApiResponseUtil.error(res, 'after must be a message id', 400);
-      }
+      const params = parseMessageCursorParams(req, res);
+      if (!params) return;
 
-      const messages = await MessageService.listDmMessages(req.params['threadId'] as string, buyer, {
-        before,
-        after,
-        limit,
-      });
+      const messages = await MessageService.listDmMessages(req.params['threadId'] as string, buyer, params);
       return ApiResponseUtil.success(res, messages);
     } catch (error: any) {
       return DmController.fail(res, error, 'Failed to load messages');
