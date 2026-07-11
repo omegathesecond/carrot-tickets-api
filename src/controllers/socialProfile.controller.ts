@@ -9,11 +9,12 @@ import { TicketStatus } from '@interfaces/ticket.interface';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername, RESERVED_USERNAMES, USERNAME_REGEX } from '@utils/username.util';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
-import { updateProfileSchema, blockSchema, followSchema, pushSubscribeSchema } from '@validators/community.validator';
+import { updateProfileSchema, blockSchema, followSchema, presenceSchema, pushSubscribeSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
 import { NotificationService } from '@services/notification.service';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
+import { onlineBuyerIds } from '@utils/buyerOnline.util';
 import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
 
 export class SocialProfileController {
@@ -332,6 +333,22 @@ export class SocialProfileController {
       return ApiResponseUtil.success(res, { read: true }, 'Notifications marked read');
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to mark notifications read');
+    }
+  }
+
+  /** POST /api/social/presence { buyerIds: hex24[1..50] } -> { online: string[] }
+   *  Same freshness window as the notification dispatcher's isBuyerOnline. */
+  static async presence(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const { error, value } = presenceSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const online = await onlineBuyerIds(value.buyerIds);
+      return ApiResponseUtil.success(res, { online });
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load presence');
     }
   }
 
