@@ -84,6 +84,10 @@ export const resolveReportSchema = Joi.object({
   note: Joi.string().trim().max(500).allow('').optional(),
 });
 
+export const presenceSchema = Joi.object({
+  buyerIds: Joi.array().items(Joi.string().hex().length(24)).min(1).max(50).required(),
+});
+
 export const pushSubscribeSchema = Joi.object({
   endpoint: Joi.string().uri({ scheme: ['https'] }).max(1000).required(),
   keys: Joi.object({

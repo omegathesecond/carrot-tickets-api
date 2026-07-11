@@ -16,6 +16,7 @@ router.get('/username-available', authenticateBuyer, SocialProfileController.use
 router.post('/follow', authenticateBuyer, SocialProfileController.followTarget);
 router.delete('/follow/:targetType/:targetId', authenticateBuyer, SocialProfileController.unfollowTarget);
 router.post('/block', authenticateBuyer, SocialProfileController.blockUser);
+router.post('/presence', authenticateBuyer, SocialProfileController.presence);
 router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblockUser);
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
