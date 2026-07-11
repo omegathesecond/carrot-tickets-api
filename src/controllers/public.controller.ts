@@ -201,7 +201,7 @@ export class PublicController {
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
         Event.find(filter)
-          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold')
+          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId')
           .sort({ eventDate: 1 })
           .skip(skip)
           .limit(limit)
@@ -236,6 +236,31 @@ export class PublicController {
           .map(([id]) => id),
       );
 
+      // Batch-resolve organizer identity for the page in ONE query (same
+      // public-safe shape + null-on-missing/inactive semantics as
+      // resolveOrganizer for the detail endpoint). Wrapped so a vendor lookup
+      // failure never breaks the public events list — it just degrades to no
+      // organizer badges, loudly logged.
+      type PublicOrganizer = { id: string; businessName: string; logoUrl: string | null };
+      const organizerMap = new Map<string, PublicOrganizer>();
+      try {
+        const uniqueVendorIds = [...new Set(events.map(e => e.vendorId).filter(Boolean).map(id => String(id)))];
+        if (uniqueVendorIds.length > 0) {
+          const vendors = await Vendor.find({ _id: { $in: uniqueVendorIds }, isActive: true })
+            .select('businessName logoUrl')
+            .lean();
+          for (const vendor of vendors) {
+            organizerMap.set(String(vendor._id), {
+              id: String(vendor._id),
+              businessName: vendor.businessName,
+              logoUrl: vendor.logoUrl ?? null,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Batch resolve public organizers error:', error);
+      }
+
       // Transform events for public display
       const publicEvents = events.map(event => ({
         _id: event._id,
@@ -262,6 +287,7 @@ export class PublicController {
         },
         recentSales: recentMap.get(String(event._id)) || 0,
         trending: trendingIds.has(String(event._id)),
+        organizer: event.vendorId ? (organizerMap.get(String(event.vendorId)) ?? null) : null,
       }));
 
       return ApiResponseUtil.success(res, {
