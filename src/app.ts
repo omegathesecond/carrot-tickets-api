@@ -50,6 +50,7 @@ if (isSentryEnabled()) {
 import { ReservationService } from '@services/reservation.service';
 import { TicketService } from '@services/ticket.service';
 import { EventReminderService } from '@services/eventReminder.service';
+import { reconcileStuckUpdates } from '@services/transcode.client';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -210,6 +211,14 @@ if (process.env['NODE_ENV'] !== 'test') {
       setInterval(() => {
         EventReminderService.sweep().catch((err) => console.error('[reminder-sweep] error', err));
       }, REMINDER_SWEEP_MS);
+
+      // Discover feed: re-trigger or fail-loud-fail video updates stuck in
+      // 'processing' (transcoder crashed/never called back). See
+      // @services/transcode.client#reconcileStuckUpdates.
+      const UPDATE_RECONCILE_MS = 120_000;
+      setInterval(() => {
+        reconcileStuckUpdates().catch((e) => console.error('update reconcile sweep failed:', e?.message));
+      }, UPDATE_RECONCILE_MS);
 
       // Web Push (VAPID): missing keys log loudly and disable push, never
       // crash boot — see @config/vapid.config.
