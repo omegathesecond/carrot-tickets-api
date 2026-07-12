@@ -4,6 +4,7 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
 import { Event } from '@models/event.model';
+import { Update } from '@models/update.model';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
 import { consumeToken } from '@utils/rateLimit.util';
@@ -53,7 +54,13 @@ export class ReportService {
    */
   static async fileReport(
     buyer: IBuyer,
-    input: { targetType: ReportTargetType; messageId?: string; targetBuyerId?: string; reason: string }
+    input: {
+      targetType: ReportTargetType;
+      messageId?: string;
+      targetBuyerId?: string;
+      targetUpdateId?: string;
+      reason: string;
+    }
   ): Promise<{ report: IReport; created: boolean }> {
     if (!consumeToken(`report:${String(buyer._id)}`, 3, 3 / 60)) {
       throw new HttpError(429, 'You are reporting too quickly — slow down');
@@ -66,12 +73,15 @@ export class ReportService {
       // view also needs channel/community/event context a DM message has none of.
       const message = await Message.findById(input.messageId);
       if (!message || !message.channelId) throw new HttpError(404, 'Message not found');
-    } else {
+    } else if (input.targetType === 'buyer') {
       if (String(input.targetBuyerId) === String(buyer._id)) {
         throw new HttpError(400, 'You cannot report yourself');
       }
       const exists = await Buyer.exists({ _id: input.targetBuyerId });
       if (!exists) throw new HttpError(404, 'Buyer not found');
+    } else {
+      const exists = await Update.exists({ _id: input.targetUpdateId });
+      if (!exists) throw new HttpError(404, 'Update not found');
     }
 
     try {
@@ -80,16 +90,17 @@ export class ReportService {
         targetType: input.targetType,
         messageId: input.targetType === 'message' ? input.messageId : undefined,
         targetBuyerId: input.targetType === 'buyer' ? input.targetBuyerId : undefined,
+        targetUpdateId: input.targetType === 'update' ? input.targetUpdateId : undefined,
         reason: input.reason,
       });
       return { report, created: true };
     } catch (err: any) {
       if (err?.code !== 11000) throw err;
-      const existing = await Report.findOne(
-        input.targetType === 'message'
-          ? { reporterId: buyer._id, messageId: input.messageId, status: 'open' }
-          : { reporterId: buyer._id, targetBuyerId: input.targetBuyerId, status: 'open' }
-      );
+      const dedupeQuery: Record<string, unknown> = { reporterId: buyer._id, status: 'open' };
+      if (input.targetType === 'message') dedupeQuery['messageId'] = input.messageId;
+      else if (input.targetType === 'buyer') dedupeQuery['targetBuyerId'] = input.targetBuyerId;
+      else dedupeQuery['targetUpdateId'] = input.targetUpdateId;
+      const existing = await Report.findOne(dedupeQuery);
       if (!existing) throw err; // shouldn't happen — surface rather than swallow
       return { report: existing, created: false };
     }
