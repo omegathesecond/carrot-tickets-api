@@ -85,10 +85,18 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     };
   });
 
-  const activitySlides: FeedSlide[] = activity.map((s) => ({
-    type: 'activity', id: String(s._id), sortAt: new Date(s.soldAt).toISOString(),
-    quantity: s.quantity, eventId: String(s.eventId),
-  }));
+  const activityEventIds = activity.map((s) => s.eventId);
+  const publishedActivityEvents = wantActivity && activityEventIds.length
+    ? await Event.find({ _id: { $in: activityEventIds }, status: EventStatus.PUBLISHED }).select('name').lean()
+    : [];
+  const publishedActivityEventMap = new Map(publishedActivityEvents.map((e) => [String(e._id), e]));
+
+  const activitySlides: FeedSlide[] = activity
+    .filter((s) => publishedActivityEventMap.has(String(s.eventId)))
+    .map((s) => ({
+      type: 'activity', id: String(s._id), sortAt: new Date(s.soldAt).toISOString(),
+      quantity: s.quantity, eventId: String(s.eventId), eventName: publishedActivityEventMap.get(String(s.eventId))!.name,
+    }));
 
   // ---- interleave by PATTERN, dropping dry slots ----
   const q = { u: updateSlides, e: eventSlides, a: activitySlides };
