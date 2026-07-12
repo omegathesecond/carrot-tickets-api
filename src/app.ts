@@ -46,11 +46,9 @@ if (isSentryEnabled()) {
   }
 }
 
-// Import services
-import { ReservationService } from '@services/reservation.service';
-import { TicketService } from '@services/ticket.service';
-import { EventReminderService } from '@services/eventReminder.service';
-import { reconcileStuckUpdates } from '@services/transcode.client';
+// Background sweeps (reservation expiry, card-sale reconciliation, event
+// reminders, stuck-update reconciliation) — consolidated in src/tasks.
+import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -196,33 +194,10 @@ if (process.env['NODE_ENV'] !== 'test') {
       // Log detailed database configuration
       logDatabaseConfig();
 
-      // Start the reservation expiry sweep
-      const SWEEP_MS = 60_000;
-      setInterval(() => {
-        ReservationService.sweepExpired().catch(err => console.error('[reservation-sweep] error', err));
-      }, SWEEP_MS);
-
-      // Reconcile paid-but-stuck Peach card sales (return endpoint + webhook +
-      // poll all missed). Runs ahead of the 15-min reservation expiry so a paid
-      // sale is minted, never failed. See TicketService.reconcilePendingCardSales.
-      const CARD_RECONCILE_MS = 60_000;
-      setInterval(() => {
-        TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
-      }, CARD_RECONCILE_MS);
-
-      // Event reminders (spec §6): T-24h and day-of pushes for ticket holders.
-      const REMINDER_SWEEP_MS = 600_000;
-      setInterval(() => {
-        EventReminderService.sweep().catch((err) => console.error('[reminder-sweep] error', err));
-      }, REMINDER_SWEEP_MS);
-
-      // Discover feed: re-trigger or fail-loud-fail video updates stuck in
-      // 'processing' (transcoder crashed/never called back). See
-      // @services/transcode.client#reconcileStuckUpdates.
-      const UPDATE_RECONCILE_MS = 120_000;
-      setInterval(() => {
-        reconcileStuckUpdates().catch((e) => console.error('update reconcile sweep failed:', e?.message));
-      }, UPDATE_RECONCILE_MS);
+      // Background sweeps: reservation expiry, card-sale reconciliation,
+      // event reminders, stuck-update reconciliation. Same functions, same
+      // intervals — see src/tasks/backgroundTasks.ts.
+      startBackgroundTasks();
 
       // Web Push (VAPID): missing keys log loudly and disable push, never
       // crash boot — see @config/vapid.config.
