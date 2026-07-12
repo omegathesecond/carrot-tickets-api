@@ -46,10 +46,9 @@ if (isSentryEnabled()) {
   }
 }
 
-// Import services
-import { ReservationService } from '@services/reservation.service';
-import { TicketService } from '@services/ticket.service';
-import { EventReminderService } from '@services/eventReminder.service';
+// Background sweeps (reservation expiry, card-sale reconciliation, event
+// reminders, stuck-update reconciliation) — consolidated in src/tasks.
+import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -63,6 +62,8 @@ import operatorRoutes from '@routes/operator.route';
 import communityRoutes from '@routes/community.route';
 import socialRoutes from '@routes/social.route';
 import dmRoutes from '@routes/dm.route';
+import updateRoutes from '@routes/update.route';
+import vendorUpdateRoutes from '@routes/vendorUpdate.route';
 
 // Realtime bus
 import { ensureAdapterCollection } from '@/realtime/adapterCollection';
@@ -138,10 +139,12 @@ app.get('/api-docs.json', (_req: Request, res: Response) => {
 });
 
 // API Routes
+app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored updates (organizer dashboard) - mounted before the broader /api/tickets below so this specific path isn't shadowed
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/public/updates', updateRoutes);          // Buyer updates (Discover feed) - mounted before the broader /api/public below
 app.use('/api/public', publicRoutes);                  // Public routes - no auth required
 app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
@@ -191,25 +194,10 @@ if (process.env['NODE_ENV'] !== 'test') {
       // Log detailed database configuration
       logDatabaseConfig();
 
-      // Start the reservation expiry sweep
-      const SWEEP_MS = 60_000;
-      setInterval(() => {
-        ReservationService.sweepExpired().catch(err => console.error('[reservation-sweep] error', err));
-      }, SWEEP_MS);
-
-      // Reconcile paid-but-stuck Peach card sales (return endpoint + webhook +
-      // poll all missed). Runs ahead of the 15-min reservation expiry so a paid
-      // sale is minted, never failed. See TicketService.reconcilePendingCardSales.
-      const CARD_RECONCILE_MS = 60_000;
-      setInterval(() => {
-        TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
-      }, CARD_RECONCILE_MS);
-
-      // Event reminders (spec §6): T-24h and day-of pushes for ticket holders.
-      const REMINDER_SWEEP_MS = 600_000;
-      setInterval(() => {
-        EventReminderService.sweep().catch((err) => console.error('[reminder-sweep] error', err));
-      }, REMINDER_SWEEP_MS);
+      // Background sweeps: reservation expiry, card-sale reconciliation,
+      // event reminders, stuck-update reconciliation. Same functions, same
+      // intervals — see src/tasks/backgroundTasks.ts.
+      startBackgroundTasks();
 
       // Web Push (VAPID): missing keys log loudly and disable push, never
       // crash boot — see @config/vapid.config.

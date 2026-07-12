@@ -1,21 +1,22 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type ReportTargetType = 'message' | 'buyer';
+export type ReportTargetType = 'message' | 'buyer' | 'update';
 export type ReportStatus = 'open' | 'resolved' | 'dismissed';
 
 /**
- * A buyer-filed report against a channel message or another buyer (Plan 7
- * Task 3 — platform-wide social moderation queue, tickets:moderate_social
- * admin-only). Exactly one of messageId/targetBuyerId is set, matching
- * targetType — same exactly-one-container shape as Message's
- * channelId/dmThreadId invariant (see message.model.ts).
+ * A buyer-filed report against a channel message, another buyer, or a
+ * Discover feed update (Plan 7 Task 3 — platform-wide social moderation
+ * queue, tickets:moderate_social admin-only; 'update' added in Task 12 for
+ * the Discover feed). Exactly one of messageId/targetBuyerId/targetUpdateId
+ * is set, matching targetType — same exactly-one-container shape as
+ * Message's channelId/dmThreadId invariant (see message.model.ts).
  *
  * Dedupe: a reporter can only have ONE OPEN report against the same
- * message/buyer at a time. Enforced by the two partial unique indexes below
- * (mirrors notification.model.ts's event-reminder dedupe pattern) — once a
- * report is resolved/dismissed (status leaves 'open'), the reporter is free
- * to file again. The `$exists` guard on each partial filter keeps the two
- * target shapes from colliding with each other's absent field (an open
+ * message/buyer/update at a time. Enforced by the partial unique indexes
+ * below (mirrors notification.model.ts's event-reminder dedupe pattern) —
+ * once a report is resolved/dismissed (status leaves 'open'), the reporter
+ * is free to file again. The `$exists` guard on each partial filter keeps
+ * the target shapes from colliding with each other's absent field (an open
  * buyer-target report has no messageId, and vice versa).
  */
 export interface IReport extends Document {
@@ -23,6 +24,7 @@ export interface IReport extends Document {
   targetType: ReportTargetType;
   messageId?: Types.ObjectId;
   targetBuyerId?: Types.ObjectId;
+  targetUpdateId?: Types.ObjectId;
   reason: string;
   status: ReportStatus;
   resolvedBy?: string; // ticketsUser id (vendorId or sub-user userId) — plain string, mirrors approvedBy on resellerCommissionWithdrawal.model.ts (not a single Mongoose ref: super-admin tokens carry no real vendor row)
@@ -35,9 +37,10 @@ export interface IReport extends Document {
 const reportSchema = new Schema<IReport>(
   {
     reporterId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true, index: true },
-    targetType: { type: String, enum: ['message', 'buyer'], required: true },
+    targetType: { type: String, enum: ['message', 'buyer', 'update'], required: true },
     messageId: { type: Schema.Types.ObjectId, ref: 'Message' },
     targetBuyerId: { type: Schema.Types.ObjectId, ref: 'Buyer' },
+    targetUpdateId: { type: Schema.Types.ObjectId, ref: 'Update' },
     reason: { type: String, required: true, trim: true, minlength: 1, maxlength: 500 },
     status: { type: String, enum: ['open', 'resolved', 'dismissed'], required: true, default: 'open' },
     resolvedBy: { type: String },
@@ -47,18 +50,30 @@ const reportSchema = new Schema<IReport>(
   { timestamps: true }
 );
 
+// Maps each targetType to the one id field it must carry — the exactly-one-
+// target invariant below walks this instead of a fixed pair of booleans so
+// adding a future targetType only means adding one entry here.
+const TARGET_ID_FIELDS: Record<ReportTargetType, 'messageId' | 'targetBuyerId' | 'targetUpdateId'> = {
+  message: 'messageId',
+  buyer: 'targetBuyerId',
+  update: 'targetUpdateId',
+};
+
 // Exactly one target per report, matching its targetType.
 reportSchema.pre('validate', function (next) {
-  const hasMessage = Boolean(this.messageId);
-  const hasBuyer = Boolean(this.targetBuyerId);
-  if (hasMessage === hasBuyer) {
-    return next(new Error('Report must have exactly one of messageId or targetBuyerId'));
+  const presence: Record<'messageId' | 'targetBuyerId' | 'targetUpdateId', boolean> = {
+    messageId: Boolean(this.messageId),
+    targetBuyerId: Boolean(this.targetBuyerId),
+    targetUpdateId: Boolean(this.targetUpdateId),
+  };
+  const presentFields = (Object.keys(presence) as Array<keyof typeof presence>).filter((k) => presence[k]);
+  if (presentFields.length !== 1) {
+    return next(new Error('Report must have exactly one of messageId, targetBuyerId or targetUpdateId'));
   }
-  if (this.targetType === 'message' && !hasMessage) {
-    return next(new Error("targetType 'message' requires messageId"));
-  }
-  if (this.targetType === 'buyer' && !hasBuyer) {
-    return next(new Error("targetType 'buyer' requires targetBuyerId"));
+
+  const requiredField = TARGET_ID_FIELDS[this.targetType];
+  if (!requiredField || !presence[requiredField]) {
+    return next(new Error(`targetType '${this.targetType}' requires ${requiredField}`));
   }
   next();
 });
@@ -73,6 +88,10 @@ reportSchema.index(
 reportSchema.index(
   { reporterId: 1, targetBuyerId: 1 },
   { unique: true, partialFilterExpression: { status: 'open', targetBuyerId: { $exists: true } } }
+);
+reportSchema.index(
+  { reporterId: 1, targetUpdateId: 1 },
+  { unique: true, partialFilterExpression: { status: 'open', targetUpdateId: { $exists: true } } }
 );
 
 export const Report = model<IReport>('Report', reportSchema);

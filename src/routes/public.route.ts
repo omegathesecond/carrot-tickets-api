@@ -3,7 +3,8 @@ import { PublicController } from '@controllers/public.controller';
 import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
-import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
+import { FeedController } from '@controllers/feed.controller';
+import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 
 const router = Router();
@@ -39,6 +40,16 @@ router.get('/events', PublicController.getPublicEvents);
  * @query   limit (1–30, default 15)
  */
 router.get('/activity', PublicController.getActivity);
+
+/**
+ * @route   GET /api/public/feed
+ * @desc    Discover feed — a blended stream of buyer/organizer updates,
+ *          upcoming published events, and real purchase activity. If a
+ *          buyer token is present, update slides carry viewerReactions.
+ * @access  Public (optional buyer auth)
+ * @query   tab (for-you|following|events, default for-you), cursor
+ */
+router.get('/feed', optionalTicketsAuth, FeedController.get);
 
 /**
  * @route   GET /api/public/events/:eventId
