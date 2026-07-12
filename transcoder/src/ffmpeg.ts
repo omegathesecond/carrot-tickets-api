@@ -24,3 +24,30 @@ export function runFfmpeg(args: string[]): Promise<void> {
     p.on('error', reject);
   });
 }
+
+export function buildProbeArgs(input: string): string[] {
+  return ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-show_entries', 'format=duration', '-of', 'json', input];
+}
+
+export function runProbe(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const p = spawn('ffprobe', args);
+    let stdout = '';
+    let stderr = '';
+    p.stdout.on('data', (d) => { stdout += d.toString(); });
+    p.stderr.on('data', (d) => { stderr += d.toString(); });
+    p.on('close', (code) => (code === 0 ? resolve(stdout) : reject(new Error(`ffprobe exited ${code}: ${stderr.slice(-500)}`))));
+    p.on('error', reject);
+  });
+}
+
+export function parseProbe(json: string): { width: number; height: number; durationSec: number } {
+  const parsed = JSON.parse(json);
+  const stream = (parsed.streams && parsed.streams[0]) || {};
+  const duration = parsed.format && parsed.format.duration ? Number(parsed.format.duration) : 0;
+  return {
+    width: stream.width,
+    height: stream.height,
+    durationSec: Math.round(duration || 0),
+  };
+}
