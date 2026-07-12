@@ -3,6 +3,8 @@ import { getFeed } from '@services/feed.service';
 import { Update } from '@models/update.model';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
+import { Buyer } from '@models/buyer.model';
+import { Follow } from '@models/follow.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
@@ -86,5 +88,26 @@ describe('feed.service getFeed', () => {
     expect(publishedSlide!.eventName).toBe('Published Show');
 
     expect(activitySlides.some((s) => s.eventId === String(cancelled._id))).toBe(false);
+  });
+
+  it('following tab includes updates authored by a followed organizer', async () => {
+    const vendor = await Vendor.create({ businessName: 'Followed Org', password: 'password123', slug: 'followed-org' });
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'password123' });
+
+    const orgUpdate = await Update.create({
+      authorType: 'vendor', authorId: vendor._id, kind: 'image', caption: 'org update',
+      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+    });
+
+    // Without a follow, the following tab must NOT surface the organizer's update.
+    const before = await getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 });
+    expect(before.items.some((i) => i.id === String(orgUpdate._id))).toBe(false);
+
+    await Follow.create({ followerId: buyer._id, targetType: 'organizer', targetId: vendor._id });
+
+    const after = await getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 });
+    const slide = after.items.find((i) => i.id === String(orgUpdate._id));
+    expect(slide).toBeDefined();
+    expect(slide!.type).toBe('update');
   });
 });

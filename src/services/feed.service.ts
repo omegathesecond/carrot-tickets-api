@@ -29,7 +29,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   // resolve follow sets for personalization/following
   let followedAuthorIds: any[] = [];
   let followedOrgIds: any[] = [];
-  if (opts.buyerId && (opts.tab === 'following' || opts.tab === 'for-you')) {
+  if (opts.buyerId && opts.tab === 'following') {
     const follows = await Follow.find({ followerId: opts.buyerId }).lean();
     followedAuthorIds = follows.filter((f) => f.targetType === 'buyer').map((f) => f.targetId);
     followedOrgIds = follows.filter((f) => f.targetType === 'organizer').map((f) => f.targetId);
@@ -37,7 +37,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
 
   // ---- fetch each source (over-fetch `limit`) ----
   const updateQuery: any = { status: 'active', 'media.status': 'ready' };
-  if (opts.tab === 'following') updateQuery.authorId = { $in: followedAuthorIds };
+  if (opts.tab === 'following') updateQuery.authorId = { $in: [...followedAuthorIds, ...followedOrgIds] };
   if (cur.u) updateQuery.createdAt = { $lt: new Date(cur.u) };
   const updates = opts.tab === 'events' ? [] : await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();
 
