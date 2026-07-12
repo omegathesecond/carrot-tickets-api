@@ -65,6 +65,7 @@ import communityRoutes from '@routes/community.route';
 import socialRoutes from '@routes/social.route';
 import dmRoutes from '@routes/dm.route';
 import updateRoutes from '@routes/update.route';
+import vendorUpdateRoutes from '@routes/vendorUpdate.route';
 
 // Realtime bus
 import { ensureAdapterCollection } from '@/realtime/adapterCollection';
@@ -140,6 +141,7 @@ app.get('/api-docs.json', (_req: Request, res: Response) => {
 });
 
 // API Routes
+app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored updates (organizer dashboard) - mounted before the broader /api/tickets below so this specific path isn't shadowed
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);

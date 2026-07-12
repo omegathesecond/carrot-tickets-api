@@ -40,6 +40,50 @@ export class UpdateController {
     }
   }
 
+  /**
+   * Vendor (organizer dashboard) equivalent of create(). Vendor tokens carry
+   * `vendorId` on req.ticketsUser (not `userPhone` like buyer tokens) — see
+   * authenticateTickets in @middleware/ticketsAuth.middleware. Note that
+   * authenticateTickets does NOT itself reject buyer tokens (only
+   * authenticateBuyer checks userType); a buyer token still 401s here
+   * because it carries no vendorId.
+   */
+  static async createAsVendor(req: Request, res: Response): Promise<any> {
+    const vendorId = (req as any).ticketsUser?.vendorId;
+    if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    const { kind, caption = '', eventId, ext, contentType } = req.body || {};
+    if (kind !== 'video' && kind !== 'image') return ApiResponseUtil.validationError(res, 'kind must be video or image');
+    const allow = kind === 'video' ? VIDEO_TYPES : IMAGE_TYPES;
+    if (!allow.includes(contentType)) return ApiResponseUtil.validationError(res, `Invalid contentType for ${kind}`);
+    if (typeof caption === 'string' && caption.length > 500) return ApiResponseUtil.validationError(res, 'caption too long');
+    try {
+      const { update, uploadUrl } = await createUpdate({
+        authorType: 'vendor', authorId: String(vendorId), kind, caption, eventId, ext: String(ext || 'bin'), contentType,
+      });
+      return ApiResponseUtil.created(res, { updateId: update.id, uploadUrl });
+    } catch (err: any) {
+      return ApiResponseUtil.error(res, err?.message || 'Failed to create update', 500);
+    }
+  }
+
+  /**
+   * Vendor equivalent of finalize(): only the authoring vendor may finalize
+   * their own update.
+   */
+  static async finalizeAsVendor(req: Request, res: Response): Promise<any> {
+    const vendorId = (req as any).ticketsUser?.vendorId;
+    if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    const update = await Update.findById(req.params['id'] as string);
+    if (!update) return ApiResponseUtil.notFound(res, 'Update not found');
+    if (String(update.authorId) !== String(vendorId)) return ApiResponseUtil.forbidden(res, 'Not your update');
+    try {
+      const out = await finalizeUpdate(update.id);
+      return ApiResponseUtil.success(res, UpdateController.dto(out));
+    } catch (err: any) {
+      return ApiResponseUtil.error(res, err?.message || 'Failed to finalize', 500);
+    }
+  }
+
   static async getOne(req: Request, res: Response): Promise<any> {
     const update = await getUpdate(req.params['id'] as string);
     if (!update || update.status === 'removed') return ApiResponseUtil.notFound(res, 'Update not found');

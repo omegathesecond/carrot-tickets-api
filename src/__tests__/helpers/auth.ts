@@ -27,3 +27,18 @@ export function signSuperAdminToken(): string {
 export function signBuyerToken(phone: string): string {
   return jwt.sign({ app: 'tickets', userType: 'buyer', userPhone: phone }, JWT_SECRET);
 }
+
+/**
+ * Signs a vendor JWT for a specific vendorId (payload shape matches what
+ * TicketsAuthService mints for real vendor logins). Unlike
+ * signSuperAdminToken()'s fixed 'admin-vendor-id' (a placeholder string,
+ * not a valid Mongo ObjectId), callers that need to persist/read an Update
+ * (or any authorId: ObjectId field) authored by this vendor should pass a
+ * real ObjectId string here.
+ */
+export function signVendorToken(vendorId: string, extra: Record<string, unknown> = {}): string {
+  return jwt.sign(
+    { app: 'tickets', userType: 'vendor', vendorId, isSuperAdmin: false, role: 'owner', permissions: [], ...extra },
+    JWT_SECRET,
+  );
+}
