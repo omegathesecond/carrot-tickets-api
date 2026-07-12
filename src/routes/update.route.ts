@@ -10,6 +10,6 @@ router.get('/:id', optionalTicketsAuth, UpdateController.getOne);
 router.post('/:id/like', authenticateBuyer, UpdateController.react('like'));
 router.post('/:id/save', authenticateBuyer, UpdateController.react('save'));
 router.post('/:id/share', UpdateController.share);
-router.delete('/:id', authenticateBuyer, UpdateController.remove);
+router.delete('/:id', optionalTicketsAuth, UpdateController.remove);
 
 export default router;

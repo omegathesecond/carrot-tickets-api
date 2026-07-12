@@ -1,8 +1,9 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerToken, signSuperAdminToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
+import { Update } from '@models/update.model';
 
 jest.mock('@utils/updatesR2', () => ({
   updatesR2: {
@@ -42,5 +43,76 @@ describe('POST /api/public/updates', () => {
 
   it('401s without a token', async () => {
     await request(app).post('/api/public/updates').send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' }).expect(401);
+  });
+});
+
+describe('DELETE /api/public/updates/:id', () => {
+  beforeAll(connectTestDb);
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  const seedUpdate = async (authorId: string) =>
+    Update.create({
+      authorType: 'buyer',
+      authorId,
+      kind: 'image',
+      caption: 'x',
+      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+    });
+
+  it('allows the author (buyer who created it) to delete their own update', async () => {
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const update = await seedUpdate(String(author._id));
+
+    const res = await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .expect(200);
+    expect(res.body.data.ok).toBe(true);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).toBe('removed');
+  });
+
+  it('allows a super-admin to delete an update they did not author', async () => {
+    const OTHER_PHONE = '+26876000001';
+    const author = await Buyer.create({ phone: OTHER_PHONE, password: 'secret1', name: 'Someone Else' });
+    const update = await seedUpdate(String(author._id));
+
+    const res = await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .expect(200);
+    expect(res.body.data.ok).toBe(true);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).toBe('removed');
+  });
+
+  it('forbids a different buyer (non-author, non-admin) from deleting', async () => {
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const NON_AUTHOR_PHONE = '+26876000002';
+    await Buyer.create({ phone: NON_AUTHOR_PHONE, password: 'secret1', name: 'Rando' });
+    const update = await seedUpdate(String(author._id));
+
+    await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .set('Authorization', `Bearer ${signBuyerToken(NON_AUTHOR_PHONE)}`)
+      .expect(403);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).toBe('active');
+  });
+
+  it('denies an anonymous request (no Authorization header)', async () => {
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const update = await seedUpdate(String(author._id));
+
+    await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .expect(403);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).toBe('active');
   });
 });
