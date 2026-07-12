@@ -64,6 +64,7 @@ import operatorRoutes from '@routes/operator.route';
 import communityRoutes from '@routes/community.route';
 import socialRoutes from '@routes/social.route';
 import dmRoutes from '@routes/dm.route';
+import updateRoutes from '@routes/update.route';
 
 // Realtime bus
 import { ensureAdapterCollection } from '@/realtime/adapterCollection';
@@ -143,6 +144,7 @@ app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/public/updates', updateRoutes);          // Buyer updates (Discover feed) - mounted before the broader /api/public below
 app.use('/api/public', publicRoutes);                  // Public routes - no auth required
 app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
