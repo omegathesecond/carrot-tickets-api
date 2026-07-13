@@ -8,7 +8,7 @@ const routeSchema = new Schema<IRoute>({
   name: { type: String, required: [true, 'Route name is required'], trim: true },
   originCity: { type: String, required: [true, 'Origin city is required'], trim: true },
   destinationCity: { type: String, required: [true, 'Destination city is required'], trim: true },
-  stops: { type: [String], get: (val: any) => val && val.length > 0 ? val : undefined },
+  stops: { type: [String], default: undefined },
   farePerSeat: { type: Number, required: [true, 'Fare per seat is required'], min: [0, 'Fare cannot be negative'] },
   isActive: { type: Boolean, default: true, index: true },
 }, { timestamps: true, toJSON: stripV, toObject: stripV });

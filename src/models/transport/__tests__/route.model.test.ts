@@ -18,11 +18,25 @@ describe('Route model', () => {
     expect(route.isActive).toBe(true);
     expect(route.farePerSeat).toBe(35);
     expect(route.stops).toBeUndefined();
+    expect((route.toJSON() as any).stops).toBeUndefined();
   });
 
   it('requires originCity, destinationCity and farePerSeat', async () => {
     await expect(
       Route.create({ vendorId: new mongoose.Types.ObjectId(), name: 'X' } as any),
     ).rejects.toThrow();
+  });
+
+  it('preserves an explicitly-provided stops array', async () => {
+    const r = await Route.create({
+      vendorId: new mongoose.Types.ObjectId(),
+      name: 'R',
+      originCity: 'A',
+      destinationCity: 'B',
+      farePerSeat: 20,
+      stops: ['Midway'],
+    });
+    expect(r.stops).toEqual(['Midway']);
+    expect((r.toJSON() as any).stops).toEqual(['Midway']);
   });
 });
