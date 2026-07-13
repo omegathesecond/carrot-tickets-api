@@ -28,8 +28,14 @@ const followSchema = new Schema<IFollow>(
 );
 
 // DEPLOY (one-time, SP1b): existing rows predate `followerType` (stored as
-// null). BEFORE relying on the new index / dropping the legacy one, BACKFILL:
-//   db.follows.updateMany({ followerType: { $exists: false } }, { $set: { followerType: 'buyer' } })
+// null, since Mongoose's `default: 'buyer'` only applies at insert time and
+// is never applied retroactively to rows already in the collection). The new
+// read/unfollow code queries by `followerType`, so the backfill MUST run
+// BEFORE this code is deployed — not just before dropping the legacy index —
+// or pre-migration buyers will see undercounted follows and silently no-op
+// unfollows. Run: `npm run backfill:social-actor-types`
+// (src/scripts/backfillSocialActorTypes.ts). It is additive/idempotent and
+// safe to run against the old code too.
 // Only AFTER the backfill may the legacy index be dropped (optional, hygiene):
 //   db.follows.dropIndex('followerId_1_targetType_1_targetId_1')
 // Dropping WITHOUT backfilling lets a pre-migration buyer create a duplicate
