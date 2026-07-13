@@ -25,13 +25,6 @@ const SOLD_BY_MAP: Record<'vendor' | 'sub-user' | 'reseller-operator', SaleSoldB
   'reseller-operator': 'ResellerOperator',
 };
 
-/** MTN wants a bare international MSISDN (no +). Local 8-digit → 268XXXXXXXX. */
-function normalizeMsisdn(phone: string): string {
-  const digits = (phone || '').replace(/\D/g, '');
-  if (digits.length === 8) return `268${digits}`;
-  return digits.replace(/^0+/, '');
-}
-
 export interface SellSeatParams {
   tripId: string;
   seatNumber?: string; // required for seat-mapped, omitted for PASSENGER_COUNT
@@ -139,12 +132,14 @@ export class BookingService {
       await booking.save();
     } catch (err) {
       await this.releaseBookingClaim(booking, isSeatMapped);
+      await Booking.updateOne({ _id: booking._id }, { $set: { status: BookingStatus.CANCELLED } }).catch(() => {});
       throw err;
     }
 
     try {
       const currency = process.env['MTN_MOMO_CURRENCY'] || 'SZL';
-      const { referenceId } = await this.momoClient.requestToPay({ amount: fare, currency, payerMsisdn: normalizeMsisdn(p.momoPhone), externalId: sale.saleRef, payerMessage: `Bus seat ${p.seatNumber ?? 'GA'}` });
+      const payerMsisdn = normalizePhone(p.momoPhone).replace(/^\+/, '');
+      const { referenceId } = await this.momoClient.requestToPay({ amount: fare, currency, payerMsisdn, externalId: sale.saleRef, payerMessage: `Bus seat ${p.seatNumber ?? 'GA'}` });
       sale.momoReferenceId = referenceId;
       await sale.save();
       return { referenceId, saleId: sale._id.toString(), expiresAt };

@@ -14,7 +14,8 @@ import { Route } from '@models/transport/route.model';
 import { Seat } from '@models/transport/seat.model';
 import { Booking } from '@models/transport/booking.model';
 import { BookingSale } from '@models/transport/bookingSale.model';
-import { SeatScheme } from '@interfaces/transport.interface';
+import { Trip } from '@models/transport/trip.model';
+import { SeatScheme, TripStatus } from '@interfaces/transport.interface';
 import { BookingStatus } from '@interfaces/booking.interface';
 import { PaymentStatus } from '@interfaces/ticket.interface';
 
@@ -70,5 +71,21 @@ describe('BookingService.initiateMomoBooking', () => {
     momo.isConfigured.mockReturnValue(false);
     const { trip } = await seedTrip();
     await expect(BookingService.initiateMomoBooking(args({ tripId: trip._id.toString(), seatNumber: '1' }))).rejects.toThrow();
+  });
+
+  it('sends MTN the full international MSISDN for a leading-zero local number', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'RM' });
+    const { trip } = await seedTrip();
+    await BookingService.initiateMomoBooking(args({ tripId: trip._id.toString(), seatNumber: '1', momoPhone: '076707421' }));
+    expect(momo.requestToPay).toHaveBeenCalledWith(expect.objectContaining({ payerMsisdn: '26876707421' }));
+  });
+
+  it('rejects initiating on a departed trip with 422', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'R3' });
+    const { trip } = await seedTrip();
+    await Trip.updateOne({ _id: trip._id }, { $set: { status: TripStatus.DEPARTED } });
+    await expect(BookingService.initiateMomoBooking(args({ tripId: trip._id.toString(), seatNumber: '1' }))).rejects.toMatchObject({ statusCode: 422 });
   });
 });
