@@ -604,11 +604,24 @@ git commit -m "test(social): end-to-end vendor follow across /me and public orga
 
 - [ ] **Step 5: Record deploy follow-up**
 
-Add a note at the `Follow` unique-index definition (like SP1a's `UpdateReaction`) so the one-time prod index cleanup isn't forgotten — a comment referencing `db.follows.dropIndex('followerId_1_targetType_1_targetId_1')`. Commit:
+Replace the deploy comment at the `Follow` unique-index definition with the **backfill-aware** version below (the brief's Task-1 comment said only "drop the legacy index" — that is INCOMPLETE and unsafe). Pre-migration rows have no `followerType` (BSON `null`); new rows store `'buyer'`. The new unique index treats `null` ≠ `'buyer'`, so the legacy index is the ONLY thing deduping old buyer edges until a backfill runs. Use exactly this comment:
+
+```ts
+// DEPLOY (one-time, SP1b): existing rows predate `followerType` (stored as
+// null). BEFORE relying on the new index / dropping the legacy one, BACKFILL:
+//   db.follows.updateMany({ followerType: { $exists: false } }, { $set: { followerType: 'buyer' } })
+// Only AFTER the backfill may the legacy index be dropped (optional, hygiene):
+//   db.follows.dropIndex('followerId_1_targetType_1_targetId_1')
+// Dropping WITHOUT backfilling lets a pre-migration buyer create a duplicate
+// follow edge (null-keyed old row won't collide with a 'buyer'-keyed new one).
+schema.index({ followerType: 1, followerId: 1, targetType: 1, targetId: 1 }, { unique: true });
+```
+
+(Keep the existing `{ targetType, targetId }` secondary index line after it.)
 
 ```bash
 git add src/models/follow.model.ts
-git commit -m "docs(social): record legacy Follow index cleanup at the index definition"
+git commit -m "docs(social): backfill-aware deploy note at the Follow index (drop legacy only after backfill)"
 ```
 
 ---
