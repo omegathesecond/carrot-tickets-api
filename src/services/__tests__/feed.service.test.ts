@@ -102,12 +102,12 @@ describe('feed.service getFeed', () => {
     });
 
     // Without a follow, the following tab must NOT surface the organizer's update.
-    const before = await getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 });
+    const before = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
     expect(before.items.some((i) => i.id === String(orgUpdate._id))).toBe(false);
 
     await Follow.create({ followerId: buyer._id, targetType: 'organizer', targetId: vendor._id });
 
-    const after = await getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 });
+    const after = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
     const slide = after.items.find((i) => i.id === String(orgUpdate._id));
     expect(slide).toBeDefined();
     expect(slide!.type).toBe('update');
