@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../../__tests__/helpers/mongo';
 import { BookingService } from '@services/transport/booking.service';
 import { TripService } from '@services/transport/trip.service';
+import { PaymentConfigService } from '@services/paymentConfig.service';
+import { Reseller } from '@models/reseller.model';
 import * as paymentsModule from '@services/payments';
 import { VehicleType } from '@models/transport/vehicleType.model';
 import { Route } from '@models/transport/route.model';
@@ -117,6 +119,46 @@ describe('BookingService.sellSeat — cash', () => {
   });
 });
 
+describe('BookingService.sellSeat — reseller + payment-method guards', () => {
+  it('rejects a sale for a suspended reseller (403)', async () => {
+    const { trip } = await seedTrip(SeatScheme.SEQUENTIAL, 4);
+    const reseller = await Reseller.create({ businessName: 'Suspended Co', status: 'suspended' });
+    await expect(
+      BookingService.sellSeat(
+        sellArgs({
+          tripId: trip._id.toString(),
+          seatNumber: '1',
+          soldByType: 'reseller-operator',
+          resellerId: reseller._id.toString(),
+        }),
+      ),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('resolves commission from the reseller doc', async () => {
+    const { trip } = await seedTrip(SeatScheme.SEQUENTIAL, 4);
+    const reseller = await Reseller.create({ businessName: 'Commission Co', commissionPercent: 12 });
+    const { sale } = await BookingService.sellSeat(
+      sellArgs({
+        tripId: trip._id.toString(),
+        seatNumber: '1',
+        soldByType: 'reseller-operator',
+        resellerId: reseller._id.toString(),
+      }),
+    );
+    expect(sale.resellerCommissionPercent).toBe(12);
+    expect(sale.resellerCommissionAmount).toBe(Math.round(35 * 0.12 * 100) / 100);
+  });
+
+  it('rejects a globally-disabled payment method (400)', async () => {
+    await PaymentConfigService.update({ cashEnabled: false });
+    const { trip } = await seedTrip(SeatScheme.SEQUENTIAL, 4);
+    await expect(
+      BookingService.sellSeat(sellArgs({ tripId: trip._id.toString(), seatNumber: '1' })),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
 describe('BookingService.sellSeat — post-charge persistence failure', () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -166,6 +208,11 @@ describe('BookingService.sellSeat — payment failure rollback', () => {
       isConfigured: () => true,
       charge: async () => ({ status: 'failed', message: 'Insufficient balance' }),
     } as any);
+
+    // keshlessWalletEnabled defaults to false (Keshless decoupled) — enable it
+    // so this test reaches the mocked processor instead of 400ing at the
+    // new payment-method-toggle guard.
+    await PaymentConfigService.update({ keshlessWalletEnabled: true });
 
     const { trip } = await seedTrip(SeatScheme.SEQUENTIAL, 4);
     await expect(

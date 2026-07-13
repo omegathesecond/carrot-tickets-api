@@ -3,8 +3,6 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TripService } from '@services/transport/trip.service';
 import { BookingService } from '@services/transport/booking.service';
-import { Reseller } from '@models/reseller.model';
-import { PaymentConfigService } from '@services/paymentConfig.service';
 import { listTripsQuerySchema, sellSeatSchema, boardSchema } from '@validators/transportPos.validator';
 
 function reseller(req: Request): { operatorId: string; resellerId: string; hubId?: string } | undefined {
@@ -37,17 +35,14 @@ export class TransportPosController {
       const { error, value } = sellSeatSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
 
-      const resellerDoc = await Reseller.findById(r.resellerId).select('commissionPercent');
-      const cfg = await PaymentConfigService.get();
-      const commissionPercent = resellerDoc?.commissionPercent ?? cfg.defaultResellerCommissionPercent;
-
+      // Reseller lookup + suspension guard + commission resolution now live
+      // in BookingService.sellSeat (mirrors ResellerSaleService's convention).
       const result = await BookingService.sellSeat({
         ...value,
         soldBy: r.operatorId,
         soldByType: 'reseller-operator',
         resellerId: r.resellerId,
         hubId: r.hubId,
-        resellerCommissionPercent: commissionPercent,
       });
       return ApiResponseUtil.created(res, result, 'Booking sold');
     } catch (e) { return failWithHttpError(res, e, 'Failed to sell seat'); }

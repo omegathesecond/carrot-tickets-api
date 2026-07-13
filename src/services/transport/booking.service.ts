@@ -5,6 +5,7 @@ import { Route } from '@models/transport/route.model';
 import { Booking } from '@models/transport/booking.model';
 import { BookingSale } from '@models/transport/bookingSale.model';
 import { BoardingScan } from '@models/transport/boardingScan.model';
+import { Reseller } from '@models/reseller.model';
 import { SeatScheme, TripStatus } from '@interfaces/transport.interface';
 import { IBooking, IBookingSale, BookingStatus, BoardingScanResult } from '@interfaces/booking.interface';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
@@ -61,12 +62,30 @@ export class BookingService {
     // Read-only — computed BEFORE any claim is taken, so a config-read
     // failure here never leaves a seat/capacity claim dangling.
     const cfg = await PaymentConfigService.get();
+
+    // Guard: payment method must be enabled in PaymentConfig (mirrors
+    // ResellerSaleService's toggle check). Only cash/keshless_wallet reach
+    // here — async methods already 400'd above. Fail BEFORE claiming.
+    const METHOD_TOGGLE: Record<string, keyof typeof cfg> = { cash: 'cashEnabled', keshless_wallet: 'keshlessWalletEnabled' };
+    const toggle = METHOD_TOGGLE[p.paymentMethod];
+    if (toggle && !cfg[toggle]) throw new HttpError(400, 'Payment method is not enabled');
+
+    // Guard + resolve commission: reseller must exist and not be suspended.
+    // Reseller-specific commission takes precedence over the platform default.
+    let resolvedCommission = p.resellerCommissionPercent ?? cfg.defaultResellerCommissionPercent;
+    if (p.resellerId) {
+      const reseller = await Reseller.findById(p.resellerId).select('status isActive commissionPercent');
+      if (!reseller) throw new HttpError(404, 'Reseller not found');
+      if (reseller.status === 'suspended' || reseller.isActive === false) throw new HttpError(403, 'Reseller account is suspended');
+      resolvedCommission = reseller.commissionPercent ?? cfg.defaultResellerCommissionPercent;
+    }
+
     const mappedSoldByType = SOLD_BY_MAP[p.soldByType];
     const econ = computeSaleEconomics({
       faceAmount: fare,
       paymentMethod: p.paymentMethod as any,
       soldByType: mappedSoldByType,
-      resellerCommissionPercent: p.resellerCommissionPercent ?? cfg.defaultResellerCommissionPercent,
+      resellerCommissionPercent: resolvedCommission,
       platformFeePercent: cfg.platformFeePercent,
     });
 
@@ -83,6 +102,20 @@ export class BookingService {
       status: BookingStatus.PENDING,
     });
 
+    // releaseClaim is defined BEFORE the claim itself is taken so the
+    // seat-mapped branch below can call it immediately after a successful
+    // claim if the post-claim trip-status recheck fails.
+    const releaseClaim = async () => {
+      if (isSeatMapped) {
+        await Seat.updateOne(
+          { tripId: trip._id, seatNumber: p.seatNumber, bookingId: booking._id },
+          { $set: { isBooked: false }, $unset: { bookingId: '' } },
+        );
+      } else {
+        await Trip.updateOne({ _id: trip._id }, { $inc: { soldCount: -1 } });
+      }
+    };
+
     // ── Atomic capacity claim ─────────────────────────────────────
     if (isSeatMapped) {
       if (!p.seatNumber) throw new HttpError(400, 'seatNumber is required for this vehicle');
@@ -92,6 +125,16 @@ export class BookingService {
         { new: true },
       );
       if (!seat) throw new HttpError(409, 'Seat is already booked or reserved');
+
+      // Seat.findOneAndUpdate above can't filter on trip status inline (it
+      // only scopes by tripId/seatNumber/isBooked/isReserved), so a trip
+      // that left the sellable window between our initial load and this
+      // claim would otherwise slip through. Re-check and release+422 if so.
+      const freshTrip = await Trip.findById(trip._id).select('status');
+      if (!freshTrip || ![TripStatus.SCHEDULED, TripStatus.BOARDING].includes(freshTrip.status)) {
+        await releaseClaim();
+        throw new HttpError(422, 'Trip is no longer open for sale');
+      }
     } else {
       const claimed = await Trip.findOneAndUpdate(
         {
@@ -104,17 +147,6 @@ export class BookingService {
       );
       if (!claimed) throw new HttpError(409, 'Trip is fully booked');
     }
-
-    const releaseClaim = async () => {
-      if (isSeatMapped) {
-        await Seat.updateOne(
-          { tripId: trip._id, seatNumber: p.seatNumber, bookingId: booking._id },
-          { $set: { isBooked: false }, $unset: { bookingId: '' } },
-        );
-      } else {
-        await Trip.updateOne({ _id: trip._id }, { $inc: { soldCount: -1 } });
-      }
-    };
 
     // ── Zone A (pre-money): charge, release the claim on ANY failure ──
     let walletTransactionId: string | undefined;
