@@ -10,5 +10,7 @@ const router = Router();
 router.get('/me', authenticateTickets, VendorSocialController.me);
 router.post('/follow', authenticateTickets, VendorSocialController.follow);
 router.delete('/follow/:targetType/:targetId', authenticateTickets, VendorSocialController.unfollow);
+router.get('/me/following', authenticateTickets, VendorSocialController.following);
+router.get('/me/followers', authenticateTickets, VendorSocialController.followers);
 
 export default router;
