@@ -27,8 +27,13 @@ const followSchema = new Schema<IFollow>(
   { timestamps: true }
 );
 
-// One edge per (follower, target). followerType disambiguates a buyer and a
-// vendor that share an ObjectId value.
+// DEPLOY (one-time, SP1b): existing rows predate `followerType` (stored as
+// null). BEFORE relying on the new index / dropping the legacy one, BACKFILL:
+//   db.follows.updateMany({ followerType: { $exists: false } }, { $set: { followerType: 'buyer' } })
+// Only AFTER the backfill may the legacy index be dropped (optional, hygiene):
+//   db.follows.dropIndex('followerId_1_targetType_1_targetId_1')
+// Dropping WITHOUT backfilling lets a pre-migration buyer create a duplicate
+// follow edge (null-keyed old row won't collide with a 'buyer'-keyed new one).
 followSchema.index({ followerType: 1, followerId: 1, targetType: 1, targetId: 1 }, { unique: true });
 // Follower counts / lists for a target.
 followSchema.index({ targetType: 1, targetId: 1 });
