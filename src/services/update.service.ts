@@ -3,6 +3,7 @@ import { UpdateReaction } from '@models/updateReaction.model';
 import { updatesR2 } from '@utils/updatesR2';
 import { triggerTranscode } from '@services/transcode.client';
 import type { UpdateAuthorType, UpdateKind } from '@interfaces/update.interface';
+import type { SocialActor } from '@utils/socialActor.util';
 
 interface CreateInput {
   authorType: UpdateAuthorType;
@@ -51,15 +52,16 @@ export async function getUpdate(id: string): Promise<IUpdate | null> {
 
 const counterField = (type: 'like' | 'save') => (type === 'like' ? 'likeCount' : 'saveCount');
 
-export async function toggleReaction(updateId: string, buyerId: string, type: 'like' | 'save') {
-  const existing = await UpdateReaction.findOne({ updateId, buyerId, type });
+export async function toggleReaction(updateId: string, actor: SocialActor, type: 'like' | 'save') {
+  const key = { updateId, actorType: actor.type, buyerId: actor.id, type };
+  const existing = await UpdateReaction.findOne(key);
   let active: boolean;
   if (existing) {
     await existing.deleteOne();
     await Update.updateOne({ _id: updateId }, { $inc: { [counterField(type)]: -1 } });
     active = false;
   } else {
-    await UpdateReaction.create({ updateId, buyerId, type });
+    await UpdateReaction.create(key);
     await Update.updateOne({ _id: updateId }, { $inc: { [counterField(type)]: 1 } });
     active = true;
   }
@@ -77,15 +79,15 @@ export async function recordView(updateId: string): Promise<{ viewCount: number 
   return { viewCount: u?.viewCount ?? 0 };
 }
 
-export async function getViewerReactions(updateIds: string[], buyerId: string): Promise<Record<string, { liked: boolean; saved: boolean }>> {
-  const rows = await UpdateReaction.find({ updateId: { $in: updateIds }, buyerId }).lean();
+export async function getViewerReactions(updateIds: string[], actor: SocialActor): Promise<Record<string, { liked: boolean; saved: boolean }>> {
+  const rows = await UpdateReaction.find({ updateId: { $in: updateIds }, actorType: actor.type, buyerId: actor.id }).lean();
   const map: Record<string, { liked: boolean; saved: boolean }> = {};
   for (const id of updateIds) map[String(id)] = { liked: false, saved: false };
   for (const r of rows) {
-    const key = String(r.updateId);
-    if (!map[key]) map[key] = { liked: false, saved: false };
-    if (r.type === 'like') map[key].liked = true;
-    if (r.type === 'save') map[key].saved = true;
+    const k = String(r.updateId);
+    if (!map[k]) map[k] = { liked: false, saved: false };
+    if (r.type === 'like') map[k].liked = true;
+    if (r.type === 'save') map[k].saved = true;
   }
   return map;
 }
