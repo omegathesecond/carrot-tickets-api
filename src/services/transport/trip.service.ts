@@ -133,8 +133,7 @@ export class TripService {
   }
 
   static async reserveSeat(vendorId: string, tripId: string, seatNumber: string, note?: string, byUserId?: string): Promise<void> {
-    const trip = await Trip.findOne({ _id: tripId, vendorId });
-    if (!trip) throw new HttpError(404, 'Trip not found');
+    await TripService.findOwnedTrip(vendorId, tripId);
     const seat = await Seat.findOneAndUpdate(
       { tripId, seatNumber, isBooked: false, isReserved: false },
       { $set: { isReserved: true, reservedNote: note, reservedBy: byUserId, reservedAt: new Date() } },
@@ -144,8 +143,7 @@ export class TripService {
   }
 
   static async releaseSeat(vendorId: string, tripId: string, seatNumber: string): Promise<void> {
-    const trip = await Trip.findOne({ _id: tripId, vendorId });
-    if (!trip) throw new HttpError(404, 'Trip not found');
+    await TripService.findOwnedTrip(vendorId, tripId);
     const seat = await Seat.findOneAndUpdate(
       { tripId, seatNumber, isBooked: false, isReserved: true },
       { $set: { isReserved: false }, $unset: { reservedNote: '', reservedBy: '', reservedAt: '' } },
@@ -155,12 +153,17 @@ export class TripService {
   }
 
   static async setReservedCount(vendorId: string, tripId: string, reservedCount: number): Promise<ITrip> {
-    const trip = await Trip.findOne({ _id: tripId, vendorId });
-    if (!trip) throw new HttpError(404, 'Trip not found');
+    const trip = await TripService.findOwnedTrip(vendorId, tripId);
     if (reservedCount < 0 || reservedCount + trip.soldCount > trip.totalSeats) {
       throw new HttpError(400, 'reservedCount would exceed trip capacity');
     }
     trip.reservedCount = reservedCount;
     return trip.save();
+  }
+
+  private static async findOwnedTrip(vendorId: string, tripId: string): Promise<ITrip> {
+    const trip = await Trip.findOne({ _id: tripId, vendorId });
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    return trip;
   }
 }

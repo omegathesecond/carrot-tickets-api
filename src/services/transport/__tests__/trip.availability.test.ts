@@ -3,8 +3,9 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../../__tests__
 import { TripService } from '@services/transport/trip.service';
 import { VehicleType } from '@models/transport/vehicleType.model';
 import { Route } from '@models/transport/route.model';
+import { Trip } from '@models/transport/trip.model';
 import { Seat } from '@models/transport/seat.model';
-import { SeatScheme } from '@interfaces/transport.interface';
+import { SeatScheme, TripStatus } from '@interfaces/transport.interface';
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -78,5 +79,31 @@ describe('TripService.listSellable', () => {
     const t = await seedTrip(vendorId, SeatScheme.SEQUENTIAL, 4);
     const list = await TripService.listSellable({ vendorId });
     expect(list.map((x) => x._id.toString())).toContain(t._id.toString());
+  });
+
+  it('filters by routeId, excluding trips on other routes', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const tripA = await seedTrip(vendorId, SeatScheme.SEQUENTIAL, 4);
+    const tripB = await seedTrip(vendorId, SeatScheme.SEQUENTIAL, 6);
+    const list = await TripService.listSellable({ vendorId, routeId: tripA.routeId.toString() });
+    const ids = list.map((x) => x._id.toString());
+    expect(ids).toContain(tripA._id.toString());
+    expect(ids).not.toContain(tripB._id.toString());
+  });
+
+  it('excludes trips that are not scheduled/boarding (e.g. departed)', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const trip = await seedTrip(vendorId, SeatScheme.SEQUENTIAL, 4);
+    await Trip.updateOne({ _id: trip._id }, { $set: { status: TripStatus.DEPARTED } });
+    const list = await TripService.listSellable({ vendorId });
+    expect(list.map((x) => x._id.toString())).not.toContain(trip._id.toString());
+  });
+
+  it('excludes trips whose departureTime has already passed', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const trip = await seedTrip(vendorId, SeatScheme.SEQUENTIAL, 4);
+    await Trip.updateOne({ _id: trip._id }, { $set: { departureTime: new Date(Date.now() - 86400000) } });
+    const list = await TripService.listSellable({ vendorId });
+    expect(list.map((x) => x._id.toString())).not.toContain(trip._id.toString());
   });
 });
