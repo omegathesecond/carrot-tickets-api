@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Follow } from '@models/follow.model';
 import { UpdateReaction } from '@models/updateReaction.model';
+import { Notification } from '@models/notification.model';
 import { backfillSocialActorTypes } from '../backfillSocialActorTypes';
 
 beforeAll(connectTestDb);
@@ -30,19 +31,34 @@ async function legacyReaction() {
   } as any);
 }
 
+async function legacyNotification() {
+  await Notification.collection.insertOne({
+    recipientId: new mongoose.Types.ObjectId(),
+    type: 'follow',
+    title: 't',
+    body: 'b',
+    data: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+}
+
 describe('backfillSocialActorTypes', () => {
-  it('backfills legacy Follow/UpdateReaction rows and is idempotent', async () => {
+  it('backfills legacy Follow/UpdateReaction/Notification rows and is idempotent', async () => {
     await legacyFollow();
     await legacyReaction();
+    await legacyNotification();
 
     // Before backfill: the new read-path query shape does NOT match the
     // legacy rows, proving the hazard is real.
     expect(await Follow.countDocuments({ followerType: 'buyer' })).toBe(0);
     expect(await UpdateReaction.countDocuments({ actorType: 'buyer' })).toBe(0);
+    expect(await Notification.countDocuments({ recipientType: 'buyer' })).toBe(0);
 
     const counts = await backfillSocialActorTypes();
     expect(counts.follows).toBeGreaterThanOrEqual(1);
     expect(counts.reactions).toBeGreaterThanOrEqual(1);
+    expect(counts.notifications).toBeGreaterThanOrEqual(1);
 
     // After backfill: legacy rows now carry the discriminator and match the
     // read-path query shape.
@@ -54,8 +70,12 @@ describe('backfillSocialActorTypes', () => {
     expect((reaction as any).actorType).toBe('buyer');
     expect(await UpdateReaction.countDocuments({ actorType: 'buyer' })).toBe(1);
 
+    const notification = await Notification.findOne().lean();
+    expect((notification as any).recipientType).toBe('buyer');
+    expect(await Notification.countDocuments({ recipientType: 'buyer' })).toBe(1);
+
     // Idempotent: a second run touches nothing.
     const second = await backfillSocialActorTypes();
-    expect(second).toEqual({ follows: 0, reactions: 0 });
+    expect(second).toEqual({ follows: 0, reactions: 0, notifications: 0 });
   });
 });
