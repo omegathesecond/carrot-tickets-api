@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { Trip } from '@models/transport/trip.model';
 import { Seat } from '@models/transport/seat.model';
 import { Route } from '@models/transport/route.model';
@@ -6,10 +5,11 @@ import { Booking } from '@models/transport/booking.model';
 import { BookingSale } from '@models/transport/bookingSale.model';
 import { SeatScheme, TripStatus } from '@interfaces/transport.interface';
 import { IBooking, IBookingSale, BookingStatus } from '@interfaces/booking.interface';
-import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { getProcessor } from '@services/payments';
 import { computeSaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import { PaymentConfigService } from '@services/paymentConfig.service';
+import { deriveChannel } from '@services/ticket.service';
 import { normalizePhone } from '@utils/phone.util';
 import { HttpError } from '@utils/httpError.util';
 
@@ -55,6 +55,19 @@ export class BookingService {
     if (!route) throw new HttpError(404, 'Route not found');
     const fare = route.farePerSeat;
 
+    // ── Economic snapshot (reused DRY helper) ─────────────────────
+    // Read-only — computed BEFORE any claim is taken, so a config-read
+    // failure here never leaves a seat/capacity claim dangling.
+    const cfg = await PaymentConfigService.get();
+    const mappedSoldByType = SOLD_BY_MAP[p.soldByType];
+    const econ = computeSaleEconomics({
+      faceAmount: fare,
+      paymentMethod: p.paymentMethod as any,
+      soldByType: mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent ?? cfg.defaultResellerCommissionPercent,
+      platformFeePercent: cfg.platformFeePercent,
+    });
+
     // Pre-allocate the booking id so we can stamp it on the seat during the atomic claim.
     const booking = new Booking({
       tripId: trip._id,
@@ -63,7 +76,7 @@ export class BookingService {
       passengerPhone: normalizePhone(p.passengerPhone),
       seatNumber: isSeatMapped ? p.seatNumber : undefined,
       fareAmount: fare,
-      platformFee: 0,
+      platformFee: econ.platformFeeAmount,
       totalAmount: fare,
       status: BookingStatus.PENDING,
     });
@@ -79,7 +92,11 @@ export class BookingService {
       if (!seat) throw new HttpError(409, 'Seat is already booked or reserved');
     } else {
       const claimed = await Trip.findOneAndUpdate(
-        { _id: trip._id, $expr: { $lt: [{ $add: ['$soldCount', '$reservedCount'] }, '$totalSeats'] } },
+        {
+          _id: trip._id,
+          status: { $in: [TripStatus.SCHEDULED, TripStatus.BOARDING] },
+          $expr: { $lt: [{ $add: ['$soldCount', '$reservedCount'] }, '$totalSeats'] },
+        },
         { $inc: { soldCount: 1 } },
         { new: true },
       );
@@ -97,8 +114,7 @@ export class BookingService {
       }
     };
 
-    // ── Charge (synchronous processors only) ──────────────────────
-    let paymentStatus: PaymentStatus;
+    // ── Zone A (pre-money): charge, release the claim on ANY failure ──
     let walletTransactionId: string | undefined;
     try {
       const charge = await getProcessor(p.paymentMethod).charge({
@@ -110,59 +126,62 @@ export class BookingService {
       });
       if (charge.status !== 'completed') throw new HttpError(402, charge.message || 'Payment failed');
       walletTransactionId = charge.providerRef;
-      paymentStatus = PaymentStatus.COMPLETED;
     } catch (err) {
       await releaseClaim();
       throw err;
     }
 
-    // ── Economic snapshot (reused DRY helper) ─────────────────────
-    const cfg = await PaymentConfigService.get();
-    const mappedSoldByType = SOLD_BY_MAP[p.soldByType];
-    const econ = computeSaleEconomics({
-      faceAmount: fare,
-      paymentMethod: p.paymentMethod as any,
-      soldByType: mappedSoldByType,
-      resellerCommissionPercent: p.resellerCommissionPercent ?? cfg.defaultResellerCommissionPercent,
-      platformFeePercent: cfg.platformFeePercent,
-    });
+    // ── Zone B (money captured — DO NOT release on failure here) ──────
+    // Once the charge has completed, the claim must stay held: releasing it
+    // would let the seat/capacity be re-sold while we've already taken the
+    // customer's money. Any throw below needs manual reconciliation instead.
+    try {
+      booking.status = BookingStatus.CONFIRMED;
+      await booking.save();
 
-    // ── Persist booking + sale ────────────────────────────────────
-    booking.platformFee = econ.platformFeeAmount;
-    booking.status = BookingStatus.CONFIRMED;
-    await booking.save();
+      const sale = await BookingSale.create({
+        tripId: trip._id,
+        vendorId: trip.vendorId,
+        bookingIds: [booking._id],
+        quantity: 1,
+        customerName: p.passengerName,
+        customerPhone: booking.passengerPhone,
+        totalAmount: fare,
+        paymentMethod: p.paymentMethod,
+        paymentStatus: PaymentStatus.COMPLETED,
+        walletTransactionId,
+        soldBy: p.soldBy,
+        soldByType: mappedSoldByType,
+        channel: deriveChannel(mappedSoldByType),
+        ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+        ...(p.hubId ? { hubId: p.hubId } : {}),
+        faceAmount: fare,
+        serviceFeeAmount: 0,
+        amountCharged: fare,
+        resellerCommissionPercent: econ.resellerCommissionPercent,
+        resellerCommissionAmount: econ.resellerCommissionAmount,
+        platformFeePercent: econ.platformFeePercent,
+        platformFeeAmount: econ.platformFeeAmount,
+        organizerProceeds: econ.organizerProceeds,
+        fundsCustody: econ.fundsCustody,
+        soldAt: new Date(),
+      });
 
-    const sale = await BookingSale.create({
-      tripId: trip._id,
-      vendorId: trip.vendorId,
-      bookingIds: [booking._id],
-      quantity: 1,
-      customerName: p.passengerName,
-      customerPhone: booking.passengerPhone,
-      totalAmount: fare,
-      paymentMethod: p.paymentMethod,
-      paymentStatus,
-      walletTransactionId,
-      soldBy: p.soldBy,
-      soldByType: mappedSoldByType,
-      channel: SalesChannel.RESELLER_POS,
-      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
-      ...(p.hubId ? { hubId: p.hubId } : {}),
-      faceAmount: fare,
-      serviceFeeAmount: 0,
-      amountCharged: fare,
-      resellerCommissionPercent: econ.resellerCommissionPercent,
-      resellerCommissionAmount: econ.resellerCommissionAmount,
-      platformFeePercent: econ.platformFeePercent,
-      platformFeeAmount: econ.platformFeeAmount,
-      organizerProceeds: econ.organizerProceeds,
-      fundsCustody: econ.fundsCustody,
-      soldAt: new Date(),
-    });
+      booking.saleId = sale._id as any;
+      await booking.save();
 
-    booking.saleId = sale._id as mongoose.Types.ObjectId;
-    await booking.save();
-
-    return { booking, sale: sale as IBookingSale };
+      return { booking, sale: sale as IBookingSale };
+    } catch (err) {
+      console.error(
+        '[booking sell] payment captured but persistence failed — seat remains claimed, needs reconciliation',
+        {
+          tripId: String(trip._id),
+          seatNumber: p.seatNumber,
+          bookingRef: booking.bookingRef,
+          error: err instanceof Error ? err.message : err,
+        },
+      );
+      throw err;
+    }
   }
 }

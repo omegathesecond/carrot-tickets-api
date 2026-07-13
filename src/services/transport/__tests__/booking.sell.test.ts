@@ -7,9 +7,10 @@ import { VehicleType } from '@models/transport/vehicleType.model';
 import { Route } from '@models/transport/route.model';
 import { Seat } from '@models/transport/seat.model';
 import { Booking } from '@models/transport/booking.model';
+import { BookingSale } from '@models/transport/bookingSale.model';
 import { SeatScheme } from '@interfaces/transport.interface';
 import { BookingStatus } from '@interfaces/booking.interface';
-import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -95,6 +96,48 @@ describe('BookingService.sellSeat — cash', () => {
     await expect(
       BookingService.sellSeat(sellArgs({ tripId: trip._id.toString(), seatNumber: '1' })),
     ).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('labels channel by soldByType', async () => {
+    const { trip } = await seedTrip(SeatScheme.SEQUENTIAL, 4);
+    const { sale: resellerSale } = await BookingService.sellSeat(
+      sellArgs({ tripId: trip._id.toString(), seatNumber: '1', soldByType: 'reseller-operator' }),
+    );
+    expect(resellerSale.channel).toBe(SalesChannel.RESELLER_POS);
+
+    const { sale: vendorSale } = await BookingService.sellSeat(
+      sellArgs({
+        tripId: trip._id.toString(),
+        seatNumber: '2',
+        soldByType: 'vendor',
+        soldBy: new mongoose.Types.ObjectId().toString(),
+      }),
+    );
+    expect(vendorSale.channel).toBe(SalesChannel.BOX_OFFICE);
+  });
+});
+
+describe('BookingService.sellSeat — post-charge persistence failure', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('post-charge persist failure keeps the seat claimed and fails loud', async () => {
+    const { trip } = await seedTrip(SeatScheme.SEQUENTIAL, 4);
+    const spy = jest.spyOn(BookingSale, 'create').mockRejectedValueOnce(new Error('db down'));
+
+    await expect(
+      BookingService.sellSeat(sellArgs({ tripId: trip._id.toString(), seatNumber: '1' })),
+    ).rejects.toThrow('db down');
+
+    const seat = await Seat.findOne({ tripId: trip._id, seatNumber: '1' });
+    expect(seat!.isBooked).toBe(true); // money captured — NOT released
+
+    const booking = await Booking.findOne({ tripId: trip._id, seatNumber: '1' });
+    expect(booking).not.toBeNull();
+    expect(booking!.status).toBe(BookingStatus.CONFIRMED);
+
+    spy.mockRestore();
   });
 });
 
