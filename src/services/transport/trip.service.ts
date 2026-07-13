@@ -1,3 +1,4 @@
+import { FilterQuery } from 'mongoose';
 import { Trip } from '@models/transport/trip.model';
 import { Seat } from '@models/transport/seat.model';
 import { Route } from '@models/transport/route.model';
@@ -98,5 +99,68 @@ export class TripService {
       }
     }
     return trip;
+  }
+
+  static async getWithAvailability(vendorId: string, tripId: string, isSuperAdmin = false): Promise<{ trip: ITrip; availableSeats: number; seats: any[] }> {
+    const query: FilterQuery<ITrip> = isSuperAdmin ? { _id: tripId } : { _id: tripId, vendorId };
+    const trip = await Trip.findOne(query)
+      .populate('routeId', 'name originCity destinationCity farePerSeat')
+      .populate('vehicleTypeId', 'name seatScheme totalSeats');
+    if (!trip) throw new HttpError(404, 'Trip not found');
+
+    const vt = trip.vehicleTypeId as any;
+    if (vt?.seatScheme === SeatScheme.PASSENGER_COUNT) {
+      const availableSeats = Math.max(0, trip.totalSeats - trip.soldCount - trip.reservedCount);
+      return { trip, availableSeats, seats: [] };
+    }
+    const seats = await Seat.find({ tripId: trip._id }).sort({ seatNumber: 1 });
+    const availableSeats = seats.filter((s) => !s.isBooked && !s.isReserved).length;
+    return { trip, availableSeats, seats };
+  }
+
+  static async listSellable(p: { vendorId?: string; routeId?: string; now?: Date }): Promise<ITrip[]> {
+    const now = p.now ?? new Date();
+    const query: FilterQuery<ITrip> = {
+      status: { $in: [TripStatus.SCHEDULED, TripStatus.BOARDING] },
+      departureTime: { $gte: now },
+    };
+    if (p.vendorId) query.vendorId = p.vendorId;
+    if (p.routeId) query.routeId = p.routeId;
+    return Trip.find(query)
+      .sort({ departureTime: 1 })
+      .populate('routeId', 'name originCity destinationCity farePerSeat')
+      .populate('vehicleTypeId', 'name seatScheme');
+  }
+
+  static async reserveSeat(vendorId: string, tripId: string, seatNumber: string, note?: string, byUserId?: string): Promise<void> {
+    const trip = await Trip.findOne({ _id: tripId, vendorId });
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    const seat = await Seat.findOneAndUpdate(
+      { tripId, seatNumber, isBooked: false, isReserved: false },
+      { $set: { isReserved: true, reservedNote: note, reservedBy: byUserId, reservedAt: new Date() } },
+      { new: true },
+    );
+    if (!seat) throw new HttpError(409, 'Seat is already booked or reserved');
+  }
+
+  static async releaseSeat(vendorId: string, tripId: string, seatNumber: string): Promise<void> {
+    const trip = await Trip.findOne({ _id: tripId, vendorId });
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    const seat = await Seat.findOneAndUpdate(
+      { tripId, seatNumber, isBooked: false, isReserved: true },
+      { $set: { isReserved: false }, $unset: { reservedNote: '', reservedBy: '', reservedAt: '' } },
+      { new: true },
+    );
+    if (!seat) throw new HttpError(409, 'Seat is not currently reserved (or is booked)');
+  }
+
+  static async setReservedCount(vendorId: string, tripId: string, reservedCount: number): Promise<ITrip> {
+    const trip = await Trip.findOne({ _id: tripId, vendorId });
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (reservedCount < 0 || reservedCount + trip.soldCount > trip.totalSeats) {
+      throw new HttpError(400, 'reservedCount would exceed trip capacity');
+    }
+    trip.reservedCount = reservedCount;
+    return trip.save();
   }
 }
