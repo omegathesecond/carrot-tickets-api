@@ -44,4 +44,54 @@ describe('VehicleTypeService', () => {
     const fresh = await VehicleType.findById(vt._id);
     expect(fresh!.isActive).toBe(false);
   });
+
+  it('rejects switching an existing type to ROW_LETTER without layoutJson', async () => {
+    const owner = vendorId();
+    const vt = await VehicleTypeService.create({
+      vendorId: owner,
+      name: 'Kombi',
+      totalSeats: 15,
+      seatScheme: SeatScheme.SEQUENTIAL,
+    });
+    await expect(
+      VehicleTypeService.update(owner, vt._id.toString(), { seatScheme: SeatScheme.ROW_LETTER }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('rejects clearing layoutJson to null on a ROW_LETTER type, and leaves the doc unchanged', async () => {
+    const owner = vendorId();
+    const vt = await VehicleTypeService.create({
+      vendorId: owner,
+      name: 'RowBus',
+      totalSeats: 8,
+      seatScheme: SeatScheme.ROW_LETTER,
+      layoutJson: { rows: 2, seatsPerRow: 2 },
+    });
+    await expect(
+      VehicleTypeService.update(owner, vt._id.toString(), { layoutJson: null }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    const fresh = await VehicleType.findById(vt._id);
+    expect(fresh!.seatScheme).toBe(SeatScheme.ROW_LETTER);
+    expect(fresh!.layoutJson).toMatchObject({ rows: 2, seatsPerRow: 2 });
+  });
+
+  it('rejects creating a duplicate (vendorId, name) with 409', async () => {
+    const owner = vendorId();
+    await VehicleTypeService.create({ vendorId: owner, name: 'Kombi', totalSeats: 15 });
+    // Ensure the unique index is built before the second create, to avoid a race
+    // under mongodb-memory-server (see src/models/transport/__tests__/vehicleType.model.test.ts).
+    await VehicleType.init();
+    await expect(
+      VehicleTypeService.create({ vendorId: owner, name: 'Kombi', totalSeats: 20 }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('deactivate returns 404 for a cross-vendor id and leaves the original doc active', async () => {
+    const owner = vendorId();
+    const other = vendorId();
+    const vt = await VehicleTypeService.create({ vendorId: owner, name: 'Kombi', totalSeats: 15 });
+    await expect(VehicleTypeService.deactivate(other, vt._id.toString())).rejects.toMatchObject({ statusCode: 404 });
+    const fresh = await VehicleType.findById(vt._id);
+    expect(fresh!.isActive).toBe(true);
+  });
 });

@@ -48,12 +48,10 @@ export class VehicleTypeService {
   static async update(vendorId: string, id: string, patch: UpdateVehicleTypeParams): Promise<IVehicleType> {
     const vt = await VehicleType.findOne({ _id: id, vendorId });
     if (!vt) throw new HttpError(404, 'Vehicle type not found');
-    const nextScheme = patch.seatScheme ?? vt.seatScheme;
-    const nextLayout = patch.layoutJson ?? vt.layoutJson;
-    if (nextScheme === SeatScheme.ROW_LETTER && (!nextLayout || !nextLayout.rows || !nextLayout.seatsPerRow)) {
+    Object.assign(vt, patch);
+    if (vt.seatScheme === SeatScheme.ROW_LETTER && (!vt.layoutJson || !vt.layoutJson.rows || !vt.layoutJson.seatsPerRow)) {
       throw new HttpError(400, 'ROW_LETTER vehicle type requires layoutJson { rows, seatsPerRow }');
     }
-    Object.assign(vt, patch);
     try {
       return await vt.save();
     } catch (err: any) {
