@@ -141,4 +141,27 @@ describe('FollowService', () => {
       { followerType: 'vendor', followerId: String(brandFollower._id) },
     ]));
   });
+
+  it('notifies the brand when a buyer follows it', async () => {
+    const brand = await makeVendor();
+    const buyer = await seedBuyer('+26878000901');
+    await FollowService.follow(buyer, 'organizer', String(brand._id));
+
+    const { NotificationService } = await import('@services/notification.service');
+    const inbox = await NotificationService.list('vendor', String(brand._id), {});
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0]!.type).toBe('follow');
+    expect(inbox.items[0]!.body).toMatch(/started following you/);
+  });
+
+  it('notifies the brand when another brand follows it', async () => {
+    const brand = await makeVendor();
+    const follower = await makeVendor();
+    await FollowService.followAsVendor(String(follower._id), 'organizer', String(brand._id));
+
+    const { NotificationService } = await import('@services/notification.service');
+    const inbox = await NotificationService.list('vendor', String(brand._id), {});
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0]!.body).toContain(String(follower.businessName));
+  });
 });

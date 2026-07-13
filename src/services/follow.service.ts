@@ -3,6 +3,7 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { HttpError } from '@utils/httpError.util';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
+import { NotificationService } from '@services/notification.service';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 export class FollowService {
@@ -34,6 +35,23 @@ export class FollowService {
     }
   }
 
+  /** Best-effort: tell a brand it gained a follower. Never throws into the follow path. */
+  private static async notifyOrganizerFollowed(vendorId: string, followerType: FollowerType, followerId: string): Promise<void> {
+    try {
+      let name = 'Someone';
+      if (followerType === 'buyer') {
+        const b = await Buyer.findById(followerId).select('username name');
+        name = b?.username ?? b?.name ?? 'Someone';
+      } else {
+        const v = await Vendor.findById(followerId).select('businessName');
+        name = v?.businessName ?? 'A brand';
+      }
+      await NotificationService.create('vendor', vendorId, 'follow', 'New follower', `${name} started following you`, { followerType, followerId });
+    } catch (err: any) {
+      console.error(`[follow] notify organizer ${vendorId} failed:`, err?.message);
+    }
+  }
+
   static async follow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
     assertNotSuspended(buyer);
     // Checked OUTSIDE the try so it fires on a fresh create AND survives a
@@ -41,6 +59,9 @@ export class FollowService {
     // on the pure-duplicate (already-following) path, since `created` stays
     // false there.
     const created = await FollowService.createEdge('buyer', String(buyer._id), targetType, targetId);
+    if (created && targetType === 'organizer') {
+      await FollowService.notifyOrganizerFollowed(targetId, 'buyer', String(buyer._id));
+    }
     if (created && targetType === 'buyer' && (await FollowService.isFriend(String(buyer._id), targetId))) {
       // buyer's follow completed the mutual — tell the other party.
       NotificationDispatcher.dispatchAsync(
@@ -63,7 +84,10 @@ export class FollowService {
 
   /** The brand follows a buyer or another organizer. No suspension, no friend concept. */
   static async followAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
-    await FollowService.createEdge('vendor', String(vendorId), targetType, targetId);
+    const created = await FollowService.createEdge('vendor', String(vendorId), targetType, targetId);
+    if (created && targetType === 'organizer') {
+      await FollowService.notifyOrganizerFollowed(targetId, 'vendor', String(vendorId));
+    }
   }
 
   static async unfollowAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
