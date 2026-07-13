@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../../__tests__/helpers/mongo';
 import { RouteService } from '@services/transport/route.service';
+import { Route } from '@models/transport/route.model';
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -24,5 +25,24 @@ describe('RouteService', () => {
     await expect(
       RouteService.update(vendorId(), r._id.toString(), { farePerSeat: 25 }),
     ).rejects.toMatchObject({ statusCode: 404 });
+    const updated = await RouteService.update(owner, r._id.toString(), { farePerSeat: 25 });
+    expect(updated.farePerSeat).toBe(25);
+  });
+
+  it('deactivate flips isActive to false (owner)', async () => {
+    const owner = vendorId();
+    const r = await RouteService.create({ vendorId: owner, name: 'R', originCity: 'A', destinationCity: 'B', farePerSeat: 20 });
+    await RouteService.deactivate(owner, r._id.toString());
+    const fresh = await Route.findById(r._id);
+    expect(fresh!.isActive).toBe(false);
+  });
+
+  it('deactivate returns 404 for a cross-vendor id and leaves the route active', async () => {
+    const owner = vendorId();
+    const other = vendorId();
+    const r = await RouteService.create({ vendorId: owner, name: 'R', originCity: 'A', destinationCity: 'B', farePerSeat: 20 });
+    await expect(RouteService.deactivate(other, r._id.toString())).rejects.toMatchObject({ statusCode: 404 });
+    const fresh = await Route.findById(r._id);
+    expect(fresh!.isActive).toBe(true);
   });
 });
