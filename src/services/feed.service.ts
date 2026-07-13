@@ -67,7 +67,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   const updateSlides: FeedSlide[] = updates.map((u) => ({
     type: 'update', id: String(u._id), sortAt: u.createdAt.toISOString(),
     kind: u.kind, caption: u.caption, media: u.media,
-    likeCount: u.likeCount, saveCount: u.saveCount, shareCount: u.shareCount,
+    likeCount: u.likeCount, saveCount: u.saveCount, shareCount: u.shareCount, viewCount: u.viewCount ?? 0,
     eventId: u.eventId ? String(u.eventId) : null,
     author: u.authorType === 'vendor'
       ? { type: 'organizer', id: String(u.authorId), name: vendorMap.get(String(u.authorId))?.businessName ?? 'Organizer', avatarUrl: vendorMap.get(String(u.authorId))?.logoUrl ?? null, slug: vendorMap.get(String(u.authorId))?.slug }

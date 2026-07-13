@@ -11,6 +11,7 @@ export interface IUpdate extends Document {
   likeCount: number;
   saveCount: number;
   shareCount: number;
+  viewCount: number;
   commentCount: number;   // stays 0 in v1
   status: 'active' | 'removed';
   createdAt: Date;
@@ -51,6 +52,7 @@ const updateSchema = new Schema<IUpdate>({
   likeCount: { type: Number, default: 0 },
   saveCount: { type: Number, default: 0 },
   shareCount: { type: Number, default: 0 },
+  viewCount: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'removed'], default: 'active', index: true },
 }, { timestamps: true });
