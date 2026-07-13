@@ -106,4 +106,24 @@ export class VendorSocialController {
       return failWithHttpError(res, error, 'Failed to load followers');
     }
   }
+
+  /** GET /api/tickets/social/users/search?q= — buyers by username prefix + brands by name. */
+  static async searchUsers(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = VendorSocialController.vendorId(req);
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const q = String(req.query['q'] || '').toLowerCase();
+      if (q.length < 2 || q.length > 30) return ApiResponseUtil.error(res, 'q must be 2-30 characters', 400);
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // No block filtering: block is not a vendor concept until SP1b-c.
+      const [buyers, brands] = await Promise.all([
+        Buyer.find({ username: { $regex: `^${escaped}`, $options: 'i' } }).limit(20),
+        Vendor.find({ businessName: { $regex: escaped, $options: 'i' }, isActive: true, _id: { $ne: vendorId } })
+          .select('businessName slug logoUrl').limit(20),
+      ]);
+      return ApiResponseUtil.success(res, { buyers: buyers.map(toBuyerSummary), organizers: brands.map(toVendorSummary) });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to search accounts');
+    }
+  }
 }
