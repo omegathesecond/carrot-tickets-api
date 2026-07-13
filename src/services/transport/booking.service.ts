@@ -16,6 +16,7 @@ import { deriveChannel } from '@services/ticket.service';
 import { normalizePhone } from '@utils/phone.util';
 import { HttpError } from '@utils/httpError.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
+import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
 
 const SYNC_METHODS: PaymentMethod[] = [PaymentMethod.CASH, PaymentMethod.KESHLESS_WALLET];
 
@@ -43,6 +44,8 @@ export interface SellSeatParams {
 export class BookingService {
   private static momoClient = new MtnMomoClient();
   private static MOMO_TTL_MS = 5 * 60_000;
+  private static peachClient = new PeachClient();
+  private static CARD_TTL_MS = 15 * 60_000;
 
   /** Atomically claim capacity for a booking; throws HttpError(409) if unavailable. Shared by sellSeat + async initiate. */
   private static async claimCapacity(trip: any, isSeatMapped: boolean, seatNumber: string | undefined, bookingId: any): Promise<void> {
@@ -143,6 +146,93 @@ export class BookingService {
       sale.momoReferenceId = referenceId;
       await sale.save();
       return { referenceId, saleId: sale._id.toString(), expiresAt };
+    } catch (err) {
+      await this.releaseBookingClaim(booking, isSeatMapped);
+      booking.status = BookingStatus.CANCELLED; await booking.save();
+      sale.paymentStatus = PaymentStatus.FAILED; await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Initiate an async Peach card bus booking. Mirrors initiateMomoBooking exactly;
+   * differences: gates on cfg.peachCardEnabled, paymentMethod = PEACH_CARD,
+   * reservationExpiresAt uses CARD_TTL_MS, provider call is peachClient.createPayment
+   * (no payer phone), and the returned redirect URL comes from Peach's redirect object.
+   */
+  static async initiateCardBooking(p: {
+    tripId: string; seatNumber?: string; passengerName: string; passengerPhone: string;
+    soldBy: string; soldByType: 'vendor' | 'sub-user' | 'reseller-operator'; resellerId?: string; hubId?: string;
+  }): Promise<{ paymentId: string; redirectUrl?: string; saleId: string; expiresAt: Date }> {
+    if (!this.peachClient.isConfigured()) throw new HttpError(503, 'Card payments are not available');
+
+    const trip = await Trip.findById(p.tripId);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (![TripStatus.SCHEDULED, TripStatus.BOARDING].includes(trip.status)) throw new HttpError(422, 'Trip is not open for sale');
+    const isSeatMapped = trip.seatScheme !== SeatScheme.PASSENGER_COUNT;
+
+    const route = await Route.findById(trip.routeId).select('farePerSeat');
+    if (!route) throw new HttpError(404, 'Route not found');
+    const fare = route.farePerSeat;
+
+    const cfg = await PaymentConfigService.get();
+    if (!cfg.peachCardEnabled) throw new HttpError(400, 'Card payments are not enabled');
+    let resolvedCommission = cfg.defaultResellerCommissionPercent;
+    if (p.resellerId) {
+      const reseller = await Reseller.findById(p.resellerId).select('status isActive commissionPercent');
+      if (!reseller) throw new HttpError(404, 'Reseller not found');
+      if (reseller.status === 'suspended' || reseller.isActive === false) throw new HttpError(403, 'Reseller account is suspended');
+      resolvedCommission = reseller.commissionPercent ?? cfg.defaultResellerCommissionPercent;
+    }
+    const mappedSoldByType = SOLD_BY_MAP[p.soldByType];
+    const econ = computeSaleEconomics({ faceAmount: fare, paymentMethod: PaymentMethod.PEACH_CARD as any, soldByType: mappedSoldByType, resellerCommissionPercent: resolvedCommission, platformFeePercent: cfg.platformFeePercent });
+
+    const booking = new Booking({ tripId: trip._id, vendorId: trip.vendorId, passengerName: p.passengerName, passengerPhone: normalizePhone(p.passengerPhone), seatNumber: isSeatMapped ? p.seatNumber : undefined, fareAmount: fare, platformFee: econ.platformFeeAmount, totalAmount: fare, status: BookingStatus.PENDING });
+    await this.claimCapacity(trip, isSeatMapped, p.seatNumber, booking._id);
+
+    // seat-mapped claimCapacity can't filter on trip status inline (it only
+    // scopes by tripId/seatNumber/isBooked/isReserved), so mirror sellSeat's
+    // post-claim recheck: a trip that left the sellable window between our
+    // initial load and this claim would otherwise slip through.
+    if (isSeatMapped) {
+      const freshTrip = await Trip.findById(trip._id).select('status');
+      if (!freshTrip || ![TripStatus.SCHEDULED, TripStatus.BOARDING].includes(freshTrip.status)) {
+        await this.releaseBookingClaim(booking, isSeatMapped);
+        throw new HttpError(422, 'Trip is no longer open for sale');
+      }
+    }
+
+    const expiresAt = new Date(Date.now() + this.CARD_TTL_MS);
+    let sale;
+    try {
+      await booking.save();
+      sale = await BookingSale.create({
+        tripId: trip._id, vendorId: trip.vendorId, bookingIds: [booking._id], quantity: 1,
+        customerName: p.passengerName, customerPhone: booking.passengerPhone, totalAmount: fare,
+        paymentMethod: PaymentMethod.PEACH_CARD, paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: expiresAt,
+        soldBy: p.soldBy, soldByType: mappedSoldByType, channel: deriveChannel(mappedSoldByType),
+        ...(p.resellerId ? { resellerId: p.resellerId } : {}), ...(p.hubId ? { hubId: p.hubId } : {}),
+        faceAmount: fare, serviceFeeAmount: 0, amountCharged: fare,
+        resellerCommissionPercent: econ.resellerCommissionPercent, resellerCommissionAmount: econ.resellerCommissionAmount,
+        platformFeePercent: econ.platformFeePercent, platformFeeAmount: econ.platformFeeAmount,
+        organizerProceeds: econ.organizerProceeds, fundsCustody: econ.fundsCustody, soldAt: new Date(),
+      });
+      booking.saleId = sale._id as any;
+      await booking.save();
+    } catch (err) {
+      await this.releaseBookingClaim(booking, isSeatMapped);
+      await Booking.updateOne({ _id: booking._id }, { $set: { status: BookingStatus.CANCELLED } }).catch(() => {});
+      throw err;
+    }
+
+    try {
+      const { id, redirect } = await this.peachClient.createPayment({
+        amount: fare, currency: process.env['CARD_CURRENCY'] || 'ZAR', merchantTransactionId: sale.saleRef,
+        shopperResultUrl: process.env['CARD_RESULT_URL'] || '', nonce: sale.saleRef,
+      });
+      sale.peachPaymentId = id;
+      await sale.save();
+      return { paymentId: id, redirectUrl: redirect?.url, saleId: sale._id.toString(), expiresAt };
     } catch (err) {
       await this.releaseBookingClaim(booking, isSeatMapped);
       booking.status = BookingStatus.CANCELLED; await booking.save();
@@ -388,6 +478,71 @@ export class BookingService {
       if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
       sale.paymentStatus = PaymentStatus.FAILED; sale.momoFailureReason = 'AMOUNT_MISMATCH'; await sale.save();
       return { status: 'failed', reason: 'AMOUNT_MISMATCH' };
+    }
+
+    // atomic claim — concurrent poll + callback can't double-confirm
+    const claimed = await BookingSale.findOneAndUpdate({ _id: sale._id, paymentStatus: PaymentStatus.PENDING }, { $set: { paymentStatus: PaymentStatus.COMPLETED } }, { new: true });
+    if (!claimed) return { status: 'completed' };
+    booking.status = BookingStatus.CONFIRMED; await booking.save();
+    return { status: 'completed' };
+  }
+
+  static async getCardBookingSaleByPaymentId(id: string) {
+    return BookingSale.findOne({ peachPaymentId: id });
+  }
+
+  /**
+   * Finalize an async Peach card bus booking identified by paymentId. Idempotent.
+   * Mirrors finalizeMomoBooking exactly; differences: lookup by peachPaymentId,
+   * status via peachClient.getPaymentStatus + classifyResultCode, amount/currency
+   * guard uses CARD_CURRENCY (default ZAR).
+   */
+  static async finalizeCardBooking(paymentId: string): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await BookingSale.findOne({ peachPaymentId: paymentId });
+    if (!sale) throw new HttpError(404, 'Booking sale not found for payment id');
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return sale.paymentStatus === PaymentStatus.COMPLETED ? { status: 'completed' } : { status: 'failed' };
+    }
+
+    const { code, amount, currency } = await this.peachClient.getPaymentStatus(paymentId);
+    const outcome = classifyResultCode(code || '');
+    if (outcome === 'pending') return { status: 'pending' };
+
+    // Only load booking/trip once we know we're past the pending short-circuit —
+    // saves 2 queries on every still-pending poll.
+    const booking = await Booking.findById(sale.bookingIds[0]);
+    if (!booking) throw new HttpError(404, 'Booking not found for sale');
+    const trip = await Trip.findById(booking.tripId).select('seatScheme');
+    const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
+
+    if (outcome === 'rejected') {
+      // Atomic PENDING→CANCELLED transition gates the claim release: only the
+      // caller that wins this transition releases capacity, so a concurrent
+      // webhook+poll finalize can't both decrement soldCount / free the seat.
+      const cancelled = await Booking.findOneAndUpdate(
+        { _id: booking._id, status: BookingStatus.PENDING },
+        { $set: { status: BookingStatus.CANCELLED } },
+        { new: true },
+      );
+      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
+      sale.paymentStatus = PaymentStatus.FAILED; await sale.save();
+      return { status: 'failed' };
+    }
+
+    // success — amount + currency guard before confirming
+    const expectedCurrency = process.env['CARD_CURRENCY'] || 'ZAR';
+    const expectedAmount = sale.amountCharged ?? sale.totalAmount;
+    const confirmedAmount = Number(amount);
+    if (!Number.isFinite(confirmedAmount) || confirmedAmount !== expectedAmount || currency !== expectedCurrency) {
+      // Same atomic gate as the rejected branch above.
+      const cancelled = await Booking.findOneAndUpdate(
+        { _id: booking._id, status: BookingStatus.PENDING },
+        { $set: { status: BookingStatus.CANCELLED } },
+        { new: true },
+      );
+      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
+      sale.paymentStatus = PaymentStatus.FAILED; await sale.save();
+      return { status: 'failed' };
     }
 
     // atomic claim — concurrent poll + callback can't double-confirm
