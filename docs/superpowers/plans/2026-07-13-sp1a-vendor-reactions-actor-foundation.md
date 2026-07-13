@@ -143,34 +143,18 @@ git commit -m "feat(social): add SocialActor abstraction + resolveActorFromReque
 
 **Files:**
 - Modify: `src/models/updateReaction.model.ts`
-- Test: `src/models/__tests__/updateReaction.model.test.ts`
+- Modify (test): `src/models/__tests__/updateReaction.model.test.ts` — **this file already exists** with a test `'enforces one reaction per (update, buyer, type)'`. Keep that test (it stays green: default `actorType='buyer'` means same-actor dups still collide) and ADD the two new cases below to the same `describe` block.
 
 **Interfaces:**
 - Produces: `IUpdateReaction` now has `actorType: 'buyer' | 'vendor'` (default `'buyer'`). `buyerId` continues to hold the actor's ObjectId (a buyer id or a vendor id). Unique key is `{ updateId, actorType, buyerId, type }`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add the failing tests to the EXISTING describe block**
+
+Append these two `it(...)` cases inside the existing `describe('UpdateReaction model', ...)` in `src/models/__tests__/updateReaction.model.test.ts`. Note `await UpdateReaction.init()` — mongodb-memory-server does not build indexes until the model is initialised, so the unique-index assertions are meaningless without it (the existing test already does this).
 
 ```ts
-// src/models/__tests__/updateReaction.model.test.ts
-import mongoose from 'mongoose';
-import { UpdateReaction } from '@models/updateReaction.model';
-import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-
-describe('UpdateReaction model', () => {
-  beforeAll(connectTestDb);
-  afterEach(clearTestDb);
-  afterAll(disconnectTestDb);
-
-  it('defaults actorType to "buyer" for rows created without one (back-compat)', async () => {
-    const r = await UpdateReaction.create({
-      updateId: new mongoose.Types.ObjectId(),
-      buyerId: new mongoose.Types.ObjectId(),
-      type: 'like',
-    });
-    expect(r.actorType).toBe('buyer');
-  });
-
   it('allows a buyer and a vendor with the SAME id to react to the same update once each', async () => {
+    await UpdateReaction.init();
     const updateId = new mongoose.Types.ObjectId();
     const sharedId = new mongoose.Types.ObjectId(); // astronomically unlikely IRL, but the unique key must permit it
     await UpdateReaction.create({ updateId, buyerId: sharedId, actorType: 'buyer', type: 'like' });
@@ -179,6 +163,7 @@ describe('UpdateReaction model', () => {
   });
 
   it('rejects a duplicate reaction from the same actor', async () => {
+    await UpdateReaction.init();
     const updateId = new mongoose.Types.ObjectId();
     const buyerId = new mongoose.Types.ObjectId();
     await UpdateReaction.create({ updateId, buyerId, actorType: 'vendor', type: 'like' });
@@ -186,13 +171,12 @@ describe('UpdateReaction model', () => {
       UpdateReaction.create({ updateId, buyerId, actorType: 'vendor', type: 'like' })
     ).rejects.toMatchObject({ code: 11000 });
   });
-});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npm test -- updateReaction.model.test`
-Expected: FAIL — second test creates only 1 doc (old unique index ignores `actorType`) OR `actorType` is undefined.
+Expected: FAIL — the "buyer and a vendor with the SAME id" test creates only 1 doc (old unique index `{updateId, buyerId, type}` ignores `actorType`) so the second `create` throws 11000, or `actorType` is stripped as unknown.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -246,7 +230,7 @@ git commit -m "feat(social): add actorType discriminator to UpdateReaction (migr
 
 **Files:**
 - Modify: `src/services/update.service.ts`
-- Test: `src/services/__tests__/update.service.reactions.test.ts`
+- Modify (test): `src/services/__tests__/update.reactions.test.ts` — **this file already exists** and calls the OLD string-`buyerId` signature (e.g. `toggleReaction(u.id, buyerId, 'like')`, `getViewerReactions([u.id], buyerId)`). It MUST be updated to the actor signature or it fails to compile/pass after this task. Do NOT create a second reactions test file (DRY).
 
 **Interfaces:**
 - Consumes: `SocialActor` from `@utils/socialActor.util`.
@@ -254,27 +238,18 @@ git commit -m "feat(social): add actorType discriminator to UpdateReaction (migr
   - `toggleReaction(updateId: string, actor: SocialActor, type: 'like' | 'save'): Promise<{ active: boolean; likeCount: number; saveCount: number }>`
   - `getViewerReactions(updateIds: string[], actor: SocialActor): Promise<Record<string, { liked: boolean; saved: boolean }>>`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Update the EXISTING tests to the actor signature, then add vendor cases**
+
+In `src/services/__tests__/update.reactions.test.ts`:
+- add the import: `import type { SocialActor } from '@utils/socialActor.util';`
+- in the existing `'toggles a like on then off…'` test, change both calls to pass an actor: `toggleReaction(u.id, { type: 'buyer', id: buyerId }, 'like')`.
+- in the existing `'reports viewer reactions across updates'` test, change `toggleReaction(u.id, buyerId, 'save')` → `toggleReaction(u.id, { type: 'buyer', id: buyerId }, 'save')` and `getViewerReactions([u.id], buyerId)` → `getViewerReactions([u.id], { type: 'buyer', id: buyerId })`.
+- leave `recordShare` / `recordView` tests untouched.
+
+Then ADD these two vendor cases to the same `describe('update reactions', ...)` block:
 
 ```ts
-// src/services/__tests__/update.service.reactions.test.ts
-import mongoose from 'mongoose';
-import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { Update } from '@models/update.model';
-import { toggleReaction, getViewerReactions } from '@services/update.service';
-import type { SocialActor } from '@utils/socialActor.util';
-
-const seedUpdate = () => Update.create({
-  authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),
-  kind: 'image', caption: 'x', media: { rawKey: 'k', status: 'ready' },
-});
-
-describe('toggleReaction / getViewerReactions (actor-aware)', () => {
-  beforeAll(connectTestDb);
-  afterEach(clearTestDb);
-  afterAll(disconnectTestDb);
-
-  it('a vendor like increments and toggles independently of a buyer like', async () => {
+  it('a vendor like toggles independently of a buyer like on the same update', async () => {
     const u = await seedUpdate();
     const vendor: SocialActor = { type: 'vendor', id: new mongoose.Types.ObjectId().toString() };
     const buyer: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
@@ -292,20 +267,19 @@ describe('toggleReaction / getViewerReactions (actor-aware)', () => {
   it('getViewerReactions returns the vendor viewer own flags only', async () => {
     const u = await seedUpdate();
     const vendor: SocialActor = { type: 'vendor', id: new mongoose.Types.ObjectId().toString() };
-    const buyer: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
-    await toggleReaction(u.id, buyer, 'like');   // someone else liked
-    await toggleReaction(u.id, vendor, 'save');  // this vendor saved
+    const otherBuyer: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+    await toggleReaction(u.id, otherBuyer, 'like');   // someone else liked
+    await toggleReaction(u.id, vendor, 'save');       // this vendor saved
 
     const rx = await getViewerReactions([u.id], vendor);
     expect(rx[u.id]).toEqual({ liked: false, saved: true });
   });
-});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npm test -- update.service.reactions.test`
-Expected: FAIL — `toggleReaction` still expects a `buyerId: string`, so `active`/counts are wrong or a TS error surfaces at call time.
+Run: `npm test -- update.reactions.test`
+Expected: FAIL — the updated existing calls (and the new vendor cases) pass a `SocialActor`, but `toggleReaction`/`getViewerReactions` still take a `buyerId: string`, so the compile/behaviour is wrong.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -349,13 +323,13 @@ export async function getViewerReactions(updateIds: string[], actor: SocialActor
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npm test -- update.service.reactions.test`
-Expected: PASS (2 tests). (Callers in `update.controller.ts` / `feed.controller.ts` won't compile yet — fixed in Tasks 4 & 6. If running the whole suite now, expect TS errors there; the targeted test still passes.)
+Run: `npm test -- update.reactions.test`
+Expected: PASS (existing buyer cases on the new signature + 2 new vendor cases). Note: `update.controller.ts` still calls the old signature until Task 4, and `feed.controller.ts` until Task 5 — a full `tsc`/whole-suite run will show type errors there; this targeted suite passes.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/update.service.ts src/services/__tests__/update.service.reactions.test.ts
+git add src/services/update.service.ts src/services/__tests__/update.reactions.test.ts
 git commit -m "feat(social): make reactions actor-aware (toggleReaction/getViewerReactions take SocialActor)"
 ```
 
@@ -510,7 +484,8 @@ git commit -m "feat(social): vendor like/save endpoints; route buyer & vendor re
 **Files:**
 - Modify: `src/services/feed.service.ts`
 - Modify: `src/controllers/feed.controller.ts`
-- Test: `src/routes/__tests__/feedVendorViewer.route.test.ts`
+- Modify (test): `src/services/__tests__/feed.service.test.ts` — **existing**; two `getFeed({ tab: 'following', buyerId: String(buyer._id), … })` calls (currently ~lines 105 & 110) must change to `actor: { type: 'buyer', id: String(buyer._id) }` when the option is renamed.
+- Test: `src/routes/__tests__/feedVendorViewer.route.test.ts` (new)
 
 **Interfaces:**
 - Consumes: `SocialActor`, `resolveActorFromRequest`, `getViewerReactions`.
@@ -585,6 +560,14 @@ Replace the follow-set block near the top of `getFeed`:
   }
 ```
 
+Then update the existing `src/services/__tests__/feed.service.test.ts` — the two `getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 })` calls become:
+
+```ts
+    const before = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
+    // ...
+    const after = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
+```
+
 In `src/controllers/feed.controller.ts`, resolve the actor and attach reactions for any actor:
 
 ```ts
@@ -629,12 +612,12 @@ export class FeedController {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- feedVendorViewer.route.test`
-Expected: PASS (1 test). Re-run the existing feed suite to confirm buyer behavior is unchanged: `npm test -- feed` → PASS.
+Expected: PASS (1 test). Re-run the existing feed suites to confirm buyer behavior is unchanged and the renamed option compiles: `npm test -- feed` → PASS (includes the updated `feed.service.test.ts`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/feed.service.ts src/controllers/feed.controller.ts src/routes/__tests__/feedVendorViewer.route.test.ts
+git add src/services/feed.service.ts src/controllers/feed.controller.ts src/services/__tests__/feed.service.test.ts src/routes/__tests__/feedVendorViewer.route.test.ts
 git commit -m "feat(social): personalize Discover feed viewer-reactions for a vendor viewer via SocialActor"
 ```
 
