@@ -15,6 +15,7 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { deriveChannel } from '@services/ticket.service';
 import { normalizePhone } from '@utils/phone.util';
 import { HttpError } from '@utils/httpError.util';
+import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 
 const SYNC_METHODS: PaymentMethod[] = [PaymentMethod.CASH, PaymentMethod.KESHLESS_WALLET];
 
@@ -23,6 +24,13 @@ const SOLD_BY_MAP: Record<'vendor' | 'sub-user' | 'reseller-operator', SaleSoldB
   'sub-user': 'VendorSubUser',
   'reseller-operator': 'ResellerOperator',
 };
+
+/** MTN wants a bare international MSISDN (no +). Local 8-digit → 268XXXXXXXX. */
+function normalizeMsisdn(phone: string): string {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length === 8) return `268${digits}`;
+  return digits.replace(/^0+/, '');
+}
 
 export interface SellSeatParams {
   tripId: string;
@@ -40,6 +48,114 @@ export interface SellSeatParams {
 }
 
 export class BookingService {
+  private static momoClient = new MtnMomoClient();
+  private static MOMO_TTL_MS = 5 * 60_000;
+
+  /** Atomically claim capacity for a booking; throws HttpError(409) if unavailable. Shared by sellSeat + async initiate. */
+  private static async claimCapacity(trip: any, isSeatMapped: boolean, seatNumber: string | undefined, bookingId: any): Promise<void> {
+    if (isSeatMapped) {
+      if (!seatNumber) throw new HttpError(400, 'seatNumber is required for this vehicle');
+      const seat = await Seat.findOneAndUpdate(
+        { tripId: trip._id, seatNumber, isBooked: false, isReserved: false },
+        { $set: { isBooked: true, bookingId } }, { new: true },
+      );
+      if (!seat) throw new HttpError(409, 'Seat is already booked or reserved');
+    } else {
+      const claimed = await Trip.findOneAndUpdate(
+        { _id: trip._id, status: { $in: [TripStatus.SCHEDULED, TripStatus.BOARDING] }, $expr: { $lt: [{ $add: ['$soldCount', '$reservedCount'] }, '$totalSeats'] } },
+        { $inc: { soldCount: 1 } }, { new: true },
+      );
+      if (!claimed) throw new HttpError(409, 'Trip is fully booked');
+    }
+  }
+
+  /** Release a claim tied to a specific booking (seat-mapped: free the seat; passenger-count: decrement soldCount). */
+  private static async releaseBookingClaim(booking: IBooking, isSeatMapped: boolean): Promise<void> {
+    if (isSeatMapped) {
+      await Seat.updateOne({ tripId: booking.tripId, seatNumber: booking.seatNumber, bookingId: booking._id }, { $set: { isBooked: false }, $unset: { bookingId: '' } });
+    } else {
+      await Trip.updateOne({ _id: booking.tripId }, { $inc: { soldCount: -1 } });
+    }
+  }
+
+  static async initiateMomoBooking(p: {
+    tripId: string; seatNumber?: string; passengerName: string; passengerPhone: string; momoPhone: string;
+    soldBy: string; soldByType: 'vendor' | 'sub-user' | 'reseller-operator'; resellerId?: string; hubId?: string;
+  }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
+    if (!this.momoClient.isConfigured()) throw new HttpError(503, 'MTN MoMo is not available');
+
+    const trip = await Trip.findById(p.tripId);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (![TripStatus.SCHEDULED, TripStatus.BOARDING].includes(trip.status)) throw new HttpError(422, 'Trip is not open for sale');
+    const isSeatMapped = trip.seatScheme !== SeatScheme.PASSENGER_COUNT;
+
+    const route = await Route.findById(trip.routeId).select('farePerSeat');
+    if (!route) throw new HttpError(404, 'Route not found');
+    const fare = route.farePerSeat;
+
+    const cfg = await PaymentConfigService.get();
+    if (!cfg.mtnMomoEnabled) throw new HttpError(400, 'MoMo is not enabled');
+    let resolvedCommission = cfg.defaultResellerCommissionPercent;
+    if (p.resellerId) {
+      const reseller = await Reseller.findById(p.resellerId).select('status isActive commissionPercent');
+      if (!reseller) throw new HttpError(404, 'Reseller not found');
+      if (reseller.status === 'suspended' || reseller.isActive === false) throw new HttpError(403, 'Reseller account is suspended');
+      resolvedCommission = reseller.commissionPercent ?? cfg.defaultResellerCommissionPercent;
+    }
+    const mappedSoldByType = SOLD_BY_MAP[p.soldByType];
+    const econ = computeSaleEconomics({ faceAmount: fare, paymentMethod: PaymentMethod.MTN_MOMO as any, soldByType: mappedSoldByType, resellerCommissionPercent: resolvedCommission, platformFeePercent: cfg.platformFeePercent });
+
+    const booking = new Booking({ tripId: trip._id, vendorId: trip.vendorId, passengerName: p.passengerName, passengerPhone: normalizePhone(p.passengerPhone), seatNumber: isSeatMapped ? p.seatNumber : undefined, fareAmount: fare, platformFee: econ.platformFeeAmount, totalAmount: fare, status: BookingStatus.PENDING });
+    await this.claimCapacity(trip, isSeatMapped, p.seatNumber, booking._id);
+
+    // seat-mapped claimCapacity can't filter on trip status inline (it only
+    // scopes by tripId/seatNumber/isBooked/isReserved), so mirror sellSeat's
+    // post-claim recheck: a trip that left the sellable window between our
+    // initial load and this claim would otherwise slip through.
+    if (isSeatMapped) {
+      const freshTrip = await Trip.findById(trip._id).select('status');
+      if (!freshTrip || ![TripStatus.SCHEDULED, TripStatus.BOARDING].includes(freshTrip.status)) {
+        await this.releaseBookingClaim(booking, isSeatMapped);
+        throw new HttpError(422, 'Trip is no longer open for sale');
+      }
+    }
+
+    const expiresAt = new Date(Date.now() + this.MOMO_TTL_MS);
+    let sale;
+    try {
+      await booking.save();
+      sale = await BookingSale.create({
+        tripId: trip._id, vendorId: trip.vendorId, bookingIds: [booking._id], quantity: 1,
+        customerName: p.passengerName, customerPhone: booking.passengerPhone, totalAmount: fare,
+        paymentMethod: PaymentMethod.MTN_MOMO, paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: expiresAt,
+        soldBy: p.soldBy, soldByType: mappedSoldByType, channel: deriveChannel(mappedSoldByType),
+        ...(p.resellerId ? { resellerId: p.resellerId } : {}), ...(p.hubId ? { hubId: p.hubId } : {}),
+        faceAmount: fare, serviceFeeAmount: 0, amountCharged: fare,
+        resellerCommissionPercent: econ.resellerCommissionPercent, resellerCommissionAmount: econ.resellerCommissionAmount,
+        platformFeePercent: econ.platformFeePercent, platformFeeAmount: econ.platformFeeAmount,
+        organizerProceeds: econ.organizerProceeds, fundsCustody: econ.fundsCustody, soldAt: new Date(),
+      });
+      booking.saleId = sale._id as any;
+      await booking.save();
+    } catch (err) {
+      await this.releaseBookingClaim(booking, isSeatMapped);
+      throw err;
+    }
+
+    try {
+      const currency = process.env['MTN_MOMO_CURRENCY'] || 'SZL';
+      const { referenceId } = await this.momoClient.requestToPay({ amount: fare, currency, payerMsisdn: normalizeMsisdn(p.momoPhone), externalId: sale.saleRef, payerMessage: `Bus seat ${p.seatNumber ?? 'GA'}` });
+      sale.momoReferenceId = referenceId;
+      await sale.save();
+      return { referenceId, saleId: sale._id.toString(), expiresAt };
+    } catch (err) {
+      await this.releaseBookingClaim(booking, isSeatMapped);
+      booking.status = BookingStatus.CANCELLED; await booking.save();
+      sale.paymentStatus = PaymentStatus.FAILED; await sale.save();
+      throw err;
+    }
+  }
+
   static async sellSeat(p: SellSeatParams): Promise<{ booking: IBooking; sale: IBookingSale }> {
     if (!SYNC_METHODS.includes(p.paymentMethod)) {
       throw new HttpError(400, `Payment method ${p.paymentMethod} is not yet supported for bus bookings`);
