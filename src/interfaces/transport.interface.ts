@@ -55,6 +55,7 @@ export interface ITrip extends Document {
   arrivalTime?: Date;
   vehicleReg?: string;
   totalSeats: number;
+  seatScheme: SeatScheme;
   soldCount: number;
   reservedCount: number;
   status: TripStatus;

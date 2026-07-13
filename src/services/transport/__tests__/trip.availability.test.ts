@@ -37,6 +37,16 @@ describe('TripService.getWithAvailability', () => {
     expect(availableSeats).toBe(35);
     expect(seats).toEqual([]);
   });
+
+  it('snapshotted seatScheme wins over a VehicleType edited after the trip was created', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const trip = await seedTrip(vendorId, SeatScheme.PASSENGER_COUNT, 40, 0);
+    // Simulate an after-the-fact edit to the VehicleType's seatScheme.
+    await VehicleType.updateOne({ _id: trip.vehicleTypeId }, { $set: { seatScheme: SeatScheme.SEQUENTIAL } });
+    const { availableSeats, seats } = await TripService.getWithAvailability(vendorId, trip._id.toString());
+    expect(availableSeats).toBe(40);
+    expect(seats).toEqual([]);
+  });
 });
 
 describe('TripService.reserveSeat / releaseSeat', () => {
@@ -59,6 +69,22 @@ describe('TripService.reserveSeat / releaseSeat', () => {
     const s1 = await Seat.findOne({ tripId: trip._id, seatNumber: '1' });
     expect(s1!.isReserved).toBe(false);
   });
+
+  it('reserveSeat rejects with 400 on a passenger-count trip', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const trip = await seedTrip(vendorId, SeatScheme.PASSENGER_COUNT, 40, 0);
+    await expect(
+      TripService.reserveSeat(vendorId, trip._id.toString(), '1'),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('releaseSeat rejects with 400 on a passenger-count trip', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const trip = await seedTrip(vendorId, SeatScheme.PASSENGER_COUNT, 40, 0);
+    await expect(
+      TripService.releaseSeat(vendorId, trip._id.toString(), '1'),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
 });
 
 describe('TripService.setReservedCount', () => {
@@ -70,6 +96,14 @@ describe('TripService.setReservedCount', () => {
     ).rejects.toMatchObject({ statusCode: 400 });
     const updated = await TripService.setReservedCount(vendorId, trip._id.toString(), 4);
     expect(updated.reservedCount).toBe(4);
+  });
+
+  it('rejects with 400 on a seat-mapped (non passenger-count) trip', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const trip = await seedTrip(vendorId, SeatScheme.SEQUENTIAL, 4);
+    await expect(
+      TripService.setReservedCount(vendorId, trip._id.toString(), 1),
+    ).rejects.toMatchObject({ statusCode: 400 });
   });
 });
 

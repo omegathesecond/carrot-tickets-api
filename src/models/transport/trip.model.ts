@@ -1,5 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
-import { ITrip, TripStatus } from '@interfaces/transport.interface';
+import { ITrip, TripStatus, SeatScheme } from '@interfaces/transport.interface';
 
 const stripV = { transform: (_doc: any, ret: any) => { const { __v, ...rest } = ret; return rest; } };
 
@@ -11,6 +11,7 @@ const tripSchema = new Schema<ITrip>({
   arrivalTime: { type: Date },
   vehicleReg: { type: String, trim: true },
   totalSeats: { type: Number, required: true, min: [1, 'A trip must have at least 1 seat'] },
+  seatScheme: { type: String, enum: Object.values(SeatScheme), required: true },
   soldCount: { type: Number, default: 0, min: 0 },
   reservedCount: { type: Number, default: 0, min: 0 },
   status: { type: String, enum: Object.values(TripStatus), default: TripStatus.SCHEDULED, index: true },

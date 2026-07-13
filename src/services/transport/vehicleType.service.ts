@@ -26,6 +26,12 @@ export class VehicleTypeService {
     if (scheme === SeatScheme.ROW_LETTER && (!p.layoutJson || !p.layoutJson.rows || !p.layoutJson.seatsPerRow)) {
       throw new HttpError(400, 'ROW_LETTER vehicle type requires layoutJson { rows, seatsPerRow }');
     }
+    if (scheme === SeatScheme.ROW_LETTER) {
+      const total = p.totalSeats;
+      if (p.layoutJson!.rows * p.layoutJson!.seatsPerRow < total) {
+        throw new HttpError(400, 'ROW_LETTER layout (rows × seatsPerRow) must provide at least totalSeats seats');
+      }
+    }
     try {
       return await VehicleType.create({
         vendorId: p.vendorId,
@@ -51,6 +57,9 @@ export class VehicleTypeService {
     Object.assign(vt, patch);
     if (vt.seatScheme === SeatScheme.ROW_LETTER && (!vt.layoutJson || !vt.layoutJson.rows || !vt.layoutJson.seatsPerRow)) {
       throw new HttpError(400, 'ROW_LETTER vehicle type requires layoutJson { rows, seatsPerRow }');
+    }
+    if (vt.seatScheme === SeatScheme.ROW_LETTER && vt.layoutJson!.rows * vt.layoutJson!.seatsPerRow < vt.totalSeats) {
+      throw new HttpError(400, 'ROW_LETTER layout (rows × seatsPerRow) must provide at least totalSeats seats');
     }
     try {
       return await vt.save();

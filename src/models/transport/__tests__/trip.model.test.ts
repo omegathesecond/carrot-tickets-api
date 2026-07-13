@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../../__tests__/helpers/mongo';
 import { Trip } from '@models/transport/trip.model';
-import { TripStatus } from '@interfaces/transport.interface';
+import { TripStatus, SeatScheme } from '@interfaces/transport.interface';
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -15,6 +15,7 @@ describe('Trip model', () => {
       vehicleTypeId: new mongoose.Types.ObjectId(),
       departureTime: new Date(Date.now() + 86400000),
       totalSeats: 15,
+      seatScheme: SeatScheme.SEQUENTIAL,
     });
     expect(trip.status).toBe(TripStatus.SCHEDULED);
     expect(trip.soldCount).toBe(0);

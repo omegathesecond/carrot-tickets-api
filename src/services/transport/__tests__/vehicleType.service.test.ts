@@ -63,7 +63,7 @@ describe('VehicleTypeService', () => {
     const vt = await VehicleTypeService.create({
       vendorId: owner,
       name: 'RowBus',
-      totalSeats: 8,
+      totalSeats: 4,
       seatScheme: SeatScheme.ROW_LETTER,
       layoutJson: { rows: 2, seatsPerRow: 2 },
     });
@@ -73,6 +73,29 @@ describe('VehicleTypeService', () => {
     const fresh = await VehicleType.findById(vt._id);
     expect(fresh!.seatScheme).toBe(SeatScheme.ROW_LETTER);
     expect(fresh!.layoutJson).toMatchObject({ rows: 2, seatsPerRow: 2 });
+  });
+
+  it('rejects a ROW_LETTER type whose layout (rows × seatsPerRow) is smaller than totalSeats', async () => {
+    await expect(
+      VehicleTypeService.create({
+        vendorId: vendorId(),
+        name: 'BigCoach',
+        totalSeats: 60,
+        seatScheme: SeatScheme.ROW_LETTER,
+        layoutJson: { rows: 3, seatsPerRow: 2 },
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('accepts a ROW_LETTER type whose layout exactly fits totalSeats', async () => {
+    const vt = await VehicleTypeService.create({
+      vendorId: vendorId(),
+      name: 'ExactFit',
+      totalSeats: 6,
+      seatScheme: SeatScheme.ROW_LETTER,
+      layoutJson: { rows: 3, seatsPerRow: 2 },
+    });
+    expect(vt.totalSeats).toBe(6);
   });
 
   it('rejects creating a duplicate (vendorId, name) with 409', async () => {

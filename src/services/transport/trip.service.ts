@@ -75,6 +75,7 @@ export class TripService {
       arrivalTime: p.arrivalTime,
       vehicleReg: p.vehicleReg,
       totalSeats: vt.totalSeats,
+      seatScheme: vt.seatScheme,
       soldCount: 0,
       reservedCount,
       status: TripStatus.SCHEDULED,
@@ -108,8 +109,7 @@ export class TripService {
       .populate('vehicleTypeId', 'name seatScheme totalSeats');
     if (!trip) throw new HttpError(404, 'Trip not found');
 
-    const vt = trip.vehicleTypeId as any;
-    if (vt?.seatScheme === SeatScheme.PASSENGER_COUNT) {
+    if (trip.seatScheme === SeatScheme.PASSENGER_COUNT) {
       const availableSeats = Math.max(0, trip.totalSeats - trip.soldCount - trip.reservedCount);
       return { trip, availableSeats, seats: [] };
     }
@@ -133,7 +133,10 @@ export class TripService {
   }
 
   static async reserveSeat(vendorId: string, tripId: string, seatNumber: string, note?: string, byUserId?: string): Promise<void> {
-    await TripService.findOwnedTrip(vendorId, tripId);
+    const trip = await TripService.findOwnedTrip(vendorId, tripId);
+    if (trip.seatScheme === SeatScheme.PASSENGER_COUNT) {
+      throw new HttpError(400, 'This trip uses passenger-count capacity, not a seat map');
+    }
     const seat = await Seat.findOneAndUpdate(
       { tripId, seatNumber, isBooked: false, isReserved: false },
       { $set: { isReserved: true, reservedNote: note, reservedBy: byUserId, reservedAt: new Date() } },
@@ -143,7 +146,10 @@ export class TripService {
   }
 
   static async releaseSeat(vendorId: string, tripId: string, seatNumber: string): Promise<void> {
-    await TripService.findOwnedTrip(vendorId, tripId);
+    const trip = await TripService.findOwnedTrip(vendorId, tripId);
+    if (trip.seatScheme === SeatScheme.PASSENGER_COUNT) {
+      throw new HttpError(400, 'This trip uses passenger-count capacity, not a seat map');
+    }
     const seat = await Seat.findOneAndUpdate(
       { tripId, seatNumber, isBooked: false, isReserved: true },
       { $set: { isReserved: false }, $unset: { reservedNote: '', reservedBy: '', reservedAt: '' } },
@@ -154,6 +160,9 @@ export class TripService {
 
   static async setReservedCount(vendorId: string, tripId: string, reservedCount: number): Promise<ITrip> {
     const trip = await TripService.findOwnedTrip(vendorId, tripId);
+    if (trip.seatScheme !== SeatScheme.PASSENGER_COUNT) {
+      throw new HttpError(400, 'Seat-mapped trips reserve individual seats, not a count');
+    }
     if (reservedCount < 0 || reservedCount + trip.soldCount > trip.totalSeats) {
       throw new HttpError(400, 'reservedCount would exceed trip capacity');
     }
