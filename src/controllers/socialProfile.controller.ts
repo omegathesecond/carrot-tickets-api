@@ -313,7 +313,7 @@ export class SocialProfileController {
       const params = parseMessageCursorParams(req, res);
       if (!params) return;
       if (params.after) return ApiResponseUtil.error(res, 'after is not supported for notifications', 400);
-      const result = await NotificationService.list(buyer, { before: params.before, limit: params.limit });
+      const result = await NotificationService.list('buyer', String(buyer._id), { before: params.before, limit: params.limit });
       return ApiResponseUtil.success(res, result);
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to load notifications');
@@ -329,7 +329,7 @@ export class SocialProfileController {
       if (ids !== undefined && (!Array.isArray(ids) || !ids.every((i: unknown) => typeof i === 'string' && HEX24.test(i)))) {
         return ApiResponseUtil.error(res, 'ids must be an array of notification ids', 400);
       }
-      await NotificationService.markRead(buyer, ids);
+      await NotificationService.markRead('buyer', String(buyer._id), ids);
       return ApiResponseUtil.success(res, { read: true }, 'Notifications marked read');
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to mark notifications read');

@@ -91,6 +91,7 @@ describe('EventReminderService.sweep', () => {
     expect(before).toBe(1);
 
     const result = await NotificationService.create(
+      'buyer',
       String(buyer._id),
       'event_reminder',
       'T',
