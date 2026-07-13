@@ -91,7 +91,8 @@ export class TripService {
           })),
         );
       } catch (err) {
-        // No multi-doc txn: if seat creation fails, remove the orphan trip and fail loudly.
+        // No multi-doc txn: on seat-insert failure, remove any partial seats + the orphan trip, then fail loud.
+        await Seat.deleteMany({ tripId: trip._id });
         await Trip.deleteOne({ _id: trip._id });
         throw err;
       }

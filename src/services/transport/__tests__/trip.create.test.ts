@@ -4,6 +4,7 @@ import { TripService, generateSeatNumbers } from '@services/transport/trip.servi
 import { VehicleType } from '@models/transport/vehicleType.model';
 import { Route } from '@models/transport/route.model';
 import { Seat } from '@models/transport/seat.model';
+import { Trip } from '@models/transport/trip.model';
 import { SeatScheme } from '@interfaces/transport.interface';
 
 beforeAll(connectTestDb);
@@ -25,6 +26,22 @@ describe('generateSeatNumbers', () => {
   });
   it('ROW_LETTER → A1..A{spr}, B1.. capped at totalSeats', () => {
     expect(generateSeatNumbers(SeatScheme.ROW_LETTER, 5, { rows: 3, seatsPerRow: 2 })).toEqual(['A1', 'A2', 'B1', 'B2', 'C1']);
+  });
+  it('ROW_LETTER without layoutJson throws 400', () => {
+    expect(() => generateSeatNumbers(SeatScheme.ROW_LETTER, 4)).toThrow();
+    try {
+      generateSeatNumbers(SeatScheme.ROW_LETTER, 4);
+    } catch (e: any) {
+      expect(e.statusCode).toBe(400);
+    }
+  });
+  it('ROW_LETTER with rows exceeding the alphabet throws 400', () => {
+    try {
+      generateSeatNumbers(SeatScheme.ROW_LETTER, 100, { rows: 24, seatsPerRow: 4 });
+      throw new Error('should have thrown');
+    } catch (e: any) {
+      expect(e.statusCode).toBe(400);
+    }
   });
 });
 
@@ -69,5 +86,59 @@ describe('TripService.createTrip', () => {
     await expect(
       TripService.createTrip({ vendorId: new mongoose.Types.ObjectId().toString(), routeId, vehicleTypeId, departureTime: new Date(Date.now() + 86400000) }),
     ).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('rejects reservedSeatNumbers on a passenger-count vehicle', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const { routeId, vehicleTypeId } = await seedRouteAndVehicle(vendorId, SeatScheme.PASSENGER_COUNT, 40);
+    await expect(
+      TripService.createTrip({
+        vendorId,
+        routeId,
+        vehicleTypeId,
+        departureTime: new Date(Date.now() + 86400000),
+        reservedSeatNumbers: ['1'],
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('rejects an unknown seat label in reservedSeatNumbers', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const { routeId, vehicleTypeId } = await seedRouteAndVehicle(vendorId, SeatScheme.SEQUENTIAL, 4);
+    await expect(
+      TripService.createTrip({
+        vendorId,
+        routeId,
+        vehicleTypeId,
+        departureTime: new Date(Date.now() + 86400000),
+        reservedSeatNumbers: ['99'],
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('rejects a reservedCount greater than totalSeats', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const { routeId, vehicleTypeId } = await seedRouteAndVehicle(vendorId, SeatScheme.PASSENGER_COUNT, 10);
+    await expect(
+      TripService.createTrip({
+        vendorId,
+        routeId,
+        vehicleTypeId,
+        departureTime: new Date(Date.now() + 86400000),
+        reservedCount: 11,
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('deletes the orphan trip (and seats) if seat insert fails', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const { routeId, vehicleTypeId } = await seedRouteAndVehicle(vendorId, SeatScheme.SEQUENTIAL, 4);
+    const spy = jest.spyOn(Seat, 'insertMany').mockRejectedValueOnce(new Error('boom'));
+    await expect(
+      TripService.createTrip({ vendorId, routeId, vehicleTypeId, departureTime: new Date(Date.now() + 86400000) }),
+    ).rejects.toThrow('boom');
+    expect(await Trip.countDocuments({})).toBe(0);
+    expect(await Seat.countDocuments({})).toBe(0);
+    spy.mockRestore();
   });
 });
