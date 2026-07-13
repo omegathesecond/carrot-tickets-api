@@ -1,10 +1,12 @@
+import mongoose from 'mongoose';
 import { Trip } from '@models/transport/trip.model';
 import { Seat } from '@models/transport/seat.model';
 import { Route } from '@models/transport/route.model';
 import { Booking } from '@models/transport/booking.model';
 import { BookingSale } from '@models/transport/bookingSale.model';
+import { BoardingScan } from '@models/transport/boardingScan.model';
 import { SeatScheme, TripStatus } from '@interfaces/transport.interface';
-import { IBooking, IBookingSale, BookingStatus } from '@interfaces/booking.interface';
+import { IBooking, IBookingSale, BookingStatus, BoardingScanResult } from '@interfaces/booking.interface';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { getProcessor } from '@services/payments';
 import { computeSaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
@@ -183,5 +185,57 @@ export class BookingService {
       );
       throw err;
     }
+  }
+
+  static async board(p: {
+    qrCode: string;
+    tripId: string;
+    scannedBy: string;
+    scannedByType: 'Vendor' | 'VendorSubUser' | 'ResellerOperator';
+  }): Promise<{ result: BoardingScanResult; booking?: IBooking }> {
+    const booking = await Booking.findOne({ qrCode: p.qrCode.trim().toUpperCase() });
+
+    const writeScan = async (result: BoardingScanResult, bookingId?: mongoose.Types.ObjectId, vendorId?: mongoose.Types.ObjectId) => {
+      await BoardingScan.create({
+        bookingId,
+        tripId: p.tripId,
+        vendorId: vendorId ?? (booking?.vendorId),
+        scannedBy: p.scannedBy,
+        scannedByType: p.scannedByType,
+        result,
+      });
+    };
+
+    if (!booking) {
+      // No vendor context for an unknown QR — record against the trip only.
+      const trip = await Trip.findById(p.tripId).select('vendorId');
+      await BoardingScan.create({ tripId: p.tripId, vendorId: trip?.vendorId, scannedBy: p.scannedBy, scannedByType: p.scannedByType, result: BoardingScanResult.INVALID });
+      return { result: BoardingScanResult.INVALID };
+    }
+    if (booking.tripId.toString() !== p.tripId) {
+      await writeScan(BoardingScanResult.WRONG_TRIP, booking._id, booking.vendorId);
+      return { result: BoardingScanResult.WRONG_TRIP, booking };
+    }
+    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.REFUNDED) {
+      await writeScan(BoardingScanResult.CANCELLED_BOOKING, booking._id, booking.vendorId);
+      return { result: BoardingScanResult.CANCELLED_BOOKING, booking };
+    }
+    if (booking.status === BookingStatus.BOARDED) {
+      await writeScan(BoardingScanResult.ALREADY_BOARDED, booking._id, booking.vendorId);
+      return { result: BoardingScanResult.ALREADY_BOARDED, booking };
+    }
+
+    // Atomic transition to BOARDED so two concurrent scans can't both "succeed".
+    const boarded = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: BookingStatus.CONFIRMED },
+      { $set: { status: BookingStatus.BOARDED, boardedAt: new Date(), boardedBy: p.scannedBy } },
+      { new: true },
+    );
+    if (!boarded) {
+      await writeScan(BoardingScanResult.ALREADY_BOARDED, booking._id, booking.vendorId);
+      return { result: BoardingScanResult.ALREADY_BOARDED, booking };
+    }
+    await writeScan(BoardingScanResult.SUCCESS, booking._id, booking.vendorId);
+    return { result: BoardingScanResult.SUCCESS, booking: boarded };
   }
 }
