@@ -125,4 +125,20 @@ describe('FollowService', () => {
     await FollowService.unfollowAsVendor(String(vendor._id), 'buyer', String(buyer._id));
     expect(await FollowService.followingCount(String(vendor._id), 'vendor')).toBe(0);
   });
+
+  it('followersOfOrganizer returns followers with their type', async () => {
+    const brand = await makeVendor();
+    const buyerFollower = await seedBuyer('+26878000501');
+    const brandFollower = await makeVendor();
+
+    await FollowService.follow(buyerFollower, 'organizer', String(brand._id));       // buyer follows brand
+    await FollowService.followAsVendor(String(brandFollower._id), 'organizer', String(brand._id)); // brand follows brand
+
+    const followers = await FollowService.followersOfOrganizer(String(brand._id));
+    expect(followers).toHaveLength(2);
+    expect(followers).toEqual(expect.arrayContaining([
+      { followerType: 'buyer', followerId: String(buyerFollower._id) },
+      { followerType: 'vendor', followerId: String(brandFollower._id) },
+    ]));
+  });
 });

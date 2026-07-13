@@ -119,4 +119,10 @@ export class FollowService {
     const rows = await Follow.find({ targetType: 'organizer', targetId: vendorId }).select('followerId');
     return rows.map((r) => String(r.followerId));
   }
+
+  /** Followers of an organizer brand, WITH their type (buyers and/or other brands). */
+  static async followersOfOrganizer(vendorId: string): Promise<{ followerType: FollowerType; followerId: string }[]> {
+    const rows = await Follow.find({ targetType: 'organizer', targetId: vendorId }).select('followerType followerId');
+    return rows.map((r) => ({ followerType: r.followerType, followerId: String(r.followerId) }));
+  }
 }
