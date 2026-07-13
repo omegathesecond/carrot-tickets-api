@@ -349,18 +349,27 @@ export class BookingService {
       return sale.paymentStatus === PaymentStatus.COMPLETED ? { status: 'completed' } : { status: 'failed', reason: sale.momoFailureReason };
     }
 
+    const { status, raw } = await this.momoClient.getStatus(referenceId);
+    if (status === 'PENDING') return { status: 'pending' };
+
+    // Only load booking/trip once we know we're past the PENDING short-circuit —
+    // saves 2 queries on every still-pending poll.
     const booking = await Booking.findById(sale.bookingIds[0]);
     if (!booking) throw new HttpError(404, 'Booking not found for sale');
     const trip = await Trip.findById(booking.tripId).select('seatScheme');
     const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
 
-    const { status, raw } = await this.momoClient.getStatus(referenceId);
-    if (status === 'PENDING') return { status: 'pending' };
-
     if (status === 'FAILED') {
       const reason = typeof raw?.reason === 'string' ? raw.reason : undefined;
-      await this.releaseBookingClaim(booking, isSeatMapped);
-      booking.status = BookingStatus.CANCELLED; await booking.save();
+      // Atomic PENDING→CANCELLED transition gates the claim release: only the
+      // caller that wins this transition releases capacity, so a concurrent
+      // webhook+poll finalize can't both decrement soldCount / free the seat.
+      const cancelled = await Booking.findOneAndUpdate(
+        { _id: booking._id, status: BookingStatus.PENDING },
+        { $set: { status: BookingStatus.CANCELLED } },
+        { new: true },
+      );
+      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
       sale.paymentStatus = PaymentStatus.FAILED; if (reason) sale.momoFailureReason = reason; await sale.save();
       return { status: 'failed', reason };
     }
@@ -370,8 +379,13 @@ export class BookingService {
     const expectedAmount = sale.amountCharged ?? sale.totalAmount;
     const confirmedAmount = Number(raw?.amount);
     if (!Number.isFinite(confirmedAmount) || confirmedAmount !== expectedAmount || raw?.currency !== expectedCurrency) {
-      await this.releaseBookingClaim(booking, isSeatMapped);
-      booking.status = BookingStatus.CANCELLED; await booking.save();
+      // Same atomic gate as the FAILED branch above.
+      const cancelled = await Booking.findOneAndUpdate(
+        { _id: booking._id, status: BookingStatus.PENDING },
+        { $set: { status: BookingStatus.CANCELLED } },
+        { new: true },
+      );
+      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
       sale.paymentStatus = PaymentStatus.FAILED; sale.momoFailureReason = 'AMOUNT_MISMATCH'; await sale.save();
       return { status: 'failed', reason: 'AMOUNT_MISMATCH' };
     }

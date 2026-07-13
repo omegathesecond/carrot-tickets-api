@@ -139,4 +139,21 @@ describe('BookingService.finalizeMomoBooking', () => {
   it('throws when no sale matches the reference', async () => {
     await expect(BookingService.finalizeMomoBooking('NOPE')).rejects.toThrow(/not found/i);
   });
+
+  it('GA trip: concurrent FAILED finalize decrements soldCount exactly once', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'RGA' });
+    const { trip } = await seedTrip(SeatScheme.PASSENGER_COUNT, 10);
+    await BookingService.initiateMomoBooking(args({ tripId: trip._id.toString() }));
+    expect((await Trip.findById(trip._id))!.soldCount).toBe(1);
+
+    momo.getStatus.mockResolvedValue({ status: 'FAILED', raw: {} });
+    await Promise.allSettled([
+      BookingService.finalizeMomoBooking('RGA'),
+      BookingService.finalizeMomoBooking('RGA'),
+    ]);
+
+    const freshTrip = await Trip.findById(trip._id);
+    expect(freshTrip!.soldCount).toBe(0);
+  });
 });
