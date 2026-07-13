@@ -13,5 +13,7 @@ router.delete('/follow/:targetType/:targetId', authenticateTickets, VendorSocial
 router.get('/me/following', authenticateTickets, VendorSocialController.following);
 router.get('/me/followers', authenticateTickets, VendorSocialController.followers);
 router.get('/users/search', authenticateTickets, VendorSocialController.searchUsers);
+router.get('/notifications', authenticateTickets, VendorSocialController.notifications);
+router.post('/notifications/read', authenticateTickets, VendorSocialController.markNotificationsRead);
 
 export default router;

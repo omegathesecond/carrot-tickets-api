@@ -3,8 +3,9 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { FollowService } from '@services/follow.service';
+import { NotificationService } from '@services/notification.service';
 import { followSchema } from '@validators/community.validator';
-import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { HEX24, failWithHttpError } from '@utils/controllerHelpers.util';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { toVendorSummary } from '@utils/vendorSummary.util';
 
@@ -124,6 +125,37 @@ export class VendorSocialController {
       return ApiResponseUtil.success(res, { buyers: buyers.map(toBuyerSummary), organizers: brands.map(toVendorSummary) });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to search accounts');
+    }
+  }
+
+  /** GET /api/tickets/social/notifications?before=&limit= */
+  static async notifications(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = VendorSocialController.vendorId(req);
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const before = req.query['before'] ? String(req.query['before']) : undefined;
+      if (before !== undefined && !HEX24.test(before)) return ApiResponseUtil.error(res, 'before must be a notification id', 400);
+      const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
+      const result = await NotificationService.list('vendor', vendorId, { before, limit });
+      return ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load notifications');
+    }
+  }
+
+  /** POST /api/tickets/social/notifications/read { ids?: string[] } */
+  static async markNotificationsRead(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = VendorSocialController.vendorId(req);
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const ids = req.body?.ids;
+      if (ids !== undefined && (!Array.isArray(ids) || !ids.every((i: unknown) => typeof i === 'string' && HEX24.test(i)))) {
+        return ApiResponseUtil.error(res, 'ids must be an array of notification ids', 400);
+      }
+      await NotificationService.markRead('vendor', vendorId, ids);
+      return ApiResponseUtil.success(res, { read: true }, 'Notifications marked read');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to mark notifications read');
     }
   }
 }
