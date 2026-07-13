@@ -1,4 +1,4 @@
-import { Follow, FollowTargetType } from '@models/follow.model';
+import { Follow, FollowTargetType, FollowerType } from '@models/follow.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { HttpError } from '@utils/httpError.util';
@@ -6,26 +6,41 @@ import { NotificationDispatcher } from '@services/notificationDispatcher.service
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 
 export class FollowService {
-  static async follow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
-    assertNotSuspended(buyer);
-    if (targetType === 'buyer' && String(buyer._id) === targetId) {
-      throw new HttpError(400, 'You cannot follow yourself');
-    }
+  /**
+   * Create a follow edge. Returns true if newly created, false if it already
+   * existed (idempotent). Throws 400 on self-follow, 404 on unknown target.
+   */
+  private static async createEdge(
+    followerType: FollowerType,
+    followerId: string,
+    targetType: FollowTargetType,
+    targetId: string
+  ): Promise<boolean> {
+    const selfFollow =
+      (followerType === 'buyer' && targetType === 'buyer' && followerId === targetId) ||
+      (followerType === 'vendor' && targetType === 'organizer' && followerId === targetId);
+    if (selfFollow) throw new HttpError(400, 'You cannot follow yourself');
+
     const exists =
       targetType === 'buyer' ? await Buyer.exists({ _id: targetId }) : await Vendor.exists({ _id: targetId });
     if (!exists) throw new HttpError(404, 'User not found');
 
-    let created = false;
     try {
-      await Follow.create({ followerId: buyer._id, targetType, targetId });
-      created = true;
+      await Follow.create({ followerType, followerId, targetType, targetId });
+      return true;
     } catch (err: any) {
       if (err?.code !== 11000) throw err; // already following — idempotent
+      return false;
     }
+  }
+
+  static async follow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
+    assertNotSuspended(buyer);
     // Checked OUTSIDE the try so it fires on a fresh create AND survives a
     // retry after a transient error on the create itself — but never fires
     // on the pure-duplicate (already-following) path, since `created` stays
     // false there.
+    const created = await FollowService.createEdge('buyer', String(buyer._id), targetType, targetId);
     if (created && targetType === 'buyer' && (await FollowService.isFriend(String(buyer._id), targetId))) {
       // buyer's follow completed the mutual — tell the other party.
       NotificationDispatcher.dispatchAsync(
@@ -43,7 +58,16 @@ export class FollowService {
   }
 
   static async unfollow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
-    await Follow.deleteOne({ followerId: buyer._id, targetType, targetId });
+    await Follow.deleteOne({ followerType: 'buyer', followerId: buyer._id, targetType, targetId });
+  }
+
+  /** The brand follows a buyer or another organizer. No suspension, no friend concept. */
+  static async followAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
+    await FollowService.createEdge('vendor', String(vendorId), targetType, targetId);
+  }
+
+  static async unfollowAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
+    await Follow.deleteOne({ followerType: 'vendor', followerId: vendorId, targetType, targetId });
   }
 
   /** Mutual buyer-follow. */
@@ -59,12 +83,16 @@ export class FollowService {
     return Follow.countDocuments({ targetType, targetId });
   }
 
-  static async followingCount(buyerId: string): Promise<number> {
-    return Follow.countDocuments({ followerId: buyerId });
+  static async followingCount(followerId: string, followerType: FollowerType = 'buyer'): Promise<number> {
+    return Follow.countDocuments({ followerType, followerId });
   }
 
-  static async followingIds(buyerId: string, targetType: FollowTargetType): Promise<string[]> {
-    const rows = await Follow.find({ followerId: buyerId, targetType }).select('targetId');
+  static async followingIds(
+    followerId: string,
+    targetType: FollowTargetType,
+    followerType: FollowerType = 'buyer'
+  ): Promise<string[]> {
+    const rows = await Follow.find({ followerType, followerId, targetType }).select('targetId');
     return rows.map((r) => String(r.targetId));
   }
 

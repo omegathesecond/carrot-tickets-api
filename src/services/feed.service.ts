@@ -31,7 +31,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   let followedAuthorIds: any[] = [];
   let followedOrgIds: any[] = [];
   if (opts.actor && opts.tab === 'following') {
-    const follows = await Follow.find({ followerId: opts.actor.id }).lean();
+    const follows = await Follow.find({ followerType: opts.actor.type === 'vendor' ? 'vendor' : 'buyer', followerId: opts.actor.id }).lean();
     followedAuthorIds = follows.filter((f) => f.targetType === 'buyer').map((f) => f.targetId);
     followedOrgIds = follows.filter((f) => f.targetType === 'organizer').map((f) => f.targetId);
   }
