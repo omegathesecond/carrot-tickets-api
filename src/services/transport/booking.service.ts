@@ -330,6 +330,59 @@ export class BookingService {
     }
   }
 
+  static async getMomoBookingSaleByReference(referenceId: string) {
+    return BookingSale.findOne({ momoReferenceId: referenceId });
+  }
+
+  /**
+   * Finalize an async MTN MoMo bus booking identified by referenceId. Idempotent.
+   * Mirrors TicketService.finalizeMomoSale: not-PENDING → return current status;
+   * PENDING → pending; FAILED → release claim + cancel booking + fail sale;
+   * SUCCESSFUL → amount/currency guard then ATOMIC claim via
+   * findOneAndUpdate({_id, paymentStatus:PENDING}) so a concurrent poll +
+   * callback can't double-confirm.
+   */
+  static async finalizeMomoBooking(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending'; reason?: string }> {
+    const sale = await BookingSale.findOne({ momoReferenceId: referenceId });
+    if (!sale) throw new HttpError(404, 'Booking sale not found for reference');
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return sale.paymentStatus === PaymentStatus.COMPLETED ? { status: 'completed' } : { status: 'failed', reason: sale.momoFailureReason };
+    }
+
+    const booking = await Booking.findById(sale.bookingIds[0]);
+    if (!booking) throw new HttpError(404, 'Booking not found for sale');
+    const trip = await Trip.findById(booking.tripId).select('seatScheme');
+    const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
+
+    const { status, raw } = await this.momoClient.getStatus(referenceId);
+    if (status === 'PENDING') return { status: 'pending' };
+
+    if (status === 'FAILED') {
+      const reason = typeof raw?.reason === 'string' ? raw.reason : undefined;
+      await this.releaseBookingClaim(booking, isSeatMapped);
+      booking.status = BookingStatus.CANCELLED; await booking.save();
+      sale.paymentStatus = PaymentStatus.FAILED; if (reason) sale.momoFailureReason = reason; await sale.save();
+      return { status: 'failed', reason };
+    }
+
+    // SUCCESSFUL — amount + currency guard before confirming
+    const expectedCurrency = process.env['MTN_MOMO_CURRENCY'] || 'SZL';
+    const expectedAmount = sale.amountCharged ?? sale.totalAmount;
+    const confirmedAmount = Number(raw?.amount);
+    if (!Number.isFinite(confirmedAmount) || confirmedAmount !== expectedAmount || raw?.currency !== expectedCurrency) {
+      await this.releaseBookingClaim(booking, isSeatMapped);
+      booking.status = BookingStatus.CANCELLED; await booking.save();
+      sale.paymentStatus = PaymentStatus.FAILED; sale.momoFailureReason = 'AMOUNT_MISMATCH'; await sale.save();
+      return { status: 'failed', reason: 'AMOUNT_MISMATCH' };
+    }
+
+    // atomic claim — concurrent poll + callback can't double-confirm
+    const claimed = await BookingSale.findOneAndUpdate({ _id: sale._id, paymentStatus: PaymentStatus.PENDING }, { $set: { paymentStatus: PaymentStatus.COMPLETED } }, { new: true });
+    if (!claimed) return { status: 'completed' };
+    booking.status = BookingStatus.CONFIRMED; await booking.save();
+    return { status: 'completed' };
+  }
+
   static async board(p: {
     qrCode: string;
     tripId: string;

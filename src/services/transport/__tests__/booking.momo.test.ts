@@ -89,3 +89,54 @@ describe('BookingService.initiateMomoBooking', () => {
     await expect(BookingService.initiateMomoBooking(args({ tripId: trip._id.toString(), seatNumber: '1' }))).rejects.toMatchObject({ statusCode: 422 });
   });
 });
+
+describe('BookingService.finalizeMomoBooking', () => {
+  async function initiate(seatNumber = '1', ref = 'R1') {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: ref });
+    const { trip } = await seedTrip();
+    await BookingService.initiateMomoBooking(args({ tripId: trip._id.toString(), seatNumber }));
+    return { trip };
+  }
+
+  it('confirms the booking on SUCCESSFUL with matching amount (idempotent)', async () => {
+    const { trip } = await initiate('1', 'R1');
+    momo.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '35', currency: 'SZL' } });
+    const first = await BookingService.finalizeMomoBooking('R1');
+    expect(first.status).toBe('completed');
+    const booking = await Booking.findOne({ tripId: trip._id });
+    expect(booking!.status).toBe(BookingStatus.CONFIRMED);
+    const sale = await BookingSale.findOne({ momoReferenceId: 'R1' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+    // idempotent
+    expect((await BookingService.finalizeMomoBooking('R1')).status).toBe('completed');
+    expect(await Booking.countDocuments({ tripId: trip._id })).toBe(1);
+  });
+
+  it('releases the seat + FAILED on MTN FAILED', async () => {
+    const { trip } = await initiate('1', 'R2');
+    momo.getStatus.mockResolvedValue({ status: 'FAILED', raw: {} });
+    expect((await BookingService.finalizeMomoBooking('R2')).status).toBe('failed');
+    expect((await Seat.findOne({ tripId: trip._id, seatNumber: '1' }))!.isBooked).toBe(false);
+    expect((await BookingSale.findOne({ momoReferenceId: 'R2' }))!.paymentStatus).toBe(PaymentStatus.FAILED);
+  });
+
+  it('refuses to confirm on amount mismatch → FAILED + seat released', async () => {
+    const { trip } = await initiate('1', 'R3');
+    momo.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '5', currency: 'SZL' } });
+    expect((await BookingService.finalizeMomoBooking('R3')).status).toBe('failed');
+    expect((await Seat.findOne({ tripId: trip._id, seatNumber: '1' }))!.isBooked).toBe(false);
+    expect((await Booking.findOne({ tripId: trip._id }))!.status).not.toBe(BookingStatus.CONFIRMED);
+  });
+
+  it('returns pending while MTN is PENDING', async () => {
+    await initiate('1', 'R4');
+    momo.getStatus.mockResolvedValue({ status: 'PENDING', raw: {} });
+    expect((await BookingService.finalizeMomoBooking('R4')).status).toBe('pending');
+    expect((await BookingSale.findOne({ momoReferenceId: 'R4' }))!.paymentStatus).toBe(PaymentStatus.PENDING);
+  });
+
+  it('throws when no sale matches the reference', async () => {
+    await expect(BookingService.finalizeMomoBooking('NOPE')).rejects.toThrow(/not found/i);
+  });
+});
