@@ -48,5 +48,6 @@ bookingSaleSchema.pre('save', function (next) {
 
 bookingSaleSchema.index({ vendorId: 1, soldAt: -1 });
 bookingSaleSchema.index({ tripId: 1, soldAt: -1 });
+bookingSaleSchema.index({ paymentStatus: 1, paymentMethod: 1 });
 
 export const BookingSale = mongoose.model<IBookingSale>('BookingSale', bookingSaleSchema);

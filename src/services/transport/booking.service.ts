@@ -552,6 +552,72 @@ export class BookingService {
     return { status: 'completed' };
   }
 
+  /**
+   * Reconcile stuck PENDING Peach card bus bookings (paid-but-stuck: return
+   * endpoint + webhook + poll all missed). Mirrors TicketService.reconcilePendingCardSales.
+   */
+  static async reconcilePendingCardBookings(olderThanMs = 2 * 60_000): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await BookingSale.find({
+      paymentMethod: PaymentMethod.PEACH_CARD,
+      paymentStatus: PaymentStatus.PENDING,
+      peachPaymentId: { $exists: true, $nin: [null, ''] },
+      createdAt: { $lt: cutoff },
+    }).limit(50);
+
+    let n = 0;
+    for (const s of stuck) {
+      try {
+        const r = await this.finalizeCardBooking(s.peachPaymentId as string);
+        if (r.status !== 'pending') n++;
+      } catch (err) {
+        console.error(`[booking card-reconcile] failed for ${s.saleRef}`, err);
+      }
+    }
+    return n;
+  }
+
+  /**
+   * MoMo has no reconcile endpoint of its own: this is the backstop sweep that
+   * releases capacity for PENDING bookings whose reservation hold lapsed
+   * (marking them FAILED/CANCELLED), for BOTH momo and card sales that never
+   * got finalized before their reservationExpiresAt.
+   *
+   * Releases the claim via the SAME atomic-transition pattern finalizeMomoBooking/
+   * finalizeCardBooking use (Booking.findOneAndUpdate PENDING→CANCELLED) rather
+   * than a read-then-release: only the caller that wins this atomic transition
+   * releases capacity and marks the sale FAILED, so a concurrent sweep (or a
+   * finalize racing the same expiry) can't double-release/double-decrement a
+   * GA trip's soldCount.
+   */
+  static async sweepExpiredBookings(): Promise<number> {
+    const lapsed = await BookingSale.find({ paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { $lt: new Date() } }).limit(100);
+    let n = 0;
+    for (const sale of lapsed) {
+      try {
+        const bookingId = sale.bookingIds[0];
+        const cancelled = await Booking.findOneAndUpdate(
+          { _id: bookingId, status: BookingStatus.PENDING },
+          { $set: { status: BookingStatus.CANCELLED } },
+          { new: true },
+        );
+        if (!cancelled) continue; // already transitioned by a concurrent sweep/finalize — don't double-release or double-count
+
+        const trip = await Trip.findById(cancelled.tripId).select('seatScheme');
+        const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
+        await this.releaseBookingClaim(cancelled, isSeatMapped);
+
+        sale.paymentStatus = PaymentStatus.FAILED;
+        sale.momoFailureReason = sale.momoFailureReason || 'EXPIRED';
+        await sale.save();
+        n++;
+      } catch (err) {
+        console.error(`[booking sweep] failed for ${sale.saleRef}`, err);
+      }
+    }
+    return n;
+  }
+
   static async board(p: {
     qrCode: string;
     tripId: string;
