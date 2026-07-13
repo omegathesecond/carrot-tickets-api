@@ -1,6 +1,6 @@
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Update } from '@models/update.model';
-import { toggleReaction, recordShare, getViewerReactions } from '@services/update.service';
+import { toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
 import mongoose from 'mongoose';
 
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn(), reconcileStuckUpdates: jest.fn() }));
@@ -29,6 +29,14 @@ describe('update reactions', () => {
     const u = await seedUpdate();
     const r = await recordShare(u.id);
     expect(r.shareCount).toBe(1);
+  });
+
+  it('records view increments, counting up across repeated calls', async () => {
+    const u = await seedUpdate();
+    const first = await recordView(u.id);
+    expect(first.viewCount).toBe(1);
+    const second = await recordView(u.id);
+    expect(second.viewCount).toBe(2);
   });
 
   it('reports viewer reactions across updates', async () => {

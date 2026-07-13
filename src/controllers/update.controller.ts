@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
-import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, getViewerReactions } from '@services/update.service';
+import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
 import { Update } from '@models/update.model';
 
 const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
@@ -109,6 +109,11 @@ export class UpdateController {
     return ApiResponseUtil.success(res, r);
   }
 
+  static async recordView(req: Request, res: Response): Promise<any> {
+    const r = await recordView(req.params['id'] as string);
+    return ApiResponseUtil.success(res, r);
+  }
+
   static async remove(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     const isSuperAdmin = (req as any).ticketsUser?.isSuperAdmin === true;
@@ -133,6 +138,7 @@ export class UpdateController {
       likeCount: update.likeCount,
       saveCount: update.saveCount,
       shareCount: update.shareCount,
+      viewCount: update.viewCount ?? 0,
       createdAt: update.createdAt,
       viewerReactions: reactions ?? null,
     };

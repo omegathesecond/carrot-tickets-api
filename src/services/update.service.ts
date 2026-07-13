@@ -72,6 +72,11 @@ export async function recordShare(updateId: string) {
   return { shareCount: u?.shareCount ?? 0 };
 }
 
+export async function recordView(updateId: string): Promise<{ viewCount: number }> {
+  const u = await Update.findByIdAndUpdate(updateId, { $inc: { viewCount: 1 } }, { new: true }).select('viewCount').lean();
+  return { viewCount: u?.viewCount ?? 0 };
+}
+
 export async function getViewerReactions(updateIds: string[], buyerId: string): Promise<Record<string, { liked: boolean; saved: boolean }>> {
   const rows = await UpdateReaction.find({ updateId: { $in: updateIds }, buyerId }).lean();
   const map: Record<string, { liked: boolean; saved: boolean }> = {};

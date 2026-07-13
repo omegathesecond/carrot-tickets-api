@@ -41,6 +41,8 @@ describe('feed.service getFeed', () => {
     const types = items.map((i) => i.type);
     expect(types).toContain('update');
     expect(types).toContain('event');
+    const updateSlide = items.find((i) => i.type === 'update');
+    expect(updateSlide?.['viewCount']).toBe(0);
   });
 
   it('excludes non-ready updates from the feed', async () => {

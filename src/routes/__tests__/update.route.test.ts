@@ -46,6 +46,28 @@ describe('POST /api/public/updates', () => {
   });
 });
 
+describe('POST /api/public/updates/:id/view', () => {
+  beforeAll(connectTestDb);
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  it('increments and returns viewCount with no auth required', async () => {
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const update = await Update.create({
+      authorType: 'buyer',
+      authorId: author._id,
+      kind: 'image',
+      caption: 'x',
+      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+    });
+
+    const res = await request(app)
+      .post(`/api/public/updates/${update.id}/view`)
+      .expect(200);
+    expect(res.body.data.viewCount).toBe(1);
+  });
+});
+
 describe('DELETE /api/public/updates/:id', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
