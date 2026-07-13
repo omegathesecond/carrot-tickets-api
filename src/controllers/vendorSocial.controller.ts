@@ -5,7 +5,7 @@ import { Buyer } from '@models/buyer.model';
 import { FollowService } from '@services/follow.service';
 import { NotificationService } from '@services/notification.service';
 import { followSchema } from '@validators/community.validator';
-import { HEX24, failWithHttpError } from '@utils/controllerHelpers.util';
+import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { toVendorSummary } from '@utils/vendorSummary.util';
 
@@ -133,10 +133,10 @@ export class VendorSocialController {
     try {
       const vendorId = VendorSocialController.vendorId(req);
       if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
-      const before = req.query['before'] ? String(req.query['before']) : undefined;
-      if (before !== undefined && !HEX24.test(before)) return ApiResponseUtil.error(res, 'before must be a notification id', 400);
-      const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
-      const result = await NotificationService.list('vendor', vendorId, { before, limit });
+      const params = parseMessageCursorParams(req, res);
+      if (!params) return;
+      if (params.after) return ApiResponseUtil.error(res, 'after is not supported for notifications', 400);
+      const result = await NotificationService.list('vendor', vendorId, { before: params.before, limit: params.limit });
       return ApiResponseUtil.success(res, result);
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load notifications');

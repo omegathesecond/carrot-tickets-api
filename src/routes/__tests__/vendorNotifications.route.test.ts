@@ -29,4 +29,10 @@ describe('/api/tickets/social/notifications (vendor)', () => {
   it('401s a buyer token', async () => {
     await request(app).get('/api/tickets/social/notifications').set('Authorization', `Bearer ${signBuyerToken('+26878001002')}`).expect(401);
   });
+
+  it('400s a non-numeric limit (shared cursor-param parser, not hand-rolled NaN)', async () => {
+    const brand = await Vendor.create({ businessName: 'Notif Brand 2', email: 'notif2@example.com', phoneNumber: '+26878001003', password: 'secret123' });
+    const brandToken = `Bearer ${signVendorToken(String(brand._id))}`;
+    await request(app).get('/api/tickets/social/notifications?limit=abc').set('Authorization', brandToken).expect(400);
+  });
 });

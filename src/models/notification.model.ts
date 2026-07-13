@@ -21,7 +21,7 @@ export interface INotification extends Document {
 const notificationSchema = new Schema<INotification>(
   {
     recipientType: { type: String, enum: ['buyer', 'vendor'], required: true, default: 'buyer' },
-    recipientId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true },
+    recipientId: { type: Schema.Types.ObjectId, required: true },
     type: {
       type: String,
       enum: ['announcement', 'dm', 'mention', 'friend', 'event_reminder', 'follow'],
@@ -35,6 +35,19 @@ const notificationSchema = new Schema<INotification>(
   { timestamps: true }
 );
 
+// DEPLOY (one-time, SP1b-c): existing rows predate `recipientType` (stored as
+// null, since Mongoose's `default: 'buyer'` only applies at insert time and
+// is never applied retroactively to rows already in the collection). These
+// two indexes and NotificationService.list/markRead query by `recipientType`,
+// so the backfill MUST run BEFORE this code is deployed — not just before
+// dropping the legacy indexes — or pre-migration buyers will see an empty
+// inbox (their rows are keyed null, not 'buyer'). Run:
+// `npm run backfill:social-actor-types`
+// (src/scripts/backfillSocialActorTypes.ts). It is additive/idempotent and
+// safe to run against the old code too.
+// Only AFTER the backfill may the legacy indexes be dropped (optional, hygiene):
+//   db.notifications.dropIndex('recipientId_1__id_-1')
+//   db.notifications.dropIndex('recipientId_1_readAt_1')
 notificationSchema.index({ recipientType: 1, recipientId: 1, _id: -1 });
 notificationSchema.index({ recipientType: 1, recipientId: 1, readAt: 1 });
 
