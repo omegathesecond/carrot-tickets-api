@@ -6,7 +6,7 @@ const stripV = { transform: (_doc: any, ret: any) => { const { __v, ...rest } = 
 const boardingScanSchema = new Schema<IBoardingScan>({
   bookingId: { type: Schema.Types.ObjectId, ref: 'Booking', index: true },
   tripId: { type: Schema.Types.ObjectId, ref: 'Trip', required: true, index: true },
-  vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', required: true, index: true },
+  vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', index: true },
   scannedBy: { type: Schema.Types.ObjectId, required: true, refPath: 'scannedByType' },
   scannedByType: { type: String, required: true, enum: ['Vendor', 'VendorSubUser', 'ResellerOperator'] },
   result: { type: String, enum: Object.values(BoardingScanResult), required: true, index: true },

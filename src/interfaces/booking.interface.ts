@@ -82,7 +82,7 @@ export interface IBoardingScan extends Document {
   _id: Types.ObjectId;
   bookingId?: Types.ObjectId;
   tripId: Types.ObjectId;
-  vendorId: Types.ObjectId;
+  vendorId?: Types.ObjectId;
   scannedBy: Types.ObjectId;
   scannedByType: 'Vendor' | 'VendorSubUser' | 'ResellerOperator';
   result: BoardingScanResult;

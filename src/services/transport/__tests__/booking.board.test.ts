@@ -61,4 +61,53 @@ describe('BookingService.board', () => {
     const r = await BookingService.board({ qrCode: booking.qrCode, tripId: trip._id.toString(), scannedBy, scannedByType: 'ResellerOperator' });
     expect(r.result).toBe(BoardingScanResult.CANCELLED_BOOKING);
   });
+
+  it('INVALID for an unknown QR at a non-existent trip still writes an audit scan (no crash)', async () => {
+    const scannedBy = new mongoose.Types.ObjectId().toString();
+    const r = await BookingService.board({
+      qrCode: 'ZZZZ9999',
+      tripId: new mongoose.Types.ObjectId().toString(),
+      scannedBy,
+      scannedByType: 'ResellerOperator',
+    });
+    expect(r.result).toBe(BoardingScanResult.INVALID);
+    expect(await BoardingScan.countDocuments({})).toBe(1);
+  });
+
+  it('normalizes the scanned qrCode (lowercase/padded matches)', async () => {
+    const { trip, booking, scannedBy } = await sellOne();
+    const r = await BookingService.board({
+      qrCode: '  ' + booking.qrCode.toLowerCase() + '  ',
+      tripId: trip._id.toString(),
+      scannedBy,
+      scannedByType: 'ResellerOperator',
+    });
+    expect(r.result).toBe(BoardingScanResult.SUCCESS);
+  });
+
+  it('WRONG_TRIP takes priority over CANCELLED_BOOKING', async () => {
+    const { booking, scannedBy } = await sellOne();
+    await Booking.updateOne({ _id: booking._id }, { $set: { status: BookingStatus.CANCELLED } });
+    const r = await BookingService.board({
+      qrCode: booking.qrCode,
+      tripId: new mongoose.Types.ObjectId().toString(),
+      scannedBy,
+      scannedByType: 'ResellerOperator',
+    });
+    expect(r.result).toBe(BoardingScanResult.WRONG_TRIP);
+  });
+
+  it('concurrent scans of the same booking: exactly one SUCCESS, one ALREADY_BOARDED', async () => {
+    const { trip, booking, scannedBy } = await sellOne();
+    const args: Parameters<typeof BookingService.board>[0] = {
+      qrCode: booking.qrCode,
+      tripId: trip._id.toString(),
+      scannedBy,
+      scannedByType: 'ResellerOperator',
+    };
+    const [a, b] = await Promise.all([BookingService.board(args), BookingService.board(args)]);
+    const results = [a.result, b.result].sort();
+    expect(results).toEqual([BoardingScanResult.SUCCESS, BoardingScanResult.ALREADY_BOARDED].sort());
+    expect(await BoardingScan.countDocuments({ bookingId: booking._id })).toBe(2);
+  });
 });
