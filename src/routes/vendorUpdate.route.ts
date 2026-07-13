@@ -10,5 +10,7 @@ const router = Router();
 
 router.post('/', authenticateTickets, UpdateController.createAsVendor);
 router.post('/:id/finalize', authenticateTickets, UpdateController.finalizeAsVendor);
+router.post('/:id/like', authenticateTickets, UpdateController.reactAsVendor('like'));
+router.post('/:id/save', authenticateTickets, UpdateController.reactAsVendor('save'));
 
 export default router;

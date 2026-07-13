@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
 import { Update } from '@models/update.model';
 
@@ -88,8 +89,8 @@ export class UpdateController {
     const update = await getUpdate(req.params['id'] as string);
     if (!update || update.status === 'removed') return ApiResponseUtil.notFound(res, 'Update not found');
     let reactions: { liked: boolean; saved: boolean } | undefined;
-    const buyer = await resolveBuyerFromRequest(req).catch(() => null);
-    if (buyer) reactions = (await getViewerReactions([update.id], String(buyer._id)))[update.id];
+    const actor = await resolveActorFromRequest(req).catch(() => null);
+    if (actor) reactions = (await getViewerReactions([update.id], actor))[update.id];
     return ApiResponseUtil.success(res, UpdateController.dto(update, reactions));
   }
 
@@ -99,7 +100,19 @@ export class UpdateController {
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const update = await Update.findById(req.params['id'] as string).select('_id status');
       if (!update || update.status === 'removed') return ApiResponseUtil.notFound(res, 'Update not found');
-      const r = await toggleReaction(req.params['id'] as string, String(buyer._id), type);
+      const r = await toggleReaction(req.params['id'] as string, { type: 'buyer', id: String(buyer._id) }, type);
+      return ApiResponseUtil.success(res, r);
+    };
+  }
+
+  /** Vendor (organizer) reaction — the brand likes/saves a post. */
+  static reactAsVendor(type: 'like' | 'save') {
+    return async (req: Request, res: Response): Promise<any> => {
+      const vendorId = (req as any).ticketsUser?.vendorId;
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const update = await Update.findById(req.params['id'] as string).select('_id status');
+      if (!update || update.status === 'removed') return ApiResponseUtil.notFound(res, 'Update not found');
+      const r = await toggleReaction(req.params['id'] as string, { type: 'vendor', id: String(vendorId) }, type);
       return ApiResponseUtil.success(res, r);
     };
   }
