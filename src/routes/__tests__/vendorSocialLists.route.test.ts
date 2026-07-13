@@ -45,4 +45,14 @@ describe('/api/tickets/social/me/following|followers (vendor)', () => {
     expect(res.body.data.organizers.map((o: any) => o.id)).toEqual([String(followerBrand._id)]);
     expect(res.body.data.buyers.map((b: any) => b.id)).toEqual([String(followerBuyer._id)]);
   });
+
+  it('401s a buyer token on /me/following (no vendorId)', async () => {
+    await request(app).get('/api/tickets/social/me/following')
+      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+  });
+
+  it('401s a buyer token on /me/followers (no vendorId)', async () => {
+    await request(app).get('/api/tickets/social/me/followers')
+      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+  });
 });

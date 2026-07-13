@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 
@@ -26,5 +26,10 @@ describe('GET /api/tickets/social/users/search (vendor)', () => {
   it('400s a too-short query', async () => {
     const me = await Vendor.create({ businessName: 'Solo Brand', email: 'solo@example.com', phoneNumber: '+26878000704', password: 'secret123' });
     await request(app).get('/api/tickets/social/users/search?q=b').set('Authorization', `Bearer ${signVendorToken(String(me._id))}`).expect(400);
+  });
+
+  it('401s a buyer token (no vendorId)', async () => {
+    await request(app).get('/api/tickets/social/users/search?q=test')
+      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
   });
 });
