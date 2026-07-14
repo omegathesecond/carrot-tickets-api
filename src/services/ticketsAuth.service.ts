@@ -6,7 +6,7 @@ import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
 import { HandoffToken } from '@models/handoffToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
-import { OperatorType } from '@interfaces/vendor.interface';
+import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 import { scopePermissionsToType } from '@utils/permissions.util';
 import { JWT_SECRET } from '@config/jwt.config';
 
@@ -101,6 +101,35 @@ export class TicketsAuthService {
         isVerified: vendor.isVerified
       }
     };
+  }
+
+  /**
+   * Admin-only: create an operator (event/transport/both). Unlike self-signup
+   * this accepts operatorType and lands the account already VERIFIED (an admin
+   * vouches for it). Returns the created vendor; no token is minted.
+   */
+  static async adminCreateOperator(params: {
+    businessName: string;
+    operatorType: OperatorType;
+    email?: string;
+    phoneNumber?: string;
+    password: string;
+    businessType?: string;
+    primaryContact?: string;
+  }) {
+    const { businessName, operatorType, email, phoneNumber, password, businessType, primaryContact } = params;
+    if (!email && !phoneNumber) throw new Error('An email address or phone number is required');
+    if (email && await Vendor.findOne({ email })) throw new Error('An account with this email already exists');
+    if (phoneNumber && await Vendor.findOne({ phoneNumber })) throw new Error('An account with this phone number already exists');
+
+    const vendor = new Vendor({
+      businessName, operatorType, email, phoneNumber, password, businessType, primaryContact,
+      verificationStatus: VerificationStatus.VERIFIED,
+      isVerified: true,
+      verifiedAt: new Date(),
+    });
+    await vendor.save();
+    return vendor;
   }
 
   /**

@@ -2,6 +2,7 @@ import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import { OperatorType } from '@interfaces/vendor.interface';
 
 /**
  * Authentication Validators
@@ -56,6 +57,21 @@ export const registerSchema = Joi.object({
 }).or('email', 'phoneNumber').messages({
   'object.missing': 'An email address or phone number is required'
 });
+
+/**
+ * Admin-only operator creation (POST /admin/organizers). Unlike registerSchema
+ * this REQUIRES operatorType — self-signup never gets to choose transport/both,
+ * only a super-admin minting the account directly can set it.
+ */
+export const createOrganizerSchema = Joi.object({
+  businessName: Joi.string().trim().min(2).max(100).required(),
+  operatorType: Joi.string().valid(...Object.values(OperatorType)).required(),
+  email: Joi.string().email().trim().lowercase().optional(),
+  phoneNumber: Joi.string().trim().max(20).optional(),
+  password: Joi.string().min(6).required(),
+  businessType: Joi.string().trim().optional(),
+  primaryContact: Joi.string().trim().max(100).optional(),
+}).or('email', 'phoneNumber');
 
 export const updateProfileSchema = Joi.object({
   firstName: Joi.string().trim().max(50).optional(),
