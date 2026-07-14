@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { FollowService } from '@services/follow.service';
+import { BlockService } from '@services/block.service';
 import { NotificationService } from '@services/notification.service';
 import { followSchema } from '@validators/community.validator';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
@@ -156,6 +157,34 @@ export class VendorSocialController {
       return ApiResponseUtil.success(res, { read: true }, 'Notifications marked read');
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to mark notifications read');
+    }
+  }
+
+  /** POST /api/tickets/social/block { userId } — the brand blocks a buyer. */
+  static async blockUser(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = VendorSocialController.vendorId(req);
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const userId = String(req.body?.userId || '');
+      if (!HEX24.test(userId)) return ApiResponseUtil.error(res, 'userId is required', 400);
+      await BlockService.blockAsVendor(vendorId, userId);
+      return ApiResponseUtil.success(res, { blocked: true }, 'User blocked');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to block user');
+    }
+  }
+
+  /** DELETE /api/tickets/social/block/:userId */
+  static async unblockUser(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = VendorSocialController.vendorId(req);
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const userId = String(req.params['userId'] || '');
+      if (!HEX24.test(userId)) return ApiResponseUtil.error(res, 'userId must be a user id', 400);
+      await BlockService.unblockAsVendor(vendorId, userId);
+      return ApiResponseUtil.success(res, { blocked: false }, 'User unblocked');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to unblock user');
     }
   }
 }

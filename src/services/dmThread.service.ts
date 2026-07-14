@@ -126,6 +126,9 @@ export class DmThreadService {
     if (!HEX24.test(bid)) throw new HttpError(400, 'Invalid participant id');
     const buyer = await Buyer.findById(bid);
     if (!buyer) throw new HttpError(404, 'User not found');
+    if (await BlockService.isBlockedEitherWay(vendorId, bid)) {
+      throw new HttpError(403, 'You cannot message this user');
+    }
     if (!consumeToken(`msg:v:${vendorId}`)) {
       throw new HttpError(429, 'You are doing that too quickly — slow down');
     }

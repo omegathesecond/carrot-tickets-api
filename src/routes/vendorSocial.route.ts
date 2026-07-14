@@ -15,5 +15,7 @@ router.get('/me/followers', authenticateTickets, VendorSocialController.follower
 router.get('/users/search', authenticateTickets, VendorSocialController.searchUsers);
 router.get('/notifications', authenticateTickets, VendorSocialController.notifications);
 router.post('/notifications/read', authenticateTickets, VendorSocialController.markNotificationsRead);
+router.post('/block', authenticateTickets, VendorSocialController.blockUser);
+router.delete('/block/:userId', authenticateTickets, VendorSocialController.unblockUser);
 
 export default router;

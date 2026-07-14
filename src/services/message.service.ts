@@ -209,9 +209,17 @@ export class MessageService {
   ): Promise<MessageView> {
     const thread = await DmThreadService.requireDmAccess(threadId, actor);
 
-    // Suspension + block gates apply to buyer senders (a brand isn't suspended
-    // or blockable through this path). Buyer↔buyer blocks are re-checked at
-    // send time — "server-refused DMs" must hold even for pre-block threads.
+    // Brand↔buyer block (either direction), re-checked at send time.
+    if (thread.vendorParticipantId) {
+      const otherId = actor.type === 'buyer' ? String(thread.vendorParticipantId) : String(thread.participants[0] ?? '');
+      if (otherId && (await BlockService.isBlockedEitherWay(actor.id, otherId))) {
+        throw new HttpError(403, 'You cannot message this user');
+      }
+    }
+
+    // Suspension + buyer↔buyer block gates apply to buyer senders (a brand
+    // isn't suspended). Buyer↔buyer blocks are re-checked at send time —
+    // "server-refused DMs" must hold even for pre-block threads.
     if (actor.type === 'buyer') {
       const sender = await Buyer.findById(actor.id);
       if (!sender) throw new HttpError(404, 'Account not found');
