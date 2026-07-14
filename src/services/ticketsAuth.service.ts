@@ -197,13 +197,14 @@ export class TicketsAuthService {
       await subUser.save();
 
       // Generate tokens for sub-user
+      const subUserPerms = scopePermissionsToType(ticketsAccess.permissions as any, vendorForSubUser.operatorType);
       const payload = {
         userId: subUser._id.toString(),
         vendorId: subUser.vendorId.toString(),
         userType: 'sub-user',
         app: 'tickets',
         role: ticketsAccess.role,
-        permissions: ticketsAccess.permissions
+        permissions: subUserPerms
       };
       const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
       const refreshToken = this.generateRefreshToken();
@@ -222,7 +223,8 @@ export class TicketsAuthService {
           phoneNumber: subUser.phoneNumber,
           userType: 'sub-user',
           role: ticketsAccess.role,
-          permissions: ticketsAccess.permissions
+          permissions: subUserPerms,
+          operatorType: vendorForSubUser.operatorType
         }
       };
     }
@@ -367,6 +369,9 @@ export class TicketsAuthService {
         throw new Error('Keshless Tickets access not found');
       }
 
+      const vendorForSubUser = await Vendor.findById(subUser.vendorId);
+      const subType = vendorForSubUser?.operatorType ?? OperatorType.EVENTS;
+
       return {
         _id: subUser._id,
         vendorId: subUser.vendorId,
@@ -375,7 +380,8 @@ export class TicketsAuthService {
         phoneNumber: subUser.phoneNumber,
         userType: 'sub-user',
         role: ticketsAccess.role,
-        permissions: ticketsAccess.permissions
+        permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType),
+        operatorType: subType
       };
     }
   }
@@ -606,13 +612,16 @@ export class TicketsAuthService {
         throw new Error('Keshless Tickets access not found');
       }
 
+      const vendorForSubUser = await Vendor.findById(subUser.vendorId);
+      const subType = vendorForSubUser?.operatorType ?? OperatorType.EVENTS;
+
       payload = {
         userId: subUser._id.toString(),
         vendorId: subUser.vendorId.toString(),
         userType: 'sub-user',
         app: 'tickets',
         role: ticketsAccess.role,
-        permissions: ticketsAccess.permissions
+        permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType)
       };
     }
 
