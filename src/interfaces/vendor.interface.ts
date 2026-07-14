@@ -7,6 +7,12 @@ export enum VerificationStatus {
   SUSPENDED = 'suspended'
 }
 
+export enum OperatorType {
+  EVENTS = 'events',
+  TRANSPORT = 'transport',
+  BOTH = 'both',
+}
+
 export interface IVendor extends Document {
   _id: Types.ObjectId;
 
@@ -19,6 +25,7 @@ export interface IVendor extends Document {
   businessName: string;
   slug: string;
   businessType?: string;
+  operatorType: OperatorType;
   primaryContact?: string;
   logoUrl?: string;
   bio?: string;

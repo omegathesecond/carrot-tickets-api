@@ -7,6 +7,8 @@ import { TicketSale } from '@models/ticketSale.model';
 import { PaymentStatus } from '@interfaces/ticket.interface';
 import { VerificationStatus } from '@interfaces/vendor.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { createOrganizerSchema } from '@validators/tickets.validator';
+import { TicketsAuthService } from '@services/ticketsAuth.service';
 
 const verificationSchema = Joi.object({
   status: Joi.string()
@@ -116,6 +118,30 @@ export class AdminOrganizersController {
     } catch (error: any) {
       console.error('List organizers error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to load organizers', 500);
+    }
+  }
+
+  /**
+   * POST /api/tickets/admin/organizers — super-admin creates a (verified) operator.
+   * The only path that can set operatorType to transport/both — self-signup
+   * (TicketsAuthService.register) always lands events-only and PENDING.
+   */
+  static async createOrganizer(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = createOrganizerSchema.validate(req.body);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const vendor = await TicketsAuthService.adminCreateOperator(value);
+      return ApiResponseUtil.success(res, {
+        id: String(vendor._id),
+        businessName: vendor.businessName,
+        operatorType: vendor.operatorType,
+        email: vendor.email ?? null,
+        phoneNumber: vendor.phoneNumber ?? null,
+        verificationStatus: vendor.verificationStatus,
+      }, 'Operator created', 201);
+    } catch (error: any) {
+      console.error('Create organizer error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to create operator', 400);
     }
   }
 

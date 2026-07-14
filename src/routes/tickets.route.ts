@@ -68,6 +68,7 @@ router.get(
  * dashboard "Organizers" tab. Super-admin only.
  */
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
+router.post('/admin/organizers', requireSuperAdmin, AdminOrganizersController.createOrganizer);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
 
 /**
