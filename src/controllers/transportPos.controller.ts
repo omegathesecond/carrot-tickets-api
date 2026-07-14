@@ -3,7 +3,10 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TripService } from '@services/transport/trip.service';
 import { BookingService } from '@services/transport/booking.service';
-import { listTripsQuerySchema, sellSeatSchema, boardSchema } from '@validators/transportPos.validator';
+import {
+  listTripsQuerySchema, sellSeatSchema, boardSchema,
+  initiateMomoBookingSchema, initiateCardBookingSchema,
+} from '@validators/transportPos.validator';
 
 function reseller(req: Request): { operatorId: string; resellerId: string; hubId?: string } | undefined {
   return (req as any).reseller;
@@ -57,5 +60,61 @@ export class TransportPosController {
       const result = await BookingService.board({ qrCode: value.qrCode, tripId: value.tripId, scannedBy: r.operatorId, scannedByType: 'ResellerOperator' });
       return ApiResponseUtil.success(res, result, 'Scan recorded');
     } catch (e) { return failWithHttpError(res, e, 'Failed to record boarding scan'); }
+  }
+
+  static async sellMomo(req: Request, res: Response): Promise<any> {
+    try {
+      const r = reseller(req);
+      if (!r) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      const { error, value } = initiateMomoBookingSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+
+      // Reseller lookup + suspension guard + commission resolution live in
+      // BookingService.initiateMomoBooking (mirrors sellSeat's convention).
+      const { referenceId, saleId, expiresAt } = await BookingService.initiateMomoBooking({
+        ...value,
+        soldBy: r.operatorId,
+        soldByType: 'reseller-operator',
+        resellerId: r.resellerId,
+        hubId: r.hubId,
+      });
+      return ApiResponseUtil.created(res, { referenceId, saleId, expiresAt }, 'MoMo booking initiated');
+    } catch (e) { return failWithHttpError(res, e, 'Failed to initiate MoMo booking'); }
+  }
+
+  static async sellCard(req: Request, res: Response): Promise<any> {
+    try {
+      const r = reseller(req);
+      if (!r) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      const { error, value } = initiateCardBookingSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+
+      const { paymentId, redirectUrl, saleId, expiresAt } = await BookingService.initiateCardBooking({
+        ...value,
+        soldBy: r.operatorId,
+        soldByType: 'reseller-operator',
+        resellerId: r.resellerId,
+        hubId: r.hubId,
+      });
+      return ApiResponseUtil.created(res, { paymentId, redirectUrl, saleId, expiresAt }, 'Card booking initiated');
+    } catch (e) { return failWithHttpError(res, e, 'Failed to initiate card booking'); }
+  }
+
+  static async momoStatus(req: Request, res: Response): Promise<any> {
+    try {
+      if (!reseller(req)) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      // Poll = re-run finalize (idempotent + pending-safe), matching how the
+      // events SPA polls via finalize.
+      const result = await BookingService.finalizeMomoBooking(String(req.params['referenceId']));
+      return ApiResponseUtil.success(res, result);
+    } catch (e) { return failWithHttpError(res, e, 'Failed to check MoMo booking status'); }
+  }
+
+  static async cardStatus(req: Request, res: Response): Promise<any> {
+    try {
+      if (!reseller(req)) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      const result = await BookingService.finalizeCardBooking(String(req.params['paymentId']));
+      return ApiResponseUtil.success(res, result);
+    } catch (e) { return failWithHttpError(res, e, 'Failed to check card booking status'); }
   }
 }

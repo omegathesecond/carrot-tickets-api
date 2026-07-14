@@ -23,3 +23,18 @@ export const boardSchema = Joi.object({
   qrCode: Joi.string().trim().required(),
   tripId: Joi.string().regex(HEX24).required(),
 });
+
+export const initiateMomoBookingSchema = Joi.object({
+  tripId: Joi.string().regex(HEX24).required(),
+  seatNumber: Joi.string().trim().optional(),
+  passengerName: Joi.string().trim().max(100).required(),
+  passengerPhone: Joi.string().trim().max(20).required(),
+  momoPhone: Joi.string().trim().max(20).required(),
+});
+
+export const initiateCardBookingSchema = Joi.object({
+  tripId: Joi.string().regex(HEX24).required(),
+  seatNumber: Joi.string().trim().optional(),
+  passengerName: Joi.string().trim().max(100).required(),
+  passengerPhone: Joi.string().trim().max(20).required(),
+});
