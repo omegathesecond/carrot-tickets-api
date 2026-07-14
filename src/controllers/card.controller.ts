@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import { PeachClient } from '@services/payments/peach.client';
 import { TicketService } from '@services/ticket.service';
+import { BookingService } from '@services/transport/booking.service';
+
+/** True when `e` is the ticket finalizer's "not a ticket sale" miss — the
+ * signal to fall through to the bus-booking finalizer instead. */
+function isNotFoundError(e: unknown): boolean {
+  return /not found/i.test(e instanceof Error ? e.message : String(e));
+}
 
 export class CardController {
   /**
@@ -38,7 +45,24 @@ export class CardController {
       }
 
       if (paymentId) {
-        await TicketService.finalizeCardSale(paymentId);
+        try {
+          await TicketService.finalizeCardSale(paymentId);
+        } catch (e) {
+          // Not a ticket sale — try the bus-booking finalizer before giving up.
+          // Both finalizers are idempotent, so a retried webhook double-invoking
+          // is safe. Swallow+log here (own try/catch) rather than letting it
+          // reach the outer catch, since a genuinely-unknown paymentId will
+          // throw "not found" again and must not be logged as an unexpected error.
+          if (isNotFoundError(e)) {
+            try {
+              await BookingService.finalizeCardBooking(paymentId);
+            } catch (be) {
+              console.error('[card webhook] booking finalize', be);
+            }
+          } else {
+            throw e;
+          }
+        }
       }
     } catch (e) {
       console.error('[card webhook]', e);
@@ -70,7 +94,18 @@ export class CardController {
       try {
         ({ status } = await TicketService.finalizeCardSale(paymentId));
       } catch (e) {
-        console.error('[card return] finalize', e); // best-effort; polling on the page is the backstop
+        // Not a ticket sale — try the bus-booking finalizer before giving up
+        // (idempotent, same as the webhook fall-through). Its returned status
+        // (if any) is what gets threaded into the redirect's &status= param.
+        if (isNotFoundError(e)) {
+          try {
+            ({ status } = await BookingService.finalizeCardBooking(paymentId));
+          } catch (be) {
+            console.error('[card return] booking finalize', be); // best-effort; polling on the page is the backstop
+          }
+        } else {
+          console.error('[card return] finalize', e); // best-effort; polling on the page is the backstop
+        }
       }
       // Pass the server-side outcome so the SPA can show the result WITHOUT
       // depending on the buyer being signed in on this device (3DS can return
