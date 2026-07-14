@@ -11,6 +11,11 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   mention: 'mentions',
   friend: 'social',
   event_reminder: 'reminders',
+  // Vendor follow notifications bypass this buyer dispatcher entirely (written
+  // directly via NotificationService.create — see SP1b-c Task 2); 'social' is
+  // the closest existing pref bucket, kept only for Record<NotificationType,…>
+  // exhaustiveness.
+  follow: 'social',
 };
 
 const CHUNK = 50;
@@ -52,7 +57,7 @@ export class NotificationDispatcher {
           try {
             if (buyer.notificationPrefs?.[prefKey] === false) return; // toggled off — no inbox, no push
             const id = String(buyer._id);
-            await NotificationService.create(id, type, title, body, data);
+            await NotificationService.create('buyer', id, type, title, body, data);
             if (!(await isBuyerOnline(id))) {
               await PushService.sendToBuyer(id, { title, body, data: { ...data, type } });
             }

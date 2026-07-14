@@ -20,9 +20,9 @@ describe('notification inbox', () => {
   it('lists newest first with unreadCount; marks selected and all read', async () => {
     const { buyer, auth } = await seed();
     // non-null: this path never hits the event_reminder dedupe branch, so create() always returns a doc here.
-    const first = (await NotificationService.create(String(buyer._id), 'dm', 'Alpha', 'sent you a message', { threadId: 'x' }))!;
-    await NotificationService.create(String(buyer._id), 'friend', 'Beta', 'you are now friends', { buyerId: 'y' });
-    await NotificationService.create(String(buyer._id), 'announcement', 'Gates', 'open 18:00', { eventId: 'z' });
+    const first = (await NotificationService.create('buyer', String(buyer._id), 'dm', 'Alpha', 'sent you a message', { threadId: 'x' }))!;
+    await NotificationService.create('buyer', String(buyer._id), 'friend', 'Beta', 'you are now friends', { buyerId: 'y' });
+    await NotificationService.create('buyer', String(buyer._id), 'announcement', 'Gates', 'open 18:00', { eventId: 'z' });
 
     let res = await request(app).get('/api/social/notifications').set('Authorization', auth).expect(200);
     expect(res.body.data.items).toHaveLength(3);
@@ -44,10 +44,10 @@ describe('notification inbox', () => {
   it('cursor pagination + isolation between buyers + auth required', async () => {
     const { buyer, auth } = await seed();
     for (let i = 0; i < 3; i++) {
-      await NotificationService.create(String(buyer._id), 'dm', `T${i}`, 'b', {});
+      await NotificationService.create('buyer', String(buyer._id), 'dm', `T${i}`, 'b', {});
     }
     const other = await Buyer.create({ phone: '+26878000042', password: 'secret1' });
-    await NotificationService.create(String(other._id), 'dm', 'not-yours', 'b', {});
+    await NotificationService.create('buyer', String(other._id), 'dm', 'not-yours', 'b', {});
 
     const page1 = await request(app).get('/api/social/notifications?limit=2').set('Authorization', auth).expect(200);
     expect(page1.body.data.items).toHaveLength(2);
@@ -61,15 +61,15 @@ describe('notification inbox', () => {
     await request(app).get('/api/social/notifications').expect(401);
 
     // marking the other buyer's notification must be a no-op for me
-    const theirs = await NotificationService.list(other as any, {});
+    const theirs = await NotificationService.list('buyer', String(other._id), {});
     await request(app).post('/api/social/notifications/read').set('Authorization', auth)
       .send({ ids: [theirs.items[0]!.id] }).expect(200);
-    expect((await NotificationService.list(other as any, {})).unreadCount).toBe(1);
+    expect((await NotificationService.list('buyer', String(other._id), {})).unreadCount).toBe(1);
   });
 
   it('empty ids array is a no-op; malformed ids are 400', async () => {
     const { buyer, auth } = await seed();
-    await NotificationService.create(String(buyer._id), 'dm', 'T', 'b', {});
+    await NotificationService.create('buyer', String(buyer._id), 'dm', 'T', 'b', {});
 
     await request(app).post('/api/social/notifications/read').set('Authorization', auth)
       .send({ ids: [] }).expect(200);

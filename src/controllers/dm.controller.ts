@@ -29,7 +29,7 @@ export class DmController {
       const { error, value } = createThreadSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
       const thread = await DmThreadService.openThread(buyer, value.participantIds);
-      const view = await DmThreadService.buildThreadView(thread, buyer);
+      const view = await DmThreadService.buildThreadView(thread, { type: 'buyer', id: String(buyer._id) });
       return ApiResponseUtil.success(res, view, 'Conversation ready', 201);
     } catch (error: any) {
       return DmController.fail(res, error, 'Failed to open conversation');
@@ -41,7 +41,7 @@ export class DmController {
     try {
       const buyer = await DmController.requireBuyer(req, res);
       if (!buyer) return;
-      return ApiResponseUtil.success(res, await DmThreadService.listThreads(buyer));
+      return ApiResponseUtil.success(res, await DmThreadService.listThreads({ type: 'buyer', id: String(buyer._id) }));
     } catch (error: any) {
       return DmController.fail(res, error, 'Failed to load conversations');
     }
@@ -56,7 +56,7 @@ export class DmController {
       const params = parseMessageCursorParams(req, res);
       if (!params) return;
 
-      const messages = await MessageService.listDmMessages(req.params['threadId'] as string, buyer, params);
+      const messages = await MessageService.listDmMessages(req.params['threadId'] as string, { type: 'buyer', id: String(buyer._id) }, params);
       return ApiResponseUtil.success(res, messages);
     } catch (error: any) {
       return DmController.fail(res, error, 'Failed to load messages');
@@ -70,7 +70,7 @@ export class DmController {
       if (!buyer) return;
       const { error, value } = sendMessageSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
-      const view = await MessageService.sendDmMessage(req.params['threadId'] as string, buyer, value);
+      const view = await MessageService.sendDmMessage(req.params['threadId'] as string, { type: 'buyer', id: String(buyer._id) }, value);
       return ApiResponseUtil.success(res, view, 'Message sent', 201);
     } catch (error: any) {
       return DmController.fail(res, error, 'Failed to send message');
@@ -82,7 +82,7 @@ export class DmController {
     try {
       const buyer = await DmController.requireBuyer(req, res);
       if (!buyer) return;
-      await MessageService.markDmRead(req.params['threadId'] as string, buyer);
+      await MessageService.markDmRead(req.params['threadId'] as string, { type: 'buyer', id: String(buyer._id) });
       return ApiResponseUtil.success(res, { read: true }, 'Conversation marked read');
     } catch (error: any) {
       return DmController.fail(res, error, 'Failed to mark read');

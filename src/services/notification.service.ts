@@ -1,5 +1,4 @@
-import { Notification, INotification, NotificationType } from '@models/notification.model';
-import { IBuyer } from '@models/buyer.model';
+import { Notification, INotification, NotificationType, NotificationRecipientType } from '@models/notification.model';
 
 export interface NotificationView {
   id: string;
@@ -13,6 +12,7 @@ export interface NotificationView {
 
 export class NotificationService {
   static async create(
+    recipientType: NotificationRecipientType,
     recipientId: string,
     type: NotificationType,
     title: string,
@@ -20,7 +20,7 @@ export class NotificationService {
     data: Record<string, unknown>
   ): Promise<INotification | null> {
     try {
-      return await Notification.create({ recipientId, type, title, body, data });
+      return await Notification.create({ recipientType, recipientId, type, title, body, data });
     } catch (err: any) {
       // Concurrent reminder sweeps race the dedupe read; the partial unique
       // index makes the second insert a no-op instead of a duplicate row.
@@ -30,16 +30,17 @@ export class NotificationService {
   }
 
   static async list(
-    buyer: IBuyer,
+    recipientType: NotificationRecipientType,
+    recipientId: string,
     opts: { before?: string; limit?: number } = {}
   ): Promise<{ items: NotificationView[]; unreadCount: number }> {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 50);
-    const query: Record<string, unknown> = { recipientId: buyer._id };
+    const query: Record<string, unknown> = { recipientType, recipientId };
     if (opts.before) query['_id'] = { $lt: opts.before };
 
     const [docs, unreadCount] = await Promise.all([
       Notification.find(query).sort({ _id: -1 }).limit(limit),
-      Notification.countDocuments({ recipientId: buyer._id, readAt: { $exists: false } }, { limit: 99 }),
+      Notification.countDocuments({ recipientType, recipientId, readAt: { $exists: false } }, { limit: 99 }),
     ]);
 
     return {
@@ -56,11 +57,11 @@ export class NotificationService {
     };
   }
 
-  /** ids omitted → mark ALL of the buyer's notifications read; an EMPTY ids
+  /** ids omitted → mark ALL of the recipient's notifications read; an EMPTY ids
    *  array is a no-op (an empty selection must never wipe the inbox).
-   *  Scoped to the buyer so foreign ids are silently no-ops. */
-  static async markRead(buyer: IBuyer, ids?: string[]): Promise<void> {
-    const query: Record<string, unknown> = { recipientId: buyer._id, readAt: { $exists: false } };
+   *  Scoped to the recipient so foreign ids are silently no-ops. */
+  static async markRead(recipientType: NotificationRecipientType, recipientId: string, ids?: string[]): Promise<void> {
+    const query: Record<string, unknown> = { recipientType, recipientId, readAt: { $exists: false } };
     if (ids !== undefined) {
       if (ids.length === 0) return;
       query['_id'] = { $in: ids };

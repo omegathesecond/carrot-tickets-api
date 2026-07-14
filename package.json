@@ -11,6 +11,7 @@
     "seed:test": "ts-node -r tsconfig-paths/register src/scripts/seedTestData.ts",
     "seed:sales": "ts-node -r tsconfig-paths/register src/scripts/seedSalesData.ts",
     "backfill:communities": "ts-node -r tsconfig-paths/register src/scripts/backfillCommunities.ts",
+    "backfill:social-actor-types": "ts-node -r tsconfig-paths/register src/scripts/backfillSocialActorTypes.ts",
     "deploy:realtime": "bash scripts/deploy-realtime.sh",
     "test:models": "ts-node -r tsconfig-paths/register src/scripts/testModels.ts",
     "test:payment": "ts-node -r tsconfig-paths/register src/scripts/testPaymentService.ts",

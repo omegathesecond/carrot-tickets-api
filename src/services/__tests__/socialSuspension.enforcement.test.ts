@@ -54,7 +54,7 @@ describe('platform social suspension — enforcement', () => {
       });
 
       await expect(
-        MessageService.sendDmMessage(String(thread._id), buyer, { body: 'hi' })
+        MessageService.sendDmMessage(String(thread._id), { type: 'buyer', id: String(buyer._id) }, { body: 'hi' })
       ).rejects.toMatchObject({ statusCode: 403, message: SUSPENDED });
     });
 

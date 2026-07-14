@@ -102,13 +102,35 @@ describe('feed.service getFeed', () => {
     });
 
     // Without a follow, the following tab must NOT surface the organizer's update.
-    const before = await getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 });
+    const before = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
     expect(before.items.some((i) => i.id === String(orgUpdate._id))).toBe(false);
 
     await Follow.create({ followerId: buyer._id, targetType: 'organizer', targetId: vendor._id });
 
-    const after = await getFeed({ tab: 'following', buyerId: String(buyer._id), limit: 8 });
+    const after = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
     const slide = after.items.find((i) => i.id === String(orgUpdate._id));
+    expect(slide).toBeDefined();
+    expect(slide!.type).toBe('update');
+  });
+
+  it('following tab scopes follow edges by the vendor actor\'s followerType', async () => {
+    const viewerVendor = await Vendor.create({ businessName: 'Viewer Vendor', password: 'secret123', slug: 'viewer-vendor' });
+    const followedOrg = await Vendor.create({ businessName: 'Followed Org For Vendor', password: 'secret123', slug: 'followed-org-for-vendor' });
+
+    const orgUpdate = await Update.create({
+      authorType: 'vendor', authorId: followedOrg._id, kind: 'image', caption: 'org update for vendor actor',
+      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+    });
+
+    // A buyer-typed edge that happens to reuse the viewer vendor's id value must NOT
+    // leak into the vendor's following tab — the query must filter by followerType.
+    await Follow.create({ followerType: 'buyer', followerId: viewerVendor._id, targetType: 'organizer', targetId: followedOrg._id });
+    const withOnlyBuyerEdge = await getFeed({ tab: 'following', actor: { type: 'vendor', id: String(viewerVendor._id) }, limit: 8 });
+    expect(withOnlyBuyerEdge.items.some((i) => i.id === String(orgUpdate._id))).toBe(false);
+
+    await Follow.create({ followerType: 'vendor', followerId: viewerVendor._id, targetType: 'organizer', targetId: followedOrg._id });
+    const withVendorEdge = await getFeed({ tab: 'following', actor: { type: 'vendor', id: String(viewerVendor._id) }, limit: 8 });
+    const slide = withVendorEdge.items.find((i) => i.id === String(orgUpdate._id));
     expect(slide).toBeDefined();
     expect(slide!.type).toBe('update');
   });

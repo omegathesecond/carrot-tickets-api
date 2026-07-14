@@ -134,11 +134,11 @@ describe('DmThreadService', () => {
     await shareCommunity(a, b);
     const t = await DmThreadService.openThread(a, [String(b._id)]);
 
-    await expect(DmThreadService.requireDmAccess(String(t._id), b)).resolves.toBeDefined();
-    await expect(DmThreadService.requireDmAccess(String(t._id), c)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(DmThreadService.requireDmAccess(String(t._id), { type: 'buyer', id: String(b._id) })).resolves.toBeDefined();
+    await expect(DmThreadService.requireDmAccess(String(t._id), { type: 'buyer', id: String(c._id) })).rejects.toMatchObject({ statusCode: 404 });
     await expect(
-      DmThreadService.requireDmAccess(String(new mongoose.Types.ObjectId()), a)
+      DmThreadService.requireDmAccess(String(new mongoose.Types.ObjectId()), { type: 'buyer', id: String(a._id) })
     ).rejects.toMatchObject({ statusCode: 404 });
-    await expect(DmThreadService.requireDmAccess('garbage', a)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(DmThreadService.requireDmAccess('garbage', { type: 'buyer', id: String(a._id) })).rejects.toMatchObject({ statusCode: 404 });
   });
 });

@@ -6,13 +6,14 @@ import { Follow } from '@models/follow.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import type { SocialActor } from '@utils/socialActor.util';
 
 export type FeedSlide =
   | { type: 'update'; id: string; sortAt: string; [k: string]: any }
   | { type: 'event'; id: string; sortAt: string; [k: string]: any }
   | { type: 'activity'; id: string; sortAt: string; [k: string]: any };
 
-interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; buyerId?: string; limit?: number; }
+interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; actor?: SocialActor; limit?: number; }
 interface Cursor { u?: string; e?: number; a?: string; }
 
 function decode(cursor?: string): Cursor { if (!cursor) return {}; try { return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { return {}; } }
@@ -29,8 +30,8 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   // resolve follow sets for personalization/following
   let followedAuthorIds: any[] = [];
   let followedOrgIds: any[] = [];
-  if (opts.buyerId && opts.tab === 'following') {
-    const follows = await Follow.find({ followerId: opts.buyerId }).lean();
+  if (opts.actor && opts.tab === 'following') {
+    const follows = await Follow.find({ followerType: opts.actor.type === 'vendor' ? 'vendor' : 'buyer', followerId: opts.actor.id }).lean();
     followedAuthorIds = follows.filter((f) => f.targetType === 'buyer').map((f) => f.targetId);
     followedOrgIds = follows.filter((f) => f.targetType === 'organizer').map((f) => f.targetId);
   }

@@ -1,10 +1,13 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type NotificationType = 'announcement' | 'dm' | 'mention' | 'friend' | 'event_reminder';
+export type NotificationType = 'announcement' | 'dm' | 'mention' | 'friend' | 'event_reminder' | 'follow';
+
+export type NotificationRecipientType = 'buyer' | 'vendor';
 
 /** One in-app inbox entry. Every push the platform sends is mirrored here
  *  first (spec §6) — the inbox row is the durable record, push is delivery. */
 export interface INotification extends Document {
+  recipientType: NotificationRecipientType;
   recipientId: Types.ObjectId;
   type: NotificationType;
   title: string;
@@ -17,10 +20,11 @@ export interface INotification extends Document {
 
 const notificationSchema = new Schema<INotification>(
   {
-    recipientId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true },
+    recipientType: { type: String, enum: ['buyer', 'vendor'], required: true, default: 'buyer' },
+    recipientId: { type: Schema.Types.ObjectId, required: true },
     type: {
       type: String,
-      enum: ['announcement', 'dm', 'mention', 'friend', 'event_reminder'],
+      enum: ['announcement', 'dm', 'mention', 'friend', 'event_reminder', 'follow'],
       required: true,
     },
     title: { type: String, required: true, trim: true, maxlength: 120 },
@@ -31,8 +35,21 @@ const notificationSchema = new Schema<INotification>(
   { timestamps: true }
 );
 
-notificationSchema.index({ recipientId: 1, _id: -1 });
-notificationSchema.index({ recipientId: 1, readAt: 1 });
+// DEPLOY (one-time, SP1b-c): existing rows predate `recipientType` (stored as
+// null, since Mongoose's `default: 'buyer'` only applies at insert time and
+// is never applied retroactively to rows already in the collection). These
+// two indexes and NotificationService.list/markRead query by `recipientType`,
+// so the backfill MUST run BEFORE this code is deployed — not just before
+// dropping the legacy indexes — or pre-migration buyers will see an empty
+// inbox (their rows are keyed null, not 'buyer'). Run:
+// `npm run backfill:social-actor-types`
+// (src/scripts/backfillSocialActorTypes.ts). It is additive/idempotent and
+// safe to run against the old code too.
+// Only AFTER the backfill may the legacy indexes be dropped (optional, hygiene):
+//   db.notifications.dropIndex('recipientId_1__id_-1')
+//   db.notifications.dropIndex('recipientId_1_readAt_1')
+notificationSchema.index({ recipientType: 1, recipientId: 1, _id: -1 });
+notificationSchema.index({ recipientType: 1, recipientId: 1, readAt: 1 });
 
 // Reminder dedupe: one (event, kind) reminder per recipient, enforced at the
 // DB so concurrent sweeps (multi-instance API) can never double-dispatch.
