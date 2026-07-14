@@ -175,10 +175,40 @@ describe('TransportPosController status polls are scoped to the owning reseller'
     await TransportPosController.momoStatus(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: { status: 'completed' } }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        status: 'completed',
+        booking: expect.objectContaining({ qrCode: expect.any(String), seatNumber: '1' }),
+      }),
+    }));
 
     const sale = await BookingSale.findOne({ momoReferenceId: initiated.referenceId });
     expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+  });
+
+  it('MoMo: a pending poll returns just {status} with no booking', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'REF-ISO-2B' });
+    const { trip } = await seedTrip();
+    const resellerA = await Reseller.create({ businessName: 'Reseller A2B', status: 'active', isActive: true });
+
+    const initiated = await BookingService.initiateMomoBooking({
+      tripId: trip._id.toString(), seatNumber: '1', passengerName: 'Passenger', passengerPhone: '76707421',
+      momoPhone: '76707421', soldBy: resellerA._id.toString(), soldByType: 'reseller-operator',
+      resellerId: resellerA._id.toString(),
+    });
+
+    momo.getStatus.mockResolvedValue({ status: 'PENDING', raw: {} });
+
+    const { req, res } = fakeReqRes(
+      { referenceId: initiated.referenceId },
+      { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: resellerA._id.toString() },
+    );
+    await TransportPosController.momoStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: { status: 'pending' } }));
   });
 
   it('Card: a different reseller polling another reseller\'s paymentId gets 404 and finalize never runs', async () => {
@@ -231,9 +261,38 @@ describe('TransportPosController status polls are scoped to the owning reseller'
     await TransportPosController.cardStatus(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: { status: 'completed' } }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        status: 'completed',
+        booking: expect.objectContaining({ qrCode: expect.any(String), seatNumber: '1' }),
+      }),
+    }));
 
     const sale = await BookingSale.findOne({ peachPaymentId: initiated.paymentId });
     expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+  });
+
+  it('Card: a pending poll returns just {status} with no booking', async () => {
+    peach.isConfigured.mockReturnValue(true);
+    peach.createPayment.mockResolvedValue({ id: 'PAY-ISO-2B', code: '000.000.000', redirect: { url: 'https://pay.example/PAY-ISO-2B' } });
+    const { trip } = await seedTrip();
+    const resellerA = await Reseller.create({ businessName: 'Reseller A4B', status: 'active', isActive: true });
+
+    const initiated = await BookingService.initiateCardBooking({
+      tripId: trip._id.toString(), seatNumber: '1', passengerName: 'Passenger', passengerPhone: '76707421',
+      soldBy: resellerA._id.toString(), soldByType: 'reseller-operator', resellerId: resellerA._id.toString(),
+    });
+
+    peach.getPaymentStatus.mockResolvedValue({ code: '000.200.000', amount: '35', currency: 'ZAR' });
+
+    const { req, res } = fakeReqRes(
+      { paymentId: initiated.paymentId },
+      { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: resellerA._id.toString() },
+    );
+    await TransportPosController.cardStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: { status: 'pending' } }));
   });
 });

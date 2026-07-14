@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TripService } from '@services/transport/trip.service';
 import { BookingService } from '@services/transport/booking.service';
+import { Booking } from '@models/transport/booking.model';
 import {
   listTripsQuerySchema, sellSeatSchema, boardSchema,
   initiateMomoBookingSchema, initiateCardBookingSchema,
@@ -118,6 +119,11 @@ export class TransportPosController {
       // Poll = re-run finalize (idempotent + pending-safe), matching how the
       // events SPA polls via finalize.
       const result = await BookingService.finalizeMomoBooking(referenceId);
+      if (result.status === 'completed') {
+        // Confirmed — hand the POS the booking so it can print the ticket.
+        const booking = await Booking.findById(sale.bookingIds[0]).select('bookingRef qrCode seatNumber passengerName passengerPhone fareAmount totalAmount');
+        return ApiResponseUtil.success(res, { ...result, booking });
+      }
       return ApiResponseUtil.success(res, result);
     } catch (e) { return failWithHttpError(res, e, 'Failed to check MoMo booking status'); }
   }
@@ -135,6 +141,11 @@ export class TransportPosController {
       }
 
       const result = await BookingService.finalizeCardBooking(paymentId);
+      if (result.status === 'completed') {
+        // Confirmed — hand the POS the booking so it can print the ticket.
+        const booking = await Booking.findById(sale.bookingIds[0]).select('bookingRef qrCode seatNumber passengerName passengerPhone fareAmount totalAmount');
+        return ApiResponseUtil.success(res, { ...result, booking });
+      }
       return ApiResponseUtil.success(res, result);
     } catch (e) { return failWithHttpError(res, e, 'Failed to check card booking status'); }
   }
