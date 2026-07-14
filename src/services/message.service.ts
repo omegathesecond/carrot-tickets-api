@@ -224,7 +224,10 @@ export class MessageService {
       }
     }
 
-    if (!consumeToken(`msg:${actor.type}:${actor.id}`)) {
+    // Preserve the buyer's shared open-thread/send budget (`msg:<buyerId>`);
+    // a brand shares its own budget with openVendorThread (`msg:v:<vendorId>`).
+    const rateKey = actor.type === 'buyer' ? `msg:${actor.id}` : `msg:v:${actor.id}`;
+    if (!consumeToken(rateKey)) {
       throw new HttpError(429, 'You are sending messages too quickly — slow down');
     }
 
