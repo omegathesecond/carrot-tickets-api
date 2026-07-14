@@ -21,7 +21,7 @@ export function registerDmHandlers(io: Server, socket: Socket): void {
       const threadId = String(payload?.threadId || '');
       const buyer = await Buyer.findById(socket.data.buyerId);
       if (!buyer) throw new HttpError(401, 'Account not found');
-      await DmThreadService.requireDmAccess(threadId, buyer); // 404s hide existence
+      await DmThreadService.requireDmAccess(threadId, { type: 'buyer', id: String(buyer._id) }); // 404s hide existence
       await socket.join(dmRoom(threadId));
       ack?.({ ok: true });
     } catch (err: any) {

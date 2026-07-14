@@ -95,7 +95,7 @@ describe('notification triggers', () => {
 
     const thread = await DmThreadService.openThread(sender, [String(friend._id)]);
     resetBuckets();
-    await MessageService.sendDmMessage(String(thread._id), sender, { body: 'psst' });
+    await MessageService.sendDmMessage(String(thread._id), { type: 'buyer', id: String(sender._id) }, { body: 'psst' });
     await flushAsync();
     const dmNote = await Notification.findOne({ recipientId: friend._id, type: 'dm' });
     expect(dmNote).not.toBeNull();

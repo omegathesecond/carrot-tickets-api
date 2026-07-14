@@ -3,6 +3,7 @@ import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { Message, IMessage } from '@models/message.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
@@ -10,9 +11,13 @@ import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
 import { channelRoom, dmRoom } from '@/realtime/rooms';
 import { DmThreadService } from '@services/dmThread.service';
+import { IDmThread } from '@models/dmThread.model';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
+import { NotificationService } from '@services/notification.service';
+import mongoose from 'mongoose';
+import type { SocialActor } from '@utils/socialActor.util';
 
 export interface MessageView {
   id: string;
@@ -140,10 +145,10 @@ export class MessageService {
 
   static async listDmMessages(
     threadId: string,
-    buyer: IBuyer,
+    actor: SocialActor,
     opts: { before?: string; after?: string; limit?: number } = {}
   ): Promise<MessageView[]> {
-    const thread = await DmThreadService.requireDmAccess(threadId, buyer);
+    const thread = await DmThreadService.requireDmAccess(threadId, actor);
     return MessageService.listWithCursor({ dmThreadId: thread._id }, opts);
   }
 
@@ -199,33 +204,40 @@ export class MessageService {
 
   static async sendDmMessage(
     threadId: string,
-    buyer: IBuyer,
+    actor: SocialActor,
     input: { body: string; replyTo?: string }
   ): Promise<MessageView> {
-    assertNotSuspended(buyer);
-    const thread = await DmThreadService.requireDmAccess(threadId, buyer);
+    const thread = await DmThreadService.requireDmAccess(threadId, actor);
 
-    // Blocks are re-checked at send time for 1:1 threads — "server-refused
-    // DMs" (spec §5.3) must hold even for threads opened before the block.
-    if (!thread.isGroup) {
-      const other = thread.participants.find((p) => String(p) !== String(buyer._id));
-      if (other && (await BlockService.isBlockedEitherWay(String(buyer._id), String(other)))) {
-        throw new HttpError(403, 'You cannot message this user');
+    // Suspension + block gates apply to buyer senders (a brand isn't suspended
+    // or blockable through this path). Buyer↔buyer blocks are re-checked at
+    // send time — "server-refused DMs" must hold even for pre-block threads.
+    if (actor.type === 'buyer') {
+      const sender = await Buyer.findById(actor.id);
+      if (!sender) throw new HttpError(404, 'Account not found');
+      assertNotSuspended(sender);
+      if (!thread.isGroup && !thread.vendorParticipantId) {
+        const other = thread.participants.find((p) => String(p) !== actor.id);
+        if (other && (await BlockService.isBlockedEitherWay(actor.id, String(other)))) {
+          throw new HttpError(403, 'You cannot message this user');
+        }
       }
     }
 
-    if (!consumeToken(`msg:${String(buyer._id)}`)) {
+    if (!consumeToken(`msg:${actor.type}:${actor.id}`)) {
       throw new HttpError(429, 'You are sending messages too quickly — slow down');
     }
 
     const message = await Message.create({
       dmThreadId: thread._id,
-      senderId: buyer._id,
+      ...(actor.type === 'buyer'
+        ? { senderId: new mongoose.Types.ObjectId(actor.id) }
+        : { senderVendorId: new mongoose.Types.ObjectId(actor.id) }),
       body: input.body,
       replyTo: input.replyTo || undefined,
     });
     thread.lastMessageAt = new Date();
-    thread.readState.set(String(buyer._id), new Date());
+    thread.readState.set(actor.id, new Date());
     await thread.save();
 
     await message.populate('senderId', 'username name avatarUrl');
@@ -233,21 +245,41 @@ export class MessageService {
     const view = MessageService.toView(message);
     MessageService.broadcastRoom(dmRoom(String(thread._id)), 'message:new', view);
 
-    const others = thread.participants.map(String).filter((id) => id !== String(buyer._id));
-    NotificationDispatcher.dispatchAsync(
-      others,
-      'dm',
-      buyer.username ?? buyer.name ?? 'New message',
-      MessageService.trunc(input.body),
-      { threadId: String(thread._id), messageId: view.id },
-      String(buyer._id)
-    );
+    await MessageService.notifyDmRecipients(thread, actor, input.body, view.id);
     return view;
   }
 
-  static async markDmRead(threadId: string, buyer: IBuyer): Promise<void> {
-    const thread = await DmThreadService.requireDmAccess(threadId, buyer);
-    thread.readState.set(String(buyer._id), new Date());
+  /** Notify the other party of a new DM: buyers via the dispatcher (inbox +
+   *  push when offline), the brand via a vendor inbox row (no push). */
+  private static async notifyDmRecipients(
+    thread: IDmThread,
+    actor: SocialActor,
+    body: string,
+    messageId: string
+  ): Promise<void> {
+    const preview = MessageService.trunc(body);
+    if (actor.type === 'buyer') {
+      const sender = await Buyer.findById(actor.id).select('username name');
+      const title = sender?.username ?? sender?.name ?? 'New message';
+      const otherBuyers = thread.participants.map(String).filter((id) => id !== actor.id);
+      if (otherBuyers.length) {
+        NotificationDispatcher.dispatchAsync(otherBuyers, 'dm', title, preview, { threadId: String(thread._id), messageId }, actor.id);
+      }
+      if (thread.vendorParticipantId) {
+        await NotificationService.create('vendor', String(thread.vendorParticipantId), 'dm', 'New message', `${title}: ${preview}`, { threadId: String(thread._id), messageId }).catch(() => undefined);
+      }
+    } else {
+      const vendor = await Vendor.findById(actor.id).select('businessName');
+      const buyers = thread.participants.map(String);
+      if (buyers.length) {
+        NotificationDispatcher.dispatchAsync(buyers, 'dm', vendor?.businessName ?? 'A brand', preview, { threadId: String(thread._id), messageId }, actor.id);
+      }
+    }
+  }
+
+  static async markDmRead(threadId: string, actor: SocialActor): Promise<void> {
+    const thread = await DmThreadService.requireDmAccess(threadId, actor);
+    thread.readState.set(actor.id, new Date());
     await thread.save();
   }
 
@@ -279,7 +311,7 @@ export class MessageService {
     }
 
     if (message.dmThreadId) {
-      await DmThreadService.requireDmAccess(String(message.dmThreadId), buyer);
+      await DmThreadService.requireDmAccess(String(message.dmThreadId), { type: 'buyer', id: String(buyer._id) });
       message.deletedAt = new Date();
       await message.save();
       MessageService.broadcastRoom(dmRoom(String(message.dmThreadId)), 'message:deleted', {

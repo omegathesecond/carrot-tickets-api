@@ -81,7 +81,7 @@ describe('dm handlers', () => {
 
     const [live, sent] = await Promise.all([
       waitForEvent<any>(b, 'message:new', 8000),
-      MessageService.sendDmMessage(threadId, a, { body: 'live dm' }),
+      MessageService.sendDmMessage(threadId, { type: 'buyer', id: String(a._id) }, { body: 'live dm' }),
     ]);
     expect(live.id).toBe(sent.id);
     expect(live.dmThreadId).toBe(threadId);
