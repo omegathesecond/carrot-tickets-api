@@ -88,30 +88,30 @@ export const EVENT_PERMISSIONS = [
 
 The three platform-staff permissions (`VIEW_USERS`, `PRINT_WRISTBANDS`, `MODERATE_SOCIAL`) belong to **no** vertical. They are never in a role's set; they are assigned explicitly via `TicketsUserAccess.permissions[]` (or granted implicitly to super-admins by middleware). The mask must never strip them.
 
-### `effectivePermissions` helper
+### `scopePermissionsToType` helper (subtractive)
+
+Owner tokens derive permissions from `TICKETS_ROLE_PERMISSIONS[OWNER]`; **sub-user tokens use the stored `TicketsUserAccess.permissions` array directly** (not role-derived). So the mask is a single **subtractive** function over any base set: strip the *other* vertical's permissions, keep everything else. Because the three platform-staff perms belong to no vertical group, they are never stripped — no separate "union explicit" step needed.
 
 ```ts
-// allowed vertical scope for a type
-function allowedByType(type: OperatorType): Set<TicketsPermission> {
-  const s = new Set(SHARED_PERMISSIONS);
-  if (type === OperatorType.EVENTS || type === OperatorType.BOTH)
-    EVENT_PERMISSIONS.forEach((p) => s.add(p));
-  if (type === OperatorType.TRANSPORT || type === OperatorType.BOTH)
-    TRANSPORT_PERMISSIONS.forEach((p) => s.add(p));
-  return s;
+// The permissions to strip for a given type (the OTHER vertical).
+function disallowedForType(type: OperatorType): Set<TicketsPermission> {
+  if (type === OperatorType.EVENTS) return new Set(TRANSPORT_PERMISSIONS);
+  if (type === OperatorType.TRANSPORT) return new Set(EVENT_PERMISSIONS);
+  return new Set(); // BOTH strips nothing
 }
 
-// role perms scoped to the vertical, PLUS any explicit (staff) grants, unmasked
-export function effectivePermissions(
+/** Scope a base permission set to a vendor's operator type. Removes only the
+ *  opposite vertical's perms; shared + platform-staff perms always survive. */
+export function scopePermissionsToType(
+  permissions: TicketsPermission[],
   type: OperatorType,
-  role: TicketsRole,
-  explicit: TicketsPermission[] = [],
 ): TicketsPermission[] {
-  const allowed = allowedByType(type);
-  const scoped = TICKETS_ROLE_PERMISSIONS[role].filter((p) => allowed.has(p));
-  return Array.from(new Set([...scoped, ...explicit]));
+  const drop = disallowedForType(type);
+  return permissions.filter((p) => !drop.has(p));
 }
 ```
+
+The three vertical groups partition all non-staff permissions (disjoint + exhaustive), so subtractive and intersective forms are equivalent — subtractive is chosen because sub-user permission arrays already mix vertical and staff perms in one field.
 
 Resulting owner grants:
 - `events` → today's owner set **minus** transport perms (unchanged behaviour for every existing vendor).
@@ -120,11 +120,11 @@ Resulting owner grants:
 
 ### Token-build refactor (DRY)
 
-`src/services/ticketsAuth.service.ts` assigns `permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER]` in ~6 places (owner login/register/refresh, etc.) and builds sub-user tokens from `TicketsUserAccess.role` + `.permissions`. Replace every raw assignment with `effectivePermissions(vendor.operatorType, role, explicit)`:
-- **Owner** tokens: `effectivePermissions(vendor.operatorType, OWNER)` (no explicit array).
-- **Sub-user** tokens: `effectivePermissions(vendor.operatorType, access.role, access.permissions)` — the sub-user's role perms are vertically masked by *their vendor's* type, explicit perms unioned on top.
+`src/services/ticketsAuth.service.ts` assigns `permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER]` for owners at **5** sites — `register` (payload + user object), `login` (payload + user object), `getMe` (user object), `refreshAccessToken` (payload) — and assigns sub-user tokens `permissions: ticketsAccess.permissions` at 3 sites (`login`, `getMe`, `refreshAccessToken`). Wrap each with `scopePermissionsToType(base, vendor.operatorType)`:
+- **Owner**: `scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType)`.
+- **Sub-user**: `scopePermissionsToType(ticketsAccess.permissions, vendorForSubUser.operatorType)` — masked by *their vendor's* type; staff perms in the array survive.
 
-Both the access token and any refresh-time rebuild must read `operatorType` off the vendor. Load `operatorType` wherever the vendor is fetched for token building.
+Every site already has the vendor doc in scope (owner) or must load it (the sub-user `login` path already loads `vendorForSubUser`; `getMe`/`refresh` sub-user paths must additionally load the vendor to read `operatorType`). `mintSocialHandoff`/`exchangeSocialHandoff` copy `permissions` verbatim from an already-scoped token, so they need no change.
 
 ## Admin create-operator flow (new)
 
@@ -165,6 +165,16 @@ Apply it in:
 - **Landing / default route:** after login, a `transport` operator lands on `/transport/trips` (not the event-centric `DashboardPage`, which would show empty event charts). `events`/`both` keep `/`. For `transport` context the always-on **"Dashboard"** nav item also points to `/transport/trips` (or is hidden) so there is no path to the empty event dashboard; `events`/`both` keep it pointing to `/`.
 
 With permission masking in place the nav auto-corrects (an `events` owner no longer holds transport perms, so `canManageTransport` is false). The badge, labels, and default route are the explicit signals on top.
+
+## POS surface — bus-operator picker
+
+Resellers stay **generalist** (no reseller↔vendor link, no reseller type). But bus selling on the POS becomes operator-first so a conductor sells for a chosen company rather than a flat cross-operator list:
+
+- **New API endpoint** `GET /api/reseller/transport/operators` (reseller-auth, `VIEW_EVENTS`) → the bus operators a conductor can sell for: vendors with `operatorType ∈ {transport, both}`, `isActive`, that have **≥1 sellable trip** (so the picker never lists an operator with nothing to sell). Returns `[{ id, businessName }]`. Implemented as `TripService.listSellableOperators()`: `Trip.distinct('vendorId', { status ∈ [SCHEDULED, BOARDING] })` → `Vendor.find({ _id ∈ ids, operatorType ∈ [transport, both], isActive: true }).select('businessName')`.
+- **`listTrips` gains an optional `vendorId` query filter** (the service already supports it via `listSellable({ vendorId })`; ensure the POS list validator accepts `vendorId` as an optional query param).
+- **POS flow:** tapping **Sell Bus Tickets** (and **Board Bus**) opens an operator picker (`getOperators()`); choosing a company pushes the existing wizard with that `vendorId`, and `getTrips(vendorId)` lists only that operator's trips. `TransportApi.getTrips` gains an optional `vendorId`; `BusPosPage`/`BusBoardPage` gain a required `vendorId` param.
+
+This is the POS analogue of the dashboard framing: `operatorType` is what lets the POS surface real bus companies. It needs **no** reseller-model change.
 
 ## Backfill
 
@@ -212,7 +222,14 @@ All existing vendors are event organizers (transport launched 2026-07-13). Safe 
 - `src/validators/*` — Joi schema for create-operator.
 - `src/scripts/backfillOperatorType.ts` — backfill.
 - Expose `operatorType` in the auth/whoami response shape.
+- `src/services/transport/trip.service.ts` — `listSellableOperators()`; `src/controllers/transportPos.controller.ts` + `src/routes/transportPos.route.ts` — `GET /reseller/transport/operators`; `src/validators/transportPos.validator.ts` — optional `vendorId` on the trip-list query.
 - Tests alongside each.
+
+**POS (`carrot-tickets-pos`)**
+- `lib/transport_api.dart` — `getOperators()`; `getTrips({ vendorId })`.
+- `lib/pages/bus_operator_picker_page.dart` (new) — company picker.
+- `lib/pages/bus_pos_page.dart`, `lib/pages/bus_board_page.dart` — accept a `vendorId`.
+- `lib/pages/home_page.dart` — Sell Bus / Board route through the picker.
 
 **Dashboard (`carrot-tickets-dashboard`)**
 - `src/types/index.ts` — `AuthUser.operatorType`.
