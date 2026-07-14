@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
-import { IVendor, VerificationStatus } from '@interfaces/vendor.interface';
+import { IVendor, VerificationStatus, OperatorType } from '@interfaces/vendor.interface';
 
 const vendorSchema = new Schema<IVendor>({
   // Authentication - Email OR Phone (both optional but at least one required)
@@ -45,6 +45,12 @@ const vendorSchema = new Schema<IVendor>({
     enum: ['event_organizer', 'venue', 'promoter', 'entertainment', 'sports', 'other'],
     default: 'other',
     trim: true
+  },
+  operatorType: {
+    type: String,
+    enum: Object.values(OperatorType),
+    default: OperatorType.EVENTS,
+    index: true,
   },
   logoUrl: {
     type: String,
