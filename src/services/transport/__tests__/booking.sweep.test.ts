@@ -104,6 +104,47 @@ describe('BookingService.sweepExpiredBookings', () => {
     const booking = await Booking.findOne({ tripId: trip._id });
     expect(booking!.status).toBe(BookingStatus.CANCELLED);
   });
+
+  it('finalize racing an expired sweep never clobbers a paid booking (single arbiter)', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'RRACE1' });
+    const { trip } = await seedTrip();
+    await BookingService.initiateMomoBooking(args({ tripId: trip._id.toString(), seatNumber: '1', momoPhone: '76707421' }));
+
+    // Backdate the reservation hold so it reads as lapsed to the sweep — this
+    // is what lets a sweep tick race a finalize call that's about to succeed.
+    // Native driver (not Mongoose updateOne) per this file's established trick
+    // for bypassing the timestamps plugin on backdating writes.
+    await BookingSale.collection.updateOne({ momoReferenceId: 'RRACE1' }, { $set: { reservationExpiresAt: new Date(Date.now() - 60_000) } });
+
+    momo.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '35', currency: 'SZL' } });
+
+    // Both arbiters CAS the SAME BookingSale.paymentStatus field from PENDING —
+    // Mongo guarantees exactly one of these wins, so the DB must land in one of
+    // two fully-consistent end states, never a mix of the two.
+    const [fin] = await Promise.all([
+      BookingService.finalizeMomoBooking('RRACE1'),
+      BookingService.sweepExpiredBookings(),
+    ]);
+    void fin;
+
+    const booking = await Booking.findOne({ tripId: trip._id });
+    const sale = await BookingSale.findOne({ momoReferenceId: 'RRACE1' });
+    const seat = await Seat.findOne({ tripId: trip._id, seatNumber: '1' });
+
+    const paid = sale!.paymentStatus === PaymentStatus.COMPLETED;
+    const confirmed = booking!.status === BookingStatus.CONFIRMED;
+    // Never a mix: sale COMPLETED iff booking CONFIRMED iff seat still booked.
+    expect(paid).toBe(confirmed);
+    if (paid) {
+      expect(booking!.status).toBe(BookingStatus.CONFIRMED);
+      expect(seat!.isBooked).toBe(true);
+    } else {
+      expect(sale!.paymentStatus).toBe(PaymentStatus.FAILED);
+      expect(booking!.status).toBe(BookingStatus.CANCELLED);
+      expect(seat!.isBooked).toBe(false);
+    }
+  });
 });
 
 describe('BookingService.reconcilePendingCardBookings', () => {

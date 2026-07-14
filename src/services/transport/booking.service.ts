@@ -574,6 +574,7 @@ export class BookingService {
         console.error(`[booking card-reconcile] failed for ${s.saleRef}`, err);
       }
     }
+    if (n > 0) console.log(`[booking card-reconcile] finalised ${n}/${stuck.length}`);
     return n;
   }
 
@@ -583,33 +584,43 @@ export class BookingService {
    * (marking them FAILED/CANCELLED), for BOTH momo and card sales that never
    * got finalized before their reservationExpiresAt.
    *
-   * Releases the claim via the SAME atomic-transition pattern finalizeMomoBooking/
-   * finalizeCardBooking use (Booking.findOneAndUpdate PENDING→CANCELLED) rather
-   * than a read-then-release: only the caller that wins this atomic transition
-   * releases capacity and marks the sale FAILED, so a concurrent sweep (or a
-   * finalize racing the same expiry) can't double-release/double-decrement a
-   * GA trip's soldCount.
+   * The SALE is the single atomic arbiter here — same field + precondition
+   * finalizeMomoBooking/finalizeCardBooking's SUCCESS path uses
+   * (BookingSale.findOneAndUpdate({_id, paymentStatus: PENDING}, {paymentStatus: ...}))
+   * — NOT the booking. Gating on the booking instead (as a prior version of
+   * this method did) let a sweep tick race a completing finalize: finalize
+   * claims the sale COMPLETED first, then confirms the booking; if sweep reads
+   * the booking as still PENDING in that gap, it would cancel the booking,
+   * release the seat, and overwrite the just-COMPLETED sale back to FAILED —
+   * a paid customer left with sale=FAILED and their seat released. By CAS'ing
+   * BookingSale.paymentStatus from PENDING first, Mongo guarantees exactly one
+   * of {sweep, finalize} wins the claim; the loser no-ops before touching
+   * booking/seat at all. This also still protects sweep-vs-sweep (and
+   * sweep-vs-sweep GA decrement) the same way the booking-gated version did.
    */
   static async sweepExpiredBookings(): Promise<number> {
     const lapsed = await BookingSale.find({ paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { $lt: new Date() } }).limit(100);
     let n = 0;
     for (const sale of lapsed) {
       try {
-        const bookingId = sale.bookingIds[0];
-        const cancelled = await Booking.findOneAndUpdate(
-          { _id: bookingId, status: BookingStatus.PENDING },
-          { $set: { status: BookingStatus.CANCELLED } },
+        // Atomically claim the SALE first — same arbiter finalize*'s SUCCESS
+        // path uses. If a concurrent finalize (or another sweep tick) already
+        // resolved this sale, we lose the claim and must not touch the
+        // booking/seat at all: doing so could clobber a just-COMPLETED sale.
+        const claimed = await BookingSale.findOneAndUpdate(
+          { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+          { $set: { paymentStatus: PaymentStatus.FAILED, momoFailureReason: sale.momoFailureReason || 'EXPIRED' } },
           { new: true },
         );
-        if (!cancelled) continue; // already transitioned by a concurrent sweep/finalize — don't double-release or double-count
+        if (!claimed) continue; // a concurrent finalize (or sweep) already resolved this sale
 
-        const trip = await Trip.findById(cancelled.tripId).select('seatScheme');
-        const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
-        await this.releaseBookingClaim(cancelled, isSeatMapped);
-
-        sale.paymentStatus = PaymentStatus.FAILED;
-        sale.momoFailureReason = sale.momoFailureReason || 'EXPIRED';
-        await sale.save();
+        const booking = await Booking.findById(sale.bookingIds[0]);
+        if (booking && booking.status === BookingStatus.PENDING) {
+          const trip = await Trip.findById(booking.tripId).select('seatScheme');
+          await this.releaseBookingClaim(booking, trip?.seatScheme !== SeatScheme.PASSENGER_COUNT);
+          booking.status = BookingStatus.CANCELLED;
+          await booking.save();
+        }
         n++;
       } catch (err) {
         console.error(`[booking sweep] failed for ${sale.saleRef}`, err);
