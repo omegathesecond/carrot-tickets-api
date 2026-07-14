@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
 import {
+  authenticateTickets,
   requireTicketsPermission,
   requireSuperAdmin,
   requireSuperAdminOrPermission,
@@ -28,6 +29,9 @@ const router = Router();
 router.post('/auth/login', TicketsController.login);
 router.post('/auth/register', TicketsController.register);
 router.post('/auth/refresh', TicketsController.refresh);
+// Social SSO handoff: mint (dashboard, authed) → exchange (social site, public).
+router.post('/auth/handoff', authenticateTickets, TicketsController.socialHandoff);
+router.post('/auth/handoff/exchange', TicketsController.socialHandoffExchange);
 
 /**
  * Authenticated Routes

@@ -51,6 +51,36 @@ export class TicketsController {
   }
 
   /**
+   * POST /api/tickets/auth/handoff — mint a one-time social sign-in link from
+   * the (already-authenticated) dashboard session. Requires authenticateTickets.
+   */
+  static async socialHandoff(req: Request, res: Response): Promise<any> {
+    try {
+      const handoff = TicketsAuthService.mintSocialHandoff((req as any).ticketsUser);
+      return ApiResponseUtil.success(res, { handoff }, 'Handoff created');
+    } catch (error: any) {
+      return ApiResponseUtil.error(res, error.message || 'Failed to create handoff', 401);
+    }
+  }
+
+  /**
+   * POST /api/tickets/auth/handoff/exchange { handoff } — the social site
+   * exchanges a one-time handoff for a normal vendor access token. No auth.
+   */
+  static async socialHandoffExchange(req: Request, res: Response): Promise<any> {
+    try {
+      const handoff = req.body?.handoff;
+      if (!handoff || typeof handoff !== 'string') {
+        return ApiResponseUtil.error(res, 'handoff is required', 400);
+      }
+      const accessToken = await TicketsAuthService.exchangeSocialHandoff(handoff);
+      return ApiResponseUtil.success(res, { accessToken }, 'Signed in');
+    } catch (error: any) {
+      return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
+    }
+  }
+
+  /**
    * Authentication: Self-service organizer signup
    */
   static async register(req: Request, res: Response): Promise<any> {

@@ -4,6 +4,7 @@ import { Vendor } from '@models/vendor.model';
 import { VendorSubUser } from '@models/vendorSubUser.model';
 import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
+import { HandoffToken } from '@models/handoffToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 
@@ -259,6 +260,66 @@ export class TicketsAuthService {
 
       throw new Error('Invalid or expired token');
     }
+  }
+
+  /** The identity claims a vendor/sub-user token carries — copied verbatim so
+   *  an exchanged social token is equivalent to a fresh login token. */
+  private static identityClaims(src: any) {
+    return {
+      app: 'tickets' as const,
+      userId: src.userId,
+      vendorId: src.vendorId,
+      userType: src.userType ?? 'vendor',
+      businessName: src.businessName,
+      role: src.role,
+      isSuperAdmin: src.isSuperAdmin ?? false,
+      permissions: src.permissions ?? [],
+    };
+  }
+
+  /**
+   * Mint a SHORT-LIVED, one-time handoff token from an already-authenticated
+   * dashboard session, for seamless sign-in on the consumer social site
+   * (different origin). It carries the vendor identity but is only valid for
+   * 90s and single-use (see exchangeSocialHandoff).
+   */
+  static mintSocialHandoff(ticketsUser: any): string {
+    if (!ticketsUser?.vendorId) throw new Error('Vendor sign-in required');
+    const jti = crypto.randomBytes(16).toString('hex');
+    return jwt.sign(
+      { ...TicketsAuthService.identityClaims(ticketsUser), purpose: 'social-handoff', jti },
+      JWT_SECRET,
+      { expiresIn: '90s' } as SignOptions
+    );
+  }
+
+  /**
+   * Exchange a valid, unused handoff for a normal vendor access token. Rejects
+   * expired/forged/replayed handoffs. Never issues anything the organizer
+   * didn't already have (same identity claims).
+   */
+  static async exchangeSocialHandoff(handoff: string): Promise<string> {
+    let decoded: any;
+    try {
+      decoded = jwt.verify(handoff, JWT_SECRET);
+    } catch {
+      throw new Error('This sign-in link has expired — please try again from your dashboard');
+    }
+    if (decoded.app !== 'tickets' || decoded.purpose !== 'social-handoff' || !decoded.jti || !decoded.vendorId) {
+      throw new Error('Invalid sign-in link');
+    }
+    // Single-use: the read (MongoDB read-your-writes) catches the common
+    // replay; the unique index is the concurrency backstop.
+    if (await HandoffToken.findOne({ jti: decoded.jti })) {
+      throw new Error('This sign-in link was already used — please try again from your dashboard');
+    }
+    try {
+      await HandoffToken.create({ jti: decoded.jti });
+    } catch (err: any) {
+      if (err?.code === 11000) throw new Error('This sign-in link was already used — please try again from your dashboard');
+      throw err;
+    }
+    return jwt.sign(TicketsAuthService.identityClaims(decoded), JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
   }
 
   /**
