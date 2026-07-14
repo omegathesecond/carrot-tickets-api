@@ -102,6 +102,36 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
   ]
 };
 
+// ── Operator-type verticals ────────────────────────────────────────────────
+// These three groups PARTITION all non-platform-staff permissions (disjoint +
+// exhaustive). The platform-staff perms (VIEW_USERS, PRINT_WRISTBANDS,
+// MODERATE_SOCIAL) belong to no vertical and are never scoped by operator type.
+export const TRANSPORT_PERMISSIONS: TicketsPermission[] = [
+  TicketsPermission.VIEW_TRANSPORT,
+  TicketsPermission.MANAGE_TRANSPORT,
+];
+
+// Cross-cutting — granted to every type. Empty in v1 (no cross-vertical
+// dashboard surface exists yet; analytics/sales/refund views are event-shaped).
+export const SHARED_PERMISSIONS: TicketsPermission[] = [];
+
+export const EVENT_PERMISSIONS: TicketsPermission[] = [
+  TicketsPermission.CREATE_EVENT,
+  TicketsPermission.EDIT_EVENT,
+  TicketsPermission.DELETE_EVENT,
+  TicketsPermission.VIEW_EVENTS,
+  TicketsPermission.PUBLISH_EVENT,
+  TicketsPermission.SELL_TICKETS,
+  TicketsPermission.VIEW_SALES,
+  TicketsPermission.REFUND_TICKET,
+  TicketsPermission.SCAN_TICKETS,
+  TicketsPermission.VIEW_SCANS,
+  TicketsPermission.VIEW_STATS,
+  TicketsPermission.VIEW_REVENUE,
+  TicketsPermission.EXPORT_REPORTS,
+  TicketsPermission.MANAGE_ACCESS,
+];
+
 export interface TicketsUserToken {
   userId?: string;
   vendorId: string;
