@@ -15,10 +15,12 @@ jest.spyOn(PeachClient.prototype, 'getPaymentStatus').mockImplementation((...a: 
 
 import { BookingService } from '@services/transport/booking.service';
 import { TripService } from '@services/transport/trip.service';
+import { TransportPosController } from '@controllers/transportPos.controller';
 import { VehicleType } from '@models/transport/vehicleType.model';
 import { Route } from '@models/transport/route.model';
 import { Booking } from '@models/transport/booking.model';
 import { BookingSale } from '@models/transport/bookingSale.model';
+import { Reseller } from '@models/reseller.model';
 import { SeatScheme } from '@interfaces/transport.interface';
 import { BookingStatus } from '@interfaces/booking.interface';
 import { PaymentStatus } from '@interfaces/ticket.interface';
@@ -100,6 +102,137 @@ describe('POS async booking flow (initiate + status poll)', () => {
 
     const booking = await Booking.findOne({ tripId: trip._id });
     expect(booking!.status).toBe(BookingStatus.CONFIRMED);
+    const sale = await BookingSale.findOne({ peachPaymentId: initiated.paymentId });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+  });
+});
+
+// Guards the SP1c Task 6 authorization gap: momoStatus/cardStatus previously
+// looked up the sale by provider reference ALONE, so any reseller with
+// SELL_TICKETS could poll another reseller's booking status. Mirrors the
+// events precedent (public.controller getMomoStatus/getCardStatus, scoped by
+// the authenticated buyer's phone) — here scoped by resellerId instead.
+describe('TransportPosController status polls are scoped to the owning reseller', () => {
+  function fakeReqRes(params: Record<string, string>, reseller: { operatorId: string; resellerId: string; hubId?: string } | undefined) {
+    const req: any = { params, reseller, originalUrl: '/test' };
+    const res: any = { req };
+    res.status = jest.fn().mockReturnValue(res);
+    res.json = jest.fn().mockReturnValue(res);
+    return { req, res };
+  }
+
+  it('MoMo: a different reseller polling another reseller\'s referenceId gets 404 and finalize never runs', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'REF-ISO-1' });
+    const { trip } = await seedTrip();
+    const resellerA = await Reseller.create({ businessName: 'Reseller A', status: 'active', isActive: true });
+    const resellerB = await Reseller.create({ businessName: 'Reseller B', status: 'active', isActive: true });
+
+    const initiated = await BookingService.initiateMomoBooking({
+      tripId: trip._id.toString(), seatNumber: '1', passengerName: 'Passenger', passengerPhone: '76707421',
+      momoPhone: '76707421', soldBy: resellerA._id.toString(), soldByType: 'reseller-operator',
+      resellerId: resellerA._id.toString(),
+    });
+
+    // MTN would report success if asked — proves the 404 comes from the
+    // ownership check short-circuiting BEFORE finalize, not from MTN denying.
+    momo.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '35', currency: 'SZL' } });
+
+    const { req, res } = fakeReqRes(
+      { referenceId: initiated.referenceId },
+      { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: resellerB._id.toString() },
+    );
+    await TransportPosController.momoStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
+    expect(momo.getStatus).not.toHaveBeenCalled();
+
+    const sale = await BookingSale.findOne({ momoReferenceId: initiated.referenceId });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.PENDING);
+    const booking = await Booking.findOne({ tripId: trip._id });
+    expect(booking!.status).toBe(BookingStatus.PENDING);
+  });
+
+  it('MoMo: the owning reseller polling their own referenceId gets the status', async () => {
+    momo.isConfigured.mockReturnValue(true);
+    momo.requestToPay.mockResolvedValue({ referenceId: 'REF-ISO-2' });
+    const { trip } = await seedTrip();
+    const resellerA = await Reseller.create({ businessName: 'Reseller A2', status: 'active', isActive: true });
+
+    const initiated = await BookingService.initiateMomoBooking({
+      tripId: trip._id.toString(), seatNumber: '1', passengerName: 'Passenger', passengerPhone: '76707421',
+      momoPhone: '76707421', soldBy: resellerA._id.toString(), soldByType: 'reseller-operator',
+      resellerId: resellerA._id.toString(),
+    });
+
+    momo.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '35', currency: 'SZL' } });
+
+    const { req, res } = fakeReqRes(
+      { referenceId: initiated.referenceId },
+      { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: resellerA._id.toString() },
+    );
+    await TransportPosController.momoStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: { status: 'completed' } }));
+
+    const sale = await BookingSale.findOne({ momoReferenceId: initiated.referenceId });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
+  });
+
+  it('Card: a different reseller polling another reseller\'s paymentId gets 404 and finalize never runs', async () => {
+    peach.isConfigured.mockReturnValue(true);
+    peach.createPayment.mockResolvedValue({ id: 'PAY-ISO-1', code: '000.000.000', redirect: { url: 'https://pay.example/PAY-ISO-1' } });
+    const { trip } = await seedTrip();
+    const resellerA = await Reseller.create({ businessName: 'Reseller A3', status: 'active', isActive: true });
+    const resellerB = await Reseller.create({ businessName: 'Reseller B3', status: 'active', isActive: true });
+
+    const initiated = await BookingService.initiateCardBooking({
+      tripId: trip._id.toString(), seatNumber: '1', passengerName: 'Passenger', passengerPhone: '76707421',
+      soldBy: resellerA._id.toString(), soldByType: 'reseller-operator', resellerId: resellerA._id.toString(),
+    });
+
+    peach.getPaymentStatus.mockResolvedValue({ code: '000.000.000', amount: '35', currency: 'ZAR' });
+
+    const { req, res } = fakeReqRes(
+      { paymentId: initiated.paymentId },
+      { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: resellerB._id.toString() },
+    );
+    await TransportPosController.cardStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
+    expect(peach.getPaymentStatus).not.toHaveBeenCalled();
+
+    const sale = await BookingSale.findOne({ peachPaymentId: initiated.paymentId });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.PENDING);
+    const booking = await Booking.findOne({ tripId: trip._id });
+    expect(booking!.status).toBe(BookingStatus.PENDING);
+  });
+
+  it('Card: the owning reseller polling their own paymentId gets the status', async () => {
+    peach.isConfigured.mockReturnValue(true);
+    peach.createPayment.mockResolvedValue({ id: 'PAY-ISO-2', code: '000.000.000', redirect: { url: 'https://pay.example/PAY-ISO-2' } });
+    const { trip } = await seedTrip();
+    const resellerA = await Reseller.create({ businessName: 'Reseller A4', status: 'active', isActive: true });
+
+    const initiated = await BookingService.initiateCardBooking({
+      tripId: trip._id.toString(), seatNumber: '1', passengerName: 'Passenger', passengerPhone: '76707421',
+      soldBy: resellerA._id.toString(), soldByType: 'reseller-operator', resellerId: resellerA._id.toString(),
+    });
+
+    peach.getPaymentStatus.mockResolvedValue({ code: '000.000.000', amount: '35', currency: 'ZAR' });
+
+    const { req, res } = fakeReqRes(
+      { paymentId: initiated.paymentId },
+      { operatorId: new mongoose.Types.ObjectId().toString(), resellerId: resellerA._id.toString() },
+    );
+    await TransportPosController.cardStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: { status: 'completed' } }));
+
     const sale = await BookingSale.findOne({ peachPaymentId: initiated.paymentId });
     expect(sale!.paymentStatus).toBe(PaymentStatus.COMPLETED);
   });

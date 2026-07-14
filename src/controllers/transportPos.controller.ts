@@ -102,18 +102,39 @@ export class TransportPosController {
 
   static async momoStatus(req: Request, res: Response): Promise<any> {
     try {
-      if (!reseller(req)) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      const r = reseller(req);
+      if (!r) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      const referenceId = String(req.params['referenceId']);
+
+      // Ownership check: the sale's resellerId must match the calling
+      // reseller — prevents one reseller from polling another's booking
+      // status. Mirrors public.controller's getMomoStatus (phone-scoped).
+      // Missing/mismatched sale -> 404 (don't reveal existence).
+      const sale = await BookingService.getMomoBookingSaleByReference(referenceId);
+      if (!sale || (sale.resellerId ? sale.resellerId.toString() !== r.resellerId : true)) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
       // Poll = re-run finalize (idempotent + pending-safe), matching how the
       // events SPA polls via finalize.
-      const result = await BookingService.finalizeMomoBooking(String(req.params['referenceId']));
+      const result = await BookingService.finalizeMomoBooking(referenceId);
       return ApiResponseUtil.success(res, result);
     } catch (e) { return failWithHttpError(res, e, 'Failed to check MoMo booking status'); }
   }
 
   static async cardStatus(req: Request, res: Response): Promise<any> {
     try {
-      if (!reseller(req)) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
-      const result = await BookingService.finalizeCardBooking(String(req.params['paymentId']));
+      const r = reseller(req);
+      if (!r) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      const paymentId = String(req.params['paymentId']);
+
+      // Same ownership check as momoStatus, keyed on peachPaymentId.
+      const sale = await BookingService.getCardBookingSaleByPaymentId(paymentId);
+      if (!sale || (sale.resellerId ? sale.resellerId.toString() !== r.resellerId : true)) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
+      const result = await BookingService.finalizeCardBooking(paymentId);
       return ApiResponseUtil.success(res, result);
     } catch (e) { return failWithHttpError(res, e, 'Failed to check card booking status'); }
   }
