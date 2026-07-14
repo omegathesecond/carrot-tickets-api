@@ -39,10 +39,19 @@ export class MomoController {
     if (!referenceId && externalId) {
       const sale = await TicketService.getMomoSaleByExternalId(externalId);
       referenceId = sale?.momoReferenceId;
+      // Bus MoMo callbacks carry the BookingSale's saleRef as externalId (not a
+      // TicketSale's), so when no ticket sale matched, also try the bus resolver.
+      let bookingSaleFound = false;
+      if (!referenceId) {
+        const bSale = await BookingService.getMomoBookingSaleByExternalId(externalId);
+        referenceId = referenceId || bSale?.momoReferenceId;
+        bookingSaleFound = !!bSale;
+      }
       console.log('[momo callback] resolved referenceId via externalId', {
         externalId,
         referenceId: referenceId ?? null,
         saleFound: !!sale,
+        bookingSaleFound,
         receivedAt,
       });
     }

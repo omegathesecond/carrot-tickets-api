@@ -49,7 +49,7 @@ async function seedTrip(scheme = SeatScheme.SEQUENTIAL, totalSeats = 4) {
 const args = (extra: any) => ({ passengerName: 'T', passengerPhone: '76707421', soldBy: new mongoose.Types.ObjectId().toString(), soldByType: 'reseller-operator' as const, ...extra });
 
 describe('BookingService.sweepExpiredBookings', () => {
-  it('expired PENDING momo sale: releases the seat, cancels the booking, fails the sale, returns count 1', async () => {
+  it('expired PENDING momo sale (gateway still PENDING): releases the seat, cancels the booking, fails the sale, returns count 1', async () => {
     momo.isConfigured.mockReturnValue(true);
     momo.requestToPay.mockResolvedValue({ referenceId: 'RSWEEP1' });
     const { trip } = await seedTrip();
@@ -58,6 +58,9 @@ describe('BookingService.sweepExpiredBookings', () => {
     // Backdate the reservation hold so it reads as lapsed.
     await BookingSale.updateOne({ momoReferenceId: 'RSWEEP1' }, { $set: { reservationExpiresAt: new Date(Date.now() - 60_000) } });
 
+    // Sweep now VERIFIES with the gateway before failing; only force-expire the
+    // ones MTN still reports pending after the TTL.
+    momo.getStatus.mockResolvedValue({ status: 'PENDING', raw: {} });
     const n = await BookingService.sweepExpiredBookings();
     expect(n).toBe(1);
 
@@ -96,13 +99,21 @@ describe('BookingService.sweepExpiredBookings', () => {
 
     await BookingSale.updateOne({ momoReferenceId: 'RSWEEPGA' }, { $set: { reservationExpiresAt: new Date(Date.now() - 60_000) } });
 
+    // Gateway still pending after the TTL → both sweeps fall through to the
+    // single arbiter; exactly one wins the PENDING→FAILED CAS and releases
+    // capacity. The RETURN count is state-based (a loser re-reads the settled
+    // FAILED sale and reports 'failed' too), so a+b may be 1 or 2 depending on
+    // interleaving — the money invariant is soldCount decremented EXACTLY once.
+    momo.getStatus.mockResolvedValue({ status: 'PENDING', raw: {} });
     const [a, b] = await Promise.all([BookingService.sweepExpiredBookings(), BookingService.sweepExpiredBookings()]);
-    expect(a + b).toBe(1);
+    expect(a + b).toBeGreaterThanOrEqual(1);
 
     const freshTrip = await Trip.findById(trip._id);
     expect(freshTrip!.soldCount).toBe(0);
     const booking = await Booking.findOne({ tripId: trip._id });
     expect(booking!.status).toBe(BookingStatus.CANCELLED);
+    const sale = await BookingSale.findOne({ momoReferenceId: 'RSWEEPGA' });
+    expect(sale!.paymentStatus).toBe(PaymentStatus.FAILED);
   });
 
   it('finalize racing an expired sweep never clobbers a paid booking (single arbiter)', async () => {

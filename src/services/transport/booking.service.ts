@@ -74,6 +74,38 @@ export class BookingService {
     }
   }
 
+  /**
+   * Single arbiter for ANY failure/expiry of an async booking: the SALE.
+   * Atomically CAS BookingSale.paymentStatus PENDING→FAILED — the SAME field +
+   * precondition finalize*'s SUCCESS path CAS's to COMPLETED. Mongo guarantees
+   * exactly one of {this fail, a concurrent finalize-success, another fail/sweep}
+   * wins the transition; only the winner then cancels the booking and releases
+   * capacity, so a paid-and-COMPLETED sale can never be clobbered back to FAILED
+   * nor its seat double-released. Losers no-op and report the settled status.
+   * Returns 'completed' only when the sale had already been won by a success.
+   */
+  private static async failBookingSale(saleId: any, reason: string): Promise<'failed' | 'completed'> {
+    const claimed = await BookingSale.findOneAndUpdate(
+      { _id: saleId, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.FAILED, momoFailureReason: reason } },
+      { new: true },
+    );
+    if (!claimed) {
+      const fresh = await BookingSale.findById(saleId);
+      return fresh?.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed';
+    }
+    const booking = await Booking.findOneAndUpdate(
+      { _id: claimed.bookingIds[0], status: BookingStatus.PENDING },
+      { $set: { status: BookingStatus.CANCELLED } },
+      { new: true },
+    );
+    if (booking) {
+      const trip = await Trip.findById(booking.tripId).select('seatScheme');
+      await this.releaseBookingClaim(booking, trip?.seatScheme !== SeatScheme.PASSENGER_COUNT);
+    }
+    return 'failed';
+  }
+
   static async initiateMomoBooking(p: {
     tripId: string; seatNumber?: string; passengerName: string; passengerPhone: string; momoPhone: string;
     soldBy: string; soldByType: 'vendor' | 'sub-user' | 'reseller-operator'; resellerId?: string; hubId?: string;
@@ -424,6 +456,11 @@ export class BookingService {
     return BookingSale.findOne({ momoReferenceId: referenceId });
   }
 
+  /** Resolve a bus BookingSale by the externalId MTN echoes back (= our saleRef). */
+  static async getMomoBookingSaleByExternalId(externalId: string) {
+    return BookingSale.findOne({ saleRef: externalId });
+  }
+
   /**
    * Finalize an async MTN MoMo bus booking identified by referenceId. Idempotent.
    * Mirrors TicketService.finalizeMomoSale: not-PENDING → return current status;
@@ -442,26 +479,14 @@ export class BookingService {
     const { status, raw } = await this.momoClient.getStatus(referenceId);
     if (status === 'PENDING') return { status: 'pending' };
 
-    // Only load booking/trip once we know we're past the PENDING short-circuit —
-    // saves 2 queries on every still-pending poll.
-    const booking = await Booking.findById(sale.bookingIds[0]);
-    if (!booking) throw new HttpError(404, 'Booking not found for sale');
-    const trip = await Trip.findById(booking.tripId).select('seatScheme');
-    const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
-
     if (status === 'FAILED') {
       const reason = typeof raw?.reason === 'string' ? raw.reason : undefined;
-      // Atomic PENDING→CANCELLED transition gates the claim release: only the
-      // caller that wins this transition releases capacity, so a concurrent
-      // webhook+poll finalize can't both decrement soldCount / free the seat.
-      const cancelled = await Booking.findOneAndUpdate(
-        { _id: booking._id, status: BookingStatus.PENDING },
-        { $set: { status: BookingStatus.CANCELLED } },
-        { new: true },
-      );
-      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
-      sale.paymentStatus = PaymentStatus.FAILED; if (reason) sale.momoFailureReason = reason; await sale.save();
-      return { status: 'failed', reason };
+      // Route the failure through the SALE arbiter: it CAS's the sale PENDING→
+      // FAILED and, only if it wins, cancels the booking + releases capacity.
+      // If a concurrent finalize already won the sale as COMPLETED, we report
+      // that truthfully instead of assuming failure.
+      const s = await this.failBookingSale(sale._id, reason || 'FAILED');
+      return { status: s === 'completed' ? 'completed' : 'failed', reason };
     }
 
     // SUCCESSFUL — amount + currency guard before confirming
@@ -469,20 +494,20 @@ export class BookingService {
     const expectedAmount = sale.amountCharged ?? sale.totalAmount;
     const confirmedAmount = Number(raw?.amount);
     if (!Number.isFinite(confirmedAmount) || confirmedAmount !== expectedAmount || raw?.currency !== expectedCurrency) {
-      // Same atomic gate as the FAILED branch above.
-      const cancelled = await Booking.findOneAndUpdate(
-        { _id: booking._id, status: BookingStatus.PENDING },
-        { $set: { status: BookingStatus.CANCELLED } },
-        { new: true },
-      );
-      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
-      sale.paymentStatus = PaymentStatus.FAILED; sale.momoFailureReason = 'AMOUNT_MISMATCH'; await sale.save();
-      return { status: 'failed', reason: 'AMOUNT_MISMATCH' };
+      const s = await this.failBookingSale(sale._id, 'AMOUNT_MISMATCH');
+      return { status: s === 'completed' ? 'completed' : 'failed', reason: 'AMOUNT_MISMATCH' };
     }
 
     // atomic claim — concurrent poll + callback can't double-confirm
     const claimed = await BookingSale.findOneAndUpdate({ _id: sale._id, paymentStatus: PaymentStatus.PENDING }, { $set: { paymentStatus: PaymentStatus.COMPLETED } }, { new: true });
-    if (!claimed) return { status: 'completed' };
+    if (!claimed) {
+      // Lost the claim to a concurrent arbiter — DO NOT assume completed. Re-read
+      // the settled sale: a racing sweep/fail could have won it as FAILED.
+      const fresh = await BookingSale.findById(sale._id);
+      return { status: fresh?.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed', reason: fresh?.momoFailureReason };
+    }
+    const booking = await Booking.findById(sale.bookingIds[0]);
+    if (!booking) throw new HttpError(404, 'Booking not found for sale');
     booking.status = BookingStatus.CONFIRMED; await booking.save();
     return { status: 'completed' };
   }
@@ -508,25 +533,11 @@ export class BookingService {
     const outcome = classifyResultCode(code || '');
     if (outcome === 'pending') return { status: 'pending' };
 
-    // Only load booking/trip once we know we're past the pending short-circuit —
-    // saves 2 queries on every still-pending poll.
-    const booking = await Booking.findById(sale.bookingIds[0]);
-    if (!booking) throw new HttpError(404, 'Booking not found for sale');
-    const trip = await Trip.findById(booking.tripId).select('seatScheme');
-    const isSeatMapped = trip?.seatScheme !== SeatScheme.PASSENGER_COUNT;
-
     if (outcome === 'rejected') {
-      // Atomic PENDING→CANCELLED transition gates the claim release: only the
-      // caller that wins this transition releases capacity, so a concurrent
-      // webhook+poll finalize can't both decrement soldCount / free the seat.
-      const cancelled = await Booking.findOneAndUpdate(
-        { _id: booking._id, status: BookingStatus.PENDING },
-        { $set: { status: BookingStatus.CANCELLED } },
-        { new: true },
-      );
-      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
-      sale.paymentStatus = PaymentStatus.FAILED; await sale.save();
-      return { status: 'failed' };
+      // Route the failure through the SALE arbiter (also fixes the prior
+      // card-stores-no-reason gap: failBookingSale stamps momoFailureReason).
+      const s = await this.failBookingSale(sale._id, 'REJECTED');
+      return { status: s === 'completed' ? 'completed' : 'failed' };
     }
 
     // success — amount + currency guard before confirming
@@ -534,20 +545,19 @@ export class BookingService {
     const expectedAmount = sale.amountCharged ?? sale.totalAmount;
     const confirmedAmount = Number(amount);
     if (!Number.isFinite(confirmedAmount) || confirmedAmount !== expectedAmount || currency !== expectedCurrency) {
-      // Same atomic gate as the rejected branch above.
-      const cancelled = await Booking.findOneAndUpdate(
-        { _id: booking._id, status: BookingStatus.PENDING },
-        { $set: { status: BookingStatus.CANCELLED } },
-        { new: true },
-      );
-      if (cancelled) await this.releaseBookingClaim(cancelled, isSeatMapped);
-      sale.paymentStatus = PaymentStatus.FAILED; await sale.save();
-      return { status: 'failed' };
+      const s = await this.failBookingSale(sale._id, 'AMOUNT_MISMATCH');
+      return { status: s === 'completed' ? 'completed' : 'failed' };
     }
 
     // atomic claim — concurrent poll + callback can't double-confirm
     const claimed = await BookingSale.findOneAndUpdate({ _id: sale._id, paymentStatus: PaymentStatus.PENDING }, { $set: { paymentStatus: PaymentStatus.COMPLETED } }, { new: true });
-    if (!claimed) return { status: 'completed' };
+    if (!claimed) {
+      // Lost the claim — DO NOT assume completed. Re-read the settled sale.
+      const fresh = await BookingSale.findById(sale._id);
+      return { status: fresh?.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+    const booking = await Booking.findById(sale.bookingIds[0]);
+    if (!booking) throw new HttpError(404, 'Booking not found for sale');
     booking.status = BookingStatus.CONFIRMED; await booking.save();
     return { status: 'completed' };
   }
@@ -579,49 +589,43 @@ export class BookingService {
   }
 
   /**
-   * MoMo has no reconcile endpoint of its own: this is the backstop sweep that
-   * releases capacity for PENDING bookings whose reservation hold lapsed
-   * (marking them FAILED/CANCELLED), for BOTH momo and card sales that never
-   * got finalized before their reservationExpiresAt.
+   * MoMo has no reconcile endpoint of its own: this is the backstop sweep for
+   * PENDING bookings whose reservation hold lapsed, for BOTH momo and card
+   * sales that never got finalized before their reservationExpiresAt.
    *
-   * The SALE is the single atomic arbiter here — same field + precondition
-   * finalizeMomoBooking/finalizeCardBooking's SUCCESS path uses
-   * (BookingSale.findOneAndUpdate({_id, paymentStatus: PENDING}, {paymentStatus: ...}))
-   * — NOT the booking. Gating on the booking instead (as a prior version of
-   * this method did) let a sweep tick race a completing finalize: finalize
-   * claims the sale COMPLETED first, then confirms the booking; if sweep reads
-   * the booking as still PENDING in that gap, it would cancel the booking,
-   * release the seat, and overwrite the just-COMPLETED sale back to FAILED —
-   * a paid customer left with sale=FAILED and their seat released. By CAS'ing
-   * BookingSale.paymentStatus from PENDING first, Mongo guarantees exactly one
-   * of {sweep, finalize} wins the claim; the loser no-ops before touching
-   * booking/seat at all. This also still protects sweep-vs-sweep (and
-   * sweep-vs-sweep GA decrement) the same way the booking-gated version did.
+   * It does NOT blindly fail lapsed sales — a MoMo approval can arrive slow but
+   * SUCCESSFUL right around the TTL boundary, and force-failing it would strand
+   * a paying customer with sale=FAILED + released seat (a real money hole). So
+   * for each expired PENDING sale we DELEGATE to the finalizer first, which
+   * checks the actual gateway status: if the gateway has resolved it (confirmed
+   * OR failed) we accept that outcome and move on. Only sales the gateway STILL
+   * reports pending (or that have no provider reference at all) are force-
+   * expired — and that force-expiry goes through failBookingSale, the SAME
+   * single SALE arbiter (CAS BookingSale.paymentStatus PENDING→FAILED) that
+   * finalize*'s SUCCESS path CAS's to COMPLETED. Mongo guarantees exactly one
+   * of {sweep, finalize, another sweep} wins the transition; losers no-op
+   * before touching booking/seat, so a just-COMPLETED sale can never be
+   * clobbered back to FAILED nor its seat double-released. This preserves the
+   * sweep-vs-finalize and sweep-vs-sweep (incl. GA soldCount decrement) safety
+   * the prior CAS-first version had, while closing the paid-but-slow money hole.
    */
   static async sweepExpiredBookings(): Promise<number> {
     const lapsed = await BookingSale.find({ paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { $lt: new Date() } }).limit(100);
     let n = 0;
     for (const sale of lapsed) {
       try {
-        // Atomically claim the SALE first — same arbiter finalize*'s SUCCESS
-        // path uses. If a concurrent finalize (or another sweep tick) already
-        // resolved this sale, we lose the claim and must not touch the
-        // booking/seat at all: doing so could clobber a just-COMPLETED sale.
-        const claimed = await BookingSale.findOneAndUpdate(
-          { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
-          { $set: { paymentStatus: PaymentStatus.FAILED, momoFailureReason: sale.momoFailureReason || 'EXPIRED' } },
-          { new: true },
-        );
-        if (!claimed) continue; // a concurrent finalize (or sweep) already resolved this sale
-
-        const booking = await Booking.findById(sale.bookingIds[0]);
-        if (booking && booking.status === BookingStatus.PENDING) {
-          const trip = await Trip.findById(booking.tripId).select('seatScheme');
-          await this.releaseBookingClaim(booking, trip?.seatScheme !== SeatScheme.PASSENGER_COUNT);
-          booking.status = BookingStatus.CANCELLED;
-          await booking.save();
+        // Verify with the gateway first — never fail a booking the provider
+        // already approved just because our reservation hold lapsed.
+        let outcome: string | undefined;
+        if (sale.paymentMethod === PaymentMethod.MTN_MOMO && sale.momoReferenceId) {
+          outcome = (await this.finalizeMomoBooking(sale.momoReferenceId)).status;
+        } else if (sale.paymentMethod === PaymentMethod.PEACH_CARD && sale.peachPaymentId) {
+          outcome = (await this.finalizeCardBooking(sale.peachPaymentId)).status;
         }
-        n++;
+        if (outcome && outcome !== 'pending') { n++; continue; } // gateway resolved it (confirmed or failed)
+        // Still pending after the TTL (or no provider ref) → force-expire via the single arbiter.
+        const s = await this.failBookingSale(sale._id, sale.momoFailureReason || 'EXPIRED');
+        if (s === 'failed') n++;
       } catch (err) {
         console.error(`[booking sweep] failed for ${sale.saleRef}`, err);
       }
