@@ -64,6 +64,8 @@ import socialRoutes from '@routes/social.route';
 import dmRoutes from '@routes/dm.route';
 import updateRoutes from '@routes/update.route';
 import vendorUpdateRoutes from '@routes/vendorUpdate.route';
+import transportRoutes from '@routes/transport.route';
+import transportPosRoutes from '@routes/transportPos.route';
 import vendorSocialRoutes from '@routes/vendorSocial.route';
 import vendorDmRoutes from '@routes/vendorDm.route';
 
@@ -142,9 +144,11 @@ app.get('/api-docs.json', (_req: Request, res: Response) => {
 
 // API Routes
 app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored updates (organizer dashboard) - mounted before the broader /api/tickets below so this specific path isn't shadowed
+app.use('/api/tickets/transport', transportRoutes);    // Vendor bus/shuttle inventory - before the broad /api/tickets
 app.use('/api/tickets/social', vendorSocialRoutes);   // Vendor (brand) social graph — before the broad /api/tickets
 app.use('/api/tickets/dm', vendorDmRoutes);           // Vendor (brand) DMs — before the broad /api/tickets
 app.use('/api/tickets', ticketsRoutes);
+app.use('/api/reseller/transport', transportPosRoutes); // POS bus selling + boarding - before the broad /api/reseller
 app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/media', mediaRoutes);

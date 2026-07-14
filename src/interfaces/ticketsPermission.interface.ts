@@ -22,6 +22,10 @@ export enum TicketsPermission {
   SCAN_TICKETS = 'tickets:scan_tickets',
   VIEW_SCANS = 'tickets:view_scans',
 
+  // Transport (bus/shuttle) inventory management
+  VIEW_TRANSPORT = 'tickets:view_transport',
+  MANAGE_TRANSPORT = 'tickets:manage_transport',
+
   // Analytics & Reports
   VIEW_STATS = 'tickets:view_stats',
   VIEW_REVENUE = 'tickets:view_revenue',
@@ -78,6 +82,8 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
     TicketsPermission.SCAN_TICKETS,
     TicketsPermission.VIEW_SCANS,
     TicketsPermission.VIEW_STATS,
+    TicketsPermission.VIEW_TRANSPORT,
+    TicketsPermission.MANAGE_TRANSPORT,
     TicketsPermission.VIEW_REVENUE,
     TicketsPermission.EXPORT_REPORTS
   ],

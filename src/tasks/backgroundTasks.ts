@@ -2,6 +2,7 @@ import { ReservationService } from '@services/reservation.service';
 import { TicketService } from '@services/ticket.service';
 import { EventReminderService } from '@services/eventReminder.service';
 import { reconcileStuckUpdates } from '@services/transcode.client';
+import { BookingService } from '@services/transport/booking.service';
 
 // Start the reservation expiry sweep
 const RESERVATION_SWEEP_MS = 60_000;
@@ -18,6 +19,13 @@ const REMINDER_SWEEP_MS = 600_000;
 // 'processing' (transcoder crashed/never called back). See
 // @services/transcode.client#reconcileStuckUpdates.
 const UPDATE_RECONCILE_MS = 120_000;
+
+// Bus bookings: reconcile paid-but-stuck Peach card bookings (mirrors
+// CARD_RECONCILE_MS above) + sweep expired PENDING bookings whose
+// reservation hold lapsed (releases seat/GA capacity, marks FAILED/CANCELLED).
+// See BookingService.reconcilePendingCardBookings / sweepExpiredBookings.
+const BOOKING_CARD_RECONCILE_MS = 60_000;
+const BOOKING_SWEEP_MS = 60_000;
 
 /**
  * Registers all periodic background sweeps (reservation expiry, card-sale
@@ -46,6 +54,14 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     reconcileStuckUpdates().catch((e) => console.error('update reconcile sweep failed:', e?.message));
   }, UPDATE_RECONCILE_MS));
+
+  handles.push(setInterval(() => {
+    BookingService.reconcilePendingCardBookings().catch(err => console.error('[booking card-reconcile] error', err));
+  }, BOOKING_CARD_RECONCILE_MS));
+
+  handles.push(setInterval(() => {
+    BookingService.sweepExpiredBookings().catch(err => console.error('[booking sweep] error', err));
+  }, BOOKING_SWEEP_MS));
 
   return handles;
 }
