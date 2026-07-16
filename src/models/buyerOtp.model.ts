@@ -37,7 +37,10 @@ const buyerOtpSchema = new Schema<IBuyerOtp>(
     channel: { type: String, enum: ['sms', 'email'], required: true },
     destination: { type: String, required: true, index: true },
     codeHash: { type: String, required: true },
-    expiresAt: { type: Date, required: true, index: true },
+    // No `index: true` here — that built a plain "expiresAt_1" which then made
+    // MongoDB REJECT the TTL index below (same name, different options), so
+    // expired OTPs were never actually purged. The TTL index is the intent.
+    expiresAt: { type: Date, required: true },
     attempts: { type: Number, default: 0 },
     consumed: { type: Boolean, default: false }
   },
