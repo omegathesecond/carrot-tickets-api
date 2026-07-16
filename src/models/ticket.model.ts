@@ -107,11 +107,14 @@ ticketSchema.methods.isValidForEntry = function(): boolean {
   return this.status === TicketStatus.SOLD;
 };
 
-// Indexes
+// Indexes.
+// NOTE: ticketId / saleId / purchasedBy already declare their single-field
+// indexes on the field itself (unique / index / sparse respectively). Declaring
+// them again here generated a second "<field>_1" with DIFFERENT options, which
+// MongoDB rejects — silently, because Mongoose builds indexes in the background
+// and only emits the error on the connection. Keep single-field index intent on
+// the field; only compound indexes belong down here.
 ticketSchema.index({ eventId: 1, status: 1 });
 ticketSchema.index({ vendorId: 1, status: 1 });
-ticketSchema.index({ saleId: 1 });
-ticketSchema.index({ purchasedBy: 1 });
-ticketSchema.index({ ticketId: 1 }, { unique: true });
 
 export const Ticket = mongoose.model<ITicket>('Ticket', ticketSchema);

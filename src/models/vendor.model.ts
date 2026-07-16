@@ -202,10 +202,11 @@ vendorSchema.methods.comparePassword = async function(this: IVendor, candidatePa
 };
 
 // Indexes
-vendorSchema.index({ email: 1 });
-vendorSchema.index({ phoneNumber: 1 });
-vendorSchema.index({ slug: 1 });
+// NOTE: email / phoneNumber / slug / keshlessVendorId declare their own
+// single-field indexes on the field (unique + sparse / unique + index / sparse
+// + index). Re-declaring them here produced a second "<field>_1" WITHOUT those
+// options, which MongoDB rejects — silently, since Mongoose builds indexes in
+// the background. Only compound indexes belong here.
 vendorSchema.index({ isActive: 1, isVerified: 1 });
-vendorSchema.index({ keshlessVendorId: 1 });
 
 export const Vendor = mongoose.model<IVendor>('Vendor', vendorSchema);
