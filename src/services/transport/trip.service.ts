@@ -3,7 +3,9 @@ import { Trip } from '@models/transport/trip.model';
 import { Seat } from '@models/transport/seat.model';
 import { Route } from '@models/transport/route.model';
 import { VehicleType } from '@models/transport/vehicleType.model';
+import { Vendor } from '@models/vendor.model';
 import { ITrip, SeatScheme, SeatLayout, TripStatus } from '@interfaces/transport.interface';
+import { OperatorType } from '@interfaces/vendor.interface';
 import { HttpError } from '@utils/httpError.util';
 
 const ROW_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ'; // skip I, L, O for legibility
@@ -118,18 +120,37 @@ export class TripService {
     return { trip, availableSeats, seats };
   }
 
-  static async listSellable(p: { vendorId?: string; routeId?: string; now?: Date }): Promise<ITrip[]> {
-    const now = p.now ?? new Date();
-    const query: FilterQuery<ITrip> = {
+  /** Shared "sellable" predicate: reused by listSellable and listSellableOperators
+   *  so "has a sellable trip" means the same thing everywhere. */
+  private static sellablePredicate(now: Date): FilterQuery<ITrip> {
+    return {
       status: { $in: [TripStatus.SCHEDULED, TripStatus.BOARDING] },
       departureTime: { $gte: now },
     };
+  }
+
+  static async listSellable(p: { vendorId?: string; routeId?: string; now?: Date }): Promise<ITrip[]> {
+    const now = p.now ?? new Date();
+    const query: FilterQuery<ITrip> = TripService.sellablePredicate(now);
     if (p.vendorId) query.vendorId = p.vendorId;
     if (p.routeId) query.routeId = p.routeId;
     return Trip.find(query)
       .sort({ departureTime: 1 })
       .populate('routeId', 'name originCity destinationCity farePerSeat')
       .populate('vehicleTypeId', 'name seatScheme');
+  }
+
+  /** Bus companies a reseller conductor can sell for: active, transport|both
+   *  vendors with at least one sellable trip (same predicate as listSellable). */
+  static async listSellableOperators(now = new Date()): Promise<Array<{ id: string; businessName: string }>> {
+    const vendorIds = await Trip.distinct('vendorId', TripService.sellablePredicate(now));
+    if (!vendorIds.length) return [];
+    const vendors = await Vendor.find({
+      _id: { $in: vendorIds },
+      operatorType: { $in: [OperatorType.TRANSPORT, OperatorType.BOTH] },
+      isActive: true,
+    }).select('businessName').lean();
+    return vendors.map((v) => ({ id: String(v._id), businessName: v.businessName as string }));
   }
 
   static async reserveSeat(vendorId: string, tripId: string, seatNumber: string, note?: string, byUserId?: string): Promise<void> {

@@ -14,6 +14,14 @@ function reseller(req: Request): { operatorId: string; resellerId: string; hubId
 }
 
 export class TransportPosController {
+  /** GET /api/reseller/transport/operators — bus companies a conductor can sell for. */
+  static async listOperators(req: Request, res: Response): Promise<any> {
+    try {
+      if (!reseller(req)) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');
+      return ApiResponseUtil.success(res, await TripService.listSellableOperators());
+    } catch (e) { return failWithHttpError(res, e, 'Failed to load operators'); }
+  }
+
   static async listTrips(req: Request, res: Response): Promise<any> {
     try {
       if (!reseller(req)) return ApiResponseUtil.unauthorized(res, 'Reseller sign-in required');

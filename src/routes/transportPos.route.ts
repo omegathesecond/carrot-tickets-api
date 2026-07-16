@@ -9,6 +9,7 @@ const router = Router();
 
 router.use(authenticateReseller);
 
+router.get('/operators', requireResellerPermission(ResellerPermission.VIEW_EVENTS), TransportPosController.listOperators);
 router.get('/trips', requireResellerPermission(ResellerPermission.VIEW_EVENTS), TransportPosController.listTrips);
 router.get('/trips/:id', requireResellerPermission(ResellerPermission.VIEW_EVENTS), TransportPosController.getTrip);
 router.post('/bookings', requireResellerPermission(ResellerPermission.SELL_TICKETS), TransportPosController.sell);

@@ -6,6 +6,8 @@ import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
 import { HandoffToken } from '@models/handoffToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
+import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { scopePermissionsToType } from '@utils/permissions.util';
 import { JWT_SECRET } from '@config/jwt.config';
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
@@ -68,12 +70,13 @@ export class TicketsAuthService {
     });
     await vendor.save();
 
+    const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
     const payload = {
       vendorId: vendor._id.toString(),
       userType: 'vendor',
       app: 'tickets',
       role: TicketsRole.OWNER,
-      permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
+      permissions: ownerPerms,
       isSuperAdmin: false
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
@@ -91,12 +94,42 @@ export class TicketsAuthService {
         slug: vendor.slug,
         userType: 'vendor',
         role: TicketsRole.OWNER,
-        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
+        permissions: ownerPerms,
+        operatorType: vendor.operatorType,
         isSuperAdmin: false,
         verificationStatus: vendor.verificationStatus,
         isVerified: vendor.isVerified
       }
     };
+  }
+
+  /**
+   * Admin-only: create an operator (event/transport/both). Unlike self-signup
+   * this accepts operatorType and lands the account already VERIFIED (an admin
+   * vouches for it). Returns the created vendor; no token is minted.
+   */
+  static async adminCreateOperator(params: {
+    businessName: string;
+    operatorType: OperatorType;
+    email?: string;
+    phoneNumber?: string;
+    password: string;
+    businessType?: string;
+    primaryContact?: string;
+  }) {
+    const { businessName, operatorType, email, phoneNumber, password, businessType, primaryContact } = params;
+    if (!email && !phoneNumber) throw new Error('An email address or phone number is required');
+    if (email && await Vendor.findOne({ email })) throw new Error('An account with this email already exists');
+    if (phoneNumber && await Vendor.findOne({ phoneNumber })) throw new Error('An account with this phone number already exists');
+
+    const vendor = new Vendor({
+      businessName, operatorType, email, phoneNumber, password, businessType, primaryContact,
+      verificationStatus: VerificationStatus.VERIFIED,
+      isVerified: true,
+      verifiedAt: new Date(),
+    });
+    await vendor.save();
+    return vendor;
   }
 
   /**
@@ -122,12 +155,13 @@ export class TicketsAuthService {
       }
 
       // Generate tokens for vendor
+      const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
       const payload = {
         vendorId: vendor._id.toString(),
         userType: 'vendor',
         app: 'tickets',
         role: TicketsRole.OWNER,
-        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
+        permissions: ownerPerms,
         isSuperAdmin: vendor.isSuperAdmin || false
       };
       const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
@@ -147,7 +181,8 @@ export class TicketsAuthService {
           slug: vendor.slug,
           userType: 'vendor',
           role: TicketsRole.OWNER,
-          permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
+          permissions: ownerPerms,
+          operatorType: vendor.operatorType,
           isSuperAdmin: vendor.isSuperAdmin || false,
           verificationStatus: vendor.verificationStatus,
           isVerified: vendor.isVerified
@@ -191,13 +226,14 @@ export class TicketsAuthService {
       await subUser.save();
 
       // Generate tokens for sub-user
+      const subUserPerms = scopePermissionsToType(ticketsAccess.permissions as any, vendorForSubUser.operatorType);
       const payload = {
         userId: subUser._id.toString(),
         vendorId: subUser.vendorId.toString(),
         userType: 'sub-user',
         app: 'tickets',
         role: ticketsAccess.role,
-        permissions: ticketsAccess.permissions
+        permissions: subUserPerms
       };
       const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
       const refreshToken = this.generateRefreshToken();
@@ -216,7 +252,8 @@ export class TicketsAuthService {
           phoneNumber: subUser.phoneNumber,
           userType: 'sub-user',
           role: ticketsAccess.role,
-          permissions: ticketsAccess.permissions
+          permissions: subUserPerms,
+          operatorType: vendorForSubUser.operatorType
         }
       };
     }
@@ -340,7 +377,8 @@ export class TicketsAuthService {
         slug: vendor.slug,
         userType: 'vendor',
         role: TicketsRole.OWNER,
-        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
+        permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType),
+        operatorType: vendor.operatorType,
         isSuperAdmin: vendor.isSuperAdmin || false,
         verificationStatus: vendor.verificationStatus,
         isVerified: vendor.isVerified
@@ -360,6 +398,9 @@ export class TicketsAuthService {
         throw new Error('Keshless Tickets access not found');
       }
 
+      const vendorForSubUser = await Vendor.findById(subUser.vendorId);
+      const subType = vendorForSubUser?.operatorType ?? OperatorType.EVENTS;
+
       return {
         _id: subUser._id,
         vendorId: subUser.vendorId,
@@ -368,7 +409,8 @@ export class TicketsAuthService {
         phoneNumber: subUser.phoneNumber,
         userType: 'sub-user',
         role: ticketsAccess.role,
-        permissions: ticketsAccess.permissions
+        permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType),
+        operatorType: subType
       };
     }
   }
@@ -581,7 +623,7 @@ export class TicketsAuthService {
         userType: 'vendor',
         app: 'tickets',
         role: TicketsRole.OWNER,
-        permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER],
+        permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType),
         isSuperAdmin: vendor.isSuperAdmin || false
       };
     } else {
@@ -599,13 +641,16 @@ export class TicketsAuthService {
         throw new Error('Keshless Tickets access not found');
       }
 
+      const vendorForSubUser = await Vendor.findById(subUser.vendorId);
+      const subType = vendorForSubUser?.operatorType ?? OperatorType.EVENTS;
+
       payload = {
         userId: subUser._id.toString(),
         vendorId: subUser.vendorId.toString(),
         userType: 'sub-user',
         app: 'tickets',
         role: ticketsAccess.role,
-        permissions: ticketsAccess.permissions
+        permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType)
       };
     }
 
