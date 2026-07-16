@@ -4,6 +4,7 @@ import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { FeedController } from '@controllers/feed.controller';
+import { UpdateController } from '@controllers/update.controller';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 
@@ -50,6 +51,18 @@ router.get('/activity', PublicController.getActivity);
  * @query   tab (for-you|following|events, default for-you), cursor
  */
 router.get('/feed', optionalTicketsAuth, FeedController.get);
+
+/**
+ * @route   GET /api/public/updates/by/:authorType/:authorId
+ * @desc    An author's own ready updates, newest first (profile grid: the
+ *          organizer "Posts" tab and buyer posts). Reached via fallthrough
+ *          from the narrower /api/public/updates mount (@routes/update.route
+ *          only claims single-segment /:id paths) — see src/app.ts mount
+ *          order comments.
+ * @access  Public (optional tickets token for viewerReactions)
+ * @query   cursor (createdAt ISO string of the last item on the prior page)
+ */
+router.get('/updates/by/:authorType/:authorId', optionalTicketsAuth, UpdateController.listByAuthor);
 
 /**
  * @route   GET /api/public/events/:eventId

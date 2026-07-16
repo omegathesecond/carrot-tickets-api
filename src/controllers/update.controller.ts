@@ -2,8 +2,13 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
 import { Update } from '@models/update.model';
+import type { UpdateAuthorType } from '@interfaces/update.interface';
+
+const AUTHOR_TYPES: UpdateAuthorType[] = ['buyer', 'vendor'];
+const PAGE_SIZE = 24;
 
 const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -92,6 +97,41 @@ export class UpdateController {
     const actor = await resolveActorFromRequest(req).catch(() => null);
     if (actor) reactions = (await getViewerReactions([update.id], actor))[update.id];
     return ApiResponseUtil.success(res, UpdateController.dto(update, reactions));
+  }
+
+  /**
+   * GET /api/public/updates/by/:authorType/:authorId — an author's own
+   * ready posts, newest first (profile grid: organizer "Posts" tab, buyer
+   * posts). Public read; if a tickets token resolves to a social actor,
+   * viewerReactions is populated on each item like getOne()/getFeed() do.
+   *
+   * "Ready" = the model's real fields: top-level status:'active' (not
+   * 'removed') AND media.status:'ready' (transcode/finalize complete) —
+   * there is no single status:'ready' field on Update.
+   */
+  static async listByAuthor(req: Request, res: Response): Promise<any> {
+    try {
+      const authorType = String(req.params['authorType'] || '');
+      const authorId = String(req.params['authorId'] || '');
+      if (!AUTHOR_TYPES.includes(authorType as UpdateAuthorType) || !HEX24.test(authorId)) {
+        return ApiResponseUtil.validationError(res, 'Invalid author');
+      }
+      const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
+      const filter: any = { authorType, authorId, status: 'active', 'media.status': 'ready' };
+      if (cursor) filter.createdAt = { $lt: new Date(cursor) };
+
+      const docs = await Update.find(filter).sort({ createdAt: -1 }).limit(PAGE_SIZE + 1);
+      const page = docs.slice(0, PAGE_SIZE);
+      const nextCursor = docs.length > PAGE_SIZE ? new Date(page[page.length - 1]!.createdAt).toISOString() : null;
+
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      const reactions = actor && page.length ? await getViewerReactions(page.map((d) => d.id), actor) : undefined;
+      const items = page.map((d) => UpdateController.dto(d, reactions?.[d.id]));
+
+      return ApiResponseUtil.success(res, { items, nextCursor });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load posts');
+    }
   }
 
   static react(type: 'like' | 'save') {
