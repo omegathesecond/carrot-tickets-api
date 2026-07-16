@@ -7,6 +7,7 @@ import {
   requireSuperAdminOrPermission,
 } from '@middleware/ticketsAuth.middleware';
 import { dualAuth } from '@middleware/serviceAuth.middleware';
+import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
@@ -137,6 +138,21 @@ router.patch(
   '/organizer/profile',
   requireTicketsPermission(TicketsPermission.EDIT_EVENT),
   OrganizerProfileController.updateOwn
+);
+
+/**
+ * Organizer brand logo upload — multipart 'logo' -> { logoUrl }. Mirrors
+ * BuyerProfileController.uploadAvatar (same avatarUpload multer config + R2
+ * key/upload/delete-previous idiom), gated by the same permission as the
+ * profile PATCH above.
+ */
+router.post(
+  '/organizer/profile/logo',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  avatarUpload.single('logo'),
+  handleMulterError,
+  validateFileUpload,
+  OrganizerProfileController.uploadLogo,
 );
 
 /**

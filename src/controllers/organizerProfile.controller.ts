@@ -7,6 +7,7 @@ import { FollowService } from '@services/follow.service';
 import { ReviewService } from '@services/review.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { R2Service } from '@utils/r2.service';
 
 export class OrganizerProfileController {
   /** PATCH /api/tickets/organizer/profile — vendor updates its own brand card. */
@@ -33,6 +34,39 @@ export class OrganizerProfileController {
       }, 'Profile updated');
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to update organizer profile');
+    }
+  }
+
+  /** POST /api/tickets/organizer/profile/logo (multipart 'logo') — vendor uploads its brand logo. */
+  static async uploadLogo(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = (req as any).ticketsUser?.vendorId as string | undefined;
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Authentication required');
+
+      const file = (req as any).file;
+      if (!file) return ApiResponseUtil.validationError(res, 'No image uploaded');
+
+      const vendor = await Vendor.findById(vendorId);
+      if (!vendor) return ApiResponseUtil.error(res, 'Organizer not found', 404);
+
+      const ext = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
+      const key = R2Service.generateMediaKey(`vendors/${vendor._id}/logo`, `logo.${ext}`);
+      await R2Service.uploadBufferToR2(key, file.buffer, file.mimetype);
+      const url = R2Service.getPublicUrl(key);
+
+      const previous = vendor.logoUrl;
+      vendor.logoUrl = url;
+      await vendor.save();
+
+      if (previous) {
+        R2Service.deleteEventMediaByUrl(previous).catch((err) =>
+          console.warn('Failed to delete previous logo (non-fatal):', err?.message),
+        );
+      }
+
+      return ApiResponseUtil.success(res, { logoUrl: url }, 'Logo updated');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to upload logo');
     }
   }
 
