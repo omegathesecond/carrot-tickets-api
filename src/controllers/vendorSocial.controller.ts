@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { FollowService } from '@services/follow.service';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { BlockService } from '@services/block.service';
 import { NotificationService } from '@services/notification.service';
 import { followSchema } from '@validators/community.validator';
@@ -14,6 +15,21 @@ import { toVendorSummary } from '@utils/vendorSummary.util';
 export class VendorSocialController {
   private static vendorId(req: Request): string | undefined {
     return (req as any).ticketsUser?.vendorId;
+  }
+
+  /**
+   * Whether this session may edit the brand's identity (logo/bio).
+   *
+   * Mirrors requireTicketsPermission's read of req.ticketsUser.permissions —
+   * the same bar POST /api/tickets/organizer/profile/logo enforces. Exposed
+   * so clients never offer a brand-identity action a sub-user would be 403'd
+   * out of (notably the PhotoGate, whose only exit IS the logo upload: a
+   * SALES/SCANNER staffer of a logoless vendor would otherwise be shown a
+   * non-dismissible gate they can never satisfy).
+   */
+  private static canEditBrand(req: Request): boolean {
+    const permissions = (req as any).ticketsUser?.permissions || [];
+    return permissions.includes(TicketsPermission.EDIT_EVENT);
   }
 
   /** GET /api/tickets/social/me — the brand's own social summary. */
@@ -35,6 +51,7 @@ export class VendorSocialController {
         bio: vendor.bio ?? null,
         followerCount,
         followingCount,
+        canEditBrand: VendorSocialController.canEditBrand(req),
       });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load brand profile');

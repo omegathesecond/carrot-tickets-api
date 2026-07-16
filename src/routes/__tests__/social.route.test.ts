@@ -7,7 +7,16 @@ import { Buyer } from '@models/buyer.model';
 const PHONE = '+26878422613';
 
 describe('social profile routes', () => {
-  beforeAll(connectTestDb);
+  // The "taken username" case below asserts a 409, which the controller only
+  // produces from Mongo's duplicate-key error (E11000) — the same race-free
+  // path used in production. That error can only fire once the unique index on
+  // Buyer.username actually exists, and Mongoose builds indexes in the
+  // background, so awaiting init() here establishes the precondition instead of
+  // racing it (without this the duplicate silently succeeds and returns 200).
+  beforeAll(async () => {
+    await connectTestDb();
+    await Buyer.init();
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
