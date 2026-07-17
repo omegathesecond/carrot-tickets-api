@@ -33,9 +33,12 @@ export interface IWallet extends Document {
   updatedAt: Date;
 }
 
+// {PATH} is interpolated by Mongoose with the offending field name, so this is
+// shared across balance and cashFundedBalance without either reporting the
+// other's name.
 const integerCents = {
   validator: Number.isSafeInteger,
-  message: 'balance must be integer minor units (ZAR cents)',
+  message: '{PATH} must be integer minor units (ZAR cents)',
 };
 
 const walletSchema = new Schema<IWallet>(
@@ -56,6 +59,48 @@ const walletSchema = new Schema<IWallet>(
   { timestamps: true },
 );
 
+/**
+ * !! THE cashFundedBalance <= balance INVARIANT IS NOT ENFORCED ON UPDATES !!
+ *
+ * This hook — and every `min`/`validate` rule declared above — runs ONLY on
+ * save() and create(). It does NOT run on updateOne / findOneAndUpdate /
+ * updateMany / bulkWrite: Mongoose skips document validators on update paths
+ * unless `runValidators: true` is passed per-call, and there is no global plugin
+ * setting it here. `$inc` bypasses validation regardless, since there is no full
+ * document to validate. A cross-field check like this one cannot be expressed
+ * under `runValidators` at all, because an update validator only ever sees the
+ * single path it is validating — never the sibling it must compare against.
+ *
+ * Consequence: ANY code mutating `balance` or `cashFundedBalance` outside
+ * save()/create() MUST preserve the invariant ITSELF. Nothing will catch it.
+ *
+ * The intended pattern is ONE atomic aggregation-pipeline update that moves both
+ * fields together, with a $max floor keeping cashFundedBalance at or above 0
+ * once a spend has drawn it fully down (spec §2.4 — cash is spent FIRST so the
+ * residual is maximally auto-refundable to a card):
+ *
+ *   Wallet.findOneAndUpdate(
+ *     { _id, status: 'active', balance: { $gte: amount } },   // CAS guard
+ *     [{ $set: {
+ *         balance:           { $subtract: ['$balance', amount] },
+ *         cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', amount] }] },
+ *     } }],
+ *     { new: true },
+ *   )
+ *
+ * The filter is the compare-and-set: it is what makes the read-modify-write safe
+ * under concurrent taps, and a null result means "insufficient funds or not
+ * active", NOT an error to swallow.
+ *
+ * NOTE ON BACKSTOPS: there is currently NO automated detector for
+ * cashFundedBalance > balance drift. ReconciliationService.checkInvariant() and
+ * checkJournalIntegrity() reconcile the LEDGER only (spec §3) — they never read
+ * Wallet documents, so this specific drift is invisible to them. Do not rely on
+ * reconciliation to catch a caller that violates the invariant.
+ *
+ * Do NOT delete this hook: it still guards create()/save(), which is where
+ * wallets are minted and where a bad seed would otherwise start life invalid.
+ */
 walletSchema.pre('validate', function (next) {
   if (this.cashFundedBalance > this.balance) {
     return next(new Error('cashFundedBalance cannot exceed balance'));
@@ -77,9 +122,13 @@ walletSchema.index(
 // two simultaneous check-in scans both miss and both insert. PARTIAL for the
 // same reason as bandUid: buyerId is optional (a cash-desk wallet can exist
 // before sign-up), so a plain unique index would collide on multiple nulls.
+// $type:'objectId' and NOT $exists:true, symmetric with bandUid's $type:'string':
+// $exists is true for a stored explicit null, and Mongoose does store an
+// explicitly-set null, so two buyerId:null wallets would index as {eventId,null}
+// and the second would fail E11000. $type only matches a real ObjectId.
 walletSchema.index(
   { eventId: 1, buyerId: 1 },
-  { unique: true, partialFilterExpression: { buyerId: { $exists: true } } },
+  { unique: true, partialFilterExpression: { buyerId: { $type: 'objectId' } } },
 );
 
 export const Wallet = mongoose.model<IWallet>('Wallet', walletSchema);
