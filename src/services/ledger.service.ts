@@ -2,6 +2,7 @@ import mongoose, { ClientSession } from 'mongoose';
 import { LedgerEntry } from '@models/ledgerEntry.model';
 import {
   LedgerAccount,
+  LedgerAccountType,
   FloatTag,
   accountRequiresRef,
 } from '@interfaces/ledger.interface';
@@ -113,5 +114,56 @@ export class LedgerService {
       await session.endSession();
     }
     return txnId;
+  }
+
+  /**
+   * Signed balance of one account: Σ delta.
+   * Asset (float) → positive when holding money.
+   * Liability/revenue (wallet/merchant/fees) → negative when owed/earned.
+   */
+  static async accountBalance(eventId: string, account: LedgerAccount): Promise<number> {
+    if (accountRequiresRef(account.type) && !account.ref) {
+      throw new Error(`${account.type} account requires a ref`);
+    }
+    const [row] = await LedgerEntry.aggregate<{ total: number }>([
+      {
+        $match: {
+          eventId: new mongoose.Types.ObjectId(eventId),
+          accountType: account.type,
+          accountRef: account.ref ?? null,
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$delta' } } },
+    ]);
+    return row?.total ?? 0;
+  }
+
+  /** Signed float balance, optionally restricted to money sitting in one place. */
+  static async floatBalance(eventId: string, tag?: FloatTag): Promise<number> {
+    const [row] = await LedgerEntry.aggregate<{ total: number }>([
+      {
+        $match: {
+          eventId: new mongoose.Types.ObjectId(eventId),
+          accountType: LedgerAccountType.FLOAT,
+          ...(tag ? { tag } : {}),
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$delta' } } },
+    ]);
+    return row?.total ?? 0;
+  }
+
+  /**
+   * Human-facing positive figure for a credit-normal account type:
+   * total owed (wallet/merchant) or earned (fees) across the event.
+   */
+  static async totalOwed(eventId: string, type: LedgerAccountType): Promise<number> {
+    const [row] = await LedgerEntry.aggregate<{ total: number }>([
+      {
+        $match: { eventId: new mongoose.Types.ObjectId(eventId), accountType: type },
+      },
+      { $group: { _id: null, total: { $sum: '$delta' } } },
+    ]);
+    return -(row?.total ?? 0);
   }
 }
