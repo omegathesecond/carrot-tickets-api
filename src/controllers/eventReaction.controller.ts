@@ -10,6 +10,18 @@ import { toggleEventLike, recordEventShare } from '@services/eventReaction.servi
  * PublicController.
  */
 export class EventReactionController {
+  /**
+   * Returns the eventId if the event exists; otherwise sends a 404 response and returns null.
+   */
+  private static async requireEvent(req: Request, res: Response): Promise<string | null> {
+    const eventId = req.params['eventId'] as string;
+    if (!(await Event.exists({ _id: eventId }))) {
+      ApiResponseUtil.error(res, 'Event not found', 404);
+      return null;
+    }
+    return eventId;
+  }
+
   /** POST /api/public/events/:eventId/like — 401 when anonymous. */
   static async like(req: Request, res: Response): Promise<any> {
     try {
@@ -24,10 +36,8 @@ export class EventReactionController {
       // caller reaches here. A like needs an owner: refuse, never no-op.
       if (!actor) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
 
-      const eventId = req.params['eventId'] as string;
-      if (!(await Event.exists({ _id: eventId }))) {
-        return ApiResponseUtil.error(res, 'Event not found', 404);
-      }
+      const eventId = await EventReactionController.requireEvent(req, res);
+      if (!eventId) return;
 
       return ApiResponseUtil.success(res, await toggleEventLike(eventId, actor));
     } catch (error: any) {
@@ -38,10 +48,8 @@ export class EventReactionController {
   /** POST /api/public/events/:eventId/share — no actor required. */
   static async share(req: Request, res: Response): Promise<any> {
     try {
-      const eventId = req.params['eventId'] as string;
-      if (!(await Event.exists({ _id: eventId }))) {
-        return ApiResponseUtil.error(res, 'Event not found', 404);
-      }
+      const eventId = await EventReactionController.requireEvent(req, res);
+      if (!eventId) return;
       return ApiResponseUtil.success(res, await recordEventShare(eventId));
     } catch (error: any) {
       return ApiResponseUtil.error(res, error?.message || 'Failed to record share', 500);
