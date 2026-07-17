@@ -171,16 +171,38 @@ export class UpdateController {
     return ApiResponseUtil.success(res, r);
   }
 
+  /**
+   * DELETE /api/public/updates/:id — soft-delete (status:'removed'), author or
+   * superadmin only. Mounted with optionalTicketsAuth: the route accepts any
+   * tickets token (buyer OR vendor) and authorization happens HERE.
+   *
+   * Resolves a SocialActor, not a buyer: a brand post has authorType:'vendor'
+   * and resolveBuyerFromRequest returns null for a vendor token, which used to
+   * 403 organizers on their own posts.
+   */
   static async remove(req: Request, res: Response): Promise<any> {
-    const buyer = await resolveBuyerFromRequest(req);
+    const actor = await resolveActorFromRequest(req).catch(() => null);
     const isSuperAdmin = (req as any).ticketsUser?.isSuperAdmin === true;
     const update = await Update.findById(req.params['id'] as string);
     if (!update) return ApiResponseUtil.notFound(res, 'Update not found');
-    const isAuthor = buyer && String(update.authorId) === String(buyer._id);
+    const isAuthor = UpdateController.isActorAuthor(update, actor);
     if (!isAuthor && !isSuperAdmin) return ApiResponseUtil.forbidden(res, 'Not allowed');
     update.status = 'removed';
     await update.save();
     return ApiResponseUtil.success(res, { ok: true });
+  }
+
+  /**
+   * The one ownership rule, shared by remove() and the viewerIsAuthor flag.
+   *
+   * The authorType clause is load-bearing, not cosmetic: comparing ids alone
+   * let a buyer whose _id equalled a vendor's id delete that brand's post
+   * (proven by a test constructing exactly that collision).
+   */
+  static isActorAuthor(update: any, actor: { type: string; id: string } | null): boolean {
+    return !!actor
+      && update.authorType === actor.type
+      && String(update.authorId) === String(actor.id);
   }
 
   static dto(update: any, reactions?: { liked: boolean; saved: boolean }) {

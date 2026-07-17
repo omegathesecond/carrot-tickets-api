@@ -1,7 +1,8 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signSuperAdminToken } from '../../__tests__/helpers/auth';
+import { signBuyerToken, signSuperAdminToken, signVendorToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Update } from '@models/update.model';
 
@@ -81,6 +82,66 @@ describe('DELETE /api/public/updates/:id', () => {
       caption: 'x',
       media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
     });
+
+  const seedVendorUpdate = async (vendorId: string) =>
+    Update.create({
+      authorType: 'vendor',
+      authorId: vendorId,
+      kind: 'image',
+      caption: 'brand post',
+      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+    });
+
+  // THE REPORTED GAP: remove() resolved only a buyer, so an organizer got 403
+  // on their own brand post.
+  it('allows a vendor to delete their own brand post', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    const update = await seedVendorUpdate(String(vendorId));
+
+    const res = await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .set('Authorization', `Bearer ${signVendorToken(String(vendorId))}`)
+      .expect(200);
+    expect(res.body.data.ok).toBe(true);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).toBe('removed');
+  });
+
+  it("forbids a vendor from deleting a DIFFERENT brand's post", async () => {
+    const author = new mongoose.Types.ObjectId();
+    const other = new mongoose.Types.ObjectId();
+    const update = await seedVendorUpdate(String(author));
+
+    await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .set('Authorization', `Bearer ${signVendorToken(String(other))}`)
+      .expect(403);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).not.toBe('removed');
+  });
+
+  // (Anonymous delete is already covered below by "denies an anonymous request
+  // (no Authorization header)" — the assertion that makes the optionalTicketsAuth
+  // mounting safe. Not duplicated here.)
+
+  // The latent hole: the old check compared authorId to buyer._id WITHOUT
+  // checking authorType, so a buyer whose _id equalled a vendor's id could
+  // delete that brand's post. Construct exactly that collision.
+  it('forbids a buyer from deleting a VENDOR post whose authorId equals the buyer _id', async () => {
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Collider' });
+    // Same raw id, but authored by a *vendor* — only the authorType check saves us.
+    const update = await seedVendorUpdate(String(buyer._id));
+
+    await request(app)
+      .delete(`/api/public/updates/${update.id}`)
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .expect(403);
+
+    const reloaded = await Update.findById(update.id);
+    expect(reloaded?.status).not.toBe('removed');
+  });
 
   it('allows the author (buyer who created it) to delete their own update', async () => {
     const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
