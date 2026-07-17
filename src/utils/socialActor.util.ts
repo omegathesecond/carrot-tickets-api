@@ -25,3 +25,25 @@ export async function resolveActorFromRequest(req: Request): Promise<SocialActor
   }
   return null;
 }
+
+/**
+ * Does `actor` own content authored by (authorType, authorId)?
+ *
+ * The ONE ownership rule — used by UpdateController.remove() (can you delete
+ * this?) and by the viewerIsAuthor flag (should the UI offer delete?). Those
+ * two must never disagree, so they share this.
+ *
+ * The authorType clause is load-bearing, not cosmetic: comparing ids alone let
+ * a buyer whose _id equalled a vendor's id delete that brand's post (a test
+ * constructs exactly that collision).
+ *
+ * Callers speaking a different vocabulary must translate FIRST — notably the
+ * feed, whose FeedAuthor.type is 'organizer' where the model says 'vendor'.
+ */
+export function isActorAuthorOf(
+  authorType: string | undefined,
+  authorId: unknown,
+  actor: SocialActor | null | undefined,
+): boolean {
+  return !!actor && authorType === actor.type && String(authorId) === String(actor.id);
+}

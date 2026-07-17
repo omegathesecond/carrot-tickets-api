@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
-import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { resolveActorFromRequest, isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
 import { Update } from '@models/update.model';
@@ -96,7 +96,7 @@ export class UpdateController {
     let reactions: { liked: boolean; saved: boolean } | undefined;
     const actor = await resolveActorFromRequest(req).catch(() => null);
     if (actor) reactions = (await getViewerReactions([update.id], actor))[update.id];
-    return ApiResponseUtil.success(res, UpdateController.dto(update, reactions));
+    return ApiResponseUtil.success(res, UpdateController.dto(update, reactions, UpdateController.isActorAuthor(update, actor)));
   }
 
   /**
@@ -130,7 +130,7 @@ export class UpdateController {
 
       const actor = await resolveActorFromRequest(req).catch(() => null);
       const reactions = actor && page.length ? await getViewerReactions(page.map((d) => d.id), actor) : undefined;
-      const items = page.map((d) => UpdateController.dto(d, reactions?.[d.id]));
+      const items = page.map((d) => UpdateController.dto(d, reactions?.[d.id], UpdateController.isActorAuthor(d, actor)));
 
       return ApiResponseUtil.success(res, { items, nextCursor });
     } catch (error: any) {
@@ -192,20 +192,17 @@ export class UpdateController {
     return ApiResponseUtil.success(res, { ok: true });
   }
 
-  /**
-   * The one ownership rule, shared by remove() and the viewerIsAuthor flag.
-   *
-   * The authorType clause is load-bearing, not cosmetic: comparing ids alone
-   * let a buyer whose _id equalled a vendor's id delete that brand's post
-   * (proven by a test constructing exactly that collision).
-   */
-  static isActorAuthor(update: any, actor: { type: string; id: string } | null): boolean {
-    return !!actor
-      && update.authorType === actor.type
-      && String(update.authorId) === String(actor.id);
+  /** Ownership for an Update document. The rule itself lives in
+   *  socialActor.util — the feed shares it through a different vocabulary. */
+  static isActorAuthor(update: any, actor: SocialActor | null): boolean {
+    return isActorAuthorOf(update.authorType, update.authorId, actor);
   }
 
-  static dto(update: any, reactions?: { liked: boolean; saved: boolean }) {
+  /**
+   * `viewerIsAuthor` defaults false so call sites with no resolved actor
+   * (create/finalize) stay truthful rather than claiming ownership.
+   */
+  static dto(update: any, reactions?: { liked: boolean; saved: boolean }, viewerIsAuthor = false) {
     return {
       id: update.id,
       authorType: update.authorType,
@@ -220,6 +217,7 @@ export class UpdateController {
       viewCount: update.viewCount ?? 0,
       createdAt: update.createdAt,
       viewerReactions: reactions ?? null,
+      viewerIsAuthor,
     };
   }
 }

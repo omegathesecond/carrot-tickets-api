@@ -109,4 +109,52 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     const res = await request(app).get('/api/public/updates/by/vendor/507f1f77bcf86cd799439011?cursor=not-a-date');
     expect(res.status).toBe(400);
   });
+
+  // viewerIsAuthor is what lets the client offer delete only on your own post.
+  // Server-computed (like viewerReactions) so the client needn't bridge the
+  // model's authorType:'vendor' vs the feed's author.type:'organizer' naming.
+  it('sets viewerIsAuthor true for the vendor who authored the posts', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    await Update.create({
+      authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'mine',
+      media: readyImageMedia,
+    });
+
+    const res = await request(app)
+      .get(`/api/public/updates/by/vendor/${vendorId.toHexString()}`)
+      .set('Authorization', `Bearer ${signVendorToken(vendorId.toHexString())}`)
+      .expect(200);
+
+    expect(res.body.data.items[0].viewerIsAuthor).toBe(true);
+  });
+
+  it('sets viewerIsAuthor false for a different vendor', async () => {
+    const author = new mongoose.Types.ObjectId();
+    const other = new mongoose.Types.ObjectId();
+    await Update.create({
+      authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
+      media: readyImageMedia,
+    });
+
+    const res = await request(app)
+      .get(`/api/public/updates/by/vendor/${author.toHexString()}`)
+      .set('Authorization', `Bearer ${signVendorToken(other.toHexString())}`)
+      .expect(200);
+
+    expect(res.body.data.items[0].viewerIsAuthor).toBe(false);
+  });
+
+  it('sets viewerIsAuthor false for an anonymous viewer', async () => {
+    const author = new mongoose.Types.ObjectId();
+    await Update.create({
+      authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
+      media: readyImageMedia,
+    });
+
+    const res = await request(app)
+      .get(`/api/public/updates/by/vendor/${author.toHexString()}`)
+      .expect(200);
+
+    expect(res.body.data.items[0].viewerIsAuthor).toBe(false);
+  });
 });

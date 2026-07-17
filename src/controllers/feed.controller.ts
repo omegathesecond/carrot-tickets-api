@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { getFeed, FeedSlide } from '@services/feed.service';
-import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { resolveActorFromRequest, isActorAuthorOf } from '@utils/socialActor.util';
 import { getViewerReactions } from '@services/update.service';
 
 const TABS = ['for-you', 'following', 'events'] as const;
@@ -24,7 +24,14 @@ export class FeedController {
         if (updateIds.length) {
           const rx = await getViewerReactions(updateIds, actor);
           for (const i of items as FeedSlide[]) {
-            if (i.type === 'update') i['viewerReactions'] = rx[i.id] ?? null;
+            if (i.type !== 'update') continue;
+            i['viewerReactions'] = rx[i.id] ?? null;
+            // The feed calls a vendor author 'organizer' (FeedAuthor.type) while
+            // a SocialActor says 'vendor' — translate before comparing, or a
+            // brand would never own its own post and the ⋯ delete would never
+            // appear in the feed.
+            const authorType = i.author.type === 'organizer' ? 'vendor' : 'buyer';
+            i['viewerIsAuthor'] = isActorAuthorOf(authorType, i.author.id, actor);
           }
         }
       }
