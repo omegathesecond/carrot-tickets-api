@@ -104,4 +104,9 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.items[0].viewerReactions).toEqual({ liked: true, saved: false });
   });
+
+  it('400s on a malformed cursor rather than silently returning an empty page', async () => {
+    const res = await request(app).get('/api/public/updates/by/vendor/507f1f77bcf86cd799439011?cursor=not-a-date');
+    expect(res.status).toBe(400);
+  });
 });

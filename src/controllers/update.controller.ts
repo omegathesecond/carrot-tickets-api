@@ -118,7 +118,11 @@ export class UpdateController {
       }
       const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
       const filter: any = { authorType, authorId, status: 'active', 'media.status': 'ready' };
-      if (cursor) filter.createdAt = { $lt: new Date(cursor) };
+      if (cursor) {
+        const d = new Date(cursor);
+        if (Number.isNaN(d.getTime())) return ApiResponseUtil.error(res, 'Invalid cursor', 400);
+        filter.createdAt = { $lt: d };
+      }
 
       const docs = await Update.find(filter).sort({ createdAt: -1 }).limit(PAGE_SIZE + 1);
       const page = docs.slice(0, PAGE_SIZE);
