@@ -155,6 +155,27 @@ describe('WalletService.bindBand', () => {
     spy.mockRestore();
   });
 
+  it('rollback does NOT clobber a concurrent legal rebind (compensating write is a CAS)', async () => {
+    const w = await WalletService.ensureWallet(eventId, buyerId);
+    // Simulate "someone rebound W between our claim and our rollback": the audit
+    // write, on its one throwing call, FIRST moves W's band to a different uid
+    // (as a legal unbind+rebind would), THEN throws so bindBand enters rollback.
+    const spy = jest.spyOn(BandBinding, 'create').mockImplementationOnce(async () => {
+      await Wallet.updateOne({ _id: w._id }, { $set: { bandUid: 'uid2' } });
+      throw new Error('audit write boom');
+    });
+
+    await expect(WalletService.bindBand(String(w._id), 'uid1')).rejects.toThrow('audit write boom');
+
+    // The rollback is CAS'd on {_id, bandUid:'uid1'}, so it matches nothing and
+    // leaves the later legal rebind intact. With the OLD unconditional rollback
+    // this would be null — the reissued band would be silently stranded.
+    const fresh = await Wallet.findById(w._id);
+    expect(fresh?.bandUid).toBe('uid2');
+
+    spy.mockRestore();
+  });
+
   it('propagates an E11000 from a NON-bandUid index unchanged (does not mislabel it)', async () => {
     // A duplicate-key error whose keyPattern is NOT bandUid must surface as-is,
     // never be mapped to "already bound to another wallet". Reject (not throw)

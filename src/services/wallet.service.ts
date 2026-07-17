@@ -113,7 +113,19 @@ export class WalletService {
       });
     } catch (auditErr) {
       try {
-        await Wallet.updateOne({ _id: claimed._id }, { $set: { bandUid: null } });
+        // Roll back ONLY the uid this call claimed — the compensating write is
+        // itself a CAS, matching {_id, bandUid: uid}, exactly like every other
+        // wallet mutation in this file. An unconditional `{_id}` update would
+        // clobber a later LEGAL rebind: if the wallet was unbound and rebound to
+        // a different uid between our failed audit and this rollback, unsetting
+        // bandUid unconditionally would strip that new uid, leaving a physically
+        // bound band with a live audit row but an unbound wallet.
+        //
+        // A zero-match here is therefore NOT a failure: it means a concurrent
+        // rebind already moved this band, so our claim was superseded and there
+        // is nothing to undo. Only a thrown error is treated as a rollback
+        // failure below.
+        await Wallet.updateOne({ _id: claimed._id, bandUid: uid }, { $set: { bandUid: null } });
       } catch (rollbackErr) {
         // Rollback is best-effort but LOUD: if it too fails, a band may be stuck
         // bound with NO audit row. Surface BOTH failures so on-call sees the
