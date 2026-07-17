@@ -130,4 +130,36 @@ export class WalletService {
 
     return claimed;
   }
+
+  /**
+   * Release a band from a wallet — the lost-band path (spec §5.1).
+   *
+   * The balance is deliberately untouched: it lives on the wallet, not the band,
+   * so a lost band costs the attendee nothing and staff can reissue a new one by
+   * calling bindBand() again. Releasing also frees the UID for reuse.
+   */
+  static async unbindBand(walletId: string, reason: string): Promise<IWallet> {
+    // Precondition in the filter: only a wallet that HAS a band can be unbound,
+    // so two concurrent unbinds cannot both stamp the audit row.
+    const released = await Wallet.findOneAndUpdate(
+      { _id: walletId, bandUid: { $ne: null } },
+      { $set: { bandUid: null } },
+      { new: true },
+    );
+
+    if (!released) {
+      const fresh = await Wallet.findById(walletId);
+      if (!fresh) throw new Error('wallet not found');
+      throw new Error('wallet has no band bound');
+    }
+
+    // Stamp the live binding row closed. Scoped to the row without unboundAt so
+    // an earlier, already-closed binding for the same uid is never re-stamped.
+    await BandBinding.findOneAndUpdate(
+      { walletId: released._id, unboundAt: { $exists: false } },
+      { $set: { unboundAt: new Date(), unboundReason: reason } },
+    );
+
+    return released;
+  }
 }

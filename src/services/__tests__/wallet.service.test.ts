@@ -185,3 +185,54 @@ describe('WalletService.bindBand', () => {
     expect(await Wallet.countDocuments({ eventId, bandUid: 'SAMEUID1' })).toBe(1);
   });
 });
+
+describe('WalletService.unbindBand (lost band reissue)', () => {
+  beforeAll(async () => { await connectTestDb(); });
+  afterEach(async () => { await clearTestDb(); jest.restoreAllMocks(); });
+  afterAll(async () => { await disconnectTestDb(); });
+
+  it('unbinds a lost band, stamps the audit row, and PRESERVES the balance', async () => {
+    const w = await WalletService.ensureWallet(eventId, buyerId);
+    await WalletService.bindBand(String(w._id), 'LOSTBAND');
+    // Simulate a topped-up wallet (SP3 does this properly via the ledger).
+    await Wallet.updateOne({ _id: w._id }, { $set: { balance: 5000 } });
+
+    const unbound = await WalletService.unbindBand(String(w._id), 'lost');
+
+    expect(unbound.bandUid).toBeNull();
+    expect(unbound.balance).toBe(5000); // the whole point of a server-side balance
+    const audit = await BandBinding.findOne({ walletId: w._id, bandUid: 'LOSTBAND' });
+    expect(audit?.unboundAt).toBeInstanceOf(Date);
+    expect(audit?.unboundReason).toBe('lost');
+  });
+
+  it('lets a NEW band be bound after the lost one is released, balance intact', async () => {
+    const w = await WalletService.ensureWallet(eventId, buyerId);
+    await WalletService.bindBand(String(w._id), 'LOSTBAND');
+    await Wallet.updateOne({ _id: w._id }, { $set: { balance: 5000 } });
+    await WalletService.unbindBand(String(w._id), 'lost');
+
+    const rebound = await WalletService.bindBand(String(w._id), 'NEWBAND1');
+    expect(rebound.bandUid).toBe('NEWBAND1');
+    expect(rebound.balance).toBe(5000);
+    // Full history retained: one closed binding, one live.
+    expect(await BandBinding.countDocuments({ walletId: w._id })).toBe(2);
+  });
+
+  it('frees the released UID for reuse by a different wallet', async () => {
+    const a = await WalletService.ensureWallet(eventId, buyerId);
+    const b = await WalletService.ensureWallet(eventId, new mongoose.Types.ObjectId().toString());
+    await WalletService.bindBand(String(a._id), 'REUSEUID');
+    await WalletService.unbindBand(String(a._id), 'reissued');
+
+    const bound = await WalletService.bindBand(String(b._id), 'REUSEUID');
+    expect(bound.bandUid).toBe('REUSEUID');
+  });
+
+  it('refuses to unbind a wallet that has no band', async () => {
+    const w = await WalletService.ensureWallet(eventId, buyerId);
+    await expect(WalletService.unbindBand(String(w._id), 'lost')).rejects.toThrow(
+      'wallet has no band bound',
+    );
+  });
+});
