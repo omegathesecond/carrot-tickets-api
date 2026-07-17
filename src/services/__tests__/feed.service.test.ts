@@ -134,4 +134,25 @@ describe('feed.service getFeed', () => {
     expect(slide).toBeDefined();
     expect(slide!.type).toBe('update');
   });
+
+  it('includes likeCount on event slides', async () => {
+    await seedEvent('E-likes');
+    const { items } = await getFeed({ tab: 'events', limit: 8 });
+    const eventSlide = items.find((i) => i.type === 'event');
+    expect(eventSlide?.['likeCount']).toBe(0);
+  });
+
+  // The deploy-window case, and the ONLY one that proves the `?? 0`: events
+  // created before the counter existed have no likeCount path at all, and
+  // .lean() does not apply schema defaults to an absent field. A freshly
+  // created Event gets the default at insert, so $unset is what reproduces
+  // the real shape of an old row.
+  it('defaults likeCount to 0 for events predating the counter', async () => {
+    const e = await seedEvent('E-old');
+    await Event.updateOne({ _id: e._id }, { $unset: { likeCount: 1 } });
+
+    const { items } = await getFeed({ tab: 'events', limit: 8 });
+    const eventSlide = items.find((i) => i.type === 'event');
+    expect(eventSlide?.['likeCount']).toBe(0);
+  });
 });

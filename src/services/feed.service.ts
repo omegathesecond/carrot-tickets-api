@@ -81,6 +81,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     return {
       type: 'event', id: String(e._id), sortAt: new Date(e.eventDate).toISOString(),
       name: e.name, venue: e.venue, eventDate: e.eventDate, posterUrl: e.posterUrl ?? null,
+      likeCount: e.likeCount ?? 0,
       priceRange: { min: prices.length ? Math.min(...prices) : 0, max: prices.length ? Math.max(...prices) : 0 },
       organizer: org ? { id: String(e.vendorId), businessName: org.businessName, logoUrl: org.logoUrl ?? null, slug: org.slug } : null,
     };

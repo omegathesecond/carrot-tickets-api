@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { getFeed, FeedSlide } from '@services/feed.service';
 import { resolveActorFromRequest, isActorAuthorOf } from '@utils/socialActor.util';
 import { getViewerReactions } from '@services/update.service';
+import { getViewerEventReactions } from '@services/eventReaction.service';
 
 const TABS = ['for-you', 'following', 'events'] as const;
 type Tab = (typeof TABS)[number];
@@ -32,6 +33,18 @@ export class FeedController {
             // appear in the feed.
             const authorType = i.author.type === 'organizer' ? 'vendor' : 'buyer';
             i['viewerIsAuthor'] = isActorAuthorOf(authorType, i.author.id, actor);
+          }
+        }
+
+        // Sibling of the block above, NOT nested inside it: a feed window can
+        // contain event slides and no update slides (pattern: u u u e u u a e),
+        // and nesting would drop event reactions in exactly that case.
+        const eventIds = items.filter((i) => i.type === 'event').map((i) => i.id);
+        if (eventIds.length) {
+          const erx = await getViewerEventReactions(eventIds, actor);
+          for (const i of items as FeedSlide[]) {
+            if (i.type !== 'event') continue;
+            i['viewerReactions'] = erx[i.id] ?? null;
           }
         }
       }
