@@ -71,30 +71,62 @@ export class WalletService {
       { _id: walletId, status: 'active', bandUid: null },
       { $set: { bandUid: uid } },
       { new: true },
-    ).catch((err: { code?: number }) => {
-      // Race 2 surfaced during the claim itself.
-      if (err?.code === 11000) {
-        throw new Error('band is already bound to another wallet at this event');
-      }
-      throw err;
+    ).catch((err: { code?: number; keyPattern?: Record<string, unknown> }) => {
+      // Race 2 surfaced during the claim itself. Discriminate by keyPattern the
+      // way ensureWallet does: ONLY a duplicate key on the {eventId, bandUid}
+      // partial unique index describes this race. Mapping on `code === 11000`
+      // alone would mislabel an E11000 raised by any other index as "already
+      // bound". A $set:{bandUid} on a fixed _id can only violate that one index
+      // today, so this is defensive/symmetric rather than reachable — but cheap.
+      if (!err?.keyPattern?.bandUid) throw err;
+      throw new Error('band is already bound to another wallet at this event');
     });
 
     if (!claimed) {
       // Distinguish the failure so the operator gets a true message, rather
-      // than a generic "could not bind".
+      // than a generic "could not bind". This re-read is best-effort: a rare
+      // interleaving (the wallet being unbound or reactivated between the failed
+      // claim and this read) can pick the wrong branch, and thus the wrong
+      // MESSAGE — but the claim already failed authoritatively, so at most the
+      // explanation is stale, never the outcome. Not worth a retry loop.
       const fresh = await Wallet.findById(walletId);
       if (!fresh) throw new Error('wallet not found');
       if (fresh.status !== 'active') throw new Error('wallet is not active');
       throw new Error('wallet already has a band bound');
     }
 
-    await BandBinding.create({
-      walletId: claimed._id,
-      eventId: claimed.eventId,
-      bandUid: uid,
-      boundAt: new Date(),
-      ...(boundBy ? { boundBy } : {}),
-    });
+    // The claim (bandUid now set) and this audit row are two separate writes,
+    // not one atomic unit. We deliberately do NOT wrap them in a transaction: a
+    // transaction would force this check-in path onto a replica set, but it must
+    // keep running on the standalone mongod harness (and standalone nodes). So
+    // compensate instead — if the audit write fails, roll the claim back by
+    // unsetting bandUid, restoring the "either both the claim and the audit row
+    // exist, or neither does" invariant. Otherwise a band is left bound with no
+    // forensic row for the clone/reissue trail.
+    try {
+      await BandBinding.create({
+        walletId: claimed._id,
+        eventId: claimed.eventId,
+        bandUid: uid,
+        boundAt: new Date(),
+        ...(boundBy ? { boundBy } : {}),
+      });
+    } catch (auditErr) {
+      try {
+        await Wallet.updateOne({ _id: claimed._id }, { $set: { bandUid: null } });
+      } catch (rollbackErr) {
+        // Rollback is best-effort but LOUD: if it too fails, a band may be stuck
+        // bound with NO audit row. Surface BOTH failures so on-call sees the
+        // band that needs manual unbinding, not just the audit error.
+        throw new Error(
+          `band binding audit write failed AND rollback failed — wallet ${String(claimed._id)} may be stuck bound to uid ${uid}. ` +
+            `audit error: ${(auditErr as Error)?.message ?? String(auditErr)}; ` +
+            `rollback error: ${(rollbackErr as Error)?.message ?? String(rollbackErr)}`,
+        );
+      }
+      // Claim rolled back cleanly; surface the ORIGINAL audit failure loudly.
+      throw auditErr;
+    }
 
     return claimed;
   }

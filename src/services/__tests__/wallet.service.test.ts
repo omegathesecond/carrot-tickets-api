@@ -92,7 +92,9 @@ describe('WalletService.ensureWallet', () => {
 
 describe('WalletService.bindBand', () => {
   beforeAll(async () => { await connectTestDb(); });
-  afterEach(async () => { await clearTestDb(); });
+  // restoreAllMocks here too, so a stub can never leak past its test even if an
+  // assertion throws mid-test.
+  afterEach(async () => { await clearTestDb(); jest.restoreAllMocks(); });
   afterAll(async () => { await disconnectTestDb(); });
 
   it('binds a blank band to an unbound wallet and records the binding', async () => {
@@ -133,6 +135,41 @@ describe('WalletService.bindBand', () => {
     await expect(WalletService.bindBand(String(w._id), 'AABBCC03')).rejects.toThrow(
       'wallet is not active',
     );
+  });
+
+  it('rolls the claim back when the audit write fails — no band left bound, no orphan row', async () => {
+    const w = await WalletService.ensureWallet(eventId, buyerId);
+    // Stub the audit write to blow up exactly once, AFTER the claim has set bandUid.
+    const spy = jest.spyOn(BandBinding, 'create').mockImplementationOnce(() => {
+      throw new Error('audit write boom');
+    });
+
+    await expect(WalletService.bindBand(String(w._id), 'AABBCC09')).rejects.toThrow('audit write boom');
+
+    // The compensating unbind must have reverted bandUid to null (re-read from DB),
+    // so we are never left with a band bound but no forensic row.
+    const fresh = await Wallet.findById(w._id);
+    expect(fresh?.bandUid).toBeNull();
+    expect(await BandBinding.countDocuments({ walletId: w._id })).toBe(0);
+
+    spy.mockRestore();
+  });
+
+  it('propagates an E11000 from a NON-bandUid index unchanged (does not mislabel it)', async () => {
+    // A duplicate-key error whose keyPattern is NOT bandUid must surface as-is,
+    // never be mapped to "already bound to another wallet". Reject (not throw)
+    // so the error flows through the claim's .catch where discrimination lives.
+    const dupOther = Object.assign(new Error('E11000 duplicate key error'), {
+      code: 11000,
+      keyPattern: { eventId: 1, buyerId: 1 },
+    });
+    jest.spyOn(Wallet, 'findOneAndUpdate').mockImplementationOnce(
+      () => Promise.reject(dupOther) as never,
+    );
+
+    await expect(
+      WalletService.bindBand(new mongoose.Types.ObjectId().toString(), 'AABBCC10'),
+    ).rejects.toThrow('E11000');
   });
 
   it('only one of many concurrent binds of the SAME uid wins', async () => {
