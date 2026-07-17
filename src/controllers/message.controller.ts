@@ -5,6 +5,7 @@ import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername } from '@utils/username.util';
 import { sendMessageSchema } from '@validators/community.validator';
 import { failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
+import { organizerFromRequest } from '@utils/communityViewer.util';
 
 export class MessageController {
   private static fail(res: Response, error: any, fallback: string) {
@@ -13,13 +14,21 @@ export class MessageController {
 
   static async list(req: Request, res: Response): Promise<any> {
     try {
+      const params = parseMessageCursorParams(req, res);
+      if (!params) return;
+      const channelId = req.params['channelId'] as string;
+
+      // Organizer read-only peek is ownership-gated; buyer read is membership-gated.
+      const organizer = organizerFromRequest(req);
+      if (organizer) {
+        const messages = await MessageService.listMessagesAsOrganizer(channelId, organizer, params);
+        return ApiResponseUtil.success(res, messages);
+      }
+
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
 
-      const params = parseMessageCursorParams(req, res);
-      if (!params) return;
-
-      const messages = await MessageService.listMessages(req.params['channelId'] as string, buyer, params);
+      const messages = await MessageService.listMessages(channelId, buyer, params);
       return ApiResponseUtil.success(res, messages);
     } catch (error: any) {
       return MessageController.fail(res, error, 'Failed to load messages');
@@ -56,10 +65,18 @@ export class MessageController {
   /** GET /api/community/channels/:channelId/pins — same gating as listing messages. */
   static async listPins(req: Request, res: Response): Promise<any> {
     try {
+      const channelId = req.params['channelId'] as string;
+
+      const organizer = organizerFromRequest(req);
+      if (organizer) {
+        const messages = await MessageService.listPinnedMessagesAsOrganizer(channelId, organizer);
+        return ApiResponseUtil.success(res, messages);
+      }
+
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
 
-      const messages = await MessageService.listPinnedMessages(req.params['channelId'] as string, buyer);
+      const messages = await MessageService.listPinnedMessages(channelId, buyer);
       return ApiResponseUtil.success(res, messages);
     } catch (error: any) {
       return MessageController.fail(res, error, 'Failed to load pinned messages');

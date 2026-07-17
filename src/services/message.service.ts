@@ -7,6 +7,7 @@ import { Vendor } from '@models/vendor.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
+import { OrganizerViewer, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
 import { channelRoom, dmRoom } from '@/realtime/rooms';
@@ -140,6 +141,33 @@ export class MessageService {
     opts: { before?: string; after?: string; limit?: number } = {}
   ): Promise<MessageView[]> {
     await MessageService.requireChannelAccess(channelId, buyer);
+    return MessageService.listWithCursor({ channelId }, opts);
+  }
+
+  /**
+   * Read-only channel access for the managing organizer: gated by event
+   * ownership, not membership, and never ticket-gated (they own the event, so
+   * every channel is visible). No read cursor is touched. Returns the channel
+   * + community for the caller, mirroring requireChannelAccess's shape.
+   */
+  static async requireChannelAccessAsOrganizer(channelId: string, organizer: OrganizerViewer) {
+    const channel = await Channel.findById(channelId);
+    if (!channel) throw new HttpError(404, 'Channel not found');
+    if (channel.archived) throw new HttpError(403, 'This channel is archived');
+
+    const community = await Community.findById(channel.communityId);
+    if (!community) throw new HttpError(404, 'Community not found');
+    await assertOrganizerOwnsCommunity(community, organizer);
+
+    return { channel, community };
+  }
+
+  static async listMessagesAsOrganizer(
+    channelId: string,
+    organizer: OrganizerViewer,
+    opts: { before?: string; after?: string; limit?: number } = {}
+  ): Promise<MessageView[]> {
+    await MessageService.requireChannelAccessAsOrganizer(channelId, organizer);
     return MessageService.listWithCursor({ channelId }, opts);
   }
 
@@ -351,6 +379,19 @@ export class MessageService {
    */
   static async listPinnedMessages(channelId: string, buyer: IBuyer): Promise<MessageView[]> {
     await MessageService.requireChannelAccess(channelId, buyer);
+    return MessageService.listPinsFor(channelId);
+  }
+
+  /** Organizer read-only pins — ownership-gated twin of listPinnedMessages. */
+  static async listPinnedMessagesAsOrganizer(
+    channelId: string,
+    organizer: OrganizerViewer
+  ): Promise<MessageView[]> {
+    await MessageService.requireChannelAccessAsOrganizer(channelId, organizer);
+    return MessageService.listPinsFor(channelId);
+  }
+
+  private static async listPinsFor(channelId: string): Promise<MessageView[]> {
     const docs = await Message.find({ channelId, pinnedAt: { $ne: null } })
       .sort({ pinnedAt: -1 })
       .limit(10)

@@ -8,6 +8,7 @@ import { Membership } from '@models/membership.model';
 import { Community } from '@models/community.model';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { organizerFromRequest, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
 
 export class CommunityController {
   /** Resolve the buyer and make sure they carry a username before any social action. */
@@ -37,9 +38,17 @@ export class CommunityController {
 
   static async getView(req: Request, res: Response): Promise<any> {
     try {
+      const eventId = req.params['eventId'] as string;
+      // An organizer token gets the read-only owner peek; a buyer token gets
+      // the normal member view (resolved via their phone/Membership).
+      const organizer = organizerFromRequest(req);
+      if (organizer) {
+        const view = await CommunityMembershipService.getOrganizerView(eventId, organizer);
+        return ApiResponseUtil.success(res, view);
+      }
       const buyer = await CommunityController.requireBuyer(req, res);
       if (!buyer) return;
-      const view = await CommunityMembershipService.getView(req.params['eventId'] as string, buyer);
+      const view = await CommunityMembershipService.getView(eventId, buyer);
       return ApiResponseUtil.success(res, view);
     } catch (error: any) {
       return CommunityController.fail(res, error, 'Failed to load community');
@@ -63,14 +72,22 @@ export class CommunityController {
    */
   static async listMembers(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await CommunityController.requireBuyer(req, res);
-      if (!buyer) return;
       const eventId = req.params['eventId'] as string;
 
       const community = await Community.findOne({ eventId });
       if (!community) throw new HttpError(404, 'Community not found for this event');
-      const me = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
-      if (!me || me.bannedAt) throw new HttpError(403, 'Join the community first');
+
+      // Organizer peek: gate on ownership. Buyer: gate on their own (un-banned)
+      // membership — attendees can only see the roster once they've joined.
+      const organizer = organizerFromRequest(req);
+      if (organizer) {
+        await assertOrganizerOwnsCommunity(community, organizer);
+      } else {
+        const buyer = await CommunityController.requireBuyer(req, res);
+        if (!buyer) return;
+        const me = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
+        if (!me || me.bannedAt) throw new HttpError(403, 'Join the community first');
+      }
 
       const limitRaw = req.query['limit'];
       let limit = 25;
