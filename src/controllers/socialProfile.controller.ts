@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
-import { Follow } from '@models/follow.model';
 import { Ticket } from '@models/ticket.model';
 import { PushSubscription } from '@models/pushSubscription.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -13,6 +12,7 @@ import { updateProfileSchema, blockSchema, followSchema, presenceSchema, pushSub
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
 import { NotificationService } from '@services/notification.service';
+import { SocialProfileViewService } from '@services/socialProfileView.service';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 import { onlineBuyerIds } from '@utils/buyerOnline.util';
 import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
@@ -103,38 +103,12 @@ export class SocialProfileController {
   static async publicProfile(req: Request, res: Response): Promise<any> {
     try {
       const username = String(req.params['username'] || '').toLowerCase();
-      const buyer = await Buyer.findOne({ username });
-      if (!buyer) return ApiResponseUtil.error(res, 'User not found', 404);
-
       const viewer = await resolveBuyerFromRequest(req);
       if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const viewerId = String(viewer._id);
-      const targetId = String(buyer._id);
-      const [followerCount, followingCount, attendedEventIds, isFollowing, isFollowedBy, isFriend, isBlocked] =
-        await Promise.all([
-          FollowService.followerCount('buyer', targetId),
-          FollowService.followingCount(targetId),
-          Ticket.distinct('eventId', { customerPhone: buyer.phone, status: TicketStatus.CHECKED_IN }),
-          Follow.exists({ followerId: viewerId, targetType: 'buyer', targetId }).then(Boolean),
-          Follow.exists({ followerId: targetId, targetType: 'buyer', targetId: viewerId }).then(Boolean),
-          FollowService.isFriend(viewerId, targetId),
-          BlockService.isBlockedEitherWay(viewerId, targetId),
-        ]);
-      return ApiResponseUtil.success(res, {
-        id: targetId,
-        username: buyer.username,
-        name: buyer.name ?? null,
-        avatarUrl: buyer.avatarUrl ?? null,
-        bio: buyer.bio ?? null,
-        joinedAt: buyer.createdAt,
-        followerCount,
-        followingCount,
-        eventsAttended: attendedEventIds.length,
-        isFollowing,
-        isFollowedBy,
-        isFriend,
-        isBlocked,
-      });
+
+      const profile = await SocialProfileViewService.forViewer(username, { type: 'buyer', id: String(viewer._id) });
+      if (!profile) return ApiResponseUtil.error(res, 'User not found', 404);
+      return ApiResponseUtil.success(res, profile);
     } catch (error: any) {
       console.error('Get public profile error:', error);
       return ApiResponseUtil.error(res, error?.message || 'Failed to load profile', 500);

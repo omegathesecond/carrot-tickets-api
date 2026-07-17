@@ -10,6 +10,7 @@ import { followSchema } from '@validators/community.validator';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { toVendorSummary } from '@utils/vendorSummary.util';
+import { SocialProfileViewService } from '@services/socialProfileView.service';
 
 /** Social-graph endpoints where the acting identity is the organizer brand (Vendor). */
 export class VendorSocialController {
@@ -127,6 +128,27 @@ export class VendorSocialController {
       return ApiResponseUtil.success(res, { buyers: buyers.map(toBuyerSummary), organizers: organizers.map(toVendorSummary) });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load followers');
+    }
+  }
+
+  /**
+   * GET /api/tickets/social/users/:username — a buyer's public profile, as
+   * seen by this vendor brand. Same response shape as
+   * SocialProfileController.publicProfile (GET /api/social/users/:username,
+   * the buyer-viewer route) — both delegate to
+   * SocialProfileViewService.forViewer so they can never drift. NEVER
+   * exposes the buyer's phone or privacy settings.
+   */
+  static async publicProfile(req: Request, res: Response): Promise<any> {
+    try {
+      const vendorId = VendorSocialController.vendorId(req);
+      if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const username = String(req.params['username'] || '').toLowerCase();
+      const profile = await SocialProfileViewService.forViewer(username, { type: 'vendor', id: vendorId });
+      if (!profile) return ApiResponseUtil.error(res, 'User not found', 404);
+      return ApiResponseUtil.success(res, profile);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load profile');
     }
   }
 
