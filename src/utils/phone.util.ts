@@ -45,3 +45,34 @@ export function isValidPhone(input: string): boolean {
   const normalized = normalizePhone(input);
   return /^\+\d{10,15}$/.test(normalized);
 }
+
+/**
+ * Equivalent stored representations of a phone number, for a tolerant login
+ * lookup. Vendor/sub-user phone numbers are stored verbatim (the schema only
+ * trims them), so an organizer who signed up with "076123456" but logs in with
+ * "+26876123456" — or vice-versa — would never match on an exact query.
+ *
+ * Given any phone-shaped identifier we return every plausible way the SAME
+ * number could have been persisted (international, no-plus, local-trunk, bare
+ * subscriber, plus the raw trimmed input), so `{ phoneNumber: { $in: [...] } }`
+ * matches regardless of the format on record. Returns [] for non-phone input
+ * (e.g. an email), so callers can skip the phone branch entirely.
+ */
+export function phoneLoginCandidates(input: string): string[] {
+  const raw = (input || '').trim();
+  if (!raw || raw.includes('@')) return []; // clearly an email, not a phone
+
+  const normalized = normalizePhone(raw); // -> +268XXXXXXXX (or +<intl>)
+  if (!/^\+\d{6,15}$/.test(normalized)) return [];
+
+  const digits = normalized.slice(1); // 268XXXXXXXX
+  const candidates = new Set<string>([normalized, digits, raw]);
+
+  if (digits.startsWith(DEFAULT_DIAL_CODE) && digits.length > DEFAULT_DIAL_CODE.length) {
+    const local = digits.slice(DEFAULT_DIAL_CODE.length); // XXXXXXXX
+    candidates.add(local);
+    candidates.add(`0${local}`);
+  }
+
+  return [...candidates];
+}

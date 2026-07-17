@@ -8,6 +8,7 @@ import { HandoffToken } from '@models/handoffToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
 import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 import { scopePermissionsToType } from '@utils/permissions.util';
+import { phoneLoginCandidates } from '@utils/phone.util';
 import { JWT_SECRET } from '@config/jwt.config';
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
@@ -137,11 +138,16 @@ export class TicketsAuthService {
    * Automatically detects user type (Vendor or SubUser) and authenticates accordingly
    */
   static async login(identifier: string, password: string) {
-    // Try Vendor (email or phone)
+    // Try Vendor (email or phone). Email casing/whitespace is handled by the
+    // schema's lowercase+trim setters (applied to query filters too). Phone
+    // numbers are stored verbatim, so match every equivalent format the number
+    // could have been saved as — otherwise "076123456" vs "+26876123456" locks
+    // out an organizer with the correct password.
+    const phoneCandidates = phoneLoginCandidates(identifier);
     const vendor = await Vendor.findOne({
       $or: [
         { email: identifier },
-        { phoneNumber: identifier }
+        ...(phoneCandidates.length ? [{ phoneNumber: { $in: phoneCandidates } }] : [])
       ]
     }).select('+password');
 
