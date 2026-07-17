@@ -22,6 +22,10 @@ export interface CommunityView {
   eventId: string;
   channels: ChannelView[];
   membership: { role: string; ticketVerified: boolean; joinedAt: Date } | null;
+  /** Active (non-banned) members. Mirrors CommunityController.listMembers'
+   *  `bannedAt: { $exists: false }` filter exactly — a divergent filter here
+   *  would report a count that disagrees with the list the user opens. */
+  memberCount: number;
 }
 
 export class CommunityMembershipService {
@@ -107,10 +111,16 @@ export class CommunityMembershipService {
       })
     );
 
+    const memberCount = await Membership.countDocuments({
+      communityId,
+      bannedAt: { $exists: false },
+    });
+
     return {
       communityId,
       eventId,
       channels: channelViews,
+      memberCount,
       membership: membership
         ? { role: membership.role, ticketVerified: verified, joinedAt: membership.createdAt }
         : null,
