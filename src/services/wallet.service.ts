@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
+import { BandBinding } from '@models/bandBinding.model';
 
 /**
  * Wallet lifecycle for the per-event closed-loop cashless wallet (spec §4, §5.1).
@@ -45,5 +46,56 @@ export class WalletService {
       if (!existing) throw err; // E11000 with no winner => a different index; surface it.
       return existing;
     }
+  }
+
+  /**
+   * Bind a blank client band's UID to an unbound, active wallet (spec §5.1).
+   *
+   * Two distinct races are guarded, in this order:
+   *  1. Two operators banding the SAME wallet — the `bandUid: null` precondition
+   *     lives inside the filter, so MongoDB's single-document atomicity lets
+   *     exactly one win.
+   *  2. Two operators binding the SAME uid to DIFFERENT wallets — caught by the
+   *     partial unique index on {eventId, bandUid} as an E11000. The claim is
+   *     rolled back so the loser leaves no half-bound wallet behind.
+   *
+   * The audit row is written only after the uid is safely claimed, so a losing
+   * caller never leaves a BandBinding for a band it does not hold.
+   */
+  static async bindBand(walletId: string, bandUid: string, boundBy?: string): Promise<IWallet> {
+    const uid = bandUid.trim();
+    if (!uid) throw new Error('bandUid is required');
+
+    // Race 1: claim the wallet. Precondition in the filter => one winner.
+    const claimed = await Wallet.findOneAndUpdate(
+      { _id: walletId, status: 'active', bandUid: null },
+      { $set: { bandUid: uid } },
+      { new: true },
+    ).catch((err: { code?: number }) => {
+      // Race 2 surfaced during the claim itself.
+      if (err?.code === 11000) {
+        throw new Error('band is already bound to another wallet at this event');
+      }
+      throw err;
+    });
+
+    if (!claimed) {
+      // Distinguish the failure so the operator gets a true message, rather
+      // than a generic "could not bind".
+      const fresh = await Wallet.findById(walletId);
+      if (!fresh) throw new Error('wallet not found');
+      if (fresh.status !== 'active') throw new Error('wallet is not active');
+      throw new Error('wallet already has a band bound');
+    }
+
+    await BandBinding.create({
+      walletId: claimed._id,
+      eventId: claimed.eventId,
+      bandUid: uid,
+      boundAt: new Date(),
+      ...(boundBy ? { boundBy } : {}),
+    });
+
+    return claimed;
   }
 }
