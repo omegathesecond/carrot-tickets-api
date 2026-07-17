@@ -4,6 +4,7 @@ import { updatesR2 } from '@utils/updatesR2';
 import { triggerTranscode } from '@services/transcode.client';
 import type { UpdateAuthorType, UpdateKind } from '@interfaces/update.interface';
 import type { SocialActor } from '@utils/socialActor.util';
+import { toggleReactionGeneric } from '@services/reactions.service';
 
 interface CreateInput {
   authorType: UpdateAuthorType;
@@ -53,18 +54,15 @@ export async function getUpdate(id: string): Promise<IUpdate | null> {
 const counterField = (type: 'like' | 'save') => (type === 'like' ? 'likeCount' : 'saveCount');
 
 export async function toggleReaction(updateId: string, actor: SocialActor, type: 'like' | 'save') {
-  const key = { updateId, actorType: actor.type, buyerId: actor.id, type };
-  const existing = await UpdateReaction.findOne(key);
-  let active: boolean;
-  if (existing) {
-    await existing.deleteOne();
-    await Update.updateOne({ _id: updateId }, { $inc: { [counterField(type)]: -1 } });
-    active = false;
-  } else {
-    await UpdateReaction.create(key);
-    await Update.updateOne({ _id: updateId }, { $inc: { [counterField(type)]: 1 } });
-    active = true;
-  }
+  const { active } = await toggleReactionGeneric({
+    reactionModel: UpdateReaction,
+    targetModel: Update,
+    targetField: 'updateId',
+    targetId: updateId,
+    actor,
+    type,
+    counterField: counterField(type),
+  });
   const u = await Update.findById(updateId).select('likeCount saveCount').lean();
   return { active, likeCount: u?.likeCount ?? 0, saveCount: u?.saveCount ?? 0 };
 }
