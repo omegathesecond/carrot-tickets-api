@@ -12,7 +12,9 @@ router.post('/follow', authenticateTickets, VendorSocialController.follow);
 router.delete('/follow/:targetType/:targetId', authenticateTickets, VendorSocialController.unfollow);
 router.get('/me/following', authenticateTickets, VendorSocialController.following);
 router.get('/me/followers', authenticateTickets, VendorSocialController.followers);
+// '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateTickets, VendorSocialController.searchUsers);
+router.get('/users/:username', authenticateTickets, VendorSocialController.publicProfile);
 router.get('/notifications', authenticateTickets, VendorSocialController.notifications);
 router.post('/notifications/read', authenticateTickets, VendorSocialController.markNotificationsRead);
 router.post('/block', authenticateTickets, VendorSocialController.blockUser);
