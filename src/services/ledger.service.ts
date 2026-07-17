@@ -19,7 +19,16 @@ export interface PostInput {
   postings: Posting[];
   refType: string;
   refId: string;
-  /** Supply to make the write idempotent against a known id; otherwise generated. */
+  /**
+   * Correlation/tracing id shared by every leg of this transaction. Generated
+   * when omitted.
+   *
+   * post() is NOT idempotent. Calling it twice with the same txnId writes the
+   * legs twice, and because each set balances on its own the sum-to-zero
+   * invariant will NOT catch the duplicate. Callers needing exactly-once must
+   * guarantee it at their own layer — a status CAS on their own record (e.g.
+   * BookingSale.paymentStatus) — before calling post().
+   */
   txnId?: string;
   /** Join an existing transaction (e.g. a wallet debit + its postings). */
   session?: ClientSession;
@@ -49,7 +58,16 @@ export class LedgerService {
       if (accountRequiresRef(p.account.type) && !p.account.ref) {
         throw new Error(`${p.account.type} account requires a ref`);
       }
+      // A ref on a singleton account (FLOAT/FEES) would persist accountRef and
+      // split the bucket under the {eventId, accountType, accountRef} grouping
+      // balances are derived from — a phantom account.
+      if (!accountRequiresRef(p.account.type) && p.account.ref) {
+        throw new Error(`${p.account.type} account does not take a ref`);
+      }
       sum += p.delta;
+    }
+    if (!Number.isSafeInteger(sum)) {
+      throw new Error(`transaction sum ${sum} is outside the safe integer range`);
     }
     if (sum !== 0) {
       throw new Error(`unbalanced transaction: postings sum to ${sum}, expected 0`);
@@ -74,6 +92,12 @@ export class LedgerService {
 
     if (input.session) {
       // Caller owns the transaction (e.g. wallet debit + postings together).
+      // A session that is NOT in a transaction gives a plain insertMany, where
+      // an ordered mid-array failure commits the earlier legs — the half-written
+      // post this function exists to prevent. Refuse rather than pretend.
+      if (!input.session.inTransaction()) {
+        throw new Error('post() requires the caller session to be in a transaction');
+      }
       await LedgerEntry.insertMany(docs, { session: input.session });
       return txnId;
     }
