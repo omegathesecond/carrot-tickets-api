@@ -72,4 +72,63 @@ describe('LedgerService balance derivation', () => {
     await topUp('w1', 5000, FloatTag.KESHLESS);
     expect(await LedgerService.floatBalance(other)).toBe(0);
   });
+
+  // -0 is arithmetically harmless but Object.is(-0, 0) is false, so it fails
+  // toBe(0) — a caller asserting an empty event reads as broken.
+  describe('totalOwed returns a positive zero, never -0', () => {
+    it('for a type with no postings at all', async () => {
+      expect(await LedgerService.totalOwed(eventId, LedgerAccountType.WALLET)).toBe(0);
+      expect(await LedgerService.totalOwed(eventId, LedgerAccountType.MERCHANT)).toBe(0);
+      expect(await LedgerService.totalOwed(eventId, LedgerAccountType.FEES)).toBe(0);
+    });
+
+    it('for postings that net to zero (topped up, then fully spent)', async () => {
+      await topUp('w1', 5000, FloatTag.KESHLESS);
+      await LedgerService.post({
+        eventId, refType: 'charge', refId: 'spend-all',
+        postings: [
+          { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: 5000 },
+          { account: { type: LedgerAccountType.MERCHANT, ref: 'm1' }, delta: -5000 },
+        ],
+      });
+
+      expect(await LedgerService.totalOwed(eventId, LedgerAccountType.WALLET)).toBe(0);
+      expect(
+        await LedgerService.accountBalance(eventId, { type: LedgerAccountType.WALLET, ref: 'w1' }),
+      ).toBe(0);
+    });
+  });
+
+  describe('rejects reads that would silently report a wrong figure', () => {
+    it('throws when a ref is supplied for a singleton account', async () => {
+      await topUp('w1', 5000, FloatTag.KESHLESS);
+      // Without the guard this matches accountRef: 'x', finds nothing and
+      // reports the float as empty while it holds 5000.
+      await expect(
+        LedgerService.accountBalance(eventId, { type: LedgerAccountType.FLOAT, ref: 'x' }),
+      ).rejects.toThrow(/does not take a ref/);
+      await expect(
+        LedgerService.accountBalance(eventId, { type: LedgerAccountType.FEES, ref: 'x' }),
+      ).rejects.toThrow(/does not take a ref/);
+    });
+
+    it('throws on an empty-string ref for a singleton account', async () => {
+      // Truthiness-based guards let '' through; '' is still a supplied ref.
+      await expect(
+        LedgerService.accountBalance(eventId, { type: LedgerAccountType.FLOAT, ref: '' }),
+      ).rejects.toThrow(/does not take a ref/);
+    });
+
+    it('throws when a ref is missing for an entity account', async () => {
+      await expect(
+        LedgerService.accountBalance(eventId, { type: LedgerAccountType.WALLET }),
+      ).rejects.toThrow(/requires a ref/);
+    });
+
+    it('throws when totalOwed is asked for the debit-normal float', async () => {
+      await expect(LedgerService.totalOwed(eventId, LedgerAccountType.FLOAT)).rejects.toThrow(
+        /credit-normal/,
+      );
+    });
+  });
 });

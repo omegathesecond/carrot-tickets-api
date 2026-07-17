@@ -117,40 +117,51 @@ export class LedgerService {
   }
 
   /**
-   * Signed balance of one account: Σ delta.
-   * Asset (float) → positive when holding money.
-   * Liability/revenue (wallet/merchant/fees) → negative when owed/earned.
+   * Σ delta over the matched postings, or 0 when nothing matches.
+   *
+   * The single aggregation every balance read is derived from — keeping the
+   * pipeline in one place is what makes "no postings" mean 0 consistently
+   * rather than three near-identical hand-rolls drifting apart.
    */
-  static async accountBalance(eventId: string, account: LedgerAccount): Promise<number> {
-    if (accountRequiresRef(account.type) && !account.ref) {
-      throw new Error(`${account.type} account requires a ref`);
-    }
+  private static async sumDeltas(match: Record<string, unknown>): Promise<number> {
     const [row] = await LedgerEntry.aggregate<{ total: number }>([
-      {
-        $match: {
-          eventId: new mongoose.Types.ObjectId(eventId),
-          accountType: account.type,
-          accountRef: account.ref ?? null,
-        },
-      },
+      { $match: match },
       { $group: { _id: null, total: { $sum: '$delta' } } },
     ]);
     return row?.total ?? 0;
   }
 
+  /**
+   * Signed balance of one account: Σ delta.
+   * Asset (float) → positive when holding money.
+   * Liability/revenue (wallet/merchant/fees) → negative when owed/earned.
+   */
+  static async accountBalance(eventId: string, account: LedgerAccount): Promise<number> {
+    const requiresRef = accountRequiresRef(account.type);
+    if (requiresRef && !account.ref) {
+      throw new Error(`${account.type} account requires a ref`);
+    }
+    // Mirror of post()'s phantom-account guard. A ref on a singleton account
+    // matches accountRef: '<ref>', finds nothing and would report the float as
+    // empty when it is not — the read side must refuse what the write side does.
+    // `!= null` (not truthiness) so an empty-string ref counts as supplied.
+    if (!requiresRef && account.ref != null) {
+      throw new Error(`${account.type} account does not take a ref`);
+    }
+    return this.sumDeltas({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      accountType: account.type,
+      accountRef: account.ref ?? null,
+    });
+  }
+
   /** Signed float balance, optionally restricted to money sitting in one place. */
   static async floatBalance(eventId: string, tag?: FloatTag): Promise<number> {
-    const [row] = await LedgerEntry.aggregate<{ total: number }>([
-      {
-        $match: {
-          eventId: new mongoose.Types.ObjectId(eventId),
-          accountType: LedgerAccountType.FLOAT,
-          ...(tag ? { tag } : {}),
-        },
-      },
-      { $group: { _id: null, total: { $sum: '$delta' } } },
-    ]);
-    return row?.total ?? 0;
+    return this.sumDeltas({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      accountType: LedgerAccountType.FLOAT,
+      ...(tag ? { tag } : {}),
+    });
   }
 
   /**
@@ -158,12 +169,18 @@ export class LedgerService {
    * total owed (wallet/merchant) or earned (fees) across the event.
    */
   static async totalOwed(eventId: string, type: LedgerAccountType): Promise<number> {
-    const [row] = await LedgerEntry.aggregate<{ total: number }>([
-      {
-        $match: { eventId: new mongoose.Types.ObjectId(eventId), accountType: type },
-      },
-      { $group: { _id: null, total: { $sum: '$delta' } } },
-    ]);
-    return -(row?.total ?? 0);
+    // FLOAT is debit-normal; negating it yields a nonsense "owed" asset.
+    if (type === LedgerAccountType.FLOAT) {
+      throw new Error(
+        `totalOwed is for credit-normal accounts; ${type} is an asset — use floatBalance()`,
+      );
+    }
+    const total = await this.sumDeltas({
+      eventId: new mongoose.Types.ObjectId(eventId),
+      accountType: type,
+    });
+    // `0 - total`, not `-total`: negating 0 gives -0, which Object.is (and so
+    // Jest's toBe) distinguishes from 0.
+    return 0 - total;
   }
 }
