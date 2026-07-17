@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { LedgerEntry } from '@models/ledgerEntry.model';
+import { Wallet } from '@models/wallet.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
 
@@ -16,6 +17,30 @@ export interface InvariantReport {
 export interface IntegrityReport {
   ok: boolean;
   unbalancedTxnIds: string[];
+}
+
+export interface WalletDrift {
+  walletId: string;
+  /** The denormalized Wallet.balance. */
+  stored: number;
+  /** -Σ of this wallet's ledger deltas (the journal's view). */
+  journal: number;
+  /** stored - journal. Non-zero means the two sources disagree. */
+  drift: number;
+}
+
+export interface WalletBalanceReport {
+  ok: boolean;
+  checked: number;
+  drifted: WalletDrift[];
+  /**
+   * Wallets violating `cashFundedBalance <= balance`. Task 1's pre('validate')
+   * hook guards ONLY save()/create(); update operators and $inc bypass it
+   * entirely, and SP3/SP5 mutate balance with exactly those. So this is the
+   * only backstop for that invariant — without it the violation is undetectable,
+   * and refunds would route cash-funded money to the wrong channel.
+   */
+  invariantViolations: string[];
 }
 
 /**
@@ -83,5 +108,47 @@ export class ReconciliationService {
 
     const unbalancedTxnIds = rows.map((r) => r._id);
     return { ok: unbalancedTxnIds.length === 0, unbalancedTxnIds };
+  }
+
+  /**
+   * Compare every wallet's denormalized balance against the journal (spec §3,
+   * check #2).
+   *
+   * Unlike checkInvariant — which is tautological, since post() forces every
+   * transaction to sum to zero — this compares TWO INDEPENDENT SOURCES: the
+   * stored Wallet.balance and -Σ of that wallet's ledger deltas. A bug that
+   * mutates a balance without a matching posting (or vice versa) is invisible
+   * to checkInvariant and shows up only here. This is the real internal alarm.
+   */
+  static async checkWalletBalances(eventId: string): Promise<WalletBalanceReport> {
+    const wallets = await Wallet.find({
+      eventId: new mongoose.Types.ObjectId(eventId),
+    }).select('_id balance cashFundedBalance');
+
+    const drifted: WalletDrift[] = [];
+    const invariantViolations: string[] = [];
+    for (const w of wallets) {
+      const walletId = String(w._id);
+      const signed = await LedgerService.accountBalance(eventId, {
+        type: LedgerAccountType.WALLET,
+        ref: walletId,
+      });
+      // wallet is credit-normal: owed to the attendee is -signed.
+      const journal = 0 - signed;
+      const drift = w.balance - journal;
+      if (drift !== 0) drifted.push({ walletId, stored: w.balance, journal, drift });
+
+      // The pre('validate') hook guards only save()/create(); $inc and update
+      // operators bypass it, and SP3/SP5 use exactly those. This is the ONLY
+      // backstop for the invariant.
+      if (w.cashFundedBalance > w.balance) invariantViolations.push(walletId);
+    }
+
+    return {
+      ok: drifted.length === 0 && invariantViolations.length === 0,
+      checked: wallets.length,
+      drifted,
+      invariantViolations,
+    };
   }
 }
