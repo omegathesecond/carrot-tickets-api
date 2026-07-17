@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
 import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
+import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
@@ -87,6 +88,20 @@ router.get('/events/:eventId/reviews', ReviewController.listForEvent);
  * @body    rating (1-5), text?
  */
 router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.submit);
+
+/**
+ * @route   POST /api/public/events/:eventId/like
+ * @desc    Toggle the signed-in actor's like on an event (Discover event slides).
+ * @access  Buyer or vendor session required — 401 when anonymous.
+ */
+router.post('/events/:eventId/like', optionalTicketsAuth, EventReactionController.like);
+
+/**
+ * @route   POST /api/public/events/:eventId/share
+ * @desc    Record an event share. Anonymous allowed — sharing needs no actor.
+ * @access  Public
+ */
+router.post('/events/:eventId/share', optionalTicketsAuth, EventReactionController.share);
 
 /**
  * @route   GET /api/public/organizers/:vendorId
