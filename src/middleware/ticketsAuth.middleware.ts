@@ -172,6 +172,51 @@ export const authenticateBuyer = async (
 };
 
 /**
+ * Authenticate a Community VIEWER — a buyer (ticket holder / attendee) OR an
+ * organizer (vendor / sub-user) whose token manages the event. Both token
+ * kinds are attached as `ticketsUser`; the read controllers/services branch on
+ * userType (see organizerFromRequest). Buyers get the full member experience;
+ * organizers get a read-only peek of events they own.
+ *
+ * Only the READ community routes use this. Write routes (join, send, mark-read,
+ * verify-ticket, delete, reports) stay on authenticateBuyer, so an organizer
+ * token structurally can't post or mutate — read-only falls out of the routing.
+ */
+export const authenticateCommunityViewer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      ApiResponseUtil.unauthorized(res, 'Please sign in to view the community');
+      return;
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      ApiResponseUtil.unauthorized(res, 'No token provided');
+      return;
+    }
+
+    const decoded = TicketsAuthService.verifyToken(token) as any;
+    const isBuyer = decoded.userType === 'buyer' && decoded.userPhone;
+    const isOrganizer =
+      (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
+    if (!isBuyer && !isOrganizer) {
+      ApiResponseUtil.unauthorized(res, 'Invalid token');
+      return;
+    }
+
+    (req as any).ticketsUser = decoded;
+    next();
+  } catch (error: any) {
+    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+  }
+};
+
+/**
  * Require super-admin access.
  * Checks isSuperAdmin flag on the already-decoded ticketsUser.
  * Must be used after authenticateTickets.

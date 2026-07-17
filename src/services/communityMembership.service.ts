@@ -6,6 +6,7 @@ import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
+import { OrganizerViewer, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
 
 export interface ChannelView {
   id: string;
@@ -26,6 +27,9 @@ export interface CommunityView {
    *  `bannedAt: { $exists: false }` filter exactly — a divergent filter here
    *  would report a count that disagrees with the list the user opens. */
   memberCount: number;
+  /** Set to 'organizer' when the viewer is the managing vendor peeking
+   *  read-only (no membership). Absent for buyer/member views. */
+  viewerRole?: 'organizer';
 }
 
 export class CommunityMembershipService {
@@ -54,6 +58,44 @@ export class CommunityMembershipService {
     if (!community) throw new HttpError(404, 'Community not found for this event');
     const membership = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
     return CommunityMembershipService.buildView(String(community._id), eventId, membership);
+  }
+
+  /**
+   * Read-only community view for the managing organizer (spec: organizer peek).
+   * No Membership is involved — the organizer sees every channel unlocked
+   * (they own the event, gating doesn't apply to them), with no unread badges
+   * or read cursor. `viewerRole: 'organizer'` tells the client to render
+   * read-only (no join, no composer). Throws 403 if they don't own the event.
+   */
+  static async getOrganizerView(eventId: string, organizer: OrganizerViewer): Promise<CommunityView> {
+    const community = await Community.findOne({ eventId });
+    if (!community) throw new HttpError(404, 'Community not found for this event');
+    await assertOrganizerOwnsCommunity(community, organizer);
+
+    const channels = await Channel.find({ communityId: community._id, archived: false }).sort({ createdAt: 1 });
+    const channelViews: ChannelView[] = channels.map((c: IChannel) => ({
+      id: String(c._id),
+      name: c.name,
+      slug: c.slug,
+      gated: c.gated,
+      postPolicy: c.postPolicy,
+      locked: false,
+      unreadCount: null,
+    }));
+
+    const memberCount = await Membership.countDocuments({
+      communityId: community._id,
+      bannedAt: { $exists: false },
+    });
+
+    return {
+      communityId: String(community._id),
+      eventId,
+      channels: channelViews,
+      memberCount,
+      membership: null,
+      viewerRole: 'organizer',
+    };
   }
 
   static async reverifyTicket(eventId: string, buyer: IBuyer): Promise<CommunityView> {
