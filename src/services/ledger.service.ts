@@ -62,8 +62,26 @@ export class LedgerService {
       // A ref on a singleton account (FLOAT/FEES) would persist accountRef and
       // split the bucket under the {eventId, accountType, accountRef} grouping
       // balances are derived from — a phantom account.
-      if (!accountRequiresRef(p.account.type) && p.account.ref) {
+      // `!= null` (not truthiness) so an empty-string ref is rejected rather than
+      // persisted: accountRef '' is invisible to accountBalance()'s `accountRef:
+      // null` match, so a ''-ref FLOAT leg would silently under-report the float.
+      // The write guard must be at least as strict as the read guard.
+      if (!accountRequiresRef(p.account.type) && p.account.ref != null) {
         throw new Error(`${p.account.type} account does not take a ref`);
+      }
+      // A FLOAT leg with no tag is money attributable to no physical location:
+      // counted by floatBalance() but by NEITHER floatBalance(KESHLESS) NOR
+      // floatBalance(CASH_DESK), while checkInvariant still reports ok. That
+      // silently defeats external reconciliation (ledger float vs actual Keshless
+      // balance + cash on hand) — the only check that catches real-world loss.
+      if (p.account.type === LedgerAccountType.FLOAT && p.tag == null) {
+        throw new Error('float posting requires a tag');
+      }
+      // tag is meaningful ONLY on FLOAT (see FloatTag). A tag elsewhere is a
+      // caller confusion; persisting it would make `{accountType: FLOAT, tag}`
+      // reads look correct while the tag documents nothing.
+      if (p.account.type !== LedgerAccountType.FLOAT && p.tag != null) {
+        throw new Error(`${p.account.type} posting does not take a tag`);
       }
       sum += p.delta;
     }
@@ -123,11 +141,14 @@ export class LedgerService {
    * pipeline in one place is what makes "no postings" mean 0 consistently
    * rather than three near-identical hand-rolls drifting apart.
    */
-  private static async sumDeltas(match: Record<string, unknown>): Promise<number> {
+  private static async sumDeltas(
+    match: Record<string, unknown>,
+    session?: ClientSession,
+  ): Promise<number> {
     const [row] = await LedgerEntry.aggregate<{ total: number }>([
       { $match: match },
       { $group: { _id: null, total: { $sum: '$delta' } } },
-    ]);
+    ]).session(session ?? null);
     return row?.total ?? 0;
   }
 
@@ -135,8 +156,16 @@ export class LedgerService {
    * Signed balance of one account: Σ delta.
    * Asset (float) → positive when holding money.
    * Liability/revenue (wallet/merchant/fees) → negative when owed/earned.
+   *
+   * NOT A SAFE BASIS FOR ENFORCING A NON-NEGATIVE BALANCE. See the overdraft
+   * note on floatBalance() below; it applies to every read on this service,
+   * `session` or no `session`.
    */
-  static async accountBalance(eventId: string, account: LedgerAccount): Promise<number> {
+  static async accountBalance(
+    eventId: string,
+    account: LedgerAccount,
+    session?: ClientSession,
+  ): Promise<number> {
     const requiresRef = accountRequiresRef(account.type);
     if (requiresRef && !account.ref) {
       throw new Error(`${account.type} account requires a ref`);
@@ -148,37 +177,79 @@ export class LedgerService {
     if (!requiresRef && account.ref != null) {
       throw new Error(`${account.type} account does not take a ref`);
     }
-    return this.sumDeltas({
-      eventId: new mongoose.Types.ObjectId(eventId),
-      accountType: account.type,
-      accountRef: account.ref ?? null,
-    });
+    return this.sumDeltas(
+      {
+        eventId: new mongoose.Types.ObjectId(eventId),
+        accountType: account.type,
+        accountRef: account.ref ?? null,
+      },
+      session,
+    );
   }
 
-  /** Signed float balance, optionally restricted to money sitting in one place. */
-  static async floatBalance(eventId: string, tag?: FloatTag): Promise<number> {
-    return this.sumDeltas({
-      eventId: new mongoose.Types.ObjectId(eventId),
-      accountType: LedgerAccountType.FLOAT,
-      ...(tag ? { tag } : {}),
-    });
+  /**
+   * Signed float balance, optionally restricted to money sitting in one place.
+   *
+   * NOT A SAFE BASIS FOR ENFORCING A NON-NEGATIVE BALANCE — this applies to
+   * accountBalance() and totalOwed() equally.
+   *
+   * Passing `session` lets a read join a caller's transaction, but a read can
+   * never exclude a concurrent writer, so read-then-post is a TOCTOU race:
+   * two concurrent taps each read 5000, each post -5000, both commit, and the
+   * wallet goes to -5000 — money created out of nothing. Snapshot isolation
+   * does not save you either: each transaction reads a snapshot taken before
+   * the other wrote, and neither conflicts on a document it only appended
+   * beside.
+   *
+   * Overdraft prevention MUST come from an atomic compare-and-swap on a stored
+   * balance, where the guard and the decrement are the same operation:
+   *
+   *   findOneAndUpdate({ _id, balance: { $gte: amount } },
+   *                    { $inc: { balance: -amount } })
+   *
+   * A null result means insufficient funds — reject the tap and post nothing.
+   * These reads are for reporting and reconciliation, never for authorization.
+   */
+  static async floatBalance(
+    eventId: string,
+    tag?: FloatTag,
+    session?: ClientSession,
+  ): Promise<number> {
+    return this.sumDeltas(
+      {
+        eventId: new mongoose.Types.ObjectId(eventId),
+        accountType: LedgerAccountType.FLOAT,
+        ...(tag ? { tag } : {}),
+      },
+      session,
+    );
   }
 
   /**
    * Human-facing positive figure for a credit-normal account type:
    * total owed (wallet/merchant) or earned (fees) across the event.
+   *
+   * NOT A SAFE BASIS FOR ENFORCING A NON-NEGATIVE BALANCE. See the overdraft
+   * note on floatBalance().
    */
-  static async totalOwed(eventId: string, type: LedgerAccountType): Promise<number> {
+  static async totalOwed(
+    eventId: string,
+    type: LedgerAccountType,
+    session?: ClientSession,
+  ): Promise<number> {
     // FLOAT is debit-normal; negating it yields a nonsense "owed" asset.
     if (type === LedgerAccountType.FLOAT) {
       throw new Error(
         `totalOwed is for credit-normal accounts; ${type} is an asset — use floatBalance()`,
       );
     }
-    const total = await this.sumDeltas({
-      eventId: new mongoose.Types.ObjectId(eventId),
-      accountType: type,
-    });
+    const total = await this.sumDeltas(
+      {
+        eventId: new mongoose.Types.ObjectId(eventId),
+        accountType: type,
+      },
+      session,
+    );
     // `0 - total`, not `-total`: negating 0 gives -0, which Object.is (and so
     // Jest's toBe) distinguishes from 0.
     return 0 - total;

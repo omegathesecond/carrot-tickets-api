@@ -23,7 +23,11 @@ export interface ILedgerEntry extends Document {
 
 const ledgerEntrySchema = new Schema<ILedgerEntry>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+    // No `index: true`: eventId_1 would be a strict prefix of the compound
+    // {eventId, accountType, accountRef} index below, which already serves
+    // eventId-only queries. A second index is pure write amplification on the
+    // hottest insert path in the system.
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     txnId: { type: String, required: true, index: true },
     accountType: {
       type: String,

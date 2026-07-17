@@ -99,6 +99,43 @@ describe('LedgerService balance derivation', () => {
     });
   });
 
+  // The session parameter exists so a caller CAN read inside its own
+  // transaction. If it were silently dropped, the read would miss the caller's
+  // own uncommitted postings and quietly report a stale figure.
+  describe('reads join a caller transaction when given a session', () => {
+    it('sees the callers own uncommitted postings, which an unsessioned read does not', async () => {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          await LedgerService.post({
+            eventId, refType: 'topup', refId: 't-sessioned', session,
+            postings: [
+              { account: { type: LedgerAccountType.FLOAT }, delta: 5000, tag: FloatTag.KESHLESS },
+              { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -5000 },
+            ],
+          });
+
+          // Inside the txn, with the session: the uncommitted legs are visible.
+          expect(await LedgerService.floatBalance(eventId, undefined, session)).toBe(5000);
+          expect(await LedgerService.floatBalance(eventId, FloatTag.KESHLESS, session)).toBe(5000);
+          expect(
+            await LedgerService.accountBalance(
+              eventId, { type: LedgerAccountType.WALLET, ref: 'w1' }, session,
+            ),
+          ).toBe(-5000);
+          expect(
+            await LedgerService.totalOwed(eventId, LedgerAccountType.WALLET, session),
+          ).toBe(5000);
+        });
+      } finally {
+        await session.endSession();
+      }
+
+      // Committed: an unsessioned read now agrees.
+      expect(await LedgerService.floatBalance(eventId)).toBe(5000);
+    });
+  });
+
   describe('rejects reads that would silently report a wrong figure', () => {
     it('throws when a ref is supplied for a singleton account', async () => {
       await topUp('w1', 5000, FloatTag.KESHLESS);

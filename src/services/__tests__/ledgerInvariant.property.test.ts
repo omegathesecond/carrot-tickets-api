@@ -138,7 +138,7 @@ describe('ledger invariant (property)', () => {
         });
         earned[m] = (earned[m] ?? 0) - amt;
         floatByTag[FloatTag.KESHLESS] -= amt;
-      } else {
+      } else if (move === 'refund') {
         // wallet +X, float -X. Money leaves custody back to the attendee.
         const w = pick(refundable);
         const amt = owed[w] as number;
@@ -151,6 +151,12 @@ describe('ledger invariant (property)', () => {
         });
         owed[w] = 0;
         floatByTag[FloatTag.KESHLESS] -= amt;
+      } else {
+        // A sixth movement added to MOVEMENTS/choices without its own branch
+        // would otherwise silently post refund's legs while incrementing that
+        // movement's counter: green, and proving less than the coverage
+        // assertion below claims. Fail loudly instead.
+        throw new Error(`unhandled movement: ${move}`);
       }
       walked[move]++;
 

@@ -51,7 +51,7 @@ describe('LedgerService.post', () => {
         refType: 'topup',
         refId: 't2',
         postings: [
-          { account: { type: LedgerAccountType.FLOAT }, delta: 5000 },
+          { account: { type: LedgerAccountType.FLOAT }, delta: 5000, tag: FloatTag.KESHLESS },
           { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -4000 },
         ],
       }),
@@ -66,7 +66,9 @@ describe('LedgerService.post', () => {
         eventId,
         refType: 'topup',
         refId: 't3',
-        postings: [{ account: { type: LedgerAccountType.FLOAT }, delta: 0 }],
+        postings: [
+          { account: { type: LedgerAccountType.FLOAT }, delta: 0, tag: FloatTag.KESHLESS },
+        ],
       }),
     ).rejects.toThrow('a transaction needs at least 2 postings');
   });
@@ -78,7 +80,7 @@ describe('LedgerService.post', () => {
         refType: 'topup',
         refId: 't4',
         postings: [
-          { account: { type: LedgerAccountType.FLOAT }, delta: 50.5 },
+          { account: { type: LedgerAccountType.FLOAT }, delta: 50.5, tag: FloatTag.KESHLESS },
           { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -50.5 },
         ],
       }),
@@ -92,7 +94,7 @@ describe('LedgerService.post', () => {
         refType: 'topup',
         refId: 't5',
         postings: [
-          { account: { type: LedgerAccountType.FLOAT }, delta: 100 },
+          { account: { type: LedgerAccountType.FLOAT }, delta: 100, tag: FloatTag.KESHLESS },
           { account: { type: LedgerAccountType.WALLET }, delta: -100 },
         ],
       }),
@@ -106,11 +108,68 @@ describe('LedgerService.post', () => {
         refType: 'topup',
         refId: 't7',
         postings: [
-          { account: { type: LedgerAccountType.FLOAT, ref: 'nope' }, delta: 100 },
+          { account: { type: LedgerAccountType.FLOAT, ref: 'nope' }, delta: 100, tag: FloatTag.KESHLESS },
           { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100 },
         ],
       }),
     ).rejects.toThrow('float account does not take a ref');
+
+    expect(await LedgerEntry.countDocuments({})).toBe(0);
+  });
+
+  it('rejects an empty-string ref on an account type that does not take one', async () => {
+    // '' is falsy, so a truthiness guard lets it through; `accountRef: ''` then
+    // survives `?? null` and is invisible to accountBalance()'s `accountRef:
+    // null` match — the float would silently read low by this leg's delta.
+    // Postings balance, so only the ref guard can be what rejects this.
+    await expect(
+      LedgerService.post({
+        eventId,
+        refType: 'topup',
+        refId: 't10',
+        postings: [
+          { account: { type: LedgerAccountType.FLOAT, ref: '' }, delta: 100, tag: FloatTag.KESHLESS },
+          { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100 },
+        ],
+      }),
+    ).rejects.toThrow('float account does not take a ref');
+
+    expect(await LedgerEntry.countDocuments({})).toBe(0);
+  });
+
+  it('rejects a float posting with no tag', async () => {
+    // An untagged float leg is money in no physical location: counted by
+    // floatBalance() but by neither floatBalance(KESHLESS) nor
+    // floatBalance(CASH_DESK), so external reconciliation can never find it.
+    await expect(
+      LedgerService.post({
+        eventId,
+        refType: 'topup',
+        refId: 't11',
+        postings: [
+          { account: { type: LedgerAccountType.FLOAT }, delta: 100 },
+          { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100 },
+        ],
+      }),
+    ).rejects.toThrow('float posting requires a tag');
+
+    expect(await LedgerEntry.countDocuments({})).toBe(0);
+  });
+
+  it('rejects a tag on a non-float posting', async () => {
+    // tag documents where FLOAT money physically sits; on a wallet leg it
+    // records nothing and misleads whoever reads it next.
+    await expect(
+      LedgerService.post({
+        eventId,
+        refType: 'topup',
+        refId: 't12',
+        postings: [
+          { account: { type: LedgerAccountType.FLOAT }, delta: 100, tag: FloatTag.KESHLESS },
+          { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100, tag: FloatTag.KESHLESS },
+        ],
+      }),
+    ).rejects.toThrow('wallet posting does not take a tag');
 
     expect(await LedgerEntry.countDocuments({})).toBe(0);
   });
@@ -125,7 +184,7 @@ describe('LedgerService.post', () => {
           refId: 't8',
           session,
           postings: [
-            { account: { type: LedgerAccountType.FLOAT }, delta: 100 },
+            { account: { type: LedgerAccountType.FLOAT }, delta: 100, tag: FloatTag.KESHLESS },
             { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100 },
           ],
         }),
@@ -164,7 +223,7 @@ describe('LedgerService.post', () => {
           refType: 'topup',
           refId: 't9',
           postings: [
-            { account: { type: LedgerAccountType.FLOAT }, delta: 100 },
+            { account: { type: LedgerAccountType.FLOAT }, delta: 100, tag: FloatTag.KESHLESS },
             { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100 },
           ],
         }),
@@ -188,7 +247,7 @@ describe('LedgerService.post', () => {
           refId: 't6',
           session,
           postings: [
-            { account: { type: LedgerAccountType.FLOAT }, delta: 100 },
+            { account: { type: LedgerAccountType.FLOAT }, delta: 100, tag: FloatTag.KESHLESS },
             { account: { type: LedgerAccountType.WALLET, ref: 'w1' }, delta: -100 },
           ],
         });
