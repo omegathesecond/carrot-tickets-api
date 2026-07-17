@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { Event } from '@models/event.model';
 import { toggleEventLike, recordEventShare } from '@services/eventReaction.service';
@@ -41,7 +42,7 @@ export class EventReactionController {
 
       return ApiResponseUtil.success(res, await toggleEventLike(eventId, actor));
     } catch (error: any) {
-      return ApiResponseUtil.error(res, error?.message || 'Failed to like event', 500);
+      return failWithHttpError(res, error, 'Failed to like event');
     }
   }
 
@@ -52,7 +53,7 @@ export class EventReactionController {
       if (!eventId) return;
       return ApiResponseUtil.success(res, await recordEventShare(eventId));
     } catch (error: any) {
-      return ApiResponseUtil.error(res, error?.message || 'Failed to record share', 500);
+      return failWithHttpError(res, error, 'Failed to record share');
     }
   }
 }
