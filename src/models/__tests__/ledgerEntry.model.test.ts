@@ -37,6 +37,22 @@ describe('LedgerEntry model', () => {
     expect(doc.tag).toBe(FloatTag.KESHLESS);
   });
 
+  it('persists a posting with a negative delta', async () => {
+    const eventId = new mongoose.Types.ObjectId();
+    const doc = await LedgerEntry.create({
+      eventId,
+      txnId: 'txn-2-neg',
+      accountType: LedgerAccountType.WALLET,
+      accountRef: 'w1',
+      delta: -5000,
+      tag: FloatTag.KESHLESS,
+      refType: 'withdrawal',
+      refId: 'w1',
+    });
+    expect(doc.delta).toBe(-5000);
+    expect(doc.tag).toBe(FloatTag.KESHLESS);
+  });
+
   it('rejects a non-integer delta', async () => {
     await expect(
       LedgerEntry.create({
@@ -47,6 +63,20 @@ describe('LedgerEntry model', () => {
         delta: 10.5,
         refType: 'charge',
         refId: 'c1',
+      }),
+    ).rejects.toThrow(/integer minor units/);
+  });
+
+  it('rejects a delta that is an integer but not a safe integer', async () => {
+    await expect(
+      LedgerEntry.create({
+        eventId: new mongoose.Types.ObjectId(),
+        txnId: 'txn-3',
+        accountType: LedgerAccountType.FEES,
+        accountRef: null,
+        delta: Number.MAX_SAFE_INTEGER + 1,
+        refType: 'charge',
+        refId: 'c2',
       }),
     ).rejects.toThrow(/integer minor units/);
   });
