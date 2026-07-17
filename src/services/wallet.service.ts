@@ -31,6 +31,15 @@ export class WalletService {
       );
     } catch (err) {
       if ((err as { code?: number })?.code !== 11000) throw err;
+      // Only the {eventId, buyerId} index describes the race this re-read
+      // resolves. Discriminating on `code` alone would also swallow an E11000
+      // from the {eventId, bandUid} index and hand back a wallet that has
+      // nothing to do with the failure — silently, whenever a matching wallet
+      // happens to exist (which defeats the `!existing` backstop below).
+      // Unreachable today (this insert always leaves bandUid null, which that
+      // partial index excludes), but a trap for a later
+      // ensureWallet(eventId, buyerId, bandUid).
+      if (!(err as { keyPattern?: Record<string, unknown> })?.keyPattern?.buyerId) throw err;
       // Lost the insert race: the winner's wallet is the one true wallet.
       const existing = await Wallet.findOne(filter);
       if (!existing) throw err; // E11000 with no winner => a different index; surface it.
