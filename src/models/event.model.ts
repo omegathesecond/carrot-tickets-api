@@ -126,6 +126,12 @@ const eventSchema = new Schema<IEvent>({
     min: 0
   },
 
+  // Discover-feed engagement counters. Events created before this field exists
+  // have no value stored; `.lean()` reads (feed.service.ts) do NOT apply schema
+  // defaults to absent fields, so every read site must use `?? 0`.
+  likeCount: { type: Number, default: 0 },
+  shareCount: { type: Number, default: 0 },
+
   // Media & Images
   posterUrl: {
     type: String,

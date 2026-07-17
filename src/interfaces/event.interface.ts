@@ -51,6 +51,10 @@ export interface IEvent extends Document {
   totalTicketsSold: number;
   totalRevenue: number;
 
+  // Discover-feed engagement counters
+  likeCount: number;
+  shareCount: number;
+
   // Media & Images
   posterUrl?: string;
   thumbnailUrl?: string;
