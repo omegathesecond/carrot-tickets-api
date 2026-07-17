@@ -7,7 +7,7 @@ import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 
-function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]): string {
+function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_BRAND]): string {
   return jwt.sign(
     { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin: false, role: 'owner', permissions },
     JWT_SECRET
@@ -57,5 +57,14 @@ describe('organizer own-profile update', () => {
       .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [])}`)
       .send({ bio: 'x' }).expect(403);
     await request(app).patch('/api/tickets/organizer/profile').send({ bio: 'x' }).expect(401);
+  });
+
+  it('403s a token that carries EDIT_EVENT but not EDIT_BRAND — brand identity is a different axis than events', async () => {
+    const vendor = await seedVendor();
+    await request(app)
+      .patch('/api/tickets/organizer/profile')
+      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [TicketsPermission.EDIT_EVENT])}`)
+      .send({ bio: 'x' })
+      .expect(403);
   });
 });

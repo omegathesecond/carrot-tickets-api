@@ -21,7 +21,7 @@ import { R2Service } from '@utils/r2.service';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'test-secret-key';
 
-function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]): string {
+function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_BRAND]): string {
   return jwt.sign(
     { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin: false, role: 'owner', permissions },
     JWT_SECRET
@@ -61,5 +61,15 @@ describe('POST /api/tickets/organizer/profile/logo', () => {
       .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`);
 
     expect(res.status).toBe(400);
+  });
+
+  it('403s a token that carries EDIT_EVENT but not EDIT_BRAND — brand identity is a different axis than events', async () => {
+    const vendor = await seedVendor();
+    const res = await request(app)
+      .post('/api/tickets/organizer/profile/logo')
+      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [TicketsPermission.EDIT_EVENT])}`)
+      .attach('logo', Buffer.from('fakeimage'), { filename: 'logo.png', contentType: 'image/png' });
+
+    expect(res.status).toBe(403);
   });
 });

@@ -50,7 +50,15 @@ export enum TicketsPermission {
   // buyer's platform-wide social access. NEVER part of any role's default
   // set: organizers (OWNER) only moderate their own community, they don't
   // get the platform-wide queue.
-  MODERATE_SOCIAL = 'tickets:moderate_social'
+  MODERATE_SOCIAL = 'tickets:moderate_social',
+
+  // Brand identity (logo/bio) — deliberately vertical-neutral: a bus
+  // company's brand is not an events concept, so this belongs to NEITHER
+  // EVENT_PERMISSIONS nor TRANSPORT_PERMISSIONS below. That absence from
+  // both groups is what makes scopePermissionsToType never strip it,
+  // regardless of OperatorType. Granted only to brand-owner roles
+  // (OWNER/MANAGER) — SALES/SCANNER must not overwrite brand identity.
+  EDIT_BRAND = 'tickets:edit_brand'
 }
 
 export enum TicketsRole {
@@ -85,7 +93,8 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
     TicketsPermission.VIEW_TRANSPORT,
     TicketsPermission.MANAGE_TRANSPORT,
     TicketsPermission.VIEW_REVENUE,
-    TicketsPermission.EXPORT_REPORTS
+    TicketsPermission.EXPORT_REPORTS,
+    TicketsPermission.EDIT_BRAND
   ],
 
   [TicketsRole.SALES]: [
@@ -103,9 +112,16 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
 };
 
 // ── Operator-type verticals ────────────────────────────────────────────────
-// These three groups PARTITION all non-platform-staff permissions (disjoint +
-// exhaustive). The platform-staff perms (VIEW_USERS, PRINT_WRISTBANDS,
-// MODERATE_SOCIAL) belong to no vertical and are never scoped by operator type.
+// These three groups PARTITION all non-platform-staff, non-vertical-neutral
+// permissions (disjoint + exhaustive). Two categories of permission are
+// deliberately excluded from all three groups because scopePermissionsToType
+// only strips membership in a group — absence from every group is what makes
+// a permission survive scoping for EVERY OperatorType:
+//   - platform-staff perms (VIEW_USERS, PRINT_WRISTBANDS, MODERATE_SOCIAL) —
+//     belong to no vertical, never part of any role's default set.
+//   - EDIT_BRAND — brand identity is not an events-or-transport concept, so
+//     it must survive scoping for EVENTS, TRANSPORT, and BOTH alike; IS part
+//     of the brand-owner roles' (OWNER/MANAGER) default set.
 export const TRANSPORT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.VIEW_TRANSPORT,
   TicketsPermission.MANAGE_TRANSPORT,

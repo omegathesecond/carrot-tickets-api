@@ -137,7 +137,7 @@ router.put('/users/password', TicketsController.changePassword);
  */
 router.patch(
   '/organizer/profile',
-  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  requireTicketsPermission(TicketsPermission.EDIT_BRAND),
   OrganizerProfileController.updateOwn
 );
 
@@ -149,7 +149,7 @@ router.patch(
  */
 router.post(
   '/organizer/profile/logo',
-  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  requireTicketsPermission(TicketsPermission.EDIT_BRAND),
   avatarUpload.single('logo'),
   handleMulterError,
   validateFileUpload,

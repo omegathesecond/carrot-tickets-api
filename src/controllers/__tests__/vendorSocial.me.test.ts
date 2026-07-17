@@ -40,12 +40,17 @@ function tokenFor(role: TicketsRole, permissions: TicketsPermission[]): string {
 /**
  * GET /api/tickets/social/me sits behind authenticateTickets only, but the
  * ONLY way to satisfy the PhotoGate (POST /organizer/profile/logo) requires
- * EDIT_EVENT. `canEditBrand` tells the client whether this session could ever
+ * EDIT_BRAND. `canEditBrand` tells the client whether this session could ever
  * clear the gate, so a SALES/SCANNER sub-user is never shown an exit it will
  * be 403'd out of. See the C1 finding.
+ *
+ * EDIT_BRAND is vertical-neutral (belongs to neither EVENT_PERMISSIONS nor
+ * TRANSPORT_PERMISSIONS — see permissions.util.test.ts), granted only to the
+ * brand-owner roles (OWNER/MANAGER), so this holds for events, transport,
+ * and BOTH operators alike; SALES/SCANNER never get it regardless of vertical.
  */
 describe('GET /api/tickets/social/me — canEditBrand', () => {
-  it('is false for a SALES sub-user token (no EDIT_EVENT)', async () => {
+  it('is false for a SALES sub-user token (no EDIT_BRAND)', async () => {
     const res = await request(app)
       .get('/api/tickets/social/me')
       .set('Authorization', `Bearer ${tokenFor(TicketsRole.SALES, TICKETS_ROLE_PERMISSIONS[TicketsRole.SALES])}`);
@@ -54,7 +59,7 @@ describe('GET /api/tickets/social/me — canEditBrand', () => {
     expect(res.body.data.canEditBrand).toBe(false);
   });
 
-  it('is false for a SCANNER sub-user token (no EDIT_EVENT)', async () => {
+  it('is false for a SCANNER sub-user token (no EDIT_BRAND)', async () => {
     const res = await request(app)
       .get('/api/tickets/social/me')
       .set('Authorization', `Bearer ${tokenFor(TicketsRole.SCANNER, TICKETS_ROLE_PERMISSIONS[TicketsRole.SCANNER])}`);
@@ -63,7 +68,7 @@ describe('GET /api/tickets/social/me — canEditBrand', () => {
     expect(res.body.data.canEditBrand).toBe(false);
   });
 
-  it('is true for an OWNER token (has EDIT_EVENT)', async () => {
+  it('is true for an OWNER token (has EDIT_BRAND)', async () => {
     const res = await request(app)
       .get('/api/tickets/social/me')
       .set('Authorization', `Bearer ${tokenFor(TicketsRole.OWNER, TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER])}`);
@@ -72,13 +77,31 @@ describe('GET /api/tickets/social/me — canEditBrand', () => {
     expect(res.body.data.canEditBrand).toBe(true);
   });
 
-  it('is true for a MANAGER token (has EDIT_EVENT)', async () => {
+  it('is true for a MANAGER token (has EDIT_BRAND)', async () => {
     const res = await request(app)
       .get('/api/tickets/social/me')
       .set('Authorization', `Bearer ${tokenFor(TicketsRole.MANAGER, TICKETS_ROLE_PERMISSIONS[TicketsRole.MANAGER])}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.canEditBrand).toBe(true);
+  });
+
+  it('is true for a token carrying EDIT_BRAND explicitly, regardless of role', async () => {
+    const res = await request(app)
+      .get('/api/tickets/social/me')
+      .set('Authorization', `Bearer ${tokenFor(TicketsRole.SALES, [TicketsPermission.EDIT_BRAND])}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.canEditBrand).toBe(true);
+  });
+
+  it('is false for a SALES sub-user even if it somehow carries EDIT_EVENT but not EDIT_BRAND (axis is brand, not events)', async () => {
+    const res = await request(app)
+      .get('/api/tickets/social/me')
+      .set('Authorization', `Bearer ${tokenFor(TicketsRole.SALES, [TicketsPermission.EDIT_EVENT])}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.canEditBrand).toBe(false);
   });
 
   it('is false when the token carries no permissions array at all', async () => {

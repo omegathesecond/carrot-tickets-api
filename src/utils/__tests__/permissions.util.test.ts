@@ -5,15 +5,27 @@ import { scopePermissionsToType } from '@utils/permissions.util';
 
 const OWNER = TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER];
 const STAFF = [TicketsPermission.VIEW_USERS, TicketsPermission.PRINT_WRISTBANDS, TicketsPermission.MODERATE_SOCIAL];
+// Vertical-neutral perms deliberately outside the EVENT/TRANSPORT/SHARED
+// partition (same mechanism as STAFF: scopePermissionsToType only strips
+// membership in a group, so absence from all three groups is what makes
+// these survive scoping for every OperatorType).
+const VERTICAL_NEUTRAL = [TicketsPermission.EDIT_BRAND];
 
 describe('vertical permission groups', () => {
-  it('partition all non-staff permissions (disjoint + exhaustive)', () => {
+  it('partition all non-staff, non-vertical-neutral permissions (disjoint + exhaustive)', () => {
     const groups = [...EVENT_PERMISSIONS, ...TRANSPORT_PERMISSIONS, ...SHARED_PERMISSIONS];
     // disjoint
     expect(new Set(groups).size).toBe(groups.length);
-    // exhaustive: every non-staff permission appears in exactly one group
-    const nonStaff = Object.values(TicketsPermission).filter((p) => !STAFF.includes(p));
+    // exhaustive: every non-staff, non-vertical-neutral permission appears in exactly one group
+    const nonStaff = Object.values(TicketsPermission).filter(
+      (p) => !STAFF.includes(p) && !VERTICAL_NEUTRAL.includes(p)
+    );
     expect(new Set(groups)).toEqual(new Set(nonStaff));
+  });
+
+  it('EDIT_BRAND belongs to neither EVENT_PERMISSIONS nor TRANSPORT_PERMISSIONS', () => {
+    expect(EVENT_PERMISSIONS).not.toContain(TicketsPermission.EDIT_BRAND);
+    expect(TRANSPORT_PERMISSIONS).not.toContain(TicketsPermission.EDIT_BRAND);
   });
 });
 
@@ -40,5 +52,11 @@ describe('scopePermissionsToType', () => {
     const withStaff = [...OWNER, ...STAFF];
     const scoped = scopePermissionsToType(withStaff, OperatorType.EVENTS);
     STAFF.forEach((p) => expect(scoped).toContain(p));
+  });
+
+  it('never strips EDIT_BRAND — brand identity is vertical-neutral', () => {
+    for (const t of [OperatorType.EVENTS, OperatorType.TRANSPORT, OperatorType.BOTH]) {
+      expect(scopePermissionsToType([TicketsPermission.EDIT_BRAND], t)).toContain(TicketsPermission.EDIT_BRAND);
+    }
   });
 });

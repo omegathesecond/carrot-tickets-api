@@ -26,10 +26,14 @@ export class VendorSocialController {
    * out of (notably the PhotoGate, whose only exit IS the logo upload: a
    * SALES/SCANNER staffer of a logoless vendor would otherwise be shown a
    * non-dismissible gate they can never satisfy).
+   *
+   * Checks EDIT_BRAND, not EDIT_EVENT — brand identity is vertical-neutral
+   * (a bus company's brand is not an events concept), so this now works for
+   * TRANSPORT and BOTH operators, not just EVENTS ones.
    */
   private static canEditBrand(req: Request): boolean {
     const permissions = (req as any).ticketsUser?.permissions || [];
-    return permissions.includes(TicketsPermission.EDIT_EVENT);
+    return permissions.includes(TicketsPermission.EDIT_BRAND);
   }
 
   /** GET /api/tickets/social/me — the brand's own social summary. */
