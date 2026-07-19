@@ -13,6 +13,8 @@ export type WalletStatus = 'active' | 'frozen' | 'closed';
  */
 export interface IWallet extends Document {
   eventId: mongoose.Types.ObjectId;
+  /** The ticket this wallet belongs to — the wallet identity (one wallet per ticket). */
+  ticketId: mongoose.Types.ObjectId;
   /** The attendee, when known. A cash-desk wallet may exist before sign-up. */
   buyerId?: mongoose.Types.ObjectId;
   /** Bound band UID, or null when unbound (never bound, or reported lost). */
@@ -44,6 +46,12 @@ const integerCents = {
 const walletSchema = new Schema<IWallet>(
   {
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
+    // NOTE: no unique/index/sparse here on purpose — uniqueness is declared once,
+    // below, via schema.index(). Declaring it in both places yields two
+    // definitions of the same index name with different options; MongoDB rejects
+    // the second and Mongoose swallows the error, so the index silently never
+    // exists.
+    ticketId: { type: Schema.Types.ObjectId, ref: 'Ticket', required: true },
     buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer' },
     // NOTE: no unique/index/sparse here on purpose — the partial unique index is
     // declared once, below. Declaring it in both places yields two definitions of
@@ -116,19 +124,11 @@ walletSchema.index(
   { eventId: 1, bandUid: 1 },
   { unique: true, partialFilterExpression: { bandUid: { $type: 'string' } } },
 );
-// One wallet per attendee per event (closed-loop). This MUST be unique: it is
-// what makes ensureWallet()'s upsert concurrency-safe — an upsert only
-// serialises concurrent callers when a unique index backs its filter, otherwise
-// two simultaneous check-in scans both miss and both insert. PARTIAL for the
-// same reason as bandUid: buyerId is optional (a cash-desk wallet can exist
-// before sign-up), so a plain unique index would collide on multiple nulls.
-// $type:'objectId' and NOT $exists:true, symmetric with bandUid's $type:'string':
-// $exists is true for a stored explicit null, and Mongoose does store an
-// explicitly-set null, so two buyerId:null wallets would index as {eventId,null}
-// and the second would fail E11000. $type only matches a real ObjectId.
-walletSchema.index(
-  { eventId: 1, buyerId: 1 },
-  { unique: true, partialFilterExpression: { buyerId: { $type: 'objectId' } } },
-);
+// One wallet per ticket (the chosen identity). Single declaration site; makes
+// ensureWalletForTicket's upsert concurrency-safe.
+walletSchema.index({ ticketId: 1 }, { unique: true });
+// Non-partial: checkWalletBalances scans ALL wallets in an event (bound or not),
+// which the partial {eventId,bandUid} index cannot serve.
+walletSchema.index({ eventId: 1 });
 
 export const Wallet = mongoose.model<IWallet>('Wallet', walletSchema);
