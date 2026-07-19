@@ -427,6 +427,10 @@ export class ScanService {
       throw new Error('This ticket is for a different event');
     }
 
+    if (!ScanService.BAND_ELIGIBLE.has(ticket.status)) {
+      throw new Error(`Ticket is ${ticket.status}, cannot bind a band`);
+    }
+
     const wallet = await Wallet.findOne({ ticketId: ticket._id });
     if (!wallet) throw new Error('No wallet for this ticket');
 

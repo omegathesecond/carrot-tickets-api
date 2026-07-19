@@ -178,4 +178,27 @@ describe('ScanService.reissueBandForTicket', () => {
       }),
     ).rejects.toThrow(/different vendor/);
   });
+
+  it('rejects reissue for a refunded ticket and leaves the bound band untouched', async () => {
+    const eventId = new mongoose.Types.ObjectId();
+    const t = await seedTicket(eventId);
+    const { wallet } = await ScanService.bindBandToTicket({
+      ticketId: t.ticketId, bandUid: 'REFD0001', vendorId: String(t.vendorId),
+    });
+
+    // Ticket gets refunded after the band was bound — the refund flow flips
+    // status but (per the known gap) does not unbind the band.
+    await Ticket.updateOne({ _id: t._id }, { $set: { status: TicketStatus.REFUNDED } });
+
+    await expect(
+      ScanService.reissueBandForTicket({
+        ticketId: t.ticketId, newBandUid: 'REFD0002', reason: 'lost', vendorId: String(t.vendorId),
+      }),
+    ).rejects.toThrow(/cannot bind a band/);
+
+    // The wallet must still carry the ORIGINAL band — no unbind/rebind should
+    // have happened as a side effect of the rejected attempt.
+    const reread = await Wallet.findOne({ _id: wallet._id });
+    expect(reread?.bandUid).toBe('REFD0001');
+  });
 });
