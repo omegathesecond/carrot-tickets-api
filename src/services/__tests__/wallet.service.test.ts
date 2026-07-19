@@ -5,40 +5,42 @@ import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
 
 const eventId = new mongoose.Types.ObjectId().toString();
-const buyerId = new mongoose.Types.ObjectId().toString();
+const ticketId = new mongoose.Types.ObjectId().toString();
 
-describe('WalletService.ensureWallet', () => {
+describe('WalletService.ensureWalletForTicket', () => {
   beforeAll(async () => { await connectTestDb(); });
   afterEach(async () => { await clearTestDb(); });
   afterAll(async () => { await disconnectTestDb(); });
 
-  it('creates an active empty wallet for a new attendee', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+  it('creates an active empty wallet for a new ticket', async () => {
+    const w = await WalletService.ensureWalletForTicket({ ticketId, eventId });
     expect(w.balance).toBe(0);
     expect(w.status).toBe('active');
+    expect(String(w.ticketId)).toBe(ticketId);
     expect(String(w.eventId)).toBe(eventId);
   });
 
-  it('is idempotent — the same attendee gets the SAME wallet, not a second one', async () => {
-    const a = await WalletService.ensureWallet(eventId, buyerId);
-    const b = await WalletService.ensureWallet(eventId, buyerId);
+  it('is idempotent — the same ticket gets the SAME wallet', async () => {
+    const a = await WalletService.ensureWalletForTicket({ ticketId, eventId });
+    const b = await WalletService.ensureWalletForTicket({ ticketId, eventId });
     expect(String(a._id)).toBe(String(b._id));
-    expect(await Wallet.countDocuments({ eventId, buyerId })).toBe(1);
+    expect(await Wallet.countDocuments({ ticketId })).toBe(1);
   });
 
-  it('never creates two wallets under concurrent calls', async () => {
+  it('never creates two wallets under concurrent calls for one ticket', async () => {
     await Promise.all([
-      WalletService.ensureWallet(eventId, buyerId),
-      WalletService.ensureWallet(eventId, buyerId),
-      WalletService.ensureWallet(eventId, buyerId),
+      WalletService.ensureWalletForTicket({ ticketId, eventId }),
+      WalletService.ensureWalletForTicket({ ticketId, eventId }),
+      WalletService.ensureWalletForTicket({ ticketId, eventId }),
     ]);
-    expect(await Wallet.countDocuments({ eventId, buyerId })).toBe(1);
+    expect(await Wallet.countDocuments({ ticketId })).toBe(1);
   });
 
-  it('gives the same attendee a SEPARATE wallet per event (closed-loop)', async () => {
-    const other = new mongoose.Types.ObjectId().toString();
-    const a = await WalletService.ensureWallet(eventId, buyerId);
-    const b = await WalletService.ensureWallet(other, buyerId);
+  it('gives DIFFERENT tickets different wallets', async () => {
+    const a = await WalletService.ensureWalletForTicket({ ticketId, eventId });
+    const b = await WalletService.ensureWalletForTicket({
+      ticketId: new mongoose.Types.ObjectId().toString(), eventId,
+    });
     expect(String(a._id)).not.toBe(String(b._id));
   });
 
@@ -57,35 +59,35 @@ describe('WalletService.ensureWallet', () => {
       Object.assign(new Error('E11000 duplicate key error'), { code: 11000, keyPattern });
 
     it('lost the insert race — returns the winner wallet already in the DB', async () => {
-      const winner = await WalletService.ensureWallet(eventId, buyerId);
+      const winner = await WalletService.ensureWalletForTicket({ ticketId, eventId });
       jest.spyOn(Wallet, 'findOneAndUpdate').mockImplementationOnce(() => {
-        throw dupKeyError({ eventId: 1, buyerId: 1 });
+        throw dupKeyError({ ticketId: 1 });
       });
 
-      const w = await WalletService.ensureWallet(eventId, buyerId);
+      const w = await WalletService.ensureWalletForTicket({ ticketId, eventId });
 
       expect(String(w._id)).toBe(String(winner._id));
       expect(w.balance).toBe(0);
       expect(w.status).toBe('active');
-      expect(await Wallet.countDocuments({ eventId, buyerId })).toBe(1);
+      expect(await Wallet.countDocuments({ ticketId })).toBe(1);
     });
 
     it('rethrows E11000 when no winner exists — never invents a wallet', async () => {
       jest.spyOn(Wallet, 'findOneAndUpdate').mockImplementationOnce(() => {
-        throw dupKeyError({ eventId: 1, buyerId: 1 });
+        throw dupKeyError({ ticketId: 1 });
       });
 
-      await expect(WalletService.ensureWallet(eventId, buyerId)).rejects.toThrow('E11000');
-      expect(await Wallet.countDocuments({ eventId, buyerId })).toBe(0);
+      await expect(WalletService.ensureWalletForTicket({ ticketId, eventId })).rejects.toThrow('E11000');
+      expect(await Wallet.countDocuments({ ticketId })).toBe(0);
     });
 
     it('rethrows an E11000 raised by a DIFFERENT index even when a wallet matches', async () => {
-      await WalletService.ensureWallet(eventId, buyerId);
+      await WalletService.ensureWalletForTicket({ ticketId, eventId });
       jest.spyOn(Wallet, 'findOneAndUpdate').mockImplementationOnce(() => {
-        throw dupKeyError({ eventId: 1, bandUid: 1 }); // not the buyerId race
+        throw dupKeyError({ eventId: 1, bandUid: 1 }); // not the ticketId race
       });
 
-      await expect(WalletService.ensureWallet(eventId, buyerId)).rejects.toThrow('E11000');
+      await expect(WalletService.ensureWalletForTicket({ ticketId, eventId })).rejects.toThrow('E11000');
     });
   });
 });
@@ -98,7 +100,7 @@ describe('WalletService.bindBand', () => {
   afterAll(async () => { await disconnectTestDb(); });
 
   it('binds a blank band to an unbound wallet and records the binding', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     const bound = await WalletService.bindBand(String(w._id), 'AABBCC01', 'gate-op-1');
 
     expect(bound.bandUid).toBe('AABBCC01');
@@ -110,8 +112,8 @@ describe('WalletService.bindBand', () => {
   });
 
   it('refuses to bind a UID already live on another wallet in the same event', async () => {
-    const a = await WalletService.ensureWallet(eventId, buyerId);
-    const b = await WalletService.ensureWallet(eventId, new mongoose.Types.ObjectId().toString());
+    const a = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
+    const b = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await WalletService.bindBand(String(a._id), 'AABBCC01');
 
     await expect(WalletService.bindBand(String(b._id), 'AABBCC01')).rejects.toThrow(
@@ -122,7 +124,7 @@ describe('WalletService.bindBand', () => {
   });
 
   it('refuses to bind a second band to a wallet that already has one', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await WalletService.bindBand(String(w._id), 'AABBCC01');
     await expect(WalletService.bindBand(String(w._id), 'AABBCC02')).rejects.toThrow(
       'wallet already has a band bound',
@@ -130,7 +132,7 @@ describe('WalletService.bindBand', () => {
   });
 
   it('refuses to bind to a closed wallet', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await Wallet.updateOne({ _id: w._id }, { $set: { status: 'closed' } });
     await expect(WalletService.bindBand(String(w._id), 'AABBCC03')).rejects.toThrow(
       'wallet is not active',
@@ -138,7 +140,7 @@ describe('WalletService.bindBand', () => {
   });
 
   it('rolls the claim back when the audit write fails — no band left bound, no orphan row', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     // Stub the audit write to blow up exactly once, AFTER the claim has set bandUid.
     const spy = jest.spyOn(BandBinding, 'create').mockImplementationOnce(() => {
       throw new Error('audit write boom');
@@ -156,7 +158,7 @@ describe('WalletService.bindBand', () => {
   });
 
   it('rollback does NOT clobber a concurrent legal rebind (compensating write is a CAS)', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     // Simulate "someone rebound W between our claim and our rollback": the audit
     // write, on its one throwing call, FIRST moves W's band to a different uid
     // (as a legal unbind+rebind would), THEN throws so bindBand enters rollback.
@@ -195,9 +197,9 @@ describe('WalletService.bindBand', () => {
 
   it('only one of many concurrent binds of the SAME uid wins', async () => {
     const wallets = await Promise.all([
-      WalletService.ensureWallet(eventId, new mongoose.Types.ObjectId().toString()),
-      WalletService.ensureWallet(eventId, new mongoose.Types.ObjectId().toString()),
-      WalletService.ensureWallet(eventId, new mongoose.Types.ObjectId().toString()),
+      WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId }),
+      WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId }),
+      WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId }),
     ]);
     const results = await Promise.allSettled(
       wallets.map((w) => WalletService.bindBand(String(w._id), 'SAMEUID1')),
@@ -213,7 +215,7 @@ describe('WalletService.unbindBand (lost band reissue)', () => {
   afterAll(async () => { await disconnectTestDb(); });
 
   it('unbinds a lost band, stamps the audit row, and PRESERVES the balance', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await WalletService.bindBand(String(w._id), 'LOSTBAND');
     // Simulate a topped-up wallet (SP3 does this properly via the ledger).
     await Wallet.updateOne({ _id: w._id }, { $set: { balance: 5000 } });
@@ -228,7 +230,7 @@ describe('WalletService.unbindBand (lost band reissue)', () => {
   });
 
   it('lets a NEW band be bound after the lost one is released, balance intact', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await WalletService.bindBand(String(w._id), 'LOSTBAND');
     await Wallet.updateOne({ _id: w._id }, { $set: { balance: 5000 } });
     await WalletService.unbindBand(String(w._id), 'lost');
@@ -241,8 +243,8 @@ describe('WalletService.unbindBand (lost band reissue)', () => {
   });
 
   it('frees the released UID for reuse by a different wallet', async () => {
-    const a = await WalletService.ensureWallet(eventId, buyerId);
-    const b = await WalletService.ensureWallet(eventId, new mongoose.Types.ObjectId().toString());
+    const a = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
+    const b = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await WalletService.bindBand(String(a._id), 'REUSEUID');
     await WalletService.unbindBand(String(a._id), 'reissued');
 
@@ -251,7 +253,7 @@ describe('WalletService.unbindBand (lost band reissue)', () => {
   });
 
   it('refuses to unbind a wallet that has no band', async () => {
-    const w = await WalletService.ensureWallet(eventId, buyerId);
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     await expect(WalletService.unbindBand(String(w._id), 'lost')).rejects.toThrow(
       'wallet has no band bound',
     );

@@ -31,8 +31,8 @@ describe('ReconciliationService.checkWalletBalances', () => {
   });
 
   it('reports ok when every stored balance matches the journal', async () => {
-    const a = await Wallet.create({ eventId });
-    const b = await Wallet.create({ eventId });
+    const a = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId() });
+    const b = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId() });
     await topUp(String(a._id), 5000);
     await topUp(String(b._id), 2500);
 
@@ -43,7 +43,7 @@ describe('ReconciliationService.checkWalletBalances', () => {
   });
 
   it('DETECTS a balance mutated without a matching posting', async () => {
-    const w = await Wallet.create({ eventId });
+    const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId() });
     await topUp(String(w._id), 5000);
     // The bug this check exists to catch: money added to the stored balance
     // with no ledger posting behind it.
@@ -56,7 +56,7 @@ describe('ReconciliationService.checkWalletBalances', () => {
   });
 
   it('DETECTS a posting with no matching stored balance', async () => {
-    const w = await Wallet.create({ eventId });
+    const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId() });
     await LedgerService.post({
       eventId, refType: 'topup', refId: 'ghost',
       postings: [
@@ -72,7 +72,7 @@ describe('ReconciliationService.checkWalletBalances', () => {
   });
 
   it('DETECTS a cashFundedBalance > balance invariant violation ($inc bypasses the hook)', async () => {
-    const w = await Wallet.create({ eventId });
+    const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId() });
     await topUp(String(w._id), 5000);
     // $inc bypasses validators AND the pre('validate') cross-field hook — the
     // exact path SP3/SP5 will use, so this must be caught here or nowhere.
@@ -86,7 +86,7 @@ describe('ReconciliationService.checkWalletBalances', () => {
 
   it('scopes the check to one event', async () => {
     const other = new mongoose.Types.ObjectId().toString();
-    const w = await Wallet.create({ eventId });
+    const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId() });
     await topUp(String(w._id), 5000);
 
     expect(await ReconciliationService.checkWalletBalances(other)).toEqual({
