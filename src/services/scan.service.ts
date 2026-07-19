@@ -369,11 +369,17 @@ export class ScanService {
   static async bindBandToTicket(params: {
     ticketId: string;
     bandUid: string;
+    vendorId: string;
+    isSuperAdmin?: boolean;
     expectedEventId?: string;
     boundBy?: string;
   }): Promise<{ ticket: ITicket; wallet: IWallet }> {
     const ticket = await findTicketByCode(params.ticketId);
     if (!ticket) throw new Error('Ticket not found');
+
+    if (!params.isSuperAdmin && ticket.vendorId.toString() !== params.vendorId) {
+      throw new Error('Ticket belongs to a different vendor');
+    }
 
     if (params.expectedEventId && String(ticket.eventId) !== String(params.expectedEventId)) {
       throw new Error('This ticket is for a different event');

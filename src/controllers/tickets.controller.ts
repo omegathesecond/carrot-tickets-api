@@ -851,6 +851,8 @@ export class TicketsController {
       const result = await ScanService.bindBandToTicket({
         ticketId: value.ticketId,
         bandUid: value.bandUid,
+        vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         expectedEventId: value.expectedEventId,
         boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
       });
