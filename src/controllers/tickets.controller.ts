@@ -22,6 +22,7 @@ import {
   validateTicketSchema,
   checkInTicketSchema,
   bindBandSchema,
+  reissueBandSchema,
   scanQuerySchema,
   analyticsQuerySchema
 } from '@validators/tickets.validator';
@@ -861,6 +862,40 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Bind band error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to bind band', 400);
+    }
+  }
+
+  /**
+   * Scans: Reissue a lost band for a ticket's cashless wallet (cashless spec
+   * §5.1) — unbinds the old uid and binds a new one on the same wallet, so the
+   * balance is preserved. Mirrors bindBand's vendor ownership + event-lock
+   * enforcement exactly.
+   */
+  static async reissueBand(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = reissueBandSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.reissueBandForTicket({
+        ticketId: value.ticketId,
+        newBandUid: value.newBandUid,
+        reason: value.reason,
+        vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        expectedEventId: value.expectedEventId,
+        boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Reissue band error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to reissue band', 400);
     }
   }
 
