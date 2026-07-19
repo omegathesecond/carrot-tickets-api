@@ -9,6 +9,7 @@ import { TicketService } from '@services/ticket.service';
 import { SalesChannel, PaymentStatus } from '@interfaces/ticket.interface';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { normalizePhone } from '@utils/phone.util';
+import { notEndedFilter } from '@utils/eventVisibility.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { ContactMessage } from '@models/contactMessage.model';
@@ -184,8 +185,10 @@ export class PublicController {
         if (startDate) filter.eventDate.$gte = new Date(startDate);
         if (endDate) filter.eventDate.$lte = new Date(endDate);
       } else {
-        // Default: only show upcoming events (eventDate >= today)
-        filter.eventDate = { $gte: new Date() };
+        // Default: show every event that hasn't ended yet, so an in-progress
+        // event (e.g. a late-night show) stays discoverable and buyable until
+        // its endTime — not just until its start instant. See notEndedFilter.
+        Object.assign(filter, notEndedFilter());
       }
 
       // Search by name, venue, or description

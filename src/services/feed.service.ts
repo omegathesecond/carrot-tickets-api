@@ -5,6 +5,7 @@ import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { notEndedFilter } from '@utils/eventVisibility.util';
 import { PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import type { SocialActor } from '@utils/socialActor.util';
 
@@ -42,7 +43,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   if (cur.u) updateQuery.createdAt = { $lt: new Date(cur.u) };
   const updates = opts.tab === 'events' ? [] : await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();
 
-  const eventQuery: any = { status: EventStatus.PUBLISHED, eventDate: { $gte: new Date() } };
+  const eventQuery: any = { status: EventStatus.PUBLISHED, ...notEndedFilter() };
   if (opts.tab === 'following') eventQuery.vendorId = { $in: followedOrgIds };
   const eventSkip = cur.e ?? 0;
   const events = await Event.find(eventQuery).sort({ eventDate: 1 }).skip(eventSkip).limit(limit).lean();

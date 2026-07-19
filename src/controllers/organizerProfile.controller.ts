@@ -8,6 +8,7 @@ import { ReviewService } from '@services/review.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { R2Service } from '@utils/r2.service';
+import { notEndedFilter, endedFilter } from '@utils/eventVisibility.util';
 
 export class OrganizerProfileController {
   /** PATCH /api/tickets/organizer/profile — vendor updates its own brand card. */
@@ -84,12 +85,12 @@ export class OrganizerProfileController {
       const [followerCount, rating, upcoming, past] = await Promise.all([
         FollowService.followerCount('organizer', vendorId),
         ReviewService.vendorAggregate(vendorId),
-        Event.find({ vendorId, status: EventStatus.PUBLISHED, eventDate: { $gte: now } })
+        Event.find({ vendorId, status: EventStatus.PUBLISHED, ...notEndedFilter(now) })
           .select(eventFields).sort({ eventDate: 1 }).limit(20),
         Event.find({
           vendorId,
           status: { $in: [EventStatus.PUBLISHED, EventStatus.COMPLETED] },
-          eventDate: { $lt: now },
+          ...endedFilter(now),
         }).select(eventFields).sort({ eventDate: -1 }).limit(20),
       ]);
 
