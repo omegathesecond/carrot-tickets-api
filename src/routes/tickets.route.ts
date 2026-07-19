@@ -367,6 +367,12 @@ router.post(
   TicketsController.checkInTicket
 );
 
+router.post(
+  '/scans/bind-band',
+  requireTicketsPermission(TicketsPermission.SCAN_TICKETS),
+  TicketsController.bindBand
+);
+
 router.get(
   '/scans/stats',
   requireTicketsPermission(TicketsPermission.VIEW_SCANS),

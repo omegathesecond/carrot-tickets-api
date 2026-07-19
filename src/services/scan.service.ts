@@ -3,6 +3,8 @@ import { TicketScan } from '@models/ticketScan.model';
 import { Event } from '@models/event.model';
 import { ITicket, ITicketScan, TicketStatus } from '@interfaces/ticket.interface';
 import { findTicketByCode } from '@utils/ticketLookup.util';
+import { WalletService } from '@services/wallet.service';
+import { IWallet } from '@models/wallet.model';
 import mongoose from 'mongoose';
 
 export interface ValidateTicketParams {
@@ -349,6 +351,47 @@ export class ScanService {
       console.error('Check-in ticket error:', error);
       throw new Error(error.message || 'Failed to check in ticket');
     }
+  }
+
+  // A band may be bound only to a ticket that is SOLD or already CHECKED_IN.
+  // AVAILABLE (not sold), REFUNDED, CANCELLED must never get a spendable band.
+  private static readonly BAND_ELIGIBLE = new Set<TicketStatus>([
+    TicketStatus.SOLD,
+    TicketStatus.CHECKED_IN,
+  ]);
+
+  /**
+   * Bind a blank NFC band to the wallet of a scanned ticket (cashless spec
+   * §5.1). This is a DEDICATED band-desk action, independent of turnstile
+   * check-in: it never flips `ticket.status`, so binding a band cannot throw
+   * an "already checked in" error, and a re-tap to fix a mis-scan is safe.
+   */
+  static async bindBandToTicket(params: {
+    ticketId: string;
+    bandUid: string;
+    expectedEventId?: string;
+    boundBy?: string;
+  }): Promise<{ ticket: ITicket; wallet: IWallet }> {
+    const ticket = await findTicketByCode(params.ticketId);
+    if (!ticket) throw new Error('Ticket not found');
+
+    if (params.expectedEventId && String(ticket.eventId) !== String(params.expectedEventId)) {
+      throw new Error('This ticket is for a different event');
+    }
+
+    if (!ScanService.BAND_ELIGIBLE.has(ticket.status)) {
+      throw new Error(`Ticket is ${ticket.status}, cannot bind a band`);
+    }
+
+    const wallet = await WalletService.ensureWalletForTicket({
+      ticketId: String(ticket._id),
+      eventId: String(ticket.eventId),
+      ...(ticket.purchasedBy ? { buyerId: String(ticket.purchasedBy) } : {}),
+    });
+
+    const bound = await WalletService.bindBand(String(wallet._id), params.bandUid, params.boundBy);
+
+    return { ticket, wallet: bound };
   }
 
   /**

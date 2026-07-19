@@ -21,6 +21,7 @@ import {
   ticketSalesQuerySchema,
   validateTicketSchema,
   checkInTicketSchema,
+  bindBandSchema,
   scanQuerySchema,
   analyticsQuerySchema
 } from '@validators/tickets.validator';
@@ -827,6 +828,37 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Check-in ticket error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to check in ticket');
+    }
+  }
+
+  /**
+   * Scans: Bind a blank NFC band to a scanned ticket's cashless wallet
+   * (cashless spec §5.1). Independent of turnstile check-in — does NOT flip
+   * the ticket's entry-scan status, so a dedicated band desk can bind without
+   * tripping an "already checked in" error.
+   */
+  static async bindBand(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = bindBandSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.bindBandToTicket({
+        ticketId: value.ticketId,
+        bandUid: value.bandUid,
+        expectedEventId: value.expectedEventId,
+        boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Bind band error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to bind band', 400);
     }
   }
 
