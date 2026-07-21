@@ -66,6 +66,15 @@ router.get('/feed', optionalTicketsAuth, FeedController.get);
 router.get('/updates/by/:authorType/:authorId', optionalTicketsAuth, UpdateController.listByAuthor);
 
 /**
+ * @route   GET /api/public/updates/for-event/:eventId
+ * @desc    Posts tagged to one event, newest first — the Media tab on the
+ *          event quick-view (attendees sharing photos/videos from that show).
+ * @access  Public (optional tickets token for viewerReactions)
+ * @query   cursor (createdAt ISO string of the last item on the prior page)
+ */
+router.get('/updates/for-event/:eventId', optionalTicketsAuth, UpdateController.listByEvent);
+
+/**
  * @route   GET /api/public/events/:eventId
  * @desc    Get single published event details
  * @access  Public

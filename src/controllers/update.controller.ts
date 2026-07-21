@@ -138,6 +138,42 @@ export class UpdateController {
     }
   }
 
+  /**
+   * GET /api/public/updates/for-event/:eventId — posts tagged to one event,
+   * newest first. Powers the Media tab on the event quick-view, where
+   * attendees share photos/videos from that specific show.
+   *
+   * Deliberately the same visibility filter as listByAuthor (active + media
+   * ready): a post still transcoding has no playable URL, and a removed one
+   * must not resurface here just because it carries an eventId.
+   */
+  static async listByEvent(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = String(req.params['eventId'] || '');
+      if (!HEX24.test(eventId)) return ApiResponseUtil.validationError(res, 'Invalid event');
+
+      const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
+      const filter: any = { eventId, status: 'active', 'media.status': 'ready' };
+      if (cursor) {
+        const d = new Date(cursor);
+        if (Number.isNaN(d.getTime())) return ApiResponseUtil.error(res, 'Invalid cursor', 400);
+        filter.createdAt = { $lt: d };
+      }
+
+      const docs = await Update.find(filter).sort({ createdAt: -1 }).limit(PAGE_SIZE + 1);
+      const page = docs.slice(0, PAGE_SIZE);
+      const nextCursor = docs.length > PAGE_SIZE ? new Date(page[page.length - 1]!.createdAt).toISOString() : null;
+
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      const reactions = actor && page.length ? await getViewerReactions(page.map((d) => d.id), actor) : undefined;
+      const items = page.map((d) => UpdateController.dto(d, reactions?.[d.id], UpdateController.isActorAuthor(d, actor)));
+
+      return ApiResponseUtil.success(res, { items, nextCursor });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load event media');
+    }
+  }
+
   static react(type: 'like' | 'save') {
     return async (req: Request, res: Response): Promise<any> => {
       const buyer = await resolveBuyerFromRequest(req);

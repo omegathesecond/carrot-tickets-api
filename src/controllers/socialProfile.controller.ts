@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Ticket } from '@models/ticket.model';
+import { Update } from '@models/update.model';
 import { PushSubscription } from '@models/pushSubscription.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
@@ -40,11 +41,16 @@ export class SocialProfileController {
       await ensureUsername(buyer);
 
       const myId = String(buyer._id);
-      const [followerCount, followingCount, friendIds, attendedEventIds] = await Promise.all([
+      const [followerCount, followingCount, friendIds, attendedEventIds, postCount] = await Promise.all([
         FollowService.followerCount('buyer', myId),
         FollowService.followingCount(myId),
         FollowService.friendIds(myId),
         Ticket.distinct('eventId', { customerPhone: buyer.phone, status: TicketStatus.CHECKED_IN }),
+        // Same filter as UpdateController.listByAuthor, deliberately: this
+        // count is shown next to that exact grid, and it also drives the
+        // derived points total. A looser filter here would count posts the
+        // buyer cannot see (removed, or still transcoding).
+        Update.countDocuments({ authorType: 'buyer', authorId: myId, status: 'active', 'media.status': 'ready' }),
       ]);
       return ApiResponseUtil.success(res, {
         ...SocialProfileController.toOwnProfile(buyer),
@@ -52,6 +58,7 @@ export class SocialProfileController {
         followingCount,
         friendCount: friendIds.length,
         eventsAttended: attendedEventIds.length,
+        postCount,
       });
     } catch (error: any) {
       console.error('Get social profile error:', error);

@@ -12,6 +12,7 @@ dotenv.config();
 // Initialize Sentry BEFORE importing anything else
 import { sentryConfig, isSentryEnabled } from '@config/sentry.config';
 import { getDatabaseURI, logDatabaseConfig, validateEnvironment } from '@config/database.config';
+import { buildCorsOrigin } from '@utils/corsOrigins.util';
 
 // Conditionally import and initialize Sentry
 let Sentry: any = null;
@@ -107,9 +108,9 @@ app.use(requestIdMiddleware); // Add request ID for tracking
 app.use(helmet()); // Security headers
 app.use(compression()); // Compress responses
 
-// CORS Configuration
-const corsOriginsEnv = process.env['CORS_ORIGINS'] || '*';
-const corsOrigins = corsOriginsEnv === '*' ? '*' : corsOriginsEnv.split(',');
+// CORS Configuration. Entries may be exact origins or project-scoped wildcard
+// subdomains (Cloudflare Pages branch previews) — see corsOrigins.util.
+const corsOrigins = buildCorsOrigin(process.env['CORS_ORIGINS']);
 app.use(cors({
   origin: corsOrigins,
   credentials: false

@@ -1,6 +1,7 @@
 import { createServer, Server as HttpServer } from 'http';
 import express from 'express';
 import { Server } from 'socket.io';
+import type { CorsOrigin } from '@utils/corsOrigins.util';
 import { socketAuthMiddleware } from './socketAuth';
 import { registerChannelHandlers } from './channelHandlers';
 import { registerDmHandlers } from './dmHandlers';
@@ -16,7 +17,7 @@ export interface RealtimeServer {
  * lives on carrot-tickets-api) with Socket.io attached. The mongo adapter is
  * wired by the caller so this stays connection-agnostic and testable.
  */
-export function createRealtimeServer(corsOrigins: string | string[]): RealtimeServer {
+export function createRealtimeServer(corsOrigins: CorsOrigin): RealtimeServer {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, {

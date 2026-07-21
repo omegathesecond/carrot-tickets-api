@@ -13,6 +13,8 @@ import { notEndedFilter } from '@utils/eventVisibility.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { ContactMessage } from '@models/contactMessage.model';
+import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { getViewerEventReactions } from '@services/eventReaction.service';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
@@ -204,7 +206,7 @@ export class PublicController {
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
         Event.find(filter)
-          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId')
+          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount')
           .sort({ eventDate: 1 })
           .skip(skip)
           .limit(limit)
@@ -264,6 +266,22 @@ export class PublicController {
         console.error('Batch resolve public organizers error:', error);
       }
 
+      // "Have I liked this?" for the heart on each card. Anonymous visitors
+      // have no actor, so every event reports viewerHasLiked:false and the
+      // heart renders hollow — the endpoint stays public either way. One batch
+      // query for the page, mirroring how the Discover feed hydrates its event
+      // slides (see feed.controller).
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      let likedMap: Record<string, { liked: boolean }> = {};
+      if (actor) {
+        try {
+          likedMap = await getViewerEventReactions(eventIds.map(String), actor);
+        } catch (error) {
+          // Degrade to "not liked" rather than 500 the whole list — but say so.
+          console.error('Batch resolve viewer event reactions error:', error);
+        }
+      }
+
       // Transform events for public display
       const publicEvents = events.map(event => ({
         _id: event._id,
@@ -291,6 +309,10 @@ export class PublicController {
         recentSales: recentMap.get(String(event._id)) || 0,
         trending: trendingIds.has(String(event._id)),
         organizer: event.vendorId ? (organizerMap.get(String(event.vendorId)) ?? null) : null,
+        // `?? 0`: events predating the counter have no stored field, and
+        // .lean() does not apply the schema default to an absent path.
+        likeCount: (event as any).likeCount ?? 0,
+        viewerHasLiked: likedMap[String(event._id)]?.liked ?? false,
       }));
 
       return ApiResponseUtil.success(res, {

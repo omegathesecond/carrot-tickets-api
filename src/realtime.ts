@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { createAdapter } from '@socket.io/mongo-adapter';
 import { JWT_SECRET } from '@config/jwt.config';
+import { buildCorsOrigin } from '@utils/corsOrigins.util';
 import { createRealtimeServer } from './realtime/server';
 import { ensureAdapterCollection } from './realtime/adapterCollection';
 import { containBusWrites } from './realtime/containBusWrites';
@@ -18,8 +19,9 @@ if (!MONGODB_URI) {
 }
 void JWT_SECRET; // imported for its fail-closed boot check
 
-const corsOriginsEnv = process.env['CORS_ORIGINS'] || '*';
-const corsOrigins = corsOriginsEnv === '*' ? '*' : corsOriginsEnv.split(',');
+// Same matcher as the HTTP API so the realtime gateway and the REST API can
+// never disagree about which origins are allowed.
+const corsOrigins = buildCorsOrigin(process.env['CORS_ORIGINS']);
 
 async function main(): Promise<void> {
   await mongoose.connect(MONGODB_URI as string);
