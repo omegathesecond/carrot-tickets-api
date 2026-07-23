@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
 import { SocialProfileController } from '@controllers/socialProfile.controller';
+import { ConsumerReadsController } from '@controllers/consumerReads.controller';
 
 const router = Router();
 
 router.get('/me', authenticateBuyer, SocialProfileController.me);
+router.get('/me/saved', authenticateBuyer, ConsumerReadsController.mySaved);
 router.patch('/me', authenticateBuyer, SocialProfileController.update);
 router.get('/me/blocks', authenticateBuyer, SocialProfileController.myBlocks);
 router.get('/me/following', authenticateBuyer, SocialProfileController.myFollowing);
