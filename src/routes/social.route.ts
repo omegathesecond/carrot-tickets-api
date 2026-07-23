@@ -8,6 +8,8 @@ const router = Router();
 router.get('/me', authenticateBuyer, SocialProfileController.me);
 router.get('/me/saved', authenticateBuyer, ConsumerReadsController.mySaved);
 router.get('/me/going', authenticateBuyer, ConsumerReadsController.myGoing);
+router.get('/me/calendar', authenticateBuyer, ConsumerReadsController.myCalendar);
+router.get('/me/following/events', authenticateBuyer, ConsumerReadsController.myFollowingEvents);
 router.patch('/me', authenticateBuyer, SocialProfileController.update);
 router.get('/me/blocks', authenticateBuyer, SocialProfileController.myBlocks);
 router.get('/me/following', authenticateBuyer, SocialProfileController.myFollowing);
