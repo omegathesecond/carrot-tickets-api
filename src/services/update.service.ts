@@ -1,9 +1,11 @@
 import { Update, IUpdate } from '@models/update.model';
 import { UpdateReaction } from '@models/updateReaction.model';
+import { Vendor } from '@models/vendor.model';
+import { Buyer } from '@models/buyer.model';
 import { updatesR2 } from '@utils/updatesR2';
 import { triggerTranscode } from '@services/transcode.client';
 import type { UpdateAuthorType, UpdateKind } from '@interfaces/update.interface';
-import type { SocialActor } from '@utils/socialActor.util';
+import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import { toggleReactionGeneric } from '@services/reactions.service';
 
 interface CreateInput {
@@ -88,4 +90,35 @@ export async function getViewerReactions(updateIds: string[], actor: SocialActor
     if (r.type === 'save') map[k].saved = true;
   }
   return map;
+}
+
+export class UpdateService {
+  /** Serialize raw Update docs to feed-slide DTOs — author hydrated from
+   *  Vendor/Buyer, viewerReactions defaulted to {liked:false,saved:false} and
+   *  viewerIsAuthor to false when unauthenticated. Mirrors the update-slide
+   *  shape feed.service.ts already produces, so callers get one definition. */
+  static async buildUpdateSlides(updates: IUpdate[], actor: SocialActor | null): Promise<any[]> {
+    if (updates.length === 0) return [];
+    const vendorIds = updates.filter((u) => u.authorType === 'vendor').map((u) => String(u.authorId));
+    const buyerIds = updates.filter((u) => u.authorType === 'buyer').map((u) => String(u.authorId));
+    const vendors = vendorIds.length ? await Vendor.find({ _id: { $in: vendorIds } }).select('businessName logoUrl slug') : [];
+    const buyers = buyerIds.length ? await Buyer.find({ _id: { $in: buyerIds } }).select('name username avatarUrl') : [];
+    const vMap = new Map(vendors.map((v: any) => [String(v._id), v]));
+    const bMap = new Map(buyers.map((b: any) => [String(b._id), b]));
+    const reactions = actor ? await getViewerReactions(updates.map((u) => String(u._id)), actor) : {};
+
+    return updates.map((u) => {
+      const author = u.authorType === 'vendor'
+        ? { type: 'organizer', id: String(u.authorId), name: vMap.get(String(u.authorId))?.businessName ?? 'Organizer', avatarUrl: vMap.get(String(u.authorId))?.logoUrl ?? null, slug: vMap.get(String(u.authorId))?.slug ?? null }
+        : { type: 'buyer', id: String(u.authorId), name: bMap.get(String(u.authorId))?.name ?? null, username: bMap.get(String(u.authorId))?.username ?? null, avatarUrl: bMap.get(String(u.authorId))?.avatarUrl ?? null };
+      return {
+        type: 'update', id: String(u._id), sortAt: u.createdAt.toISOString(),
+        kind: u.kind, caption: u.caption, media: u.media,
+        likeCount: u.likeCount, saveCount: u.saveCount, shareCount: u.shareCount, viewCount: u.viewCount ?? 0,
+        eventId: u.eventId ? String(u.eventId) : null, author,
+        viewerReactions: reactions[String(u._id)] ?? { liked: false, saved: false },
+        viewerIsAuthor: isActorAuthorOf(u.authorType, u.authorId, actor),
+      };
+    });
+  }
 }
