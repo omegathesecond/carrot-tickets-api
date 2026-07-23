@@ -100,4 +100,25 @@ export class ConsumerReadsController {
       return failWithHttpError(res, error, 'Failed to load suggestions');
     }
   }
+
+  /** GET /api/social/suggestions/organizers — "organizers to follow". */
+  static async suggestedOrganizers(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const rows = await SuggestionsService.organizersToFollow(String(buyer._id));
+      const data = rows.map(({ vendor: v, eventCount, followerCount, isFollowing }) => ({
+        id: String(v._id),
+        businessName: v.businessName,
+        logoUrl: v.logoUrl ?? null,
+        location: v.address?.city ?? null,
+        eventCount,
+        followerCount,
+        isFollowing,
+      }));
+      return ApiResponseUtil.success(res, data);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load organizer suggestions');
+    }
+  }
 }

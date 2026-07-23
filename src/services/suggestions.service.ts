@@ -1,5 +1,9 @@
 import { Follow } from '@models/follow.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
+import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
+import { VerificationStatus } from '@interfaces/vendor.interface';
 import { FollowService } from '@services/follow.service';
 
 export class SuggestionsService {
@@ -31,5 +35,27 @@ export class SuggestionsService {
     return ranked
       .map(([id, mutualCount]) => ({ buyer: bMap.get(id), mutualCount }))
       .filter((x) => x.buyer) as Array<{ buyer: IBuyer; mutualCount: number }>;
+  }
+
+  /** Active, verified organizers to follow, ranked by follower count. May
+   *  include organizers the buyer already follows (marked isFollowing:true) —
+   *  this is a directory, not an exclusion list like peopleYouMayKnow. */
+  static async organizersToFollow(
+    buyerId: string,
+    limit = 20
+  ): Promise<Array<{ vendor: any; eventCount: number; followerCount: number; isFollowing: boolean }>> {
+    const iFollow = new Set(await FollowService.followingIds(buyerId, 'organizer'));
+    const vendors = await Vendor.find({ isActive: true, verificationStatus: VerificationStatus.VERIFIED })
+      .limit(100)
+      .select('businessName logoUrl address');
+    const enriched = await Promise.all(
+      vendors.map(async (v) => ({
+        vendor: v,
+        followerCount: await FollowService.followerCount('organizer', String(v._id)),
+        eventCount: await Event.countDocuments({ vendorId: v._id, status: EventStatus.PUBLISHED }),
+        isFollowing: iFollow.has(String(v._id)),
+      }))
+    );
+    return enriched.sort((a, b) => b.followerCount - a.followerCount).slice(0, limit);
   }
 }
