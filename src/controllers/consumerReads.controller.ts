@@ -8,6 +8,7 @@ import { buildEventCards } from '@services/eventCards.service';
 import { GoingService } from '@services/going.service';
 import { CalendarService } from '@services/calendar.service';
 import { FollowService } from '@services/follow.service';
+import { SuggestionsService } from '@services/suggestions.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 
@@ -75,6 +76,28 @@ export class ConsumerReadsController {
       return ApiResponseUtil.success(res, { events });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load followed events');
+    }
+  }
+
+  /** GET /api/social/suggestions/people — "people you may know". */
+  static async suggestedPeople(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const rows = await SuggestionsService.peopleYouMayKnow(String(buyer._id));
+      const data = rows.map(({ buyer: b, mutualCount }) => ({
+        id: String(b._id),
+        name: b.name ?? null,
+        username: b.username ?? null,
+        avatarUrl: b.avatarUrl ?? null,
+        bio: b.bio ?? null,
+        city: null,
+        mutualCount,
+        isFollowing: false,
+      }));
+      return ApiResponseUtil.success(res, data);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load suggestions');
     }
   }
 }
