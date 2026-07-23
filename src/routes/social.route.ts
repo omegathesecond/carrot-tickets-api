@@ -25,6 +25,7 @@ router.post('/presence', authenticateBuyer, SocialProfileController.presence);
 router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblockUser);
 router.get('/suggestions/people', authenticateBuyer, ConsumerReadsController.suggestedPeople);
 router.get('/suggestions/organizers', authenticateBuyer, ConsumerReadsController.suggestedOrganizers);
+router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recommendations);
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
 router.get('/users/:username', authenticateBuyer, SocialProfileController.publicProfile);

@@ -9,6 +9,7 @@ import { GoingService } from '@services/going.service';
 import { CalendarService } from '@services/calendar.service';
 import { FollowService } from '@services/follow.service';
 import { SuggestionsService } from '@services/suggestions.service';
+import { RecommendationsService } from '@services/recommendations.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 
@@ -119,6 +120,19 @@ export class ConsumerReadsController {
       return ApiResponseUtil.success(res, data);
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load organizer suggestions');
+    }
+  }
+
+  /** GET /api/social/recommendations — "because you saved X" (v1: same-organizer + soonest-upcoming). */
+  static async recommendations(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const { basisEvent, eventIds } = await RecommendationsService.forBuyer(String(buyer._id));
+      const events = await buildEventCards(eventIds, { type: 'buyer', id: String(buyer._id) });
+      return ApiResponseUtil.success(res, { basisEvent, events });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load recommendations');
     }
   }
 }
