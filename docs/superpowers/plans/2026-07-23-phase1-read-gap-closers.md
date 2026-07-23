@@ -50,7 +50,8 @@
 - Modify: `src/controllers/public.controller.ts` (`getPublicEvents`, `getPublicEvent` mappers)
 
 **Interfaces:**
-- Produces: `toPublicEventCard(event: any, extras?: PublicEventCardExtras) => PublicEventCard` where `PublicEventCardExtras = { recentSales?: number; trending?: boolean; viewerHasLiked?: boolean; organizer?: { id:string; businessName:string; logoUrl:string|null } | null }`.
+- Produces: `toPublicEventCard(event: any, extras?: PublicEventCardExtras) => PublicEventCard` where `PublicEventCardExtras = { recentSales?: number; trending?: boolean; viewerHasLiked?: boolean; likeCount?: number; organizer?: { id:string; businessName:string; logoUrl:string|null } | null }`.
+- **Each extra is emitted ONLY when its key is present in `extras`** (via `'k' in extras`), so the two existing call sites reproduce their exact prior response shapes: the LIST mapper (`getPublicEvents`, currently lines ~286–316) emits `recentSales`+`trending`+`organizer`+`likeCount`+`viewerHasLiked`; the DETAIL mapper (`getPublicEvent`, currently lines ~417–443) emits only `organizer` (+ its own `isMultiDay`/`galleryImages`). Neither endpoint's JSON keys change.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -72,19 +73,26 @@ it('maps ticketTypes to a priceRange and marks sold-out tiers', () => {
   const card = toPublicEventCard(baseEvent);
   expect(card.priceRange).toEqual({ min: 100, max: 300 });
   expect(card.ticketTypes[1]?.isSoldOut).toBe(true);
-  expect(card.likeCount).toBe(4);
-  expect(card.organizer).toBeNull();
-  expect(card.viewerHasLiked).toBe(false);
 });
 
-it('threads extras through (organizer, recentSales, trending, viewerHasLiked)', () => {
+it('emits ONLY base fields when no extras are given (no shape widening)', () => {
+  const card = toPublicEventCard(baseEvent);
+  expect('organizer' in card).toBe(false);
+  expect('recentSales' in card).toBe(false);
+  expect('trending' in card).toBe(false);
+  expect('likeCount' in card).toBe(false);
+  expect('viewerHasLiked' in card).toBe(false);
+});
+
+it('includes only the extras it is given', () => {
   const card = toPublicEventCard(baseEvent, {
     organizer: { id: 'v1', businessName: 'MTN Bushfire', logoUrl: null },
-    recentSales: 12, trending: true, viewerHasLiked: true,
+    recentSales: 12, trending: true, likeCount: 4, viewerHasLiked: true,
   });
   expect(card.organizer?.businessName).toBe('MTN Bushfire');
   expect(card.recentSales).toBe(12);
   expect(card.trending).toBe(true);
+  expect(card.likeCount).toBe(4);
   expect(card.viewerHasLiked).toBe(true);
 });
 ```
@@ -101,14 +109,16 @@ export interface PublicEventCardExtras {
   recentSales?: number;
   trending?: boolean;
   viewerHasLiked?: boolean;
+  likeCount?: number;
   organizer?: { id: string; businessName: string; logoUrl: string | null } | null;
 }
 
-/** THE public "event card" DTO. Extracted verbatim from public.controller's
- *  inline mappers so every consumer-facing event list is identical. */
+/** THE public "event card" DTO. Base fields are always emitted; the optional
+ *  extras are emitted ONLY when the caller passes the key, so each existing
+ *  call site reproduces its exact prior response shape (no silent widening). */
 export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}) {
   const tts: any[] = event.ticketTypes ?? [];
-  return {
+  const card: Record<string, any> = {
     _id: event._id,
     name: event.name,
     description: event.description,
@@ -127,12 +137,13 @@ export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}
       min: Math.min(...tts.map((tt) => tt.price)),
       max: Math.max(...tts.map((tt) => tt.price)),
     },
-    recentSales: extras.recentSales ?? 0,
-    trending: extras.trending ?? false,
-    organizer: extras.organizer ?? null,
-    likeCount: event.likeCount ?? 0,
-    viewerHasLiked: extras.viewerHasLiked ?? false,
   };
+  if ('organizer' in extras) card.organizer = extras.organizer ?? null;
+  if ('recentSales' in extras) card.recentSales = extras.recentSales;
+  if ('trending' in extras) card.trending = extras.trending;
+  if ('likeCount' in extras) card.likeCount = extras.likeCount;
+  if ('viewerHasLiked' in extras) card.viewerHasLiked = extras.viewerHasLiked;
+  return card;
 }
 ```
 
@@ -142,26 +153,29 @@ Run: `npx jest src/utils/__tests__/eventCard.util.test.ts`
 
 - [ ] **Step 5: Refactor `public.controller.ts` to use it (behavior-preserving)**
 
-In `getPublicEvents`, replace the inline `events.map(event => ({ ...big object... }))` with:
+The LIST mapper is the `events.map(event => ({ ... }))` in `getPublicEvents` (lines ~286–316); the DETAIL mapper is the `const publicEvent = { ... }` in `getPublicEvent` (lines ~417–443). Pass EXACTLY the extras each endpoint already emits, so neither response shape changes.
+
+Add the import: `import { toPublicEventCard } from '@/utils/eventCard.util';`
+
+`getPublicEvents` — replace the `.map` object literal with:
 ```ts
-import { toPublicEventCard } from '@/utils/eventCard.util';
-// ...
 const publicEvents = events.map((event: any) => toPublicEventCard(event, {
   recentSales: recentMap.get(String(event._id)) || 0,
   trending: trendingIds.has(String(event._id)),
   organizer: event.vendorId ? (organizerMap.get(String(event.vendorId)) ?? null) : null,
+  likeCount: (event as any).likeCount ?? 0,
   viewerHasLiked: likedMap[String(event._id)]?.liked ?? false,
 }));
 ```
-In `getPublicEvent`, replace its inline mapper the same way, then re-attach the detail-only fields it adds on top:
+`getPublicEvent` — it already resolves `const organizer = await PublicController.resolveOrganizer(event.vendorId)`. Replace the `const publicEvent = { ... }` literal with (detail passes only `organizer`, then keeps its own two fields):
 ```ts
-const card = toPublicEventCard(event, {
-  recentSales: recentSales || 0, trending: isTrending,
-  organizer: resolvedOrganizer, viewerHasLiked: liked,
-});
-const payload = { ...card, isMultiDay: event.isMultiDay, galleryImages: event.galleryImages ?? [] };
+const publicEvent = {
+  ...toPublicEventCard(event, { organizer }),
+  isMultiDay: event.isMultiDay,
+  galleryImages: event.galleryImages,
+};
 ```
-(Keep whatever local variable names already exist in each function — only the object literal changes.)
+The two safety-net tests to keep green: `publicEventsList.organizer.route.test.ts` and `publicEvent.organizer.route.test.ts`.
 
 - [ ] **Step 6: Run the existing public route tests — expect PASS (no behavior change)**
 
