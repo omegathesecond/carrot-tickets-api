@@ -12,6 +12,7 @@ import { SuggestionsService } from '@services/suggestions.service';
 import { RecommendationsService } from '@services/recommendations.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { notEndedFilter } from '@utils/eventVisibility.util';
 
 export class ConsumerReadsController {
   /** GET /api/social/me/saved */
@@ -69,7 +70,7 @@ export class ConsumerReadsController {
       const vendorIds = await FollowService.followingIds(String(buyer._id), 'organizer');
       let events: any[] = [];
       if (vendorIds.length) {
-        const rows = await Event.find({ vendorId: { $in: vendorIds }, status: EventStatus.PUBLISHED, eventDate: { $gte: new Date() } })
+        const rows = await Event.find({ vendorId: { $in: vendorIds }, status: EventStatus.PUBLISHED, ...notEndedFilter() })
           .sort({ eventDate: 1 })
           .select('_id');
         events = await buildEventCards(rows.map((e) => String(e._id)), { type: 'buyer', id: String(buyer._id) });

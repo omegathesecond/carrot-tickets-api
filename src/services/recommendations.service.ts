@@ -1,6 +1,7 @@
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { SavedContentService } from '@services/savedContent.service';
+import { notEndedFilter } from '@utils/eventVisibility.util';
 
 const TARGET = 8;
 
@@ -11,8 +12,7 @@ export class RecommendationsService {
   static async forBuyer(buyerId: string): Promise<{ basisEvent: { id: string; name: string } | null; eventIds: string[] }> {
     const savedIds = await SavedContentService.savedEventIds(buyerId);
     const exclude = new Set(savedIds);
-    const now = new Date();
-    const base = { status: EventStatus.PUBLISHED, eventDate: { $gte: now } };
+    const base = { status: EventStatus.PUBLISHED, ...notEndedFilter() };
 
     let basisEvent: { id: string; name: string } | null = null;
     const picked: string[] = [];

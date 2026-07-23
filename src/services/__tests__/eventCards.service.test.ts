@@ -18,4 +18,18 @@ describe('buildEventCards', () => {
   it('returns [] for no ids', async () => {
     expect(await buildEventCards([], null)).toEqual([]);
   });
+
+  it('includes likeCount matching the event\'s stored value (parity with the public list card)', async () => {
+    const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret123' });
+    const e = await Event.create({ vendorId: v._id, name: 'Liked Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), likeCount: 7, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
+    const [card] = await buildEventCards([String(e._id)], null);
+    expect(card.likeCount).toBe(7);
+  });
+
+  it('resolves organizer to null when the vendor is inactive (parity with the public list)', async () => {
+    const v = await Vendor.create({ businessName: 'Deactivated Vendor', password: 'secret123', isActive: false });
+    const e = await Event.create({ vendorId: v._id, name: 'Orphaned Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
+    const [card] = await buildEventCards([String(e._id)], null);
+    expect(card.organizer).toBeNull();
+  });
 });

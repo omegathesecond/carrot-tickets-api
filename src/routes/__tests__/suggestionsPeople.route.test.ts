@@ -86,6 +86,18 @@ describe('GET /api/social/suggestions/people', () => {
     expect(usernames).not.toContain('sus_b');
   });
 
+  it('excludes second-degree candidates with no username (unlinkable in the UI)', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const noUsername = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'NoHandle' });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: noUsername._id });
+
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const ids = res.body.data.map((p: any) => p.id);
+    expect(ids).not.toContain(String(noUsername._id));
+  });
+
   it('falls back to recently-active handled buyers when the buyer follows no one, with mutualCount 0', async () => {
     await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
     const other = await Buyer.create({

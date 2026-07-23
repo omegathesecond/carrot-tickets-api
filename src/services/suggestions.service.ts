@@ -30,7 +30,7 @@ export class SuggestionsService {
     }
     const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
     const ids = ranked.map(([id]) => id);
-    const buyers = await Buyer.find({ _id: { $in: ids }, socialSuspendedAt: null });
+    const buyers = await Buyer.find({ _id: { $in: ids }, socialSuspendedAt: null, username: { $exists: true, $ne: null } });
     const bMap = new Map(buyers.map((b) => [String(b._id), b]));
     return ranked
       .map(([id, mutualCount]) => ({ buyer: bMap.get(id), mutualCount }))

@@ -105,8 +105,8 @@ describe('GET /api/social/me/following/events', () => {
 
     const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const later = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    await makeEvent({ name: 'Later Show', vendorId, eventDate: later, status: EventStatus.PUBLISHED });
-    await makeEvent({ name: 'Soon Show', vendorId, eventDate: soon, status: EventStatus.PUBLISHED });
+    await makeEvent({ name: 'Later Show', vendorId, eventDate: later, endTime: later, status: EventStatus.PUBLISHED });
+    await makeEvent({ name: 'Soon Show', vendorId, eventDate: soon, endTime: soon, status: EventStatus.PUBLISHED });
 
     const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Soon Show', 'Later Show']);
@@ -119,8 +119,8 @@ describe('GET /api/social/me/following/events', () => {
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: followedVendor });
 
     const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    await makeEvent({ name: 'Followed Org', vendorId: followedVendor, eventDate: future, status: EventStatus.PUBLISHED });
-    await makeEvent({ name: 'Unfollowed Org', vendorId: otherVendor, eventDate: future, status: EventStatus.PUBLISHED });
+    await makeEvent({ name: 'Followed Org', vendorId: followedVendor, eventDate: future, endTime: future, status: EventStatus.PUBLISHED });
+    await makeEvent({ name: 'Unfollowed Org', vendorId: otherVendor, eventDate: future, endTime: future, status: EventStatus.PUBLISHED });
 
     const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Followed Org']);
@@ -133,9 +133,9 @@ describe('GET /api/social/me/following/events', () => {
 
     const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    await makeEvent({ name: 'Draft Future', vendorId, eventDate: future, status: EventStatus.DRAFT });
-    await makeEvent({ name: 'Published Past', vendorId, eventDate: past, status: EventStatus.PUBLISHED });
-    await makeEvent({ name: 'Published Future', vendorId, eventDate: future, status: EventStatus.PUBLISHED });
+    await makeEvent({ name: 'Draft Future', vendorId, eventDate: future, endTime: future, status: EventStatus.DRAFT });
+    await makeEvent({ name: 'Published Past', vendorId, eventDate: past, endTime: past, status: EventStatus.PUBLISHED });
+    await makeEvent({ name: 'Published Future', vendorId, eventDate: future, endTime: future, status: EventStatus.PUBLISHED });
 
     const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Published Future']);
@@ -145,6 +145,19 @@ describe('GET /api/social/me/following/events', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.events).toEqual([]);
+  });
+
+  it('still includes an in-progress event (started but not yet ended) from a followed organizer', async () => {
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    const vendorId = new mongoose.Types.ObjectId();
+    await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: vendorId });
+
+    const past = new Date(Date.now() - 60 * 60 * 1000);
+    const future = new Date(Date.now() + 60 * 60 * 1000);
+    await makeEvent({ name: 'In Progress Show', vendorId, eventDate: past, startTime: past, endTime: future, status: EventStatus.PUBLISHED });
+
+    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    expect(res.body.data.events.map((c: any) => c.name)).toEqual(['In Progress Show']);
   });
 
   it('401s when anonymous', async () => {
