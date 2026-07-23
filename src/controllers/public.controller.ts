@@ -15,6 +15,7 @@ import { PeachClient } from '@services/payments/peach.client';
 import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { getViewerEventReactions } from '@services/eventReaction.service';
+import { toPublicEventCard } from '@/utils/eventCard.util';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
@@ -283,29 +284,7 @@ export class PublicController {
       }
 
       // Transform events for public display
-      const publicEvents = events.map(event => ({
-        _id: event._id,
-        name: event.name,
-        description: event.description,
-        venue: event.venue,
-        eventDate: event.eventDate,
-        startTime: event.startTime,
-        endTime: event.endTime,
-        posterUrl: event.posterUrl,
-        thumbnailUrl: event.thumbnailUrl,
-        ticketTypes: event.ticketTypes.map(tt => ({
-          _id: tt._id,
-          name: tt.name,
-          description: tt.description,
-          price: tt.price,
-          available: tt.available,
-          isSoldOut: tt.isSoldOut || tt.available === 0
-        })),
-        isSoldOut: event.ticketTypes.every(tt => tt.isSoldOut || tt.available === 0),
-        priceRange: {
-          min: Math.min(...event.ticketTypes.map(tt => tt.price)),
-          max: Math.max(...event.ticketTypes.map(tt => tt.price))
-        },
+      const publicEvents = events.map((event: any) => toPublicEventCard(event, {
         recentSales: recentMap.get(String(event._id)) || 0,
         trending: trendingIds.has(String(event._id)),
         organizer: event.vendorId ? (organizerMap.get(String(event.vendorId)) ?? null) : null,
@@ -415,31 +394,9 @@ export class PublicController {
 
       // Transform for public display
       const publicEvent = {
-        _id: event._id,
-        name: event.name,
-        description: event.description,
-        venue: event.venue,
-        eventDate: event.eventDate,
-        startTime: event.startTime,
-        endTime: event.endTime,
+        ...toPublicEventCard(event, { organizer }),
         isMultiDay: event.isMultiDay,
-        posterUrl: event.posterUrl,
-        thumbnailUrl: event.thumbnailUrl,
         galleryImages: event.galleryImages,
-        ticketTypes: event.ticketTypes.map(tt => ({
-          _id: tt._id,
-          name: tt.name,
-          description: tt.description,
-          price: tt.price,
-          available: tt.available,
-          isSoldOut: tt.isSoldOut || tt.available === 0
-        })),
-        isSoldOut: event.ticketTypes.every(tt => tt.isSoldOut || tt.available === 0),
-        priceRange: {
-          min: Math.min(...event.ticketTypes.map(tt => tt.price)),
-          max: Math.max(...event.ticketTypes.map(tt => tt.price))
-        },
-        organizer,
       };
 
       return ApiResponseUtil.success(res, publicEvent);
