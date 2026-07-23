@@ -7,6 +7,7 @@ const router = Router();
 
 router.get('/me', authenticateBuyer, SocialProfileController.me);
 router.get('/me/saved', authenticateBuyer, ConsumerReadsController.mySaved);
+router.get('/me/going', authenticateBuyer, ConsumerReadsController.myGoing);
 router.patch('/me', authenticateBuyer, SocialProfileController.update);
 router.get('/me/blocks', authenticateBuyer, SocialProfileController.myBlocks);
 router.get('/me/following', authenticateBuyer, SocialProfileController.myFollowing);
