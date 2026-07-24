@@ -61,4 +61,14 @@ describe('GET /api/public/feed?category=', () => {
     const namesAll = resAll.body.data.items.filter((s: any) => s.type === 'event').map((s: any) => s.name);
     expect(namesAll).toEqual(expect.arrayContaining(['MusicEvt', 'TechEvt']));
   });
+
+  it('exposes category on event slides, falling back to Other for legacy events with no category', async () => {
+    await Event.create({ ...common(), name: 'MusicEvt', category: 'Music' });
+    await Event.create({ ...common(), name: 'LegacyEvt' }); // no category field, mirrors pre-migration docs
+
+    const res = await request(app).get('/api/public/feed?tab=events').expect(200);
+    const slides = res.body.data.items.filter((s: any) => s.type === 'event');
+    expect(slides.find((s: any) => s.name === 'MusicEvt').category).toBe('Music');
+    expect(slides.find((s: any) => s.name === 'LegacyEvt').category).toBe('Other');
+  });
 });

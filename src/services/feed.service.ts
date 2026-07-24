@@ -104,6 +104,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
       // toPublicEventCard (src/utils/eventCard.util.ts).
       ticketing: (e as any).ticketing ?? 'carrot',
       externalTicketUrl: (e as any).externalTicketUrl ?? null,
+      category: (e as any).category ?? 'Other',
       organizer: org ? { id: String(e.vendorId), businessName: org.businessName, logoUrl: org.logoUrl ?? null, slug: org.slug } : null,
     };
   });
