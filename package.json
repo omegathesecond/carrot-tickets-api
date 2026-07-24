@@ -16,6 +16,7 @@
     "backfill:edit-brand-permission": "ts-node -r tsconfig-paths/register src/scripts/backfillEditBrandPermission.ts",
     "backfill:event-ticketing": "ts-node -r tsconfig-paths/register src/scripts/backfillEventTicketing.ts",
     "backfill:event-category": "ts-node -r tsconfig-paths/register src/scripts/backfillEventCategory.ts",
+    "backfill:update-hashtags": "ts-node -r tsconfig-paths/register src/scripts/backfillUpdateHashtags.ts",
     "deploy:realtime": "bash scripts/deploy-realtime.sh",
     "test:models": "ts-node -r tsconfig-paths/register src/scripts/testModels.ts",
     "test:payment": "ts-node -r tsconfig-paths/register src/scripts/testPaymentService.ts",

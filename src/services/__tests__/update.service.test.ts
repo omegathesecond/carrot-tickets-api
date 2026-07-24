@@ -29,6 +29,20 @@ describe('update.service', () => {
     expect(update.media.rawKey).toBe('updates/raw/1-abc.mp4');
   });
 
+  it('createUpdate extracts hashtags from the caption', async () => {
+    const { update } = await createUpdate({
+      authorType: 'buyer', authorId: buyerId, kind: 'image', caption: 'Live now #Music #Live', ext: 'jpg', contentType: 'image/jpeg',
+    });
+    expect(update.hashtags).toEqual(['music', 'live']);
+  });
+
+  it('createUpdate defaults hashtags to [] when caption has none', async () => {
+    const { update } = await createUpdate({
+      authorType: 'buyer', authorId: buyerId, kind: 'image', caption: 'no tags here', ext: 'jpg', contentType: 'image/jpeg',
+    });
+    expect(update.hashtags).toEqual([]);
+  });
+
   it('finalizeUpdate(video) sets processingStartedAt and triggers transcode', async () => {
     const { update } = await createUpdate({ authorType: 'buyer', authorId: buyerId, kind: 'video', caption: '', ext: 'mp4', contentType: 'video/mp4' });
     const out = await finalizeUpdate(update.id);

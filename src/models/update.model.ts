@@ -6,6 +6,7 @@ export interface IUpdate extends Document {
   authorId: Types.ObjectId;
   kind: UpdateKind;
   caption: string;
+  hashtags: string[];
   eventId?: Types.ObjectId;
   media: UpdateMedia;
   likeCount: number;
@@ -47,6 +48,7 @@ const updateSchema = new Schema<IUpdate>({
   authorId: { type: Schema.Types.ObjectId, required: true },
   kind: { type: String, enum: ['video', 'image'], required: true },
   caption: { type: String, default: '', maxlength: 500 },
+  hashtags: { type: [String], default: [], index: true },
   eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
   media: { type: mediaSchema, required: true },
   likeCount: { type: Number, default: 0 },
@@ -60,5 +62,7 @@ const updateSchema = new Schema<IUpdate>({
 updateSchema.index({ createdAt: -1 });
 updateSchema.index({ authorType: 1, authorId: 1, createdAt: -1 });
 updateSchema.index({ 'media.status': 1, status: 1, createdAt: -1 });
+// Multikey: serves "recent visible updates for hashtag X" (future trending query).
+updateSchema.index({ hashtags: 1, createdAt: -1 });
 
 export const Update = mongoose.model<IUpdate>('Update', updateSchema);

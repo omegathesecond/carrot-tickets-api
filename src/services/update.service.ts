@@ -3,6 +3,7 @@ import { UpdateReaction } from '@models/updateReaction.model';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { updatesR2 } from '@utils/updatesR2';
+import { extractHashtags } from '@utils/hashtags.util';
 import { triggerTranscode } from '@services/transcode.client';
 import type { UpdateAuthorType, UpdateKind } from '@interfaces/update.interface';
 import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
@@ -26,6 +27,7 @@ export async function createUpdate(input: CreateInput): Promise<{ update: IUpdat
     authorId: input.authorId,
     kind: input.kind,
     caption: input.caption ?? '',
+    hashtags: extractHashtags(input.caption),
     eventId: input.eventId,
     media: { rawKey, status: 'processing' },
   });
