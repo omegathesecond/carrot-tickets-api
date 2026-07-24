@@ -36,6 +36,11 @@ export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}
     // neither, so they fall back to carrot/null rather than surfacing undefined.
     ticketing: event.ticketing ?? 'carrot',
     externalTicketUrl: event.externalTicketUrl ?? null,
+    // Organizer-set category — powers Home/Discover category chips + poster
+    // badge. Legacy events predating this field (or serialized through a
+    // .select() projection that omits it) fall back to 'Other' rather than
+    // surfacing undefined.
+    category: event.category ?? 'Other',
   };
   if ('organizer' in extras) card.organizer = extras.organizer ?? null;
   if ('recentSales' in extras) card.recentSales = extras.recentSales;

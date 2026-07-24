@@ -122,7 +122,11 @@ const publicEventsQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(50).default(20),
   search: Joi.string().optional().max(100),
   startDate: Joi.date().iso().optional(),
-  endDate: Joi.date().iso().optional().min(Joi.ref('startDate'))
+  endDate: Joi.date().iso().optional().min(Joi.ref('startDate')),
+  // Category chip filter (Home/Discover). 'All' or absent = unfiltered — see
+  // getPublicEvents. Not constrained to EVENT_CATEGORIES so an unrecognized
+  // value just yields zero results rather than a 400.
+  category: Joi.string().optional().max(50)
 });
 
 const publicPurchaseSchema = Joi.object({
@@ -175,12 +179,18 @@ export class PublicController {
         return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
-      const { page, limit, search, startDate, endDate } = value;
+      const { page, limit, search, startDate, endDate, category } = value;
 
       // Build query - only published events
       const filter: any = {
         status: EventStatus.PUBLISHED
       };
+
+      // Category chip filter (Home/Discover). 'All' or absent means
+      // unfiltered — every published event stays in the result set.
+      if (category && category !== 'All') {
+        filter.category = category;
+      }
 
       // Filter by date range
       if (startDate || endDate) {
@@ -207,7 +217,7 @@ export class PublicController {
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
         Event.find(filter)
-          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl')
+          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category')
           .sort({ eventDate: 1 })
           .skip(skip)
           .limit(limit)
