@@ -48,11 +48,28 @@ describe('eventQuestion.service', () => {
       await expect(createQuestion(eventId, actor, '')).rejects.toMatchObject({ statusCode: 400 });
     });
 
+    it('throws 400 (not 500) for a body over 1000 chars', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const buyer = await seedBuyer();
+      const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
+      await expect(createQuestion(eventId, actor, 'a'.repeat(1001))).rejects.toMatchObject({ statusCode: 400 });
+    });
+
     it('throws 404 for a non-existent event', async () => {
       const buyer = await seedBuyer();
       const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
       const fakeEventId = new mongoose.Types.ObjectId().toString();
       await expect(createQuestion(fakeEventId, actor, 'Is parking free?')).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('throws 403 for a suspended buyer actor', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const buyer = await Buyer.create({ phone: '+26878400020', password: 'secret1', name: 'Suspended', socialSuspendedAt: new Date() });
+      const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
+      await expect(createQuestion(eventId, actor, 'Hello?')).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'Your community access is suspended',
+      });
     });
 
     it('creates and returns a question with the buyer author DTO', async () => {
@@ -106,11 +123,31 @@ describe('eventQuestion.service', () => {
       await expect(createReply(question.id, actor, '')).rejects.toMatchObject({ statusCode: 400 });
     });
 
+    it('throws 400 (not 500) for a body over 1000 chars', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const buyer = await seedBuyer();
+      const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
+      const question = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: 'Q1' });
+      await expect(createReply(question.id, actor, 'a'.repeat(1001))).rejects.toMatchObject({ statusCode: 400 });
+    });
+
     it('throws 404 for a non-existent question', async () => {
       const buyer = await seedBuyer();
       const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
       const fakeQuestionId = new mongoose.Types.ObjectId().toString();
       await expect(createReply(fakeQuestionId, actor, 'Reply body')).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('throws 403 for a suspended buyer actor', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const asker = await seedBuyer({ phone: '+26878400021', name: 'Asker' });
+      const question = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: asker._id, body: 'Q1' });
+      const suspended = await Buyer.create({ phone: '+26878400022', password: 'secret1', name: 'Suspended', socialSuspendedAt: new Date() });
+      const actor: SocialActor = { type: 'buyer', id: String(suspended._id) };
+      await expect(createReply(question.id, actor, 'A reply')).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'Your community access is suspended',
+      });
     });
 
     it('creates a reply, increments replyCount, and returns the author DTO', async () => {
@@ -139,13 +176,26 @@ describe('eventQuestion.service', () => {
       const { eventId } = await seedPublishedEvent();
       const buyer = await seedBuyer();
       const question = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: 'Q1' });
-      const actor: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+      const liker = await seedBuyer({ phone: '+26878400005', name: 'Liker' });
+      const actor: SocialActor = { type: 'buyer', id: String(liker._id) };
 
       const on = await toggleQuestionLike(question.id, actor);
       expect(on).toEqual({ active: true, likeCount: 1 });
 
       const off = await toggleQuestionLike(question.id, actor);
       expect(off).toEqual({ active: false, likeCount: 0 });
+    });
+
+    it('throws 403 for a suspended buyer actor', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const buyer = await seedBuyer();
+      const question = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: 'Q1' });
+      const suspended = await Buyer.create({ phone: '+26878400023', password: 'secret1', name: 'Suspended', socialSuspendedAt: new Date() });
+      const actor: SocialActor = { type: 'buyer', id: String(suspended._id) };
+      await expect(toggleQuestionLike(question.id, actor)).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'Your community access is suspended',
+      });
     });
 
     it('throws 404 for a non-existent question', async () => {
@@ -185,7 +235,8 @@ describe('eventQuestion.service', () => {
     it('reports viewerHasLiked true only for a question the actor liked, and false with a null actor', async () => {
       const { eventId } = await seedPublishedEvent();
       const buyer = await seedBuyer();
-      const liker: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+      const likerBuyer = await seedBuyer({ phone: '+26878400006', name: 'Liker' });
+      const liker: SocialActor = { type: 'buyer', id: String(likerBuyer._id) };
 
       const liked = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: 'Liked question' });
       const notLiked = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: 'Not liked' });
@@ -249,7 +300,8 @@ describe('eventQuestion.service', () => {
       const { eventId } = await seedPublishedEvent();
       const asker = await seedBuyer({ phone: '+26878400003', name: 'Asker' });
       const replier = await seedBuyer({ phone: '+26878400004', name: 'Replier', username: 'replier_2' });
-      const liker: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+      const likerBuyer = await seedBuyer({ phone: '+26878400007', name: 'Liker' });
+      const liker: SocialActor = { type: 'buyer', id: String(likerBuyer._id) };
 
       const question = await EventQuestion.create({
         eventId, authorType: 'buyer', authorId: asker._id, body: 'When do gates open?',

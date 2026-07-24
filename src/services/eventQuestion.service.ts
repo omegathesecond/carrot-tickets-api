@@ -6,7 +6,23 @@ import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { toggleReactionGeneric } from '@services/reactions.service';
 import { HttpError } from '@utils/httpError.util';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 import type { SocialActor, SocialActorType } from '@utils/socialActor.util';
+
+const MAX_BODY_LENGTH = 1000;
+
+/**
+ * A brand acting as an organizer has no `socialSuspendedAt` — only buyer
+ * actors can be suspended (see @utils/socialSuspension.util). Shared by
+ * createQuestion/createReply/toggleQuestionLike so a suspended buyer can't
+ * post or like world-readable Q&A content.
+ */
+async function assertActorNotSuspended(actor: SocialActor): Promise<void> {
+  if (actor.type !== 'buyer') return;
+  const buyer = await Buyer.findById(actor.id);
+  if (!buyer) throw new HttpError(404, 'Account not found');
+  assertNotSuspended(buyer);
+}
 
 interface BuyerAuthorDTO {
   type: 'buyer';
@@ -170,8 +186,10 @@ export async function listRecent(actor: SocialActor | null, limit = 20): Promise
 
 /** Post a new question on an event's Q&A thread. */
 export async function createQuestion(eventId: string, actor: SocialActor, body: string): Promise<any> {
+  await assertActorNotSuspended(actor);
   const trimmed = typeof body === 'string' ? body.trim() : '';
   if (!trimmed) throw new HttpError(400, 'Question body is required');
+  if (trimmed.length > MAX_BODY_LENGTH) throw new HttpError(400, 'Question is too long');
   if (!(await Event.exists({ _id: eventId }))) throw new HttpError(404, 'Event not found');
 
   const question: IEventQuestion = await EventQuestion.create({
@@ -197,8 +215,10 @@ export async function createQuestion(eventId: string, actor: SocialActor, body: 
 
 /** Post a reply on an existing question, incrementing its replyCount. */
 export async function createReply(questionId: string, actor: SocialActor, body: string): Promise<any> {
+  await assertActorNotSuspended(actor);
   const trimmed = typeof body === 'string' ? body.trim() : '';
   if (!trimmed) throw new HttpError(400, 'Reply body is required');
+  if (trimmed.length > MAX_BODY_LENGTH) throw new HttpError(400, 'Reply is too long');
 
   const question = await EventQuestion.findById(questionId).select('eventId');
   if (!question) throw new HttpError(404, 'Question not found');
@@ -218,6 +238,7 @@ export async function createReply(questionId: string, actor: SocialActor, body: 
 
 /** Toggle the actor's like on a question. Mirrors toggleEventLike/toggleReaction. */
 export async function toggleQuestionLike(questionId: string, actor: SocialActor): Promise<{ active: boolean; likeCount: number }> {
+  await assertActorNotSuspended(actor);
   if (!(await EventQuestion.exists({ _id: questionId }))) throw new HttpError(404, 'Question not found');
 
   const { active } = await toggleReactionGeneric({

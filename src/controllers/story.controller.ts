@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { createStory, finalizeStory, listForViewer, markSeen } from '@services/story.service';
+import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { Story } from '@models/story.model';
 import type { StoryKind } from '@interfaces/story.interface';
 
@@ -19,11 +20,15 @@ export class StoryController {
   static async create(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-    const { kind, ext, contentType } = req.body || {};
-    if (kind !== 'video' && kind !== 'image') return ApiResponseUtil.validationError(res, 'kind must be video or image');
-    const allow = kind === 'video' ? VIDEO_TYPES : IMAGE_TYPES;
-    if (!allow.includes(contentType)) return ApiResponseUtil.validationError(res, `Invalid contentType for ${kind}`);
     try {
+      // A suspended buyer's community access is revoked platform-wide — a
+      // Story is world-readable content, so it's gated the same as
+      // follow/review/message (see @utils/socialSuspension.util).
+      assertNotSuspended(buyer);
+      const { kind, ext, contentType } = req.body || {};
+      if (kind !== 'video' && kind !== 'image') return ApiResponseUtil.validationError(res, 'kind must be video or image');
+      const allow = kind === 'video' ? VIDEO_TYPES : IMAGE_TYPES;
+      if (!allow.includes(contentType)) return ApiResponseUtil.validationError(res, `Invalid contentType for ${kind}`);
       const { story, uploadUrl } = await createStory({
         actor: { type: 'buyer', id: String(buyer._id) },
         kind: kind as StoryKind,

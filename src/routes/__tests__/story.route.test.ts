@@ -42,6 +42,22 @@ describe('Stories API', () => {
     it('401s without a token', async () => {
       await request(app).post('/api/social/stories').send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' }).expect(401);
     });
+
+    it('403s a suspended buyer creating a story; a non-suspended buyer still succeeds (control)', async () => {
+      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Suspended Poster', socialSuspendedAt: new Date() });
+      await request(app)
+        .post('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
+        .expect(403);
+
+      await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'OK Poster' });
+      await request(app)
+        .post('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
+        .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
+        .expect(201);
+    });
   });
 
   describe('POST /api/social/stories/:id/finalize', () => {

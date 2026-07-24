@@ -12,6 +12,10 @@ async function seedBuyer(phone = PHONE, name = 'Test Buyer') {
   return Buyer.create({ phone, password: 'secret1', name });
 }
 
+async function seedSuspendedBuyer(phone = PHONE, name = 'Suspended Buyer') {
+  return Buyer.create({ phone, password: 'secret1', name, socialSuspendedAt: new Date() });
+}
+
 describe('event Q&A routes', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
@@ -201,5 +205,109 @@ describe('event Q&A routes', () => {
       .post('/api/community/questions/000000000000000000000000/like')
       .set('Authorization', auth)
       .expect(404);
+  });
+
+  describe('social suspension enforcement', () => {
+    const OK_PHONE = '+26878400010';
+    const SUSPENDED_PHONE = '+26878400011';
+
+    it('403s a suspended buyer posting a question; a non-suspended buyer still succeeds (control)', async () => {
+      const { eventId } = await seedPublishedEvent();
+      await seedSuspendedBuyer(SUSPENDED_PHONE, 'Suspended Poster');
+      await seedBuyer(OK_PHONE, 'OK Poster');
+
+      await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', `Bearer ${signBuyerToken(SUSPENDED_PHONE)}`)
+        .send({ body: 'Hello?' })
+        .expect(403);
+
+      await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', `Bearer ${signBuyerToken(OK_PHONE)}`)
+        .send({ body: 'Hello?' })
+        .expect(201);
+    });
+
+    it('403s a suspended buyer posting a reply; a non-suspended buyer still succeeds (control)', async () => {
+      const { eventId } = await seedPublishedEvent();
+      await seedBuyer();
+      const created = await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .send({ body: 'Question body' })
+        .expect(201);
+      const questionId = created.body.data.id;
+
+      await seedSuspendedBuyer(SUSPENDED_PHONE, 'Suspended Replier');
+      await seedBuyer(OK_PHONE, 'OK Replier');
+
+      await request(app)
+        .post(`/api/community/questions/${questionId}/replies`)
+        .set('Authorization', `Bearer ${signBuyerToken(SUSPENDED_PHONE)}`)
+        .send({ body: 'A reply' })
+        .expect(403);
+
+      await request(app)
+        .post(`/api/community/questions/${questionId}/replies`)
+        .set('Authorization', `Bearer ${signBuyerToken(OK_PHONE)}`)
+        .send({ body: 'A reply' })
+        .expect(201);
+    });
+
+    it('403s a suspended buyer liking a question; a non-suspended buyer still succeeds (control)', async () => {
+      const { eventId } = await seedPublishedEvent();
+      await seedBuyer();
+      const created = await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .send({ body: 'Question body' })
+        .expect(201);
+      const questionId = created.body.data.id;
+
+      await seedSuspendedBuyer(SUSPENDED_PHONE, 'Suspended Liker');
+      await seedBuyer(OK_PHONE, 'OK Liker');
+
+      await request(app)
+        .post(`/api/community/questions/${questionId}/like`)
+        .set('Authorization', `Bearer ${signBuyerToken(SUSPENDED_PHONE)}`)
+        .expect(403);
+
+      await request(app)
+        .post(`/api/community/questions/${questionId}/like`)
+        .set('Authorization', `Bearer ${signBuyerToken(OK_PHONE)}`)
+        .expect(200);
+    });
+  });
+
+  describe('over-length body — 400 not 500', () => {
+    const TOO_LONG = 'a'.repeat(1001);
+
+    it('400s an over-length question body', async () => {
+      const { eventId } = await seedPublishedEvent();
+      await seedBuyer();
+      await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .send({ body: TOO_LONG })
+        .expect(400);
+    });
+
+    it('400s an over-length reply body', async () => {
+      const { eventId } = await seedPublishedEvent();
+      await seedBuyer();
+      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const created = await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', auth)
+        .send({ body: 'Question body' })
+        .expect(201);
+
+      await request(app)
+        .post(`/api/community/questions/${created.body.data.id}/replies`)
+        .set('Authorization', auth)
+        .send({ body: TOO_LONG })
+        .expect(400);
+    });
   });
 });
