@@ -76,6 +76,17 @@ router.get('/updates/by/:authorType/:authorId', optionalTicketsAuth, UpdateContr
 router.get('/updates/for-event/:eventId', optionalTicketsAuth, UpdateController.listByEvent);
 
 /**
+ * @route   GET /api/public/events/live
+ * @desc    Published events currently in progress (startTime <= now <= endTime),
+ *          sorted by startTime, each carrying a REAL `liveAttendees` count
+ *          (active community members). Powers the Home "Live Now" rail.
+ *          Registered ABOVE /events/:eventId so "live" is never captured as
+ *          an eventId param.
+ * @access  Public
+ */
+router.get('/events/live', PublicController.getLiveEvents);
+
+/**
  * @route   GET /api/public/events/:eventId
  * @desc    Get single published event details
  * @access  Public

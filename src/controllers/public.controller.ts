@@ -16,6 +16,9 @@ import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { getViewerEventReactions } from '@services/eventReaction.service';
 import { toPublicEventCard } from '@/utils/eventCard.util';
+import { Community } from '@models/community.model';
+import { Membership } from '@models/membership.model';
+import { failWithHttpError } from '@utils/controllerHelpers.util';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
@@ -318,6 +321,46 @@ export class PublicController {
     } catch (error: any) {
       console.error('Get public events error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch events');
+    }
+  }
+
+  /**
+   * GET /api/public/events/live
+   * Published events currently in progress ([startTime, endTime] contains
+   * "now"), for the Home "Live Now" rail. Each card carries `liveAttendees` —
+   * a REAL count of active (non-banned) community members, never a
+   * fabricated number. Sorted by startTime so the show that started earliest
+   * (most likely furthest into its run) leads.
+   */
+  static async getLiveEvents(_req: Request, res: Response): Promise<any> {
+    try {
+      const now = new Date();
+      const events = await Event.find({
+        status: EventStatus.PUBLISHED,
+        startTime: { $lte: now },
+        endTime: { $gte: now },
+      })
+        .sort({ startTime: 1 })
+        .lean();
+
+      const communities = await Community.find({ eventId: { $in: events.map((e) => e._id) } })
+        .select('_id eventId')
+        .lean();
+      const communityIdByEvent = new Map(communities.map((c) => [String(c.eventId), c._id]));
+
+      const cards = await Promise.all(
+        events.map(async (event: any) => {
+          const communityId = communityIdByEvent.get(String(event._id));
+          const liveAttendees = communityId
+            ? await Membership.countDocuments({ communityId, bannedAt: { $exists: false } })
+            : 0;
+          return { ...toPublicEventCard(event), liveAttendees };
+        }),
+      );
+
+      return ApiResponseUtil.success(res, { events: cards });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load live events');
     }
   }
 
