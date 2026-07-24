@@ -66,6 +66,25 @@ describe('GET /api/public/questions', () => {
     expect(await EventQuestion.countDocuments()).toBe(2);
   });
 
+  it('defaults to 20 and does not go unbounded on a non-numeric limit query param', async () => {
+    const { eventId } = await seedPublishedEvent();
+    await seedBuyer();
+    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    for (let i = 0; i < 25; i++) {
+      await request(app)
+        .post(`/api/community/${eventId}/questions`)
+        .set('Authorization', auth)
+        .send({ body: `Question ${i}` })
+        .expect(201);
+    }
+
+    const defaultRes = await request(app).get('/api/public/questions').expect(200);
+    expect(defaultRes.body.data.questions).toHaveLength(20);
+
+    const garbageLimitRes = await request(app).get('/api/public/questions?limit=not-a-number').expect(200);
+    expect(garbageLimitRes.body.data.questions).toHaveLength(20);
+  });
+
   it('works for an anonymous caller (no auth header), with viewerHasLiked false', async () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();

@@ -36,7 +36,11 @@ export class EventQuestionController {
   static async listRecent(req: Request, res: Response): Promise<any> {
     try {
       const actor = await resolveActorFromRequest(req).catch(() => null);
-      const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
+      // Same defensive clamp as PublicController.getActivity: a malformed or
+      // out-of-range query param must fall back to the default, never reach
+      // the DB query as NaN (which Mongo treats as "no limit" — unbounded).
+      const requested = parseInt(String(req.query['limit'] ?? '20'), 10);
+      const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 20, 1), 50);
       const questions = await listRecent(actor, limit);
       return ApiResponseUtil.success(res, { questions });
     } catch (error: any) {
