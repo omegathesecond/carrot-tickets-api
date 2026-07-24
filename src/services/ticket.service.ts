@@ -789,6 +789,7 @@ export class TicketService {
     const feeCfg = await PaymentConfigService.get();
     const { serviceFeeAmount } = computeServiceFee(
       totalAmount,
+      quantity,
       PaymentMethod.KESHLESS_WALLET,
       feeCfg,
     );
@@ -958,7 +959,7 @@ export class TicketService {
     const feeCfg = await PaymentConfigService.get();
     const { serviceFeeAmount, amountCharged } =
       channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, PaymentMethod.MTN_MOMO, feeCfg)
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.MTN_MOMO, feeCfg)
         : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
@@ -1096,7 +1097,7 @@ export class TicketService {
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
     const { serviceFeeAmount, amountCharged } =
       channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, PaymentMethod.PEACH_CARD, cardCfg)
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.PEACH_CARD, cardCfg)
         : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
