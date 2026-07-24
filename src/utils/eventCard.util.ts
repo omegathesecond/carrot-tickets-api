@@ -21,8 +21,8 @@ export function buildEventCardFields(event: any) {
     eventDate: event.eventDate,
     startTime: event.startTime,
     endTime: event.endTime,
-    posterUrl: event.posterUrl,
-    thumbnailUrl: event.thumbnailUrl,
+    posterUrl: event.posterUrl ?? null,
+    thumbnailUrl: event.thumbnailUrl ?? null,
     ticketTypes: tts.map((tt) => ({
       _id: tt._id, name: tt.name, description: tt.description, price: tt.price,
       available: tt.available, isSoldOut: tt.isSoldOut || tt.available === 0,

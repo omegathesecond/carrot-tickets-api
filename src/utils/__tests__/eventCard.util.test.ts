@@ -47,6 +47,23 @@ it('reads ticketing + externalTicketUrl straight off the event when present', ()
   expect(card.externalTicketUrl).toBe('https://x.tickets/e');
 });
 
+it('falls back to an empty priceRange and isSoldOut:false when ticketTypes is empty', () => {
+  // Math.min/max(...[]) is +-Infinity and .every() on [] is vacuously true —
+  // neither is a meaningful answer for an event with no ticket types yet.
+  const card = toPublicEventCard({ ...baseEvent, ticketTypes: [] });
+  expect(card.priceRange).toEqual({ min: 0, max: 0 });
+  expect(card.isSoldOut).toBe(false);
+});
+
+it('emits posterUrl/thumbnailUrl as null (not omitted) for a poster-less event', () => {
+  const { posterUrl, thumbnailUrl, ...posterless } = baseEvent;
+  const card = toPublicEventCard(posterless);
+  expect(card.posterUrl).toBeNull();
+  expect(card.thumbnailUrl).toBeNull();
+  expect(Object.prototype.hasOwnProperty.call(card, 'posterUrl')).toBe(true);
+  expect(Object.prototype.hasOwnProperty.call(card, 'thumbnailUrl')).toBe(true);
+});
+
 it('includes only the extras it is given', () => {
   const card = toPublicEventCard(baseEvent, {
     organizer: { id: 'v1', businessName: 'MTN Bushfire', logoUrl: null },
