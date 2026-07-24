@@ -17,9 +17,10 @@ export class FeedController {
     const tab = String(req.query['tab'] || 'for-you');
     if (!isTab(tab)) return ApiResponseUtil.validationError(res, 'Invalid tab');
     const cursor = req.query['cursor'] ? String(req.query['cursor']) : undefined;
+    const category = req.query['category'] ? String(req.query['category']) : undefined;
     const actor = await resolveActorFromRequest(req).catch(() => null);
     try {
-      const { items, nextCursor } = await getFeed({ tab, cursor, actor: actor ?? undefined });
+      const { items, nextCursor } = await getFeed({ tab, cursor, actor: actor ?? undefined, category });
       if (actor) {
         const updateIds = items.filter((i) => i.type === 'update').map((i) => i.id);
         if (updateIds.length) {

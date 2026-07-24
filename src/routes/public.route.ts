@@ -49,7 +49,8 @@ router.get('/activity', PublicController.getActivity);
  *          upcoming published events, and real purchase activity. If a
  *          buyer token is present, update slides carry viewerReactions.
  * @access  Public (optional buyer auth)
- * @query   tab (for-you|following|events, default for-you), cursor
+ * @query   tab (for-you|following|events, default for-you), cursor,
+ *          category (chip filter; absent or 'All' = unfiltered)
  */
 router.get('/feed', optionalTicketsAuth, FeedController.get);
 

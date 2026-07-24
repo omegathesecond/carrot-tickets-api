@@ -14,7 +14,7 @@ export type FeedSlide =
   | { type: 'event'; id: string; sortAt: string; [k: string]: any }
   | { type: 'activity'; id: string; sortAt: string; [k: string]: any };
 
-interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; actor?: SocialActor; limit?: number; }
+interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; actor?: SocialActor; limit?: number; category?: string; }
 interface Cursor { u?: string; e?: number; a?: string; }
 
 function decode(cursor?: string): Cursor { if (!cursor) return {}; try { return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { return {}; } }
@@ -37,14 +37,29 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     followedOrgIds = follows.filter((f) => f.targetType === 'organizer').map((f) => f.targetId);
   }
 
+  // Category chip filter (Discover tab). 'All' or absent = unfiltered, same
+  // convention as getPublicEvents (src/controllers/public.controller.ts).
+  // Resolved once up front so both the update-slide and event-slide queries
+  // below can use it — update slides are restricted to the category's event
+  // ids, and updates with no eventId are dropped when a category is active.
+  let categoryEventIds: any[] | null = null;
+  if (opts.category && opts.category !== 'All') {
+    const categoryEvents = await Event.find({ status: EventStatus.PUBLISHED, ...notEndedFilter(), category: opts.category })
+      .select('_id')
+      .lean();
+    categoryEventIds = categoryEvents.map((e) => e._id);
+  }
+
   // ---- fetch each source (over-fetch `limit`) ----
   const updateQuery: any = { status: 'active', 'media.status': 'ready' };
   if (opts.tab === 'following') updateQuery.authorId = { $in: [...followedAuthorIds, ...followedOrgIds] };
   if (cur.u) updateQuery.createdAt = { $lt: new Date(cur.u) };
+  if (categoryEventIds) updateQuery.eventId = { $in: categoryEventIds };
   const updates = opts.tab === 'events' ? [] : await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();
 
   const eventQuery: any = { status: EventStatus.PUBLISHED, ...notEndedFilter() };
   if (opts.tab === 'following') eventQuery.vendorId = { $in: followedOrgIds };
+  if (opts.category && opts.category !== 'All') eventQuery.category = opts.category;
   const eventSkip = cur.e ?? 0;
   const events = await Event.find(eventQuery).sort({ eventDate: 1 }).skip(eventSkip).limit(limit).lean();
 
