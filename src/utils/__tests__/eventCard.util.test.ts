@@ -25,6 +25,18 @@ it('emits ONLY base fields when no extras are given (no shape widening)', () => 
   expect('viewerHasLiked' in card).toBe(false);
 });
 
+it('always includes ticketing + externalTicketUrl as base fields, falling back to carrot/null for legacy events', () => {
+  const card = toPublicEventCard(baseEvent); // baseEvent has neither field
+  expect(card.ticketing).toBe('carrot');
+  expect(card.externalTicketUrl).toBeNull();
+});
+
+it('reads ticketing + externalTicketUrl straight off the event when present', () => {
+  const card = toPublicEventCard({ ...baseEvent, ticketing: 'external', externalTicketUrl: 'https://x.tickets/e' });
+  expect(card.ticketing).toBe('external');
+  expect(card.externalTicketUrl).toBe('https://x.tickets/e');
+});
+
 it('includes only the extras it is given', () => {
   const card = toPublicEventCard(baseEvent, {
     organizer: { id: 'v1', businessName: 'MTN Bushfire', logoUrl: null },

@@ -30,6 +30,12 @@ export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}
       min: Math.min(...tts.map((tt) => tt.price)),
       max: Math.max(...tts.map((tt) => tt.price)),
     },
+    // Intrinsic event properties (not extras) — every surface needs to know
+    // whether this event sells through Carrot or hands off to the organizer's
+    // own external ticket seller. Legacy events predating these fields have
+    // neither, so they fall back to carrot/null rather than surfacing undefined.
+    ticketing: event.ticketing ?? 'carrot',
+    externalTicketUrl: event.externalTicketUrl ?? null,
   };
   if ('organizer' in extras) card.organizer = extras.organizer ?? null;
   if ('recentSales' in extras) card.recentSales = extras.recentSales;
