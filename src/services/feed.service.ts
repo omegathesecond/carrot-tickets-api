@@ -8,6 +8,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { notEndedFilter } from '@utils/eventVisibility.util';
 import { PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import type { SocialActor } from '@utils/socialActor.util';
+import { buildEventCardFields } from '@utils/eventCard.util';
 
 export type FeedSlide =
   | { type: 'update'; id: string; sortAt: string; [k: string]: any }
@@ -92,19 +93,14 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   }));
 
   const eventSlides: FeedSlide[] = events.map((e) => {
-    const prices = (e.ticketTypes ?? []).map((t: any) => t.price);
     const org = vendorMap.get(String(e.vendorId));
     return {
       type: 'event', id: String(e._id), sortAt: new Date(e.eventDate).toISOString(),
-      name: e.name, venue: e.venue, eventDate: e.eventDate, posterUrl: e.posterUrl ?? null,
-      likeCount: e.likeCount ?? 0,
-      priceRange: { min: prices.length ? Math.min(...prices) : 0, max: prices.length ? Math.max(...prices) : 0 },
-      // Legacy events predating these fields have neither, so fall back to
-      // carrot/null rather than surfacing undefined — same convention as
-      // toPublicEventCard (src/utils/eventCard.util.ts).
-      ticketing: (e as any).ticketing ?? 'carrot',
-      externalTicketUrl: (e as any).externalTicketUrl ?? null,
-      category: (e as any).category ?? 'Other',
+      // Shared with toPublicEventCard (src/utils/eventCard.util.ts) so a new
+      // event-card field can't be added there and silently miss the feed.
+      ...buildEventCardFields(e),
+      // `?? 0`: events predating the like counter have no stored field.
+      likeCount: (e as any).likeCount ?? 0,
       organizer: org ? { id: String(e.vendorId), businessName: org.businessName, logoUrl: org.logoUrl ?? null, slug: org.slug } : null,
     };
   });
