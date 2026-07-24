@@ -201,9 +201,14 @@ export const createEventSchema = Joi.object({
       })
     )
     .default([]),
-  ticketing: Joi.string().valid('carrot', 'external').default('carrot'),
+  ticketing: Joi.string().valid('carrot', 'external').default('carrot').messages({
+    'any.only': "Ticketing must be either 'carrot' or 'external'"
+  }),
   externalTicketUrl: Joi.string().uri({ scheme: ['https'] }).when('ticketing', {
     is: 'external', then: Joi.required(), otherwise: Joi.optional().allow('', null),
+  }).messages({
+    'string.uri': 'External ticket URL must be a valid https:// URL',
+    'any.required': 'External ticket URL is required when ticketing is set to external'
   }),
 });
 
@@ -231,9 +236,14 @@ export const updateEventSchema = Joi.object({
       })
     )
     .optional(),
-  ticketing: Joi.string().valid('carrot', 'external'),
+  ticketing: Joi.string().valid('carrot', 'external').messages({
+    'any.only': "Ticketing must be either 'carrot' or 'external'"
+  }),
   externalTicketUrl: Joi.string().uri({ scheme: ['https'] }).when('ticketing', {
     is: 'external', then: Joi.required(), otherwise: Joi.optional().allow('', null),
+  }).messages({
+    'string.uri': 'External ticket URL must be a valid https:// URL',
+    'any.required': 'External ticket URL is required when ticketing is set to external'
   }),
 }).min(1).messages({
   'object.min': 'At least one field must be provided for update'

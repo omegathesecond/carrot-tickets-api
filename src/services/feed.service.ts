@@ -84,6 +84,11 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
       name: e.name, venue: e.venue, eventDate: e.eventDate, posterUrl: e.posterUrl ?? null,
       likeCount: e.likeCount ?? 0,
       priceRange: { min: prices.length ? Math.min(...prices) : 0, max: prices.length ? Math.max(...prices) : 0 },
+      // Legacy events predating these fields have neither, so fall back to
+      // carrot/null rather than surfacing undefined — same convention as
+      // toPublicEventCard (src/utils/eventCard.util.ts).
+      ticketing: (e as any).ticketing ?? 'carrot',
+      externalTicketUrl: (e as any).externalTicketUrl ?? null,
       organizer: org ? { id: String(e.vendorId), businessName: org.businessName, logoUrl: org.logoUrl ?? null, slug: org.slug } : null,
     };
   });

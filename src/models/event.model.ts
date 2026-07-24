@@ -125,6 +125,7 @@ const eventSchema = new Schema<IEvent>({
   },
   externalTicketUrl: {
     type: String,
+    trim: true,
     maxlength: 500
   },
 

@@ -155,4 +155,30 @@ describe('feed.service getFeed', () => {
     const eventSlide = items.find((i) => i.type === 'event');
     expect(eventSlide?.['likeCount']).toBe(0);
   });
+
+  // Discover feed event slides must expose ticketing/externalTicketUrl so the
+  // frontend can tell an externally-sold event apart and NOT show a Carrot
+  // buy affordance for it.
+  it('exposes ticketing and externalTicketUrl on event slides for an external-ticketing event', async () => {
+    const vendor = await Vendor.create({ businessName: 'Org External', password: 'password123', slug: 'org-external' });
+    const event = await Event.create({
+      vendorId: vendor._id, name: 'External Show', venue: 'V', eventDate: new Date(Date.now() + 86400000),
+      startTime: new Date(Date.now() + 86400000), endTime: new Date(Date.now() + 90000000),
+      status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 50 }],
+      ticketing: 'external', externalTicketUrl: 'https://tickets.example.com/buy',
+    });
+
+    const { items } = await getFeed({ tab: 'events', limit: 8 });
+    const eventSlide = items.find((i) => i.id === String(event._id));
+    expect(eventSlide?.['ticketing']).toBe('external');
+    expect(eventSlide?.['externalTicketUrl']).toBe('https://tickets.example.com/buy');
+  });
+
+  it('defaults ticketing/externalTicketUrl to carrot/null for a carrot event slide', async () => {
+    await seedEvent('E-carrot');
+    const { items } = await getFeed({ tab: 'events', limit: 8 });
+    const eventSlide = items.find((i) => i.type === 'event');
+    expect(eventSlide?.['ticketing']).toBe('carrot');
+    expect(eventSlide?.['externalTicketUrl']).toBeNull();
+  });
 });
