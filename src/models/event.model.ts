@@ -114,6 +114,20 @@ const eventSchema = new Schema<IEvent>({
     index: true
   },
 
+  // Ticketing mode — 'carrot' sells tickets on-platform (default); 'external'
+  // links out to the organizer's own ticket seller. Existing events have no
+  // stored value; the default below makes them read as 'carrot'.
+  ticketing: {
+    type: String,
+    enum: ['carrot', 'external'],
+    default: 'carrot',
+    index: true
+  },
+  externalTicketUrl: {
+    type: String,
+    maxlength: 500
+  },
+
   // Sales Info
   totalTicketsSold: {
     type: Number,

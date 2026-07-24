@@ -12,6 +12,8 @@ export enum EventStatus {
   CANCELLED = 'cancelled'
 }
 
+export type EventTicketing = 'carrot' | 'external';
+
 export interface ITicketType {
   _id?: string; // Ticket type ID (MongoDB ObjectId as string)
   name: string; // e.g., "VIP", "Regular", "Early Bird"
@@ -46,6 +48,11 @@ export interface IEvent extends Document {
 
   // Status
   status: EventStatus;
+
+  // Ticketing mode — 'carrot' sells tickets on-platform (default); 'external'
+  // links out to the organizer's own ticket seller (see externalTicketUrl).
+  ticketing: EventTicketing;
+  externalTicketUrl?: string;
 
   // Sales Info
   totalTicketsSold: number;
