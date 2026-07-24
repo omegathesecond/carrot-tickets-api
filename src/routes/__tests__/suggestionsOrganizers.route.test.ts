@@ -87,6 +87,39 @@ describe('GET /api/social/suggestions/organizers', () => {
     expect(popularIndex).toBeLessThan(quietIndex);
   });
 
+  it('ranks organizers by real follower count across more than a trivial set (proves aggregation ranking, not insertion order)', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    // Seeded in an order that does NOT match the expected rank order, so a
+    // bug that ranks by insertion/creation order instead of real
+    // followerCount would fail this test.
+    const mid = await Vendor.create({ businessName: 'Mid Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const top = await Vendor.create({ businessName: 'Top Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const low = await Vendor.create({ businessName: 'Low Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+
+    const fanCounts: Array<[typeof mid, number]> = [[mid, 5], [top, 8], [low, 2]];
+    let phoneSuffix = 100;
+    for (const [vendor, count] of fanCounts) {
+      for (let i = 0; i < count; i++) {
+        const fan = await Buyer.create({ phone: `+2687840${phoneSuffix++}`, password: 'secret1', name: `Fan${phoneSuffix}` });
+        await Follow.create({ followerType: 'buyer', followerId: fan._id, targetType: 'organizer', targetId: vendor._id });
+      }
+    }
+
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const byId = (id: string) => res.body.data.find((o: any) => o.id === id);
+    const topRow = byId(String(top._id));
+    const midRow = byId(String(mid._id));
+    const lowRow = byId(String(low._id));
+
+    expect(topRow.followerCount).toBe(8);
+    expect(midRow.followerCount).toBe(5);
+    expect(lowRow.followerCount).toBe(2);
+
+    const order = res.body.data.map((o: any) => o.id);
+    expect(order.indexOf(String(top._id))).toBeLessThan(order.indexOf(String(mid._id)));
+    expect(order.indexOf(String(mid._id))).toBeLessThan(order.indexOf(String(low._id)));
+  });
+
   it('excludes inactive and unverified vendors', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     await Vendor.create({ businessName: 'Inactive Org', password: 'secret1', isActive: false, verificationStatus: VerificationStatus.VERIFIED });
