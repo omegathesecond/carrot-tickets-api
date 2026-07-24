@@ -200,7 +200,11 @@ export const createEventSchema = Joi.object({
         })
       })
     )
-    .default([])
+    .default([]),
+  ticketing: Joi.string().valid('carrot', 'external').default('carrot'),
+  externalTicketUrl: Joi.string().uri({ scheme: ['https'] }).when('ticketing', {
+    is: 'external', then: Joi.required(), otherwise: Joi.optional().allow('', null),
+  }),
 });
 
 export const updateEventSchema = Joi.object({
@@ -226,7 +230,11 @@ export const updateEventSchema = Joi.object({
         isSoldOut: Joi.boolean().optional()
       })
     )
-    .optional()
+    .optional(),
+  ticketing: Joi.string().valid('carrot', 'external'),
+  externalTicketUrl: Joi.string().uri({ scheme: ['https'] }).when('ticketing', {
+    is: 'external', then: Joi.required(), otherwise: Joi.optional().allow('', null),
+  }),
 }).min(1).messages({
   'object.min': 'At least one field must be provided for update'
 });
