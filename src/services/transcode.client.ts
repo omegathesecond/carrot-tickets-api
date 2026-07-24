@@ -1,13 +1,27 @@
-import { Update, IUpdate } from '@models/update.model';
+import { Update } from '@models/update.model';
 
-export async function triggerTranscode(update: IUpdate): Promise<void> {
+/**
+ * Minimal shape triggerTranscode needs — just an id and a raw R2 key. IUpdate
+ * (and IStory, see @models/story.model) both satisfy this structurally, so
+ * either can be passed without a cast. NOTE: the separate transcoder
+ * microservice (transcoder/src/db.ts) currently writes its result back with
+ * `Update.updateOne({_id: updateId}, ...)` against the hardcoded `updates`
+ * collection — see finalizeStory in @services/story.service for the caveat
+ * this implies for video Stories.
+ */
+export interface Transcodable {
+  id?: unknown; // mongoose's Document.id is itself optional/`any` — matched here so real docs satisfy this structurally
+  media: { rawKey: string };
+}
+
+export async function triggerTranscode(target: Transcodable): Promise<void> {
   const url = process.env['TRANSCODER_URL'];
   const secret = process.env['TRANSCODER_SHARED_SECRET'];
   if (!url || !secret) throw new Error('TRANSCODER_URL / TRANSCODER_SHARED_SECRET not configured');
   const res = await fetch(`${url}/transcode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-transcoder-secret': secret },
-    body: JSON.stringify({ updateId: update.id, rawKey: update.media.rawKey }),
+    body: JSON.stringify({ updateId: String(target.id), rawKey: target.media.rawKey }),
   });
   if (!res.ok) throw new Error(`Transcoder responded ${res.status}`);
 }

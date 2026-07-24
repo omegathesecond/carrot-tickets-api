@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
 import { SocialProfileController } from '@controllers/socialProfile.controller';
 import { ConsumerReadsController } from '@controllers/consumerReads.controller';
+import { StoryController } from '@controllers/story.controller';
 
 const router = Router();
 
@@ -29,6 +30,12 @@ router.get('/suggestions/people', authenticateBuyer, ConsumerReadsController.sug
 router.get('/suggestions/organizers', authenticateBuyer, ConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recommendations);
 router.get('/nearby/people', authenticateBuyer, ConsumerReadsController.nearbyPeople);
+// Ephemeral 24h Stories — registered above '/users/:username' alongside the
+// rest of the fixed-segment routes, same reasoning as '/users/search' below.
+router.post('/stories', authenticateBuyer, StoryController.create);
+router.post('/stories/:id/finalize', authenticateBuyer, StoryController.finalize);
+router.get('/stories', authenticateBuyer, StoryController.list);
+router.post('/stories/:id/seen', authenticateBuyer, StoryController.seen);
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
 router.get('/users/:username', authenticateBuyer, SocialProfileController.publicProfile);

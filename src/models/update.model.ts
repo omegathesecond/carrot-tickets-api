@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import type { UpdateAuthorType, UpdateKind, UpdateMedia } from '@interfaces/update.interface';
+import { mediaSchema } from '@models/shared/media.schema';
 
 export interface IUpdate extends Document {
   authorType: UpdateAuthorType;
@@ -18,30 +19,6 @@ export interface IUpdate extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
-
-const videoSchema = new Schema({
-  url: { type: String, required: true },
-  url480: { type: String },
-  poster: { type: String, required: true },
-  width: { type: Number, required: true },
-  height: { type: Number, required: true },
-  durationSec: { type: Number, required: true },
-}, { _id: false });
-
-const imageSchema = new Schema({
-  url: { type: String, required: true },
-  width: { type: Number, required: true },
-  height: { type: Number, required: true },
-}, { _id: false });
-
-const mediaSchema = new Schema({
-  rawKey: { type: String, required: true },
-  status: { type: String, enum: ['processing', 'ready', 'failed'], required: true, default: 'processing', index: true },
-  video: { type: videoSchema },
-  image: { type: imageSchema },
-  error: { type: String, maxlength: 500 },
-  processingStartedAt: { type: Date },
-}, { _id: false });
 
 const updateSchema = new Schema<IUpdate>({
   authorType: { type: String, enum: ['vendor', 'buyer'], required: true },
