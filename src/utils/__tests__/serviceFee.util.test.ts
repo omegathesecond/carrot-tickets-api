@@ -1,4 +1,4 @@
-import { computeServiceFee, serviceFeeFor, round2, MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
+import { computeServiceFee, serviceFeeFor, MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 import { PaymentMethod } from '@interfaces/ticket.interface';
 
 const cfg = { keshlessServiceFee: 0, momoServiceFee: 5, cardServiceFee: 10 };
