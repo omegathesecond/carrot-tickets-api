@@ -14,6 +14,7 @@ import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { computeServiceFee, round2 } from '@utils/serviceFee.util';
 import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
+import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -751,6 +752,7 @@ export class TicketService {
     if (!event) {
       throw new Error('Event not found or not available');
     }
+    assertCarrotTicketing(event);
 
     const ticketType = event.ticketTypes.find(tt => tt._id?.toString() === ticketTypeId);
     if (!ticketType) {
@@ -911,6 +913,7 @@ export class TicketService {
 
     const event = await Event.findById(p.eventId);
     if (!event) throw new Error('Event not found');
+    assertCarrotTicketing(event);
 
     // Attribution: vendorId is the event organizer (derive from event if absent,
     // as the buyer/vendor path does today). soldBy defaults to the organizer.
@@ -1054,6 +1057,7 @@ export class TicketService {
 
     const event = await Event.findById(p.eventId);
     if (!event) throw new Error('Event not found');
+    assertCarrotTicketing(event);
 
     // Attribution: mirror initiateMomoPurchase defaults exactly.
     const soldByType = p.soldByType ?? 'vendor';
