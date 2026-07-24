@@ -2,6 +2,7 @@ import { Community } from '@models/community.model';
 import { Channel, IChannel } from '@models/channel.model';
 import { Membership, IMembership } from '@models/membership.model';
 import { Message } from '@models/message.model';
+import { Event } from '@models/event.model';
 import { IBuyer } from '@models/buyer.model';
 import { isTicketHolder } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
@@ -49,7 +50,15 @@ export class CommunityMembershipService {
     }
     if (!membership) throw new HttpError(500, 'Failed to join community');
 
-    await CommunityMembershipService.refreshTicketVerification(eventId, buyer, membership);
+    // Externally-sold events have no Carrot ticket to verify against — skip
+    // the check entirely so the join is open. Carrot events (and legacy
+    // events with no stored `ticketing`, which read as 'carrot') keep the
+    // existing ticket-verification requirement unchanged.
+    const event = await Event.findById(eventId).select('ticketing');
+    const requiresTicket = !event || event.ticketing !== 'external';
+    if (requiresTicket) {
+      await CommunityMembershipService.refreshTicketVerification(eventId, buyer, membership);
+    }
     return CommunityMembershipService.buildView(String(community._id), eventId, membership);
   }
 
