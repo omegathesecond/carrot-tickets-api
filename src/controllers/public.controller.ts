@@ -19,6 +19,7 @@ import { toPublicEventCard } from '@/utils/eventCard.util';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
@@ -106,7 +107,7 @@ const contactMessageSchema = Joi.object({
 const cardInitiateSchema = Joi.object({
   eventId: Joi.string().hex().length(24).required(),
   ticketTypeId: Joi.string().hex().length(24).required(),
-  quantity: Joi.number().integer().min(1).max(10).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
   customerName: Joi.string().max(100).optional(),
 });
 
@@ -114,7 +115,7 @@ const cardInitiateSchema = Joi.object({
 const momoInitiateSchema = Joi.object({
   eventId: Joi.string().hex().length(24).required(),
   ticketTypeId: Joi.string().hex().length(24).required(),
-  quantity: Joi.number().integer().min(1).max(10).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
   customerName: Joi.string().max(100).optional(),
   momoPhone: Joi.string().pattern(/^[0-9]{8,15}$/).required(),
 });
@@ -135,7 +136,7 @@ const publicEventsQuerySchema = Joi.object({
 const publicPurchaseSchema = Joi.object({
   eventId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
   ticketTypeId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
-  quantity: Joi.number().integer().min(1).max(10).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
   // The buyer's phone is NO LONGER taken from the body — it comes from the
   // OTP-verified buyer token (req.ticketsUser.userPhone). This guarantees
   // every ticket is tied to a phone the buyer actually controls, so it always

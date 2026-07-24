@@ -24,6 +24,7 @@ import {
   scanQuerySchema,
   analyticsQuerySchema
 } from '@validators/tickets.validator';
+import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 
 export class TicketsController {
   /**
@@ -204,7 +205,7 @@ export class TicketsController {
       const schema = Joi.object({
         eventId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
         ticketTypeId: Joi.string().required().regex(/^[0-9a-fA-F]{24}$/),
-        quantity: Joi.number().integer().min(1).max(10).required(),
+        quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
         customerName: Joi.string().optional().max(100).trim().allow(''),
         keshlessCardNumber: Joi.string().required().length(8).alphanum().uppercase(),
         keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/),
