@@ -44,6 +44,16 @@ router.get('/events', PublicController.getPublicEvents);
 router.get('/activity', PublicController.getActivity);
 
 /**
+ * @route   GET /api/public/trending
+ * @desc    Trending hashtags for the TopicsPage rail, ranked by post volume
+ *          over the last 14 days across active, ready updates. Top 3 are
+ *          flagged `hot`. Returns { trending: [] } when there's no recent
+ *          hashtagged activity — never fabricated.
+ * @access  Public
+ */
+router.get('/trending', PublicController.getTrending);
+
+/**
  * @route   GET /api/public/feed
  * @desc    Discover feed — a blended stream of buyer/organizer updates,
  *          upcoming published events, and real purchase activity. If a

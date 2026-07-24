@@ -18,12 +18,20 @@ import { getViewerEventReactions } from '@services/eventReaction.service';
 import { toPublicEventCard } from '@/utils/eventCard.util';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
+import { Update } from '@models/update.model';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+// Lookback window for the trending-hashtags rail (TopicsPage): only updates
+// posted in the last 14 days count toward a hashtag's volume, so the rail
+// reflects current conversation rather than all-time totals.
+const TRENDING_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const TRENDING_LIMIT = 15;
+const TRENDING_HOT_COUNT = 3;
 
 // Privacy-preserving display name for the public activity feed. Turns a stored
 // buyer name into "Sipho D." — first name + last initial — so we can create
@@ -420,6 +428,44 @@ export class PublicController {
     } catch (error: any) {
       console.error('Get activity error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch activity');
+    }
+  }
+
+  /**
+   * GET /api/public/trending
+   * Trending hashtags for the TopicsPage rail. Aggregates REAL, currently
+   * visible updates (active status, ready media) from the last 14 days,
+   * ranks tags by post volume, and returns the top 15. The top 3 by rank are
+   * flagged `hot` — no fabricated data, an empty result is just `[]`.
+   */
+  static async getTrending(_req: Request, res: Response): Promise<any> {
+    try {
+      const since = new Date(Date.now() - TRENDING_WINDOW_MS);
+      const agg = await Update.aggregate([
+        {
+          $match: {
+            status: 'active',
+            'media.status': 'ready',
+            createdAt: { $gte: since },
+            hashtags: { $ne: [] },
+          },
+        },
+        { $unwind: '$hashtags' },
+        { $group: { _id: '$hashtags', posts: { $sum: 1 } } },
+        { $sort: { posts: -1 } },
+        { $limit: TRENDING_LIMIT },
+      ]);
+
+      const trending = agg.map((row: any, index: number) => ({
+        tag: row._id as string,
+        posts: row.posts as number,
+        hot: index < TRENDING_HOT_COUNT,
+      }));
+
+      return ApiResponseUtil.success(res, { trending });
+    } catch (error: any) {
+      console.error('Get trending hashtags error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to fetch trending hashtags');
     }
   }
 
