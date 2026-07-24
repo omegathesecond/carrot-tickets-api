@@ -15,6 +15,8 @@ router.get('/me/blocks', authenticateBuyer, SocialProfileController.myBlocks);
 router.get('/me/following', authenticateBuyer, SocialProfileController.myFollowing);
 router.get('/me/followers', authenticateBuyer, SocialProfileController.myFollowers);
 router.get('/me/friends', authenticateBuyer, SocialProfileController.myFriends);
+router.patch('/me/location', authenticateBuyer, SocialProfileController.updateLocation);
+router.delete('/me/location', authenticateBuyer, SocialProfileController.deleteLocation);
 router.get('/notifications', authenticateBuyer, SocialProfileController.myNotifications);
 router.post('/notifications/read', authenticateBuyer, SocialProfileController.markNotificationsRead);
 router.get('/username-available', authenticateBuyer, SocialProfileController.usernameAvailable);
@@ -26,6 +28,7 @@ router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblo
 router.get('/suggestions/people', authenticateBuyer, ConsumerReadsController.suggestedPeople);
 router.get('/suggestions/organizers', authenticateBuyer, ConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recommendations);
+router.get('/nearby/people', authenticateBuyer, ConsumerReadsController.nearbyPeople);
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
 router.get('/users/:username', authenticateBuyer, SocialProfileController.publicProfile);

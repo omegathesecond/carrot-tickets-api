@@ -14,6 +14,13 @@ export interface NotificationPrefs {
   reminders: boolean;
 }
 
+/** GeoJSON Point. Coordinate order is [lng, lat] per the GeoJSON spec (and
+ *  what MongoDB's 2dsphere index / $geoNear expect) — NOT [lat, lng]. */
+export interface IBuyerLocation {
+  type: 'Point';
+  coordinates: [number, number]; // [lng, lat]
+}
+
 /**
  * Buyer (ticket-holder) account for the public site.
  *
@@ -39,6 +46,12 @@ export interface IBuyer extends Document {
   // (see assertNotSuspended in @utils/socialSuspension.util); ticket
   // ownership, lookup, QR and purchase are never affected.
   socialSuspendedAt?: Date | null;
+  // Nearby-people opt-in (v1). Absent for most buyers — sharing location is
+  // an explicit action (PATCH /api/social/me/location), never inferred or
+  // defaulted. A sparse 2dsphere index below means buyers without a location
+  // are simply invisible to $geoNear, no extra filtering needed.
+  location?: IBuyerLocation;
+  locationUpdatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidate: string): Promise<boolean>;
@@ -83,10 +96,31 @@ const buyerSchema = new Schema<IBuyer>(
     },
     usernameCustomizedAt: { type: Date },
     lastLoginAt: { type: Date },
-    socialSuspendedAt: { type: Date, default: null }
+    socialSuspendedAt: { type: Date, default: null },
+    // Single-nested subdocument (like notificationPrefs above), deliberately
+    // WITHOUT a default — a plain `{ type: {...}, coordinates: {...} }`
+    // nested-path definition initializes to `{}` for every buyer, which is
+    // the opposite of the "most buyers never opted in" invariant we need.
+    // Giving it a real Schema keeps it `undefined` until PATCH /me/location
+    // sets it, so the sparse 2dsphere index below actually excludes it.
+    location: {
+      type: new Schema<IBuyerLocation>(
+        {
+          type: { type: String, enum: ['Point'], required: true },
+          coordinates: { type: [Number], required: true },
+        },
+        { _id: false }
+      ),
+      required: false,
+    },
+    locationUpdatedAt: { type: Date },
   },
   { timestamps: true }
 );
+
+// Sparse by nature (docs missing `location` are excluded automatically) —
+// most buyers never opt in, and $geoNear can only run once this index exists.
+buyerSchema.index({ location: '2dsphere' });
 
 // Hash the password whenever it is set/changed.
 buyerSchema.pre('save', async function (next) {

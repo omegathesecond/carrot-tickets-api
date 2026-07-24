@@ -88,6 +88,11 @@ export const presenceSchema = Joi.object({
   buyerIds: Joi.array().items(Joi.string().hex().length(24)).min(1).max(50).required(),
 });
 
+export const locationSchema = Joi.object({
+  lat: Joi.number().min(-90).max(90).required(),
+  lng: Joi.number().min(-180).max(180).required(),
+});
+
 export const pushSubscribeSchema = Joi.object({
   endpoint: Joi.string().uri({ scheme: ['https'] }).max(1000).required(),
   keys: Joi.object({

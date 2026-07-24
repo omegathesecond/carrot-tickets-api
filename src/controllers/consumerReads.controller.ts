@@ -9,6 +9,7 @@ import { GoingService } from '@services/going.service';
 import { CalendarService } from '@services/calendar.service';
 import { FollowService } from '@services/follow.service';
 import { SuggestionsService } from '@services/suggestions.service';
+import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -121,6 +122,43 @@ export class ConsumerReadsController {
       return ApiResponseUtil.success(res, data);
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load organizer suggestions');
+    }
+  }
+
+  /** GET /api/social/nearby/people?lat=&lng=&radiusKm= — buyers who opted into
+   *  location sharing, near the viewer's current position. `currentEvent`
+   *  stays null in v1 — no "what event are they at right now" signal yet. */
+  static async nearbyPeople(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      const lat = Number(req.query['lat']);
+      const lng = Number(req.query['lng']);
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+        return ApiResponseUtil.error(res, 'lat must be a number between -90 and 90', 400);
+      }
+      if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+        return ApiResponseUtil.error(res, 'lng must be a number between -180 and 180', 400);
+      }
+      const radiusKm = NearbyService.resolveRadiusKm(req.query['radiusKm']);
+
+      const rows = await NearbyService.nearbyPeople(String(buyer._id), lat, lng, radiusKm);
+      const people = rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        username: r.username,
+        avatarUrl: r.avatarUrl,
+        bio: r.bio,
+        city: null,
+        distanceKm: Math.round((r.distanceMeters / 1000) * 10) / 10,
+        online: r.online,
+        mutualCount: r.mutualCount,
+        currentEvent: null,
+      }));
+      return ApiResponseUtil.success(res, { people });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load nearby people');
     }
   }
 

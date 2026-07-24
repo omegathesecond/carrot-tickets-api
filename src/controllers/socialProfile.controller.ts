@@ -9,7 +9,7 @@ import { TicketStatus } from '@interfaces/ticket.interface';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername, RESERVED_USERNAMES, USERNAME_REGEX } from '@utils/username.util';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
-import { updateProfileSchema, blockSchema, followSchema, presenceSchema, pushSubscribeSchema } from '@validators/community.validator';
+import { updateProfileSchema, blockSchema, followSchema, presenceSchema, pushSubscribeSchema, locationSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
 import { NotificationService } from '@services/notification.service';
@@ -103,6 +103,42 @@ export class SocialProfileController {
     } catch (error: any) {
       console.error('Update social profile error:', error);
       return ApiResponseUtil.error(res, error?.message || 'Failed to update profile', 500);
+    }
+  }
+
+  /** PATCH /api/social/me/location { lat, lng } — the nearby-people OPT-IN.
+   *  No location exists until a buyer explicitly calls this. */
+  static async updateLocation(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      const { error, value } = locationSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      buyer.location = { type: 'Point', coordinates: [value.lng, value.lat] };
+      buyer.locationUpdatedAt = new Date();
+      await buyer.save();
+      return ApiResponseUtil.success(
+        res,
+        { ok: true, location: buyer.location, locationUpdatedAt: buyer.locationUpdatedAt },
+        'Location updated'
+      );
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to update location');
+    }
+  }
+
+  /** DELETE /api/social/me/location — the nearby-people OPT-OUT. */
+  static async deleteLocation(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      await Buyer.updateOne({ _id: buyer._id }, { $unset: { location: 1, locationUpdatedAt: 1 } });
+      return ApiResponseUtil.success(res, { ok: true }, 'Location removed');
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to remove location');
     }
   }
 
