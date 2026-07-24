@@ -223,6 +223,17 @@ export class TicketService {
         ? normalizePhone(params.customerPhone)
         : params.customerPhone;
 
+      // Guard: Carrot never processes a sale for an externally-sold event.
+      // This is the SINGLE mint choke point every sale path funnels through —
+      // purchaseForCustomer already guards at its own entry point (harmless
+      // double-check here), but the POS "sell tickets" controller and the
+      // reseller cash/keshless_wallet lanes call sellTickets directly with no
+      // event in scope, so this is the ONLY place those paths get checked.
+      // A missing event is left for checkTicketAvailability below to report —
+      // guarding only when the event is found keeps this a no-op for that case.
+      const eventForGuard = await Event.findById(eventId).select('ticketing');
+      if (eventForGuard) assertCarrotTicketing(eventForGuard);
+
       // Check ticket availability
       const availabilityCheck = await EventService.checkTicketAvailability(
         eventId,
@@ -657,8 +668,12 @@ export class TicketService {
     }
     const ticketTypeData = availabilityCheck.ticketTypeData!;
 
-    const event = await Event.findById(eventId).select('vendorId').lean();
+    const event = await Event.findById(eventId).select('vendorId ticketing').lean();
     if (!event) throw new Error('Event not found');
+    // Guard: an externally-sold event shouldn't get Carrot-issued admission
+    // either — this batch mints real, scannable tickets. Does NOT route
+    // through sellTickets, so it needs its own check.
+    assertCarrotTicketing(event as any);
     const vendorId = (event as any).vendorId;
     const soldBy = params.issuedBy ?? vendorId;
 

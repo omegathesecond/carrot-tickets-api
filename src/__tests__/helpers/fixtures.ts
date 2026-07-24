@@ -16,6 +16,9 @@ export interface SeedPublishedEventOptions {
   capacity?: number;
   ticketTypeName?: string;
   vendorId?: mongoose.Types.ObjectId;
+  // Defaults to the schema default ('carrot') when omitted. Pass 'external'
+  // to seed an externally-sold event for assertCarrotTicketing regression tests.
+  ticketing?: 'carrot' | 'external';
 }
 
 export interface SeededPublishedEvent {
@@ -43,6 +46,7 @@ export async function seedPublishedEvent(
     startTime: futureDate,
     endTime: new Date(futureDate.getTime() + 2 * 60 * 60 * 1000),
     status: EventStatus.PUBLISHED,
+    ...(opts.ticketing ? { ticketing: opts.ticketing } : {}),
     ticketTypes: [
       {
         name: ticketTypeName,
