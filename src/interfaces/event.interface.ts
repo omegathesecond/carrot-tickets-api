@@ -1,4 +1,5 @@
 import { Document, Types } from 'mongoose';
+import type { EventCategory } from '@/constants/eventCategories';
 
 export enum EventStatus {
   DRAFT = 'draft',
@@ -48,6 +49,10 @@ export interface IEvent extends Document {
 
   // Status
   status: EventStatus;
+
+  // Organizer-set category — powers Home/Discover category chips + poster
+  // badge. Never inferred; defaults to 'Other' when unset.
+  category: EventCategory;
 
   // Ticketing mode — 'carrot' sells tickets on-platform (default); 'external'
   // links out to the organizer's own ticket seller (see externalTicketUrl).

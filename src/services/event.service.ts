@@ -1,6 +1,7 @@
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
+import type { EventCategory } from '@/constants/eventCategories';
 import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
 
@@ -20,6 +21,7 @@ export interface CreateEventParams {
     price: number;
     quantity: number;
   }>;
+  category?: EventCategory;
   ticketing?: 'carrot' | 'external';
   externalTicketUrl?: string;
 }
@@ -39,6 +41,7 @@ export interface UpdateEventParams {
     price: number;
     quantity: number;
   }>;
+  category?: EventCategory;
   ticketing?: 'carrot' | 'external';
   externalTicketUrl?: string;
 }
@@ -75,6 +78,7 @@ export class EventService {
         endTime: params.endTime,
         isMultiDay: params.isMultiDay,
         capacity: params.capacity,
+        category: params.category ?? 'Other',
         ticketing: params.ticketing ?? 'carrot',
         externalTicketUrl: params.externalTicketUrl,
         ticketTypes: params.ticketTypes ? params.ticketTypes.map(tt => ({
@@ -277,6 +281,7 @@ export class EventService {
       if (updates.startTime) event.startTime = updates.startTime;
       if (updates.endTime) event.endTime = updates.endTime;
       if (updates.capacity) event.capacity = updates.capacity;
+      if (updates.category) event.category = updates.category;
       if (updates.ticketing) event.ticketing = updates.ticketing;
       if (updates.externalTicketUrl !== undefined) event.externalTicketUrl = updates.externalTicketUrl;
 

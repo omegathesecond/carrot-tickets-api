@@ -1,5 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 import { IEvent, EventStatus, ITicketType } from '@interfaces/event.interface';
+import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 
 const ticketTypeSchema = new Schema<ITicketType>({
   name: {
@@ -111,6 +112,15 @@ const eventSchema = new Schema<IEvent>({
     type: String,
     enum: Object.values(EventStatus),
     default: EventStatus.DRAFT,
+    index: true
+  },
+
+  // Organizer-set category — powers Home/Discover category chips + poster
+  // badge. Never inferred; defaults to 'Other' when unset.
+  category: {
+    type: String,
+    enum: EVENT_CATEGORIES,
+    default: 'Other',
     index: true
   },
 

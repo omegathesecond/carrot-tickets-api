@@ -1,6 +1,7 @@
 import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
+import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
 
@@ -153,6 +154,9 @@ export const createEventSchema = Joi.object({
     .messages({
       'boolean.base': 'isMultiDay must be a boolean value'
     }),
+  category: Joi.string().valid(...EVENT_CATEGORIES).default('Other').messages({
+    'any.only': 'Invalid event category'
+  }),
   posterUrl: Joi.string().uri().optional().trim().messages({
     'string.uri': 'Poster URL must be a valid URL'
   }),
@@ -220,6 +224,9 @@ export const updateEventSchema = Joi.object({
   startTime: Joi.date().optional(),
   endTime: Joi.date().optional(),
   isMultiDay: Joi.boolean().optional(),
+  category: Joi.string().valid(...EVENT_CATEGORIES).messages({
+    'any.only': 'Invalid event category'
+  }),
   posterUrl: Joi.string().uri().optional().trim(),
   thumbnailUrl: Joi.string().uri().optional().trim(),
   galleryImages: Joi.array().items(Joi.string().uri()).optional(),
