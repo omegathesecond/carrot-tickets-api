@@ -20,6 +20,8 @@ export interface CreateEventParams {
     price: number;
     quantity: number;
   }>;
+  ticketing?: 'carrot' | 'external';
+  externalTicketUrl?: string;
 }
 
 export interface UpdateEventParams {
@@ -37,6 +39,8 @@ export interface UpdateEventParams {
     price: number;
     quantity: number;
   }>;
+  ticketing?: 'carrot' | 'external';
+  externalTicketUrl?: string;
 }
 
 export interface GetEventsQuery {
@@ -71,6 +75,8 @@ export class EventService {
         endTime: params.endTime,
         isMultiDay: params.isMultiDay,
         capacity: params.capacity,
+        ticketing: params.ticketing ?? 'carrot',
+        externalTicketUrl: params.externalTicketUrl,
         ticketTypes: params.ticketTypes ? params.ticketTypes.map(tt => ({
           name: tt.name,
           description: tt.description,
@@ -271,6 +277,8 @@ export class EventService {
       if (updates.startTime) event.startTime = updates.startTime;
       if (updates.endTime) event.endTime = updates.endTime;
       if (updates.capacity) event.capacity = updates.capacity;
+      if (updates.ticketing) event.ticketing = updates.ticketing;
+      if (updates.externalTicketUrl !== undefined) event.externalTicketUrl = updates.externalTicketUrl;
 
       // Update ticket types if provided
       if (updates.ticketTypes) {
