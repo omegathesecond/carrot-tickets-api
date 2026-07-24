@@ -1,12 +1,14 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
+import { Event } from '@models/event.model';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { EventQuestion } from '@models/eventQuestion.model';
 import { EventQuestionReply } from '@models/eventQuestionReply.model';
 import {
   listQuestions,
+  listRecent,
   createQuestion,
   createReply,
   toggleQuestionLike,
@@ -212,6 +214,91 @@ describe('eventQuestion.service', () => {
       // One batch call for all question+reply authors together, not one per row.
       expect(findSpy).toHaveBeenCalledTimes(1);
       findSpy.mockRestore();
+    });
+  });
+
+  describe('listRecent', () => {
+    it('returns an empty list when there are no questions across any event', async () => {
+      await seedPublishedEvent(); // an event exists, just no questions
+      expect(await listRecent(null)).toEqual([]);
+    });
+
+    it('returns the most recent questions across events, newest first, each carrying its event { id, name }', async () => {
+      const eventA = await seedPublishedEvent();
+      await Event.findByIdAndUpdate(eventA.eventId, { name: 'Summer Jam' });
+      const eventB = await seedPublishedEvent();
+      await Event.findByIdAndUpdate(eventB.eventId, { name: 'Winter Fest' });
+      const buyer = await seedBuyer();
+
+      const q1 = await EventQuestion.create({
+        eventId: eventA.eventId, authorType: 'buyer', authorId: buyer._id, body: 'Question on event A',
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const q2 = await EventQuestion.create({
+        eventId: eventB.eventId, authorType: 'buyer', authorId: buyer._id, body: 'Question on event B',
+      });
+
+      const list = await listRecent(null);
+
+      expect(list.map((q: any) => q.id)).toEqual([q2.id, q1.id]);
+      expect(list[0].event).toEqual({ id: eventB.eventId, name: 'Winter Fest' });
+      expect(list[1].event).toEqual({ id: eventA.eventId, name: 'Summer Jam' });
+    });
+
+    it('hydrates author, replies (author DTO\'d), and viewerHasLiked exactly like listQuestions', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const asker = await seedBuyer({ phone: '+26878400003', name: 'Asker' });
+      const replier = await seedBuyer({ phone: '+26878400004', name: 'Replier', username: 'replier_2' });
+      const liker: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+
+      const question = await EventQuestion.create({
+        eventId, authorType: 'buyer', authorId: asker._id, body: 'When do gates open?',
+      });
+      await createReply(question.id, { type: 'buyer', id: String(replier._id) }, 'At 6pm!');
+      await toggleQuestionLike(question.id, liker);
+
+      const [entry] = await listRecent(liker);
+
+      expect(entry.author).toEqual({
+        type: 'buyer', id: String(asker._id), name: 'Asker', username: null, avatarUrl: null,
+      });
+      expect(entry.replies).toHaveLength(1);
+      expect(entry.replies[0].author).toEqual({
+        type: 'buyer', id: String(replier._id), name: 'Replier', username: 'replier_2', avatarUrl: null,
+      });
+      expect(entry.viewerHasLiked).toBe(true);
+      expect(entry.likeCount).toBe(1);
+      expect(entry.replyCount).toBe(1);
+
+      const [anonEntry] = await listRecent(null);
+      expect(anonEntry.viewerHasLiked).toBe(false);
+    });
+
+    it('respects the limit, still newest first', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const buyer = await seedBuyer();
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const q = await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: `Q${i}` });
+        ids.push(q.id);
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      const list = await listRecent(null, 2);
+      expect(list.map((q: any) => q.id)).toEqual([ids[2], ids[1]]);
+    });
+
+    it('does not N+1: event lookups are batched regardless of how many distinct events appear', async () => {
+      const buyer = await seedBuyer();
+      for (let i = 0; i < 4; i++) {
+        const { eventId } = await seedPublishedEvent();
+        await EventQuestion.create({ eventId, authorType: 'buyer', authorId: buyer._id, body: `Q${i}` });
+      }
+
+      const eventFindSpy = jest.spyOn(Event, 'find');
+      await listRecent(null);
+      expect(eventFindSpy).toHaveBeenCalledTimes(1);
+      eventFindSpy.mockRestore();
     });
   });
 });

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
-import { listQuestions, createQuestion, createReply, toggleQuestionLike } from '@services/eventQuestion.service';
+import { listQuestions, listRecent, createQuestion, createReply, toggleQuestionLike } from '@services/eventQuestion.service';
 
 /**
  * Event Q&A — questions/replies/likes scoped to an event, for the
@@ -22,6 +22,25 @@ export class EventQuestionController {
       return ApiResponseUtil.success(res, await listQuestions(eventId, actor));
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load questions');
+    }
+  }
+
+  /**
+   * GET /api/public/questions
+   * The most recent Q&A questions ACROSS ALL events, newest first — powers
+   * the TopicsPage cross-event discussion list (the per-event thread is the
+   * `list` method above). Public + optionalTicketsAuth: an anonymous caller
+   * just gets viewerHasLiked:false on every row, same graceful degrade as
+   * `list`.
+   */
+  static async listRecent(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
+      const questions = await listRecent(actor, limit);
+      return ApiResponseUtil.success(res, { questions });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load recent questions');
     }
   }
 

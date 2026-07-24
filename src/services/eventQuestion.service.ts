@@ -78,14 +78,14 @@ function replyDto(reply: any, maps: AuthorMaps) {
 }
 
 /**
- * All questions for an event, newest first, each carrying its replies
- * (oldest first) and viewerHasLiked. Author hydration for every question AND
- * every reply is batched into loadAuthorMaps's (at most) two queries, and the
- * viewer's likes are read in one EventQuestionReaction query — no per-row
- * round-trips regardless of thread size.
+ * Hydrate a batch of raw EventQuestion docs into full DTOs: batches reply
+ * loading, author loading (questions AND replies together, via
+ * loadAuthorMaps), and the viewer's likes into a bounded number of queries
+ * regardless of how many questions/replies are in play — no per-row
+ * round-trips. Shared by listQuestions (one event) and listRecent (cross-
+ * event) so this hydration exists in exactly one place.
  */
-export async function listQuestions(eventId: string, actor: SocialActor | null): Promise<any[]> {
-  const questions = await EventQuestion.find({ eventId }).sort({ createdAt: -1 }).lean();
+async function hydrateQuestions(questions: any[], actor: SocialActor | null): Promise<any[]> {
   if (questions.length === 0) return [];
 
   const questionIds = questions.map((q) => String(q._id));
@@ -132,6 +132,40 @@ export async function listQuestions(eventId: string, actor: SocialActor | null):
       replies: (repliesByQuestion.get(id) ?? []).map((r) => replyDto(r, authorMaps)),
     };
   });
+}
+
+/**
+ * All questions for an event, newest first, each carrying its replies
+ * (oldest first) and viewerHasLiked. See hydrateQuestions for the batching
+ * guarantees.
+ */
+export async function listQuestions(eventId: string, actor: SocialActor | null): Promise<any[]> {
+  const questions = await EventQuestion.find({ eventId }).sort({ createdAt: -1 }).lean();
+  return hydrateQuestions(questions, actor);
+}
+
+/**
+ * The most recent questions ACROSS ALL events, newest first — powers the
+ * TopicsPage's cross-event discussion list (listQuestions is scoped to one
+ * event's Q&A thread). Reuses hydrateQuestions for author/reply/like
+ * hydration, then batch-loads the (id, name) of every distinct event the
+ * page of questions touches in one extra query — never one Event lookup per
+ * question.
+ */
+export async function listRecent(actor: SocialActor | null, limit = 20): Promise<any[]> {
+  const questions = await EventQuestion.find({}).sort({ createdAt: -1 }).limit(limit).lean();
+  if (questions.length === 0) return [];
+
+  const hydrated = await hydrateQuestions(questions, actor);
+
+  const eventIds = [...new Set(questions.map((q) => String(q.eventId)))];
+  const events = await Event.find({ _id: { $in: eventIds } }).select('name').lean();
+  const eventMap = new Map(events.map((e: any) => [String(e._id), e]));
+
+  return hydrated.map((q) => ({
+    ...q,
+    event: { id: q.eventId, name: eventMap.get(q.eventId)?.name ?? null },
+  }));
 }
 
 /** Post a new question on an event's Q&A thread. */

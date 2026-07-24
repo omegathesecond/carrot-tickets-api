@@ -6,6 +6,7 @@ import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
+import { EventQuestionController } from '@controllers/eventQuestion.controller';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 
@@ -52,6 +53,18 @@ router.get('/activity', PublicController.getActivity);
  * @access  Public
  */
 router.get('/trending', PublicController.getTrending);
+
+/**
+ * @route   GET /api/public/questions
+ * @desc    Cross-event Q&A: the most recent questions across ALL events,
+ *          newest first, each carrying its event { id, name } — powers the
+ *          TopicsPage discussion list (per-event threads are still
+ *          GET /api/community/:eventId/questions). Returns { questions: [] }
+ *          when there are none — never fabricated.
+ * @access  Public (optional tickets token for viewerHasLiked)
+ * @query   limit (default 20)
+ */
+router.get('/questions', optionalTicketsAuth, EventQuestionController.listRecent);
 
 /**
  * @route   GET /api/public/feed
