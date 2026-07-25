@@ -174,10 +174,14 @@ export class FollowService {
   /** Hydrates raw (type, id) follow-edge endpoints into the shared person-row
    *  DTO, resolving `isFollowing` for the viewer in two batched queries
    *  (never N+1). Rows whose underlying Buyer/Vendor no longer exists are
-   *  dropped silently (same convention as the other list endpoints here). */
+   *  dropped silently (same convention as the other list endpoints here).
+   *  `viewerId` is null for anonymous/organizer callers (no buyer follow
+   *  graph to resolve) — skip the lookup entirely rather than pass a falsy
+   *  id into the Follow query, which Mongo would otherwise treat as "no
+   *  followerId filter" and match everyone's follows. */
   private static async hydrateRows(
     entries: Array<{ type: FollowTargetType; id: string }>,
-    viewerId: string
+    viewerId: string | null
   ): Promise<FollowPersonRow[]> {
     const buyerIds = entries.filter((e) => e.type === 'buyer').map((e) => e.id);
     const orgIds = entries.filter((e) => e.type === 'organizer').map((e) => e.id);
@@ -185,8 +189,8 @@ export class FollowService {
     const [buyers, vendors, viewerFollowingBuyers, viewerFollowingOrgs] = await Promise.all([
       buyerIds.length ? Buyer.find({ _id: { $in: buyerIds } }) : Promise.resolve([]),
       orgIds.length ? Vendor.find({ _id: { $in: orgIds } }).select('businessName slug logoUrl') : Promise.resolve([]),
-      FollowService.followingIds(viewerId, 'buyer'),
-      FollowService.followingIds(viewerId, 'organizer'),
+      viewerId ? FollowService.followingIds(viewerId, 'buyer') : Promise.resolve([]),
+      viewerId ? FollowService.followingIds(viewerId, 'organizer') : Promise.resolve([]),
     ]);
     const buyerMap = new Map(buyers.map((b: any) => [String(b._id), b]));
     const vendorMap = new Map(vendors.map((v: any) => [String(v._id), v]));
@@ -227,7 +231,7 @@ export class FollowService {
   static async listFollowers(
     targetType: FollowTargetType,
     targetId: string,
-    viewerId: string,
+    viewerId: string | null,
     { page = 1, limit = 20 }: FollowListOptions = {}
   ): Promise<FollowPersonRow[]> {
     const skip = (Math.max(1, page) - 1) * limit;
@@ -248,7 +252,7 @@ export class FollowService {
   static async listFollowing(
     targetType: FollowTargetType,
     targetId: string,
-    viewerId: string,
+    viewerId: string | null,
     { page = 1, limit = 20 }: FollowListOptions = {}
   ): Promise<FollowPersonRow[]> {
     const followerType: FollowerType = targetType === 'organizer' ? 'vendor' : 'buyer';

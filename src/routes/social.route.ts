@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
+import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { SocialProfileController } from '@controllers/socialProfile.controller';
 import { ConsumerReadsController } from '@controllers/consumerReads.controller';
 import { StoryController } from '@controllers/story.controller';
@@ -23,8 +23,12 @@ router.post('/notifications/read', authenticateBuyer, SocialProfileController.ma
 router.get('/username-available', authenticateBuyer, SocialProfileController.usernameAvailable);
 router.post('/follow', authenticateBuyer, SocialProfileController.followTarget);
 router.delete('/follow/:targetType/:targetId', authenticateBuyer, SocialProfileController.unfollowTarget);
-router.get('/followers/:targetType/:targetId', authenticateBuyer, SocialProfileController.followersList);
-router.get('/following/:targetType/:targetId', authenticateBuyer, SocialProfileController.followingList);
+// Follower/following lists are PUBLIC social data — optional auth so
+// anonymous visitors and signed-in vendors (viewing their own brand's
+// Followers/Following) both get the list. isFollowing is only resolved
+// for a BUYER viewer (see SocialProfileController.followersList).
+router.get('/followers/:targetType/:targetId', optionalTicketsAuth, SocialProfileController.followersList);
+router.get('/following/:targetType/:targetId', optionalTicketsAuth, SocialProfileController.followingList);
 router.post('/block', authenticateBuyer, SocialProfileController.blockUser);
 router.post('/presence', authenticateBuyer, SocialProfileController.presence);
 router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblockUser);

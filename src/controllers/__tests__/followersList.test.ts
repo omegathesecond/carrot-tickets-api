@@ -147,17 +147,51 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
       .expect(400);
   });
 
-  it('401s when anonymous', async () => {
-    const target = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Target' });
-    await request(app).get(`/api/social/followers/buyer/${target._id}`).expect(401);
-    await request(app).get(`/api/social/following/buyer/${target._id}`).expect(401);
+  it('anonymous callers get the followers/following lists too (public social data), isFollowing false', async () => {
+    const target = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Target', username: 'target_a' });
+    const follower = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'FollowerA', username: 'follower_a' });
+    const followed = await Buyer.create({ phone: '+26878000003', password: 'secret1', name: 'Followed', username: 'followed_a' });
+    await Follow.create({ followerType: 'buyer', followerId: follower._id, targetType: 'buyer', targetId: target._id });
+    await Follow.create({ followerType: 'buyer', followerId: target._id, targetType: 'buyer', targetId: followed._id });
+
+    const followersRes = await request(app).get(`/api/social/followers/buyer/${target._id}`).expect(200);
+    expect(followersRes.body.data).toEqual([
+      { id: String(follower._id), type: 'buyer', username: 'follower_a', name: 'FollowerA', avatarUrl: null, isFollowing: false },
+    ]);
+
+    const followingRes = await request(app).get(`/api/social/following/buyer/${target._id}`).expect(200);
+    expect(followingRes.body.data).toEqual([
+      { id: String(followed._id), type: 'buyer', username: 'followed_a', name: 'Followed', avatarUrl: null, isFollowing: false },
+    ]);
   });
 
-  it('401s a vendor-only token (buyer-only route)', async () => {
-    const target = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Target' });
-    await request(app)
+  it('a vendor session (organizer viewing their own brand profile) gets the list too, isFollowing false', async () => {
+    const target = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Target', username: 'target_a' });
+    const follower = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'FollowerA', username: 'follower_a' });
+    await Follow.create({ followerType: 'buyer', followerId: follower._id, targetType: 'buyer', targetId: target._id });
+
+    const res = await request(app)
       .get(`/api/social/followers/buyer/${target._id}`)
       .set({ Authorization: `Bearer ${signVendorToken('507f1f77bcf86cd799439012')}` })
-      .expect(401);
+      .expect(200);
+    expect(res.body.data).toEqual([
+      { id: String(follower._id), type: 'buyer', username: 'follower_a', name: 'FollowerA', avatarUrl: null, isFollowing: false },
+    ]);
+  });
+
+  it('a buyer viewer still gets isFollowing resolved (regression guard for the public-read change)', async () => {
+    const me = await Buyer.create({ phone: ME_PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
+    const target = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Target', username: 'target_a' });
+    const follower = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'FollowerA', username: 'follower_a' });
+    await Follow.create({ followerType: 'buyer', followerId: follower._id, targetType: 'buyer', targetId: target._id });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: follower._id });
+
+    const res = await request(app)
+      .get(`/api/social/followers/buyer/${target._id}`)
+      .set(auth(ME_PHONE))
+      .expect(200);
+    expect(res.body.data).toEqual([
+      { id: String(follower._id), type: 'buyer', username: 'follower_a', name: 'FollowerA', avatarUrl: null, isFollowing: true },
+    ]);
   });
 });

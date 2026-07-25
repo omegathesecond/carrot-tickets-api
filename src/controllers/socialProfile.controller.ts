@@ -229,16 +229,18 @@ export class SocialProfileController {
   }
 
   /** GET /api/social/followers/:targetType/:targetId?page=&limit= — who
-   *  follows this buyer/organizer, as person rows with isFollowing resolved
-   *  for the viewer. */
+   *  follows this buyer/organizer, as person rows. PUBLIC read (route is
+   *  optionalTicketsAuth): anonymous and vendor callers get the list too.
+   *  isFollowing is only ever resolved against a BUYER viewer's own follow
+   *  graph — with no buyer viewer (anonymous or an organizer/vendor session)
+   *  it's `false` for every row, never a crash. */
   static async followersList(req: Request, res: Response): Promise<any> {
     try {
       const viewer = await resolveBuyerFromRequest(req);
-      if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const target = SocialProfileController.parseFollowTarget(req, res);
       if (!target) return;
       const { page, limit } = SocialProfileController.parsePageLimit(req);
-      const rows = await FollowService.listFollowers(target.targetType, target.targetId, String(viewer._id), { page, limit });
+      const rows = await FollowService.listFollowers(target.targetType, target.targetId, viewer ? String(viewer._id) : null, { page, limit });
       return ApiResponseUtil.success(res, rows);
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to load followers');
@@ -246,16 +248,15 @@ export class SocialProfileController {
   }
 
   /** GET /api/social/following/:targetType/:targetId?page=&limit= — who this
-   *  buyer/organizer follows, as person rows with isFollowing resolved for
-   *  the viewer. */
+   *  buyer/organizer follows, as person rows. PUBLIC read — see followersList
+   *  above for the optional-viewer/isFollowing contract. */
   static async followingList(req: Request, res: Response): Promise<any> {
     try {
       const viewer = await resolveBuyerFromRequest(req);
-      if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const target = SocialProfileController.parseFollowTarget(req, res);
       if (!target) return;
       const { page, limit } = SocialProfileController.parsePageLimit(req);
-      const rows = await FollowService.listFollowing(target.targetType, target.targetId, String(viewer._id), { page, limit });
+      const rows = await FollowService.listFollowing(target.targetType, target.targetId, viewer ? String(viewer._id) : null, { page, limit });
       return ApiResponseUtil.success(res, rows);
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to load following');
