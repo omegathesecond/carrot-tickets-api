@@ -103,6 +103,34 @@ function generateFakeActivity(
   });
 }
 
+// Deterministic string hash (Java String.hashCode-style) used to derive a
+// per-event synthetic floor WITHOUT Math.random — a per-render/per-request
+// random floor was the original sin (item #19): it re-rolled on every fetch,
+// so the same event could visibly jump between numbers on a refresh. Hashing
+// the eventId instead means the same event always resolves to the same
+// synthetic number until it earns enough real sales to exceed it.
+function seedHash(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+// Blend of real + synthetic "recent sales" momentum for the public event
+// card, matching the user-approved activity-ticker override (2026-07-09):
+// buyers should never see an active event with zero buzz. Real sales are
+// never understated — the result is always >= realCount — and an event
+// with genuinely zero recent sales floors to a believable, per-event-stable
+// number (3-19) instead of a bare 0.
+const SYNTHETIC_RECENT_SALES_MIN = 3;
+const SYNTHETIC_RECENT_SALES_MAX = 19;
+export function blendedRecentSales(realCount: number, seed: string): number {
+  const range = SYNTHETIC_RECENT_SALES_MAX - SYNTHETIC_RECENT_SALES_MIN + 1;
+  const syntheticFloor = SYNTHETIC_RECENT_SALES_MIN + (seedHash(seed) % range);
+  return Math.max(realCount, syntheticFloor);
+}
+
 // Validation schema for the public "Contact Support" form.
 const contactMessageSchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).required(),
@@ -313,9 +341,12 @@ export class PublicController {
         }
       }
 
-      // Transform events for public display
+      // Transform events for public display. `filter` above already scopes
+      // this whole query to status: EventStatus.PUBLISHED, so every event here
+      // is already published/active — safe to apply the synthetic+real blend
+      // (item #19) to all of them.
       const publicEvents = events.map((event: any) => toPublicEventCard(event, {
-        recentSales: recentMap.get(String(event._id)) || 0,
+        recentSales: blendedRecentSales(recentMap.get(String(event._id)) || 0, String(event._id)),
         trending: trendingIds.has(String(event._id)),
         organizer: event.vendorId ? (organizerMap.get(String(event.vendorId)) ?? null) : null,
         // `?? 0`: events predating the counter have no stored field, and
