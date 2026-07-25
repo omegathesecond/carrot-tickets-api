@@ -24,6 +24,9 @@ export interface CreateEventParams {
   category?: EventCategory;
   ticketing?: 'carrot' | 'external';
   externalTicketUrl?: string;
+  currency?: 'SZL' | 'ZAR';
+  priceMin?: number;
+  priceMax?: number;
 }
 
 export interface UpdateEventParams {
@@ -44,6 +47,9 @@ export interface UpdateEventParams {
   category?: EventCategory;
   ticketing?: 'carrot' | 'external';
   externalTicketUrl?: string;
+  currency?: 'SZL' | 'ZAR';
+  priceMin?: number;
+  priceMax?: number;
 }
 
 export interface GetEventsQuery {
@@ -81,6 +87,9 @@ export class EventService {
         category: params.category ?? 'Other',
         ticketing: params.ticketing ?? 'carrot',
         externalTicketUrl: params.externalTicketUrl,
+        currency: params.currency ?? 'SZL',
+        priceMin: params.priceMin,
+        priceMax: params.priceMax,
         ticketTypes: params.ticketTypes ? params.ticketTypes.map(tt => ({
           name: tt.name,
           description: tt.description,
@@ -284,6 +293,9 @@ export class EventService {
       if (updates.category) event.category = updates.category;
       if (updates.ticketing) event.ticketing = updates.ticketing;
       if (updates.externalTicketUrl !== undefined) event.externalTicketUrl = updates.externalTicketUrl;
+      if (updates.currency) event.currency = updates.currency;
+      if (updates.priceMin !== undefined) event.priceMin = updates.priceMin;
+      if (updates.priceMax !== undefined) event.priceMax = updates.priceMax;
 
       // Update ticket types if provided
       if (updates.ticketTypes) {

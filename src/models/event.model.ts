@@ -138,6 +138,19 @@ const eventSchema = new Schema<IEvent>({
     trim: true,
     maxlength: 500
   },
+  currency: {
+    type: String,
+    enum: ['SZL', 'ZAR'],
+    default: 'SZL'
+  },
+  priceMin: {
+    type: Number,
+    min: [0, 'Price cannot be negative']
+  },
+  priceMax: {
+    type: Number,
+    min: [0, 'Price cannot be negative']
+  },
 
   // Sales Info
   totalTicketsSold: {

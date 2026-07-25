@@ -59,6 +59,14 @@ export interface IEvent extends Document {
   ticketing: EventTicketing;
   externalTicketUrl?: string;
 
+  // Display currency for the event price. 'SZL' shows 'E', 'ZAR' shows 'R'.
+  // Only meaningful for external events (Carrot-sold prices are always E).
+  currency: 'SZL' | 'ZAR';
+  // Organizer-entered display price range for external events (Carrot isn't
+  // selling, so there are no ticket tiers to derive a range from).
+  priceMin?: number;
+  priceMax?: number;
+
   // Sales Info
   totalTicketsSold: number;
   totalRevenue: number;
