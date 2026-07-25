@@ -141,6 +141,14 @@ router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.subm
 router.post('/events/:eventId/like', optionalTicketsAuth, EventReactionController.like);
 
 /**
+ * @route   POST /api/public/events/:eventId/save
+ * @desc    Toggle the signed-in actor's bookmark (Save) on an event — a
+ *          distinct reaction from `like`, powering the Saved tab.
+ * @access  Buyer or vendor session required — 401 when anonymous.
+ */
+router.post('/events/:eventId/save', optionalTicketsAuth, EventReactionController.save);
+
+/**
  * @route   POST /api/public/events/:eventId/share
  * @desc    Record an event share. Anonymous allowed — sharing needs no actor.
  * @access  Public

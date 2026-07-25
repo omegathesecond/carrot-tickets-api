@@ -32,7 +32,7 @@ describe('GET /api/social/me/calendar', () => {
   it("groups the buyer's saved events into month counts for the year", async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     const e = await makeEvent({ name: 'Aug Event', eventDate: new Date('2026-08-10'), startTime: new Date('2026-08-10'), endTime: new Date('2026-08-10') });
-    await EventReaction.create({ eventId: e._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: e._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.monthCounts.Aug).toBe(1);
@@ -42,13 +42,13 @@ describe('GET /api/social/me/calendar', () => {
   it('unions going (ticketed) events with saved events, de-duped', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     const saved = await makeEvent({ name: 'Saved Only', eventDate: new Date('2026-03-05') });
-    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const ticketed = await makeEvent({ name: 'Ticketed Only', eventDate: new Date('2026-03-15') });
     await Ticket.create({ eventId: ticketed._id, vendorId: ticketed.vendorId, ticketType: 'GA', price: 0, customerPhone: PHONE, status: TicketStatus.SOLD });
 
     const both = await makeEvent({ name: 'Both', eventDate: new Date('2026-03-20') });
-    await EventReaction.create({ eventId: both._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: both._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     await Ticket.create({ eventId: both._id, vendorId: both.vendorId, ticketType: 'GA', price: 0, customerPhone: PHONE, status: TicketStatus.SOLD });
 
     const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
@@ -60,11 +60,11 @@ describe('GET /api/social/me/calendar', () => {
   it('excludes events outside the requested year', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     const inYear = await makeEvent({ name: 'In 2026', eventDate: new Date('2026-01-15') });
-    await EventReaction.create({ eventId: inYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: inYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     const outOfYear = await makeEvent({ name: 'In 2025', eventDate: new Date('2025-12-31') });
-    await EventReaction.create({ eventId: outOfYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: outOfYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     const nextYear = await makeEvent({ name: 'In 2027', eventDate: new Date('2027-01-01') });
-    await EventReaction.create({ eventId: nextYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: nextYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['In 2026']);
@@ -75,9 +75,9 @@ describe('GET /api/social/me/calendar', () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     const now = new Date();
     const thisYear = await makeEvent({ name: 'This Year', eventDate: now });
-    await EventReaction.create({ eventId: thisYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: thisYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     const lastYear = await makeEvent({ name: 'Last Year', eventDate: new Date(Date.UTC(now.getUTCFullYear() - 1, 5, 1)) });
-    await EventReaction.create({ eventId: lastYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: lastYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const res = await request(app).get('/api/social/me/calendar').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['This Year']);

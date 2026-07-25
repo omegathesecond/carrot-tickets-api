@@ -20,6 +20,23 @@ export async function toggleEventLike(eventId: string, actor: SocialActor) {
   return { active, likeCount: e?.likeCount ?? 0 };
 }
 
+/** Toggle the actor's SAVE (bookmark) on an event — independent of toggleEventLike;
+ *  a 'save' EventReaction row is entirely separate from a 'like' row (see the
+ *  unique index in eventReaction.model.ts, keyed on `type` too). */
+export async function toggleEventSave(eventId: string, actor: SocialActor) {
+  const { active } = await toggleReactionGeneric({
+    reactionModel: EventReaction,
+    targetModel: Event,
+    targetField: 'eventId',
+    targetId: eventId,
+    actor,
+    type: 'save',
+    counterField: 'saveCount',
+  });
+  const e = await Event.findById(eventId).select('saveCount').lean();
+  return { active, saveCount: e?.saveCount ?? 0 };
+}
+
 export async function recordEventShare(eventId: string): Promise<{ shareCount: number }> {
   const e = await Event.findByIdAndUpdate(eventId, { $inc: { shareCount: 1 } }, { new: true })
     .select('shareCount')

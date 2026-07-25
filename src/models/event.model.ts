@@ -168,6 +168,9 @@ const eventSchema = new Schema<IEvent>({
   // have no value stored; `.lean()` reads (feed.service.ts) do NOT apply schema
   // defaults to absent fields, so every read site must use `?? 0`.
   likeCount: { type: Number, default: 0 },
+  // Distinct bookmark-reaction counter, independent of likeCount — mirrors
+  // Update's likeCount/saveCount split (see EventReaction's 'save' type).
+  saveCount: { type: Number, default: 0 },
   shareCount: { type: Number, default: 0 },
 
   // Media & Images

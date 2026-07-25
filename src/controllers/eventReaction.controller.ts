@@ -3,7 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { Event } from '@models/event.model';
-import { toggleEventLike, recordEventShare } from '@services/eventReaction.service';
+import { toggleEventLike, toggleEventSave, recordEventShare } from '@services/eventReaction.service';
 
 /**
  * Likes/shares on an event, mounted as an event sub-resource alongside
@@ -43,6 +43,24 @@ export class EventReactionController {
       return ApiResponseUtil.success(res, await toggleEventLike(eventId, actor));
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to like event');
+    }
+  }
+
+  /** POST /api/public/events/:eventId/save — 401 when anonymous. Toggles a
+   *  bookmark, entirely independent of `like` (see toggleEventSave). */
+  static async save(req: Request, res: Response): Promise<any> {
+    try {
+      // See the comment in `like` above: a real lookup failure must surface
+      // as a 500, not be swallowed into a misleading 401.
+      const actor = await resolveActorFromRequest(req);
+      if (!actor) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      const eventId = await EventReactionController.requireEvent(req, res);
+      if (!eventId) return;
+
+      return ApiResponseUtil.success(res, await toggleEventSave(eventId, actor));
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to save event');
     }
   }
 

@@ -2,6 +2,8 @@ export interface PublicEventCardExtras {
   recentSales?: number;
   trending?: boolean;
   viewerHasLiked?: boolean;
+  /** Bookmark state — entirely independent of viewerHasLiked (see EventReaction's 'save' type). */
+  viewerHasSaved?: boolean;
   likeCount?: number;
   organizer?: { id: string; businessName: string; logoUrl: string | null } | null;
 }
@@ -71,5 +73,6 @@ export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}
   if ('trending' in extras) card.trending = extras.trending;
   if ('likeCount' in extras) card.likeCount = extras.likeCount;
   if ('viewerHasLiked' in extras) card.viewerHasLiked = extras.viewerHasLiked;
+  if ('viewerHasSaved' in extras) card.viewerHasSaved = extras.viewerHasSaved;
   return card;
 }

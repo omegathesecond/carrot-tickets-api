@@ -7,7 +7,7 @@ export interface IEventReaction extends Document {
   /** The reacting actor's id. Holds a Buyer _id when actorType='buyer', a Vendor _id when 'vendor'. */
   buyerId: Types.ObjectId;
   actorType: ReactionActorType;
-  type: 'like';
+  type: 'like' | 'save';
   createdAt: Date;
 }
 
@@ -15,9 +15,11 @@ const schema = new Schema<IEventReaction>({
   eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
   buyerId: { type: Schema.Types.ObjectId, required: true, index: true },
   actorType: { type: String, enum: ['buyer', 'vendor'], required: true, default: 'buyer' },
-  // Enum with a single member today. Mirrors UpdateReaction so adding 'save'
-  // later is a one-word change, not a migration.
-  type: { type: String, enum: ['like'], required: true },
+  // 'save' is a distinct bookmark reaction, independent of 'like' — an actor
+  // may hold both a like and a save row for the same event (disambiguated by
+  // the unique index below, which includes `type`). Mirrors UpdateReaction's
+  // like/save split.
+  type: { type: String, enum: ['like', 'save'], required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
 // One reaction of each type per (event, actor). actorType disambiguates the

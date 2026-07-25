@@ -3,9 +3,9 @@ import { EventReaction } from '@models/eventReaction.model';
 import { Update } from '@models/update.model';
 
 export class SavedContentService {
-  /** Event ids the buyer saved (= liked), newest-first. */
+  /** Event ids the buyer saved (bookmarked) — distinct from liked, newest-first. */
   static async savedEventIds(buyerId: string): Promise<string[]> {
-    const rows = await EventReaction.find({ actorType: 'buyer', buyerId, type: 'like' }).sort({ createdAt: -1 }).select('eventId');
+    const rows = await EventReaction.find({ actorType: 'buyer', buyerId, type: 'save' }).sort({ createdAt: -1 }).select('eventId');
     return rows.map((r) => String(r.eventId));
   }
   /** Update ids the buyer saved, newest-first. */

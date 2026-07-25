@@ -73,6 +73,7 @@ export interface IEvent extends Document {
 
   // Discover-feed engagement counters
   likeCount: number;
+  saveCount: number;
   shareCount: number;
 
   // Media & Images

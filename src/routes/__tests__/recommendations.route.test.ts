@@ -16,7 +16,7 @@ describe('GET /api/social/recommendations', () => {
     const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret1' });
     const saved = await Event.create({ vendorId: v._id, name: 'Saved', venue: 'V', eventDate: new Date(Date.now() + 8.64e7), startTime: new Date(), endTime: new Date(Date.now() + 8.64e7), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
     const rec = await Event.create({ vendorId: v._id, name: 'Recommended', venue: 'V', eventDate: new Date(Date.now() + 1.7e8), startTime: new Date(), endTime: new Date(Date.now() + 1.7e8), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
-    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const res = await request(app).get('/api/social/recommendations').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
     expect(res.body.data.basisEvent.name).toBe('Saved');
@@ -43,7 +43,7 @@ describe('GET /api/social/recommendations', () => {
     const future = new Date(Date.now() + 60 * 60 * 1000);
     const saved = await Event.create({ vendorId: v._id, name: 'Saved', venue: 'V', eventDate: new Date(Date.now() + 8.64e7), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
     await Event.create({ vendorId: v._id, name: 'In Progress Show', venue: 'V', eventDate: past, startTime: past, endTime: future, status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
-    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const res = await request(app).get('/api/social/recommendations').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
     const names = res.body.data.events.map((c: any) => c.name);
