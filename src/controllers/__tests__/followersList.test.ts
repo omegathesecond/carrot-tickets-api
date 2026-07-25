@@ -41,6 +41,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
     const rowB = byId(String(followerB._id));
     expect(rowA).toEqual({
       id: String(followerA._id),
+      type: 'buyer',
       username: 'follower_a',
       name: 'FollowerA',
       avatarUrl: null,
@@ -48,6 +49,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
     });
     expect(rowB).toEqual({
       id: String(followerB._id),
+      type: 'buyer',
       username: 'follower_b',
       name: 'FollowerB',
       avatarUrl: null,
@@ -71,6 +73,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual({
       id: String(followed._id),
+      type: 'buyer',
       username: 'followed_a',
       name: 'Followed',
       avatarUrl: null,
@@ -90,7 +93,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
       .expect(200);
 
     expect(res.body.data).toEqual([
-      { id: String(followerBuyer._id), username: 'fan_a', name: 'Fan', avatarUrl: null, isFollowing: false },
+      { id: String(followerBuyer._id), type: 'buyer', username: 'fan_a', name: 'Fan', avatarUrl: null, isFollowing: false },
     ]);
   });
 
@@ -106,7 +109,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
       .expect(200);
 
     expect(res.body.data).toEqual([
-      { id: String(followedOrg._id), username: followedOrg.slug, name: 'House on Fire', avatarUrl: 'https://cdn.example.com/hof.png', isFollowing: false },
+      { id: String(followedOrg._id), type: 'organizer', username: followedOrg.slug, name: 'House on Fire', avatarUrl: 'https://cdn.example.com/hof.png', isFollowing: false },
     ]);
   });
 

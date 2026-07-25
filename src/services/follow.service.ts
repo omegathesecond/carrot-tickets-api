@@ -10,9 +10,12 @@ import { assertNotSuspended } from '@utils/socialSuspension.util';
  *  field names for both, so a single list component can render buyer AND
  *  organizer rows without a type switch. A buyer row maps username/name/
  *  avatarUrl as-is; an organizer (Vendor) row maps slug -> username,
- *  businessName -> name, logoUrl -> avatarUrl. */
+ *  businessName -> name, logoUrl -> avatarUrl. `type` tells the client which
+ *  shape it got (buyer -> /u/:username, organizer -> /o/:id) without having
+ *  to guess from field presence. */
 export interface FollowPersonRow {
   id: string;
+  type: 'buyer' | 'organizer';
   username: string | null;
   name: string | null;
   avatarUrl: string | null;
@@ -197,6 +200,7 @@ export class FollowService {
         if (!b) continue;
         rows.push({
           id: entry.id,
+          type: 'buyer',
           username: b.username ?? null,
           name: b.name ?? null,
           avatarUrl: b.avatarUrl ?? null,
@@ -207,6 +211,7 @@ export class FollowService {
         if (!v) continue;
         rows.push({
           id: entry.id,
+          type: 'organizer',
           username: v.slug ?? null,
           name: v.businessName ?? null,
           avatarUrl: v.logoUrl ?? null,
