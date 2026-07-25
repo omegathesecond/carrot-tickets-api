@@ -129,12 +129,20 @@ const momoInitiateSchema = Joi.object({
 });
 
 // Validation schemas
-const publicEventsQuerySchema = Joi.object({
+// Exported so it's independently unit-testable (see
+// __tests__/eventQuery.validator.test.ts) without spinning up the DB harness.
+export const publicEventsQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(50).default(20),
   search: Joi.string().optional().max(100),
   startDate: Joi.date().iso().optional(),
-  endDate: Joi.date().iso().optional().min(Joi.ref('startDate')),
+  // `min(startDate)` only applies when startDate is ALSO present — an
+  // endDate-only query (what the Past tab sends) must not 400 trying to
+  // resolve a ref to a field that isn't there.
+  endDate: Joi.date().iso().optional().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().iso().min(Joi.ref('startDate')),
+  }),
   // Category chip filter (Home/Discover). 'All' or absent = unfiltered — see
   // getPublicEvents. Not constrained to EVENT_CATEGORIES so an unrecognized
   // value just yields zero results rather than a 400.
