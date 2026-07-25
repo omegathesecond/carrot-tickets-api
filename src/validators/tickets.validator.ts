@@ -279,7 +279,13 @@ export const eventQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
   status: Joi.string().valid(...Object.values(EventStatus)).optional(),
   startDate: Joi.date().iso().optional(),
-  endDate: Joi.date().iso().min(Joi.ref('startDate')).optional().messages({
+  // `min(startDate)` only applies when startDate is ALSO present — an
+  // endDate-only query must not 400 trying to resolve a ref to a field
+  // that isn't there.
+  endDate: Joi.date().iso().optional().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().iso().min(Joi.ref('startDate')),
+  }).messages({
     'date.min': 'End date must be after start date'
   }),
   search: Joi.string().optional()
@@ -378,7 +384,13 @@ export const ticketSalesQuerySchema = Joi.object({
   paymentStatus: Joi.string().valid(...Object.values(PaymentStatus)).optional(),
   channel: Joi.string().valid(...Object.values(SalesChannel)).optional(),
   startDate: Joi.date().iso().optional(),
-  endDate: Joi.date().iso().min(Joi.ref('startDate')).optional().messages({
+  // `min(startDate)` only applies when startDate is ALSO present — an
+  // endDate-only query must not 400 trying to resolve a ref to a field
+  // that isn't there.
+  endDate: Joi.date().iso().optional().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().iso().min(Joi.ref('startDate')),
+  }).messages({
     'date.min': 'End date must be after start date'
   })
 });
@@ -429,7 +441,13 @@ export const scanQuerySchema = Joi.object({
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   status: Joi.string().valid('success', 'failed', 'already_scanned').optional(),
   startDate: Joi.date().iso().optional(),
-  endDate: Joi.date().iso().min(Joi.ref('startDate')).optional().messages({
+  // `min(startDate)` only applies when startDate is ALSO present — an
+  // endDate-only query must not 400 trying to resolve a ref to a field
+  // that isn't there.
+  endDate: Joi.date().iso().optional().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().iso().min(Joi.ref('startDate')),
+  }).messages({
     'date.min': 'End date must be after start date'
   })
 });
@@ -439,7 +457,13 @@ export const scanQuerySchema = Joi.object({
  */
 export const analyticsQuerySchema = Joi.object({
   startDate: Joi.date().iso().optional(),
-  endDate: Joi.date().iso().min(Joi.ref('startDate')).optional().messages({
+  // `min(startDate)` only applies when startDate is ALSO present — an
+  // endDate-only query must not 400 trying to resolve a ref to a field
+  // that isn't there.
+  endDate: Joi.date().iso().optional().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().iso().min(Joi.ref('startDate')),
+  }).messages({
     'date.min': 'End date must be after start date'
   }),
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
