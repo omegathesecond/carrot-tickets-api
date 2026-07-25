@@ -5,6 +5,14 @@ import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
 
+// Cross-field guard: a max price, when both are present, must be >= the min.
+const priceRangeCheck = (value: any, helpers: any) => {
+  if (value.priceMin != null && value.priceMax != null && value.priceMax < value.priceMin) {
+    return helpers.message('Maximum price must be greater than or equal to minimum price');
+  }
+  return value;
+};
+
 /**
  * Authentication Validators
  */
@@ -214,7 +222,12 @@ export const createEventSchema = Joi.object({
     'string.uri': 'External ticket URL must be a valid https:// URL',
     'any.required': 'External ticket URL is required when ticketing is set to external'
   }),
-});
+  currency: Joi.string().valid('SZL', 'ZAR').default('SZL').messages({
+    'any.only': "Currency must be either 'SZL' or 'ZAR'",
+  }),
+  priceMin: Joi.number().min(0).optional(),
+  priceMax: Joi.number().min(0).optional(),
+}).custom(priceRangeCheck);
 
 export const updateEventSchema = Joi.object({
   name: Joi.string().trim().max(200).optional(),
@@ -252,7 +265,12 @@ export const updateEventSchema = Joi.object({
     'string.uri': 'External ticket URL must be a valid https:// URL',
     'any.required': 'External ticket URL is required when ticketing is set to external'
   }),
-}).min(1).messages({
+  currency: Joi.string().valid('SZL', 'ZAR').optional().messages({
+    'any.only': "Currency must be either 'SZL' or 'ZAR'",
+  }),
+  priceMin: Joi.number().min(0).optional(),
+  priceMax: Joi.number().min(0).optional(),
+}).min(1).custom(priceRangeCheck).messages({
   'object.min': 'At least one field must be provided for update'
 });
 
