@@ -39,7 +39,7 @@ describe('GET /api/public/feed — event viewer reactions', () => {
 
     const slide = res.body.data.items.find((i: any) => i.type === 'event' && i.id === e.id);
     expect(slide).toBeTruthy();
-    expect(slide.viewerReactions).toEqual({ liked: true });
+    expect(slide.viewerReactions).toEqual({ liked: true, saved: false });
   });
 
   // The events tab returns ONLY event slides — zero update slides. This is
@@ -58,7 +58,7 @@ describe('GET /api/public/feed — event viewer reactions', () => {
     expect(res.body.data.items.length).toBeGreaterThan(0);
     expect(res.body.data.items.every((i: any) => i.type === 'event')).toBe(true);
     for (const slide of res.body.data.items) {
-      expect(slide.viewerReactions).toEqual({ liked: false });
+      expect(slide.viewerReactions).toEqual({ liked: false, saved: false });
     }
   });
 

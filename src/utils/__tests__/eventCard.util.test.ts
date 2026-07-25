@@ -23,6 +23,7 @@ it('emits ONLY base fields when no extras are given (no shape widening)', () => 
   expect('trending' in card).toBe(false);
   expect('likeCount' in card).toBe(false);
   expect('viewerHasLiked' in card).toBe(false);
+  expect('viewerHasSaved' in card).toBe(false);
 });
 
 it('always includes ticketing + externalTicketUrl as base fields, falling back to carrot/null for legacy events', () => {
@@ -67,13 +68,14 @@ it('emits posterUrl/thumbnailUrl as null (not omitted) for a poster-less event',
 it('includes only the extras it is given', () => {
   const card = toPublicEventCard(baseEvent, {
     organizer: { id: 'v1', businessName: 'MTN Bushfire', logoUrl: null },
-    recentSales: 12, trending: true, likeCount: 4, viewerHasLiked: true,
+    recentSales: 12, trending: true, likeCount: 4, viewerHasLiked: true, viewerHasSaved: true,
   });
   expect(card.organizer?.businessName).toBe('MTN Bushfire');
   expect(card.recentSales).toBe(12);
   expect(card.trending).toBe(true);
   expect(card.likeCount).toBe(4);
   expect(card.viewerHasLiked).toBe(true);
+  expect(card.viewerHasSaved).toBe(true);
 });
 
 describe('buildEventCardFields — currency + external price + gallery', () => {

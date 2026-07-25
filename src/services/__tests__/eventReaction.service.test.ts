@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Event } from '@models/event.model';
-import { toggleEventLike, recordEventShare, getViewerEventReactions } from '@services/eventReaction.service';
+import { toggleEventLike, toggleEventSave, recordEventShare, getViewerEventReactions } from '@services/eventReaction.service';
 import type { SocialActor } from '@utils/socialActor.util';
 
 async function seedEvent() {
@@ -56,21 +56,48 @@ describe('event reactions', () => {
     expect((await recordEventShare(e.id)).shareCount).toBe(2);
   });
 
-  it('reports viewer reactions per event, defaulting unliked to false', async () => {
+  it('reports viewer reactions per event, defaulting unliked/unsaved to false', async () => {
     const liked = await seedEvent();
     const notLiked = await seedEvent();
     const actor = buyer();
     await toggleEventLike(liked.id, actor);
 
     const map = await getViewerEventReactions([liked.id, notLiked.id], actor);
-    expect(map[liked.id]).toEqual({ liked: true });
-    expect(map[notLiked.id]).toEqual({ liked: false });
+    expect(map[liked.id]).toEqual({ liked: true, saved: false });
+    expect(map[notLiked.id]).toEqual({ liked: false, saved: false });
   });
 
   it('does not leak another actor\'s like into the viewer map', async () => {
     const e = await seedEvent();
     await toggleEventLike(e.id, buyer());
     const map = await getViewerEventReactions([e.id], buyer());
-    expect(map[e.id]).toEqual({ liked: false });
+    expect(map[e.id]).toEqual({ liked: false, saved: false });
+  });
+
+  // FINDING 1 fix: viewerHasSaved was a dead capability — getViewerEventReactions
+  // only ever resolved `liked`. It must now also resolve `saved` (independent
+  // of `liked`, per the 'save' EventReaction type) so the bookmark UI can
+  // restore its filled/hollow state after reload.
+  it('reports saved:true for the actor who saved, false for a different actor, and leaves liked unaffected', async () => {
+    const e = await seedEvent();
+    const saver = buyer();
+    const otherActor = buyer();
+    await toggleEventSave(e.id, saver);
+
+    const saverMap = await getViewerEventReactions([e.id], saver);
+    expect(saverMap[e.id]).toEqual({ liked: false, saved: true });
+
+    const otherMap = await getViewerEventReactions([e.id], otherActor);
+    expect(otherMap[e.id]).toEqual({ liked: false, saved: false });
+  });
+
+  it('resolves both liked and saved independently when an actor has done both', async () => {
+    const e = await seedEvent();
+    const actor = buyer();
+    await toggleEventLike(e.id, actor);
+    await toggleEventSave(e.id, actor);
+
+    const map = await getViewerEventReactions([e.id], actor);
+    expect(map[e.id]).toEqual({ liked: true, saved: true });
   });
 });

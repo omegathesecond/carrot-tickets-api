@@ -325,18 +325,19 @@ export class PublicController {
         console.error('Batch resolve public organizers error:', error);
       }
 
-      // "Have I liked this?" for the heart on each card. Anonymous visitors
-      // have no actor, so every event reports viewerHasLiked:false and the
-      // heart renders hollow — the endpoint stays public either way. One batch
-      // query for the page, mirroring how the Discover feed hydrates its event
-      // slides (see feed.controller).
+      // "Have I liked/saved this?" for the heart + bookmark on each card.
+      // Anonymous visitors have no actor, so every event reports
+      // viewerHasLiked/viewerHasSaved:false and both render hollow — the
+      // endpoint stays public either way. One batch query for the page,
+      // mirroring how the Discover feed hydrates its event slides (see
+      // feed.controller).
       const actor = await resolveActorFromRequest(req).catch(() => null);
-      let likedMap: Record<string, { liked: boolean }> = {};
+      let likedMap: Record<string, { liked: boolean; saved: boolean }> = {};
       if (actor) {
         try {
           likedMap = await getViewerEventReactions(eventIds.map(String), actor);
         } catch (error) {
-          // Degrade to "not liked" rather than 500 the whole list — but say so.
+          // Degrade to "not liked/saved" rather than 500 the whole list — but say so.
           console.error('Batch resolve viewer event reactions error:', error);
         }
       }
@@ -353,6 +354,7 @@ export class PublicController {
         // .lean() does not apply the schema default to an absent path.
         likeCount: (event as any).likeCount ?? 0,
         viewerHasLiked: likedMap[String(event._id)]?.liked ?? false,
+        viewerHasSaved: likedMap[String(event._id)]?.saved ?? false,
       }));
 
       return ApiResponseUtil.success(res, {

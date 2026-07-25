@@ -1,7 +1,10 @@
+import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { buildEventCards } from '@services/eventCards.service';
+import { toggleEventSave } from '@services/eventReaction.service';
+import type { SocialActor } from '@utils/socialActor.util';
 
 describe('buildEventCards', () => {
   beforeAll(connectTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
@@ -31,5 +34,24 @@ describe('buildEventCards', () => {
     const e = await Event.create({ vendorId: v._id, name: 'Orphaned Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
     const [card] = await buildEventCards([String(e._id)], null);
     expect(card.organizer).toBeNull();
+  });
+
+  // FINDING 1 fix: viewerHasSaved was a dead capability on this read path —
+  // buildEventCards only ever resolved viewerHasLiked. It must now also
+  // resolve the independent 'save' reaction so the bookmark UI can restore
+  // its filled state after reload.
+  it('serializes viewerHasSaved:true for the actor who saved and false for a non-actor, leaving viewerHasLiked unaffected', async () => {
+    const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret123' });
+    const e = await Event.create({ vendorId: v._id, name: 'Saved Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
+    const saver: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+    const other: SocialActor = { type: 'buyer', id: new mongoose.Types.ObjectId().toString() };
+    await toggleEventSave(String(e._id), saver);
+
+    const [saverCard] = await buildEventCards([String(e._id)], saver);
+    expect(saverCard.viewerHasSaved).toBe(true);
+    expect(saverCard.viewerHasLiked).toBe(false);
+
+    const [otherCard] = await buildEventCards([String(e._id)], other);
+    expect(otherCard.viewerHasSaved).toBe(false);
   });
 });

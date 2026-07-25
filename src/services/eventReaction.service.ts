@@ -45,24 +45,32 @@ export async function recordEventShare(eventId: string): Promise<{ shareCount: n
 }
 
 /**
- * Batch-resolve "did this viewer like each of these events?" in ONE query.
- * The feed calls this once per page — a per-slide call would be N round-trips.
+ * Batch-resolve "did this viewer like/save each of these events?" in ONE
+ * query. The feed calls this once per page — a per-slide call would be N
+ * round-trips. Mirrors update.service's getViewerReactions ({liked, saved}
+ * shape) so a card's bookmark state can be restored after reload, same as an
+ * update's.
  */
 export async function getViewerEventReactions(
   eventIds: string[],
   actor: SocialActor
-): Promise<Record<string, { liked: boolean }>> {
-  const map: Record<string, { liked: boolean }> = {};
-  for (const id of eventIds) map[String(id)] = { liked: false };
+): Promise<Record<string, { liked: boolean; saved: boolean }>> {
+  const map: Record<string, { liked: boolean; saved: boolean }> = {};
+  for (const id of eventIds) map[String(id)] = { liked: false, saved: false };
   if (eventIds.length === 0) return map;
 
   const rows = await EventReaction.find({
     eventId: { $in: eventIds },
     actorType: actor.type,
     buyerId: actor.id,
-    type: 'like',
+    type: { $in: ['like', 'save'] },
   }).lean();
 
-  for (const r of rows) map[String(r.eventId)] = { liked: true };
+  for (const r of rows) {
+    const k = String(r.eventId);
+    if (!map[k]) map[k] = { liked: false, saved: false };
+    if (r.type === 'like') map[k].liked = true;
+    if (r.type === 'save') map[k].saved = true;
+  }
   return map;
 }
