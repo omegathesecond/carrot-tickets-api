@@ -47,6 +47,14 @@ export function buildEventCardFields(event: any) {
     // .select() projection that omits it) fall back to 'Other' rather than
     // surfacing undefined.
     category: event.category ?? 'Other',
+    // Display currency + organizer-entered price range for external events.
+    // Legacy events predating these fields fall back to SZL / no range.
+    currency: event.currency ?? 'SZL',
+    priceMin: event.priceMin ?? null,
+    priceMax: event.priceMax ?? null,
+    // Gallery images power the website's auto-cycling masonry/card animation.
+    // Absent on legacy events or under a .select() that omits them → [].
+    galleryImages: event.galleryImages ?? [],
   };
 }
 

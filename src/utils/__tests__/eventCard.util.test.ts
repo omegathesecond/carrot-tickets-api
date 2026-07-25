@@ -1,4 +1,4 @@
-import { toPublicEventCard } from '@/utils/eventCard.util';
+import { toPublicEventCard, buildEventCardFields } from '@/utils/eventCard.util';
 
 const baseEvent = {
   _id: 'e1', name: 'Bushfire', description: 'd', venue: 'House on Fire',
@@ -74,4 +74,25 @@ it('includes only the extras it is given', () => {
   expect(card.trending).toBe(true);
   expect(card.likeCount).toBe(4);
   expect(card.viewerHasLiked).toBe(true);
+});
+
+describe('buildEventCardFields — currency + external price + gallery', () => {
+  it('defaults currency to SZL and price/gallery to null/[] when absent', () => {
+    const f = buildEventCardFields({ name: 'A', ticketTypes: [] });
+    expect(f.currency).toBe('SZL');
+    expect(f.priceMin).toBeNull();
+    expect(f.priceMax).toBeNull();
+    expect(f.galleryImages).toEqual([]);
+  });
+
+  it('passes through ZAR + explicit price range + gallery', () => {
+    const f = buildEventCardFields({
+      name: 'B', ticketTypes: [], currency: 'ZAR',
+      priceMin: 100, priceMax: 250, galleryImages: ['a.jpg', 'b.jpg'],
+    });
+    expect(f.currency).toBe('ZAR');
+    expect(f.priceMin).toBe(100);
+    expect(f.priceMax).toBe(250);
+    expect(f.galleryImages).toEqual(['a.jpg', 'b.jpg']);
+  });
 });
