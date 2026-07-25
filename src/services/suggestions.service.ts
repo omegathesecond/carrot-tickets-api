@@ -86,6 +86,7 @@ export class SuggestionsService {
     if (iFollow.length === 0) {
       const recent = await Buyer.find({ _id: { $nin: [...exclude] }, username: { $exists: true, $ne: null }, socialSuspendedAt: null })
         .select('_id')
+        .sort({ lastLoginAt: -1 })
         .limit(FALLBACK_CANDIDATE_POOL_CAP);
       candidates = recent.map((b) => ({ id: String(b._id), mutualCount: 0 }));
     } else {
