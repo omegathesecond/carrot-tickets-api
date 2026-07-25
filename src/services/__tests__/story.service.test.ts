@@ -26,7 +26,7 @@ describe('story.service', () => {
   const buyerId = () => new mongoose.Types.ObjectId().toString();
 
   describe('createStory / finalizeStory', () => {
-    it('createStory persists a processing story with a 24h expiry and returns a presigned URL', async () => {
+    it('createStory persists a processing story with a 48h expiry and returns a presigned URL', async () => {
       const before = Date.now();
       const { story, uploadUrl } = await createStory({
         actor: { type: 'buyer', id: buyerId() }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg',
@@ -35,8 +35,8 @@ describe('story.service', () => {
       expect(story.media.status).toBe('processing');
       expect(story.media.rawKey).toBe('updates/raw/1-abc.jpg');
       const expiresInMs = story.expiresAt.getTime() - before;
-      expect(expiresInMs).toBeGreaterThan(23.9 * 3600 * 1000);
-      expect(expiresInMs).toBeLessThan(24.1 * 3600 * 1000);
+      expect(expiresInMs).toBeGreaterThan(47.9 * 3600 * 1000);
+      expect(expiresInMs).toBeLessThan(48.1 * 3600 * 1000);
     });
 
     it('finalizeStory(image) marks ready immediately with an image url', async () => {

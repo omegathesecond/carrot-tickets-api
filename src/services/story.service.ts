@@ -9,7 +9,7 @@ import { HttpError } from '@utils/httpError.util';
 import type { SocialActor } from '@utils/socialActor.util';
 import type { StoryKind } from '@interfaces/story.interface';
 
-const STORY_TTL_MS = 24 * 60 * 60 * 1000;
+const STORY_TTL_MS = 48 * 60 * 60 * 1000;
 
 interface CreateStoryInput {
   actor: SocialActor;
