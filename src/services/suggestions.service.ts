@@ -19,6 +19,16 @@ export interface SuggestionsPageOptions {
 // as organizersToFollow below.
 const FALLBACK_CANDIDATE_POOL_CAP = 1000;
 
+// Cap on how many candidates get scored (shared-event resolution + the full
+// composite score) per request. mutualCount dominates the composite score by
+// construction (MUTUAL_WEIGHT is larger than the max possible combined
+// contribution of sharedEventCount+city+recency — see the weight constants
+// below), so taking the top-K by mutualCount BEFORE scoring is guaranteed to
+// contain the eventual top-K ranked results. Without this cap, a
+// well-connected viewer's friends-of-friends set is unbounded, and used to
+// fan out one GoingService query PER candidate.
+const CANDIDATE_SCORE_CAP = 200;
+
 // Composite ranking weights, ordered so each signal can only ever break a TIE
 // in the signal above it — mutualCount (friends-of-friends) is primary,
 // shared-event attendance is the first tiebreaker, same-city the second,
@@ -89,6 +99,14 @@ export class SuggestionsService {
     }
     if (candidates.length === 0) return [];
 
+    // Cap BEFORE scoring (see CANDIDATE_SCORE_CAP) — sort by mutualCount desc
+    // with an _id tiebreak for determinism, then take only the top-K into the
+    // (relatively) expensive shared-event resolution below.
+    candidates.sort((a, b) =>
+      b.mutualCount !== a.mutualCount ? b.mutualCount - a.mutualCount : a.id.localeCompare(b.id)
+    );
+    candidates = candidates.slice(0, CANDIDATE_SCORE_CAP);
+
     const buyers = await Buyer.find({
       _id: { $in: candidates.map((c) => c.id) },
       socialSuspendedAt: null,
@@ -99,23 +117,28 @@ export class SuggestionsService {
     const viewerGoingEventIds = viewer ? new Set(await GoingService.goingEventIds(viewer)) : new Set<string>();
     const viewerCity = normalizeCity(viewer?.city);
 
-    const scored = await Promise.all(
-      candidates
-        .filter((c) => bMap.has(c.id))
-        .map(async (c) => {
-          const buyer = bMap.get(c.id) as IBuyer;
-          const candidateEventIds = viewerGoingEventIds.size ? await GoingService.goingEventIds(buyer) : [];
-          const sharedEventCount = candidateEventIds.filter((id) => viewerGoingEventIds.has(id)).length;
-          const sameCity = Boolean(viewerCity) && normalizeCity(buyer.city) === viewerCity;
-          const score = suggestionCompositeScore({
-            mutualCount: c.mutualCount,
-            sharedEventCount,
-            sameCity,
-            lastLoginAt: buyer.lastLoginAt ?? null,
-          });
-          return { buyer, mutualCount: c.mutualCount, score };
-        })
-    );
+    const eligible = candidates.filter((c) => bMap.has(c.id));
+    // Batch-resolve every candidate's going-eventIds in a FIXED number of
+    // queries (see GoingService.goingEventIdsBatch), instead of one
+    // GoingService.goingEventIds call per candidate.
+    const goingByBuyerId = viewerGoingEventIds.size
+      ? await GoingService.goingEventIdsBatch(eligible.map((c) => bMap.get(c.id) as IBuyer))
+      : new Map<string, Set<string>>();
+
+    const scored = eligible.map((c) => {
+      const buyer = bMap.get(c.id) as IBuyer;
+      const candidateEventIds = goingByBuyerId.get(c.id) ?? new Set<string>();
+      let sharedEventCount = 0;
+      for (const id of candidateEventIds) if (viewerGoingEventIds.has(id)) sharedEventCount++;
+      const sameCity = Boolean(viewerCity) && normalizeCity(buyer.city) === viewerCity;
+      const score = suggestionCompositeScore({
+        mutualCount: c.mutualCount,
+        sharedEventCount,
+        sameCity,
+        lastLoginAt: buyer.lastLoginAt ?? null,
+      });
+      return { buyer, mutualCount: c.mutualCount, score };
+    });
 
     // Final tiebreak on _id keeps ordering fully deterministic (stable
     // pagination) even when every scored signal is exactly equal.

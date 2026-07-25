@@ -95,3 +95,48 @@ describe('GoingService.goingEventIds', () => {
     expect(ids).toEqual([]);
   });
 });
+
+// FINDING 2 fix: suggestions' peopleYouMayKnow used to call goingEventIds
+// once PER candidate inside a Promise.all — unbounded fan-out for a
+// well-connected viewer. goingEventIdsBatch resolves the same "going"
+// definition (joined community minus bans, union live SOLD/CHECKED_IN
+// tickets) for many buyers in a fixed number of queries.
+describe('GoingService.goingEventIdsBatch', () => {
+  beforeAll(connectTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
+
+  it('matches goingEventIds per-buyer for a mix of community + ticket + neither', async () => {
+    const joined = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Joined' });
+    const ticketed = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'Ticketed' });
+    const neither = await Buyer.create({ phone: '+26878000003', password: 'secret1', name: 'Neither' });
+
+    const joinedEvent = await makeEvent('Joined Batch');
+    const community = await Community.create({ eventId: joinedEvent._id, vendorId: joinedEvent.vendorId });
+    await Membership.create({ buyerId: joined._id, communityId: community._id, role: 'member' });
+
+    const ticketedEvent = await makeEvent('Ticketed Batch');
+    await Ticket.create({ eventId: ticketedEvent._id, vendorId: ticketedEvent.vendorId, ticketType: 'GA', price: 0, customerPhone: ticketed.phone, status: TicketStatus.SOLD });
+
+    const result = await GoingService.goingEventIdsBatch([joined, ticketed, neither] as any);
+
+    expect(result.get(String(joined._id))).toEqual(new Set([String(joinedEvent._id)]));
+    expect(result.get(String(ticketed._id))).toEqual(new Set([String(ticketedEvent._id)]));
+    expect(result.get(String(neither._id))).toEqual(new Set());
+  });
+
+  it('excludes banned memberships and non-live ticket statuses, same as the per-buyer version', async () => {
+    const buyer = await Buyer.create({ phone: '+26878000004', password: 'secret1', name: 'Banned+Refunded' });
+    const bannedEvent = await makeEvent('Banned Batch');
+    const bannedCommunity = await Community.create({ eventId: bannedEvent._id, vendorId: bannedEvent.vendorId });
+    await Membership.create({ buyerId: buyer._id, communityId: bannedCommunity._id, role: 'member', bannedAt: new Date() });
+    const refundedEvent = await makeEvent('Refunded Batch');
+    await Ticket.create({ eventId: refundedEvent._id, vendorId: refundedEvent.vendorId, ticketType: 'GA', price: 0, customerPhone: buyer.phone, status: TicketStatus.REFUNDED });
+
+    const result = await GoingService.goingEventIdsBatch([buyer] as any);
+    expect(result.get(String(buyer._id))).toEqual(new Set());
+  });
+
+  it('returns an empty map for an empty input', async () => {
+    const result = await GoingService.goingEventIdsBatch([]);
+    expect(result.size).toBe(0);
+  });
+});
