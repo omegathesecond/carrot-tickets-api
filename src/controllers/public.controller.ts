@@ -21,6 +21,9 @@ import { Membership } from '@models/membership.model';
 import { Update } from '@models/update.model';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
+import { normalizeHashtag } from '@utils/hashtags.util';
+import { UpdateController } from '@controllers/update.controller';
+import { getViewerReactions } from '@services/update.service';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
@@ -175,6 +178,15 @@ export const publicEventsQuerySchema = Joi.object({
   // getPublicEvents. Not constrained to EVENT_CATEGORIES so an unrecognized
   // value just yields zero results rather than a 400.
   category: Joi.string().optional().max(50)
+});
+
+// Validation schema for GET /api/public/topics/:tag/posts — page-based
+// pagination (not the cursor convention used by updates/by and
+// updates/for-event), matching what the BUILD spec for this endpoint asked
+// for and mirroring the clamp used by publicEventsQuerySchema.
+export const topicPostsQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(50).default(20),
 });
 
 const publicPurchaseSchema = Joi.object({
@@ -507,6 +519,54 @@ export class PublicController {
     } catch (error: any) {
       console.error('Get trending hashtags error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch trending hashtags');
+    }
+  }
+
+  /**
+   * GET /api/public/topics/:tag/posts
+   * Visible posts for one hashtag (TopicsPage tag detail), newest first —
+   * the same visibility filter as getTrending (active status, ready media)
+   * and the same per-post DTO as listByAuthor/listByEvent
+   * (UpdateController.dto), so the client renders these with its existing
+   * post-grid components rather than a new shape. Uses the
+   * { hashtags: 1, createdAt: -1 } multikey index on Update. Page-based
+   * pagination (page/limit) per the spec for this endpoint, not the cursor
+   * convention used by the author/event post lists.
+   */
+  static async getTopicPosts(req: Request, res: Response): Promise<any> {
+    try {
+      const tag = normalizeHashtag(req.params['tag']);
+      if (!tag) {
+        return ApiResponseUtil.validationError(res, 'Invalid tag');
+      }
+
+      const { error, value } = topicPostsQuerySchema.validate(req.query);
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+      const { page, limit } = value;
+
+      const filter = { hashtags: tag, status: 'active', 'media.status': 'ready' };
+      const skip = (page - 1) * limit;
+      // Over-fetch by one to detect a further page without a second count query.
+      const docs = await Update.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit + 1);
+      const hasMore = docs.length > limit;
+      const pageDocs = docs.slice(0, limit);
+
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      const reactions = actor && pageDocs.length
+        ? await getViewerReactions(pageDocs.map((d) => d.id), actor)
+        : undefined;
+      const posts = pageDocs.map((d) =>
+        UpdateController.dto(d, reactions?.[d.id], UpdateController.isActorAuthor(d, actor)),
+      );
+
+      return ApiResponseUtil.success(res, { posts, tag, page, hasMore });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to fetch topic posts');
     }
   }
 

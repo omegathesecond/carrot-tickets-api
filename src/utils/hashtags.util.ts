@@ -18,3 +18,14 @@ export function extractHashtags(caption: string | null | undefined): string[] {
   }
   return tags;
 }
+
+/** Normalizes a raw hashtag route/query param the same way extractHashtags
+ *  stores tags: trims, strips leading '#'(s), and lowercases — so
+ *  `GET /api/public/topics/:tag/posts` matches against the stored form
+ *  regardless of how the client passed it in (`#Music`, `MUSIC`, `music`).
+ *  Returns '' for empty/whitespace-only input; callers should treat that as
+ *  invalid rather than querying with it. */
+export function normalizeHashtag(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return raw.trim().replace(/^#+/, '').toLowerCase();
+}

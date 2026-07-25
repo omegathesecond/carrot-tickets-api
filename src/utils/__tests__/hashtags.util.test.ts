@@ -1,4 +1,4 @@
-import { extractHashtags } from '@utils/hashtags.util';
+import { extractHashtags, normalizeHashtag } from '@utils/hashtags.util';
 
 describe('extractHashtags', () => {
   it('extracts multiple hashtags from a caption', () => {
@@ -41,5 +41,25 @@ describe('extractHashtags', () => {
 
   it('returns [] when caption has no hashtags', () => {
     expect(extractHashtags('just a normal caption')).toEqual([]);
+  });
+});
+
+describe('normalizeHashtag', () => {
+  it('lowercases and strips a leading #', () => {
+    expect(normalizeHashtag('#MUSIC')).toBe('music');
+  });
+
+  it('trims whitespace', () => {
+    expect(normalizeHashtag('  music  ')).toBe('music');
+  });
+
+  it('handles a tag with no leading #', () => {
+    expect(normalizeHashtag('Music')).toBe('music');
+  });
+
+  it('returns "" for empty/null/undefined input', () => {
+    expect(normalizeHashtag('')).toBe('');
+    expect(normalizeHashtag(null)).toBe('');
+    expect(normalizeHashtag(undefined)).toBe('');
   });
 });

@@ -55,6 +55,19 @@ router.get('/activity', PublicController.getActivity);
 router.get('/trending', PublicController.getTrending);
 
 /**
+ * @route   GET /api/public/topics/:tag/posts
+ * @desc    Visible posts for one hashtag (TopicsPage tag detail), newest
+ *          first. Same visibility filter as /trending (active status, ready
+ *          media) and the same per-post DTO as
+ *          /updates/by/:authorType/:authorId and /updates/for-event/:eventId
+ *          (UpdateController.dto). Returns { posts: [], tag, page, hasMore }
+ *          when there are no visible posts — never fabricated.
+ * @access  Public (optional tickets token for viewerReactions)
+ * @query   page (default 1), limit (1-50, default 20)
+ */
+router.get('/topics/:tag/posts', optionalTicketsAuth, PublicController.getTopicPosts);
+
+/**
  * @route   GET /api/public/questions
  * @desc    Cross-event Q&A: the most recent questions across ALL events,
  *          newest first, each carrying its event { id, name } — powers the
