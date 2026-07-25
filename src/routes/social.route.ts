@@ -23,6 +23,8 @@ router.post('/notifications/read', authenticateBuyer, SocialProfileController.ma
 router.get('/username-available', authenticateBuyer, SocialProfileController.usernameAvailable);
 router.post('/follow', authenticateBuyer, SocialProfileController.followTarget);
 router.delete('/follow/:targetType/:targetId', authenticateBuyer, SocialProfileController.unfollowTarget);
+router.get('/followers/:targetType/:targetId', authenticateBuyer, SocialProfileController.followersList);
+router.get('/following/:targetType/:targetId', authenticateBuyer, SocialProfileController.followingList);
 router.post('/block', authenticateBuyer, SocialProfileController.blockUser);
 router.post('/presence', authenticateBuyer, SocialProfileController.presence);
 router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblockUser);

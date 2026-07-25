@@ -12,6 +12,7 @@ import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { updateProfileSchema, blockSchema, followSchema, presenceSchema, pushSubscribeSchema, locationSchema } from '@validators/community.validator';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
+import { FollowTargetType } from '@models/follow.model';
 import { NotificationService } from '@services/notification.service';
 import { SocialProfileViewService } from '@services/socialProfileView.service';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
@@ -205,6 +206,59 @@ export class SocialProfileController {
       return ApiResponseUtil.success(res, { following: false }, 'Unfollowed');
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to unfollow');
+    }
+  }
+
+  /** Shared {targetType, targetId} validation for the arbitrary-target follow
+   *  list routes below — mirrors unfollowTarget's check. Returns null (after
+   *  writing the 400) when invalid. */
+  private static parseFollowTarget(req: Request, res: Response): { targetType: FollowTargetType; targetId: string } | null {
+    const targetType = String(req.params['targetType'] || '');
+    const targetId = String(req.params['targetId'] || '');
+    if (!['buyer', 'organizer'].includes(targetType) || !/^[0-9a-f]{24}$/i.test(targetId)) {
+      ApiResponseUtil.error(res, 'Invalid follow target', 400);
+      return null;
+    }
+    return { targetType: targetType as FollowTargetType, targetId };
+  }
+
+  private static parsePageLimit(req: Request): { page: number; limit: number } {
+    const page = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query['limit'] ?? '20'), 10) || 20));
+    return { page, limit };
+  }
+
+  /** GET /api/social/followers/:targetType/:targetId?page=&limit= — who
+   *  follows this buyer/organizer, as person rows with isFollowing resolved
+   *  for the viewer. */
+  static async followersList(req: Request, res: Response): Promise<any> {
+    try {
+      const viewer = await resolveBuyerFromRequest(req);
+      if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const target = SocialProfileController.parseFollowTarget(req, res);
+      if (!target) return;
+      const { page, limit } = SocialProfileController.parsePageLimit(req);
+      const rows = await FollowService.listFollowers(target.targetType, target.targetId, String(viewer._id), { page, limit });
+      return ApiResponseUtil.success(res, rows);
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load followers');
+    }
+  }
+
+  /** GET /api/social/following/:targetType/:targetId?page=&limit= — who this
+   *  buyer/organizer follows, as person rows with isFollowing resolved for
+   *  the viewer. */
+  static async followingList(req: Request, res: Response): Promise<any> {
+    try {
+      const viewer = await resolveBuyerFromRequest(req);
+      if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const target = SocialProfileController.parseFollowTarget(req, res);
+      if (!target) return;
+      const { page, limit } = SocialProfileController.parsePageLimit(req);
+      const rows = await FollowService.listFollowing(target.targetType, target.targetId, String(viewer._id), { page, limit });
+      return ApiResponseUtil.success(res, rows);
+    } catch (error: any) {
+      return SocialProfileController.failSocial(res, error, 'Failed to load following');
     }
   }
 

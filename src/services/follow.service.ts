@@ -6,6 +6,24 @@ import { NotificationDispatcher } from '@services/notificationDispatcher.service
 import { NotificationService } from '@services/notification.service';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 
+/** The one public shape for "a person or brand" in a follow list — same
+ *  field names for both, so a single list component can render buyer AND
+ *  organizer rows without a type switch. A buyer row maps username/name/
+ *  avatarUrl as-is; an organizer (Vendor) row maps slug -> username,
+ *  businessName -> name, logoUrl -> avatarUrl. */
+export interface FollowPersonRow {
+  id: string;
+  username: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  isFollowing: boolean;
+}
+
+export interface FollowListOptions {
+  page?: number;
+  limit?: number;
+}
+
 export class FollowService {
   /**
    * Create a follow edge. Returns true if newly created, false if it already
@@ -148,5 +166,94 @@ export class FollowService {
   static async followersOfOrganizer(vendorId: string): Promise<{ followerType: FollowerType; followerId: string }[]> {
     const rows = await Follow.find({ targetType: 'organizer', targetId: vendorId }).select('followerType followerId');
     return rows.map((r) => ({ followerType: r.followerType, followerId: String(r.followerId) }));
+  }
+
+  /** Hydrates raw (type, id) follow-edge endpoints into the shared person-row
+   *  DTO, resolving `isFollowing` for the viewer in two batched queries
+   *  (never N+1). Rows whose underlying Buyer/Vendor no longer exists are
+   *  dropped silently (same convention as the other list endpoints here). */
+  private static async hydrateRows(
+    entries: Array<{ type: FollowTargetType; id: string }>,
+    viewerId: string
+  ): Promise<FollowPersonRow[]> {
+    const buyerIds = entries.filter((e) => e.type === 'buyer').map((e) => e.id);
+    const orgIds = entries.filter((e) => e.type === 'organizer').map((e) => e.id);
+
+    const [buyers, vendors, viewerFollowingBuyers, viewerFollowingOrgs] = await Promise.all([
+      buyerIds.length ? Buyer.find({ _id: { $in: buyerIds } }) : Promise.resolve([]),
+      orgIds.length ? Vendor.find({ _id: { $in: orgIds } }).select('businessName slug logoUrl') : Promise.resolve([]),
+      FollowService.followingIds(viewerId, 'buyer'),
+      FollowService.followingIds(viewerId, 'organizer'),
+    ]);
+    const buyerMap = new Map(buyers.map((b: any) => [String(b._id), b]));
+    const vendorMap = new Map(vendors.map((v: any) => [String(v._id), v]));
+    const followingBuyerSet = new Set(viewerFollowingBuyers);
+    const followingOrgSet = new Set(viewerFollowingOrgs);
+
+    const rows: FollowPersonRow[] = [];
+    for (const entry of entries) {
+      if (entry.type === 'buyer') {
+        const b = buyerMap.get(entry.id);
+        if (!b) continue;
+        rows.push({
+          id: entry.id,
+          username: b.username ?? null,
+          name: b.name ?? null,
+          avatarUrl: b.avatarUrl ?? null,
+          isFollowing: followingBuyerSet.has(entry.id),
+        });
+      } else {
+        const v: any = vendorMap.get(entry.id);
+        if (!v) continue;
+        rows.push({
+          id: entry.id,
+          username: v.slug ?? null,
+          name: v.businessName ?? null,
+          avatarUrl: v.logoUrl ?? null,
+          isFollowing: followingOrgSet.has(entry.id),
+        });
+      }
+    }
+    return rows;
+  }
+
+  /** GET .../followers/:targetType/:targetId — who follows this target,
+   *  newest-follow first, with isFollowing resolved for `viewerId`. */
+  static async listFollowers(
+    targetType: FollowTargetType,
+    targetId: string,
+    viewerId: string,
+    { page = 1, limit = 20 }: FollowListOptions = {}
+  ): Promise<FollowPersonRow[]> {
+    const skip = (Math.max(1, page) - 1) * limit;
+    const follows = await Follow.find({ targetType, targetId })
+      .sort({ createdAt: -1, _id: 1 })
+      .skip(skip)
+      .limit(limit)
+      .select('followerType followerId');
+    const entries = follows.map((f) => ({
+      type: (f.followerType === 'vendor' ? 'organizer' : 'buyer') as FollowTargetType,
+      id: String(f.followerId),
+    }));
+    return FollowService.hydrateRows(entries, viewerId);
+  }
+
+  /** GET .../following/:targetType/:targetId — who this target follows,
+   *  newest-follow first, with isFollowing resolved for `viewerId`. */
+  static async listFollowing(
+    targetType: FollowTargetType,
+    targetId: string,
+    viewerId: string,
+    { page = 1, limit = 20 }: FollowListOptions = {}
+  ): Promise<FollowPersonRow[]> {
+    const followerType: FollowerType = targetType === 'organizer' ? 'vendor' : 'buyer';
+    const skip = (Math.max(1, page) - 1) * limit;
+    const follows = await Follow.find({ followerType, followerId: targetId })
+      .sort({ createdAt: -1, _id: 1 })
+      .skip(skip)
+      .limit(limit)
+      .select('targetType targetId');
+    const entries = follows.map((f) => ({ type: f.targetType, id: String(f.targetId) }));
+    return FollowService.hydrateRows(entries, viewerId);
   }
 }
