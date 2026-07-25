@@ -5,36 +5,126 @@ import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { VerificationStatus } from '@interfaces/vendor.interface';
 import { FollowService } from '@services/follow.service';
+import { GoingService } from '@services/going.service';
+
+export interface SuggestionsPageOptions {
+  limit?: number;
+  page?: number;
+}
+
+// Safety cap on the "follows no one" fallback candidate pool — big enough to
+// never matter for a real friends-of-friends graph, small enough to keep a
+// full-collection scan off the table. Ranking then happens across this whole
+// pool (not just the first page), same "don't cap before ranking" reasoning
+// as organizersToFollow below.
+const FALLBACK_CANDIDATE_POOL_CAP = 1000;
+
+// Composite ranking weights, ordered so each signal can only ever break a TIE
+// in the signal above it — mutualCount (friends-of-friends) is primary,
+// shared-event attendance is the first tiebreaker, same-city the second,
+// recency (lastLoginAt) the last. Clamps (Math.min(999, ...) on event count,
+// RECENCY_MAX staying under CITY_WEIGHT) keep that ordering guaranteed
+// regardless of how large any one signal gets, so pagination stays stable.
+const MUTUAL_WEIGHT = 1_000_000;
+const EVENT_WEIGHT = 1_000;
+const CITY_WEIGHT = 10;
+const RECENCY_MAX = 5;
+
+function recencyScore(lastLoginAt?: Date | null): number {
+  if (!lastLoginAt) return 0;
+  const daysSince = Math.max(0, (Date.now() - lastLoginAt.getTime()) / 86_400_000);
+  return RECENCY_MAX / (1 + daysSince);
+}
+
+function normalizeCity(city?: string | null): string | null {
+  const trimmed = city?.trim().toLowerCase();
+  return trimmed ? trimmed : null;
+}
+
+/** Pure composite ranking score for "people you may know" — exported for
+ *  direct unit testing. Higher ranks first. See the weight constants above
+ *  for why mutualCount can never be overtaken by the other signals. */
+export function suggestionCompositeScore(input: {
+  mutualCount: number;
+  sharedEventCount: number;
+  sameCity: boolean;
+  lastLoginAt?: Date | null;
+}): number {
+  const mutual = Math.max(0, input.mutualCount);
+  const events = Math.min(999, Math.max(0, input.sharedEventCount));
+  return mutual * MUTUAL_WEIGHT + events * EVENT_WEIGHT + (input.sameCity ? CITY_WEIGHT : 0) + recencyScore(input.lastLoginAt);
+}
 
 export class SuggestionsService {
-  /** Friends-of-friends the buyer doesn't already follow, ranked by shared
-   *  connections. Falls back to recently-active handled buyers when the buyer
-   *  follows no one yet (mutualCount 0). Excludes self, already-followed and
-   *  socially-suspended buyers. */
-  static async peopleYouMayKnow(buyerId: string, limit = 20): Promise<Array<{ buyer: IBuyer; mutualCount: number }>> {
+  /** Friends-of-friends the buyer doesn't already follow, ranked by a
+   *  composite score: mutual-connection count (primary) blended with shared
+   *  event attendance, same city, and recency (in that priority order — see
+   *  suggestionCompositeScore). Falls back to the same composite ranking
+   *  over recently-active handled buyers when the buyer follows no one yet
+   *  (mutualCount 0 for all of them). Excludes self, already-followed and
+   *  socially-suspended buyers. Paginated via `page`/`limit` over the fully
+   *  ranked candidate set, so pagination is deterministic. */
+  static async peopleYouMayKnow(
+    buyerId: string,
+    { limit = 20, page = 1 }: SuggestionsPageOptions = {}
+  ): Promise<Array<{ buyer: IBuyer; mutualCount: number }>> {
+    const viewer = await Buyer.findById(buyerId);
     const iFollow = await FollowService.followingIds(buyerId, 'buyer');
     const exclude = new Set<string>([buyerId, ...iFollow]);
 
+    let candidates: Array<{ id: string; mutualCount: number }>;
     if (iFollow.length === 0) {
       const recent = await Buyer.find({ _id: { $nin: [...exclude] }, username: { $exists: true, $ne: null }, socialSuspendedAt: null })
-        .sort({ lastLoginAt: -1 })
-        .limit(limit);
-      return recent.map((b) => ({ buyer: b, mutualCount: 0 }));
+        .select('_id')
+        .limit(FALLBACK_CANDIDATE_POOL_CAP);
+      candidates = recent.map((b) => ({ id: String(b._id), mutualCount: 0 }));
+    } else {
+      const secondDegree = await Follow.find({ followerType: 'buyer', followerId: { $in: iFollow }, targetType: 'buyer' }).select('targetId');
+      const counts = new Map<string, number>();
+      for (const r of secondDegree) {
+        const id = String(r.targetId);
+        if (!exclude.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      candidates = [...counts.entries()].map(([id, mutualCount]) => ({ id, mutualCount }));
     }
+    if (candidates.length === 0) return [];
 
-    const secondDegree = await Follow.find({ followerType: 'buyer', followerId: { $in: iFollow }, targetType: 'buyer' }).select('targetId');
-    const counts = new Map<string, number>();
-    for (const r of secondDegree) {
-      const id = String(r.targetId);
-      if (!exclude.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
-    const ids = ranked.map(([id]) => id);
-    const buyers = await Buyer.find({ _id: { $in: ids }, socialSuspendedAt: null, username: { $exists: true, $ne: null } });
+    const buyers = await Buyer.find({
+      _id: { $in: candidates.map((c) => c.id) },
+      socialSuspendedAt: null,
+      username: { $exists: true, $ne: null },
+    });
     const bMap = new Map(buyers.map((b) => [String(b._id), b]));
-    return ranked
-      .map(([id, mutualCount]) => ({ buyer: bMap.get(id), mutualCount }))
-      .filter((x) => x.buyer) as Array<{ buyer: IBuyer; mutualCount: number }>;
+
+    const viewerGoingEventIds = viewer ? new Set(await GoingService.goingEventIds(viewer)) : new Set<string>();
+    const viewerCity = normalizeCity(viewer?.city);
+
+    const scored = await Promise.all(
+      candidates
+        .filter((c) => bMap.has(c.id))
+        .map(async (c) => {
+          const buyer = bMap.get(c.id) as IBuyer;
+          const candidateEventIds = viewerGoingEventIds.size ? await GoingService.goingEventIds(buyer) : [];
+          const sharedEventCount = candidateEventIds.filter((id) => viewerGoingEventIds.has(id)).length;
+          const sameCity = Boolean(viewerCity) && normalizeCity(buyer.city) === viewerCity;
+          const score = suggestionCompositeScore({
+            mutualCount: c.mutualCount,
+            sharedEventCount,
+            sameCity,
+            lastLoginAt: buyer.lastLoginAt ?? null,
+          });
+          return { buyer, mutualCount: c.mutualCount, score };
+        })
+    );
+
+    // Final tiebreak on _id keeps ordering fully deterministic (stable
+    // pagination) even when every scored signal is exactly equal.
+    scored.sort((a, b) =>
+      b.score !== a.score ? b.score - a.score : String(a.buyer._id).localeCompare(String(b.buyer._id))
+    );
+
+    const skip = (Math.max(1, page) - 1) * limit;
+    return scored.slice(skip, skip + limit).map(({ buyer, mutualCount }) => ({ buyer, mutualCount }));
   }
 
   /** Active, verified organizers to follow, ranked by follower count. May
@@ -48,8 +138,9 @@ export class SuggestionsService {
    *  never appear, on top of firing ~2 queries per vendor. */
   static async organizersToFollow(
     buyerId: string,
-    limit = 20
+    { limit = 20, page = 1 }: SuggestionsPageOptions = {}
   ): Promise<Array<{ vendor: any; eventCount: number; followerCount: number; isFollowing: boolean }>> {
+    const skip = (Math.max(1, page) - 1) * limit;
     const rows = await Vendor.aggregate([
       { $match: { isActive: true, verificationStatus: VerificationStatus.VERIFIED } },
       {
@@ -83,7 +174,10 @@ export class SuggestionsService {
           eventCount: { $ifNull: [{ $arrayElemAt: ['$_events.count', 0] }, 0] },
         },
       },
-      { $sort: { followerCount: -1 } },
+      // Stable tiebreak on _id keeps pagination deterministic when several
+      // organizers tie on followerCount.
+      { $sort: { followerCount: -1, _id: 1 } },
+      { $skip: skip },
       { $limit: limit },
       { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1 } },
     ]);

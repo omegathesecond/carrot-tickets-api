@@ -136,4 +136,20 @@ describe('GET /api/social/suggestions/organizers', () => {
   it('401s when anonymous', async () => {
     await request(app).get('/api/social/suggestions/organizers').expect(401);
   });
+
+  it('supports limit/page pagination, disjoint pages', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    for (let i = 0; i < 5; i++) {
+      await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    }
+
+    const page1 = await request(app).get('/api/social/suggestions/organizers?limit=2&page=1').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const page2 = await request(app).get('/api/social/suggestions/organizers?limit=2&page=2').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+
+    expect(page1.body.data).toHaveLength(2);
+    expect(page2.body.data).toHaveLength(2);
+    const ids1 = page1.body.data.map((o: any) => o.id);
+    const ids2 = page2.body.data.map((o: any) => o.id);
+    expect(ids1.filter((id: string) => ids2.includes(id))).toHaveLength(0);
+  });
 });

@@ -1,9 +1,12 @@
+import mongoose from 'mongoose';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { signBuyerToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
+import { Ticket } from '@models/ticket.model';
+import { TicketStatus } from '@interfaces/ticket.interface';
 
 describe('GET /api/social/suggestions/people', () => {
   beforeAll(async () => { await connectTestDb(); await Follow.init(); });
@@ -117,5 +120,81 @@ describe('GET /api/social/suggestions/people', () => {
 
   it('401s when anonymous', async () => {
     await request(app).get('/api/social/suggestions/people').expect(401);
+  });
+
+  it('page 2 is disjoint from page 1', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+
+    const candidates = [];
+    for (let i = 0; i < 6; i++) {
+      const c = await Buyer.create({ phone: `+2687800005${i}`, password: 'secret1', name: `Cand${i}`, username: `cand_${i}` });
+      await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: c._id });
+      candidates.push(c);
+    }
+
+    const page1 = await request(app)
+      .get('/api/social/suggestions/people?limit=2&page=1')
+      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
+      .expect(200);
+    const page2 = await request(app)
+      .get('/api/social/suggestions/people?limit=2&page=2')
+      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
+      .expect(200);
+
+    expect(page1.body.data).toHaveLength(2);
+    expect(page2.body.data).toHaveLength(2);
+    const ids1 = page1.body.data.map((p: any) => p.id);
+    const ids2 = page2.body.data.map((p: any) => p.id);
+    expect(ids1.filter((id: string) => ids2.includes(id))).toHaveLength(0);
+  });
+
+  it('ranks a candidate sharing an event with the viewer above an equal-mutual candidate sharing none', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+
+    // Deliberately seeded/followed in an order that does NOT match the
+    // expected rank (noEvent first) — a naive insertion-order-stable sort
+    // would keep noEvent ahead, so this only passes once event-overlap
+    // actually reorders the tie.
+    const noEvent = await Buyer.create({ phone: '+26878000032', password: 'secret1', name: 'NoEvent', username: 'no_event' });
+    const sharesEvent = await Buyer.create({ phone: '+26878000031', password: 'secret1', name: 'SharesEvent', username: 'shares_event', });
+    // Both are equal-mutual: only `friend` connects me to each of them.
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: noEvent._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: sharesEvent._id });
+
+    const sharedEventId = new mongoose.Types.ObjectId();
+    const vendorId = new mongoose.Types.ObjectId();
+    // Me and sharesEvent both hold a live ticket to the same event; noEvent holds none.
+    await Ticket.create({ eventId: sharedEventId, vendorId, ticketType: 'GA', price: 0, customerPhone: '+26878422613', status: TicketStatus.SOLD });
+    await Ticket.create({ eventId: sharedEventId, vendorId, ticketType: 'GA', price: 0, customerPhone: '+26878000031', status: TicketStatus.SOLD });
+
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const ids = res.body.data.map((p: any) => p.username);
+    const sharesIndex = ids.indexOf('shares_event');
+    const noEventIndex = ids.indexOf('no_event');
+    expect(sharesIndex).toBeGreaterThanOrEqual(0);
+    expect(noEventIndex).toBeGreaterThanOrEqual(0);
+    expect(sharesIndex).toBeLessThan(noEventIndex);
+  });
+
+  it('breaks a same-mutual, same-event tie in favor of the buyer in the same city as the viewer', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one', city: 'Manzini' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+
+    // otherCity seeded/followed FIRST — a naive stable sort on tied
+    // mutualCount would keep it ahead, so this only passes once same-city
+    // actually breaks the tie in sameCity's favor.
+    const otherCity = await Buyer.create({ phone: '+26878000042', password: 'secret1', name: 'OtherCity', username: 'other_city', city: 'Mbabane' });
+    const sameCity = await Buyer.create({ phone: '+26878000041', password: 'secret1', name: 'SameCity', username: 'same_city', city: 'Manzini' });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: otherCity._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: sameCity._id });
+
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const usernames = res.body.data.map((p: any) => p.username);
+    expect(usernames.indexOf('same_city')).toBeLessThan(usernames.indexOf('other_city'));
   });
 });

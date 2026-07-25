@@ -37,6 +37,10 @@ export interface IBuyer extends Document {
   avatarUrl?: string; // public R2 URL of the buyer's profile picture (optional)
   username?: string; // unique social handle, auto-generated on first social touch
   bio?: string;
+  // Free-text home city (no capture flow yet — set directly for now). Used as
+  // a "people you may know" ranking signal (@services/suggestions.service);
+  // absent for most buyers until a profile-settings field writes it.
+  city?: string;
   dmPrivacy: 'community' | 'friends';
   notificationPrefs: NotificationPrefs;
   usernameCustomizedAt?: Date; // set when the buyer picks their own handle
@@ -80,6 +84,7 @@ const buyerSchema = new Schema<IBuyer>(
       match: [USERNAME_REGEX, 'Usernames are 3-20 characters: a-z, 0-9 and _']
     },
     bio: { type: String, trim: true, maxlength: 280 },
+    city: { type: String, trim: true, maxlength: 100 },
     dmPrivacy: { type: String, enum: ['community', 'friends'], default: 'community' },
     notificationPrefs: {
       type: new Schema<NotificationPrefs>(

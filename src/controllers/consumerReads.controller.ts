@@ -82,19 +82,28 @@ export class ConsumerReadsController {
     }
   }
 
-  /** GET /api/social/suggestions/people — "people you may know". */
+  /** Shared page/limit parsing for the two suggestions endpoints below —
+   *  same convention as AdminUsersController.listUsers. */
+  private static parsePageLimit(req: Request): { page: number; limit: number } {
+    const page = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query['limit'] ?? '20'), 10) || 20));
+    return { page, limit };
+  }
+
+  /** GET /api/social/suggestions/people?page=&limit= — "people you may know". */
   static async suggestedPeople(req: Request, res: Response): Promise<any> {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const rows = await SuggestionsService.peopleYouMayKnow(String(buyer._id));
+      const { page, limit } = ConsumerReadsController.parsePageLimit(req);
+      const rows = await SuggestionsService.peopleYouMayKnow(String(buyer._id), { page, limit });
       const data = rows.map(({ buyer: b, mutualCount }) => ({
         id: String(b._id),
         name: b.name ?? null,
         username: b.username ?? null,
         avatarUrl: b.avatarUrl ?? null,
         bio: b.bio ?? null,
-        city: null,
+        city: b.city ?? null,
         mutualCount,
         isFollowing: false,
       }));
@@ -104,12 +113,13 @@ export class ConsumerReadsController {
     }
   }
 
-  /** GET /api/social/suggestions/organizers — "organizers to follow". */
+  /** GET /api/social/suggestions/organizers?page=&limit= — "organizers to follow". */
   static async suggestedOrganizers(req: Request, res: Response): Promise<any> {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const rows = await SuggestionsService.organizersToFollow(String(buyer._id));
+      const { page, limit } = ConsumerReadsController.parsePageLimit(req);
+      const rows = await SuggestionsService.organizersToFollow(String(buyer._id), { page, limit });
       const data = rows.map(({ vendor: v, eventCount, followerCount, isFollowing }) => ({
         id: String(v._id),
         businessName: v.businessName,
