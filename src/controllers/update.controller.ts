@@ -4,6 +4,7 @@ import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { resolveActorFromRequest, isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
+import { resolveUpdateAuthor } from '@services/updateAuthor';
 import { Update } from '@models/update.model';
 import type { UpdateAuthorType } from '@interfaces/update.interface';
 
@@ -96,7 +97,12 @@ export class UpdateController {
     let reactions: { liked: boolean; saved: boolean } | undefined;
     const actor = await resolveActorFromRequest(req).catch(() => null);
     if (actor) reactions = (await getViewerReactions([update.id], actor))[update.id];
-    return ApiResponseUtil.success(res, UpdateController.dto(update, reactions, UpdateController.isActorAuthor(update, actor)));
+    // Hydrated author (unlike the by-author/for-event/feed list mappings below,
+    // which intentionally omit it — grids need no author header): a cold/shared
+    // /post/:id link has no other way to render who posted it, since buyers
+    // have no public get-by-id endpoint.
+    const author = await resolveUpdateAuthor(update.authorType, String(update.authorId));
+    return ApiResponseUtil.success(res, UpdateController.dto(update, reactions, UpdateController.isActorAuthor(update, actor), author));
   }
 
   /**
@@ -238,7 +244,7 @@ export class UpdateController {
    * `viewerIsAuthor` defaults false so call sites with no resolved actor
    * (create/finalize) stay truthful rather than claiming ownership.
    */
-  static dto(update: any, reactions?: { liked: boolean; saved: boolean }, viewerIsAuthor = false) {
+  static dto(update: any, reactions?: { liked: boolean; saved: boolean }, viewerIsAuthor = false, author?: unknown) {
     return {
       id: update.id,
       authorType: update.authorType,
@@ -254,6 +260,7 @@ export class UpdateController {
       createdAt: update.createdAt,
       viewerReactions: reactions ?? null,
       viewerIsAuthor,
+      ...(author ? { author } : {}),
     };
   }
 }
