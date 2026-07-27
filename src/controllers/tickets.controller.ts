@@ -74,8 +74,8 @@ export class TicketsController {
       if (!handoff || typeof handoff !== 'string') {
         return ApiResponseUtil.error(res, 'handoff is required', 400);
       }
-      const accessToken = await TicketsAuthService.exchangeSocialHandoff(handoff);
-      return ApiResponseUtil.success(res, { accessToken }, 'Signed in');
+      const result = await TicketsAuthService.exchangeSocialHandoff(handoff);
+      return ApiResponseUtil.success(res, result, 'Signed in');
     } catch (error: any) {
       return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
     }

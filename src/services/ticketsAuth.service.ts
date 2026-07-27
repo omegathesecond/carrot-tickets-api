@@ -341,7 +341,7 @@ export class TicketsAuthService {
    * expired/forged/replayed handoffs. Never issues anything the organizer
    * didn't already have (same identity claims).
    */
-  static async exchangeSocialHandoff(handoff: string): Promise<string> {
+  static async exchangeSocialHandoff(handoff: string): Promise<{ accessToken: string; refreshToken: string }> {
     let decoded: any;
     try {
       decoded = jwt.verify(handoff, JWT_SECRET);
@@ -362,7 +362,21 @@ export class TicketsAuthService {
       if (err?.code === 11000) throw new Error('This sign-in link was already used — please try again from your dashboard');
       throw err;
     }
-    return jwt.sign(TicketsAuthService.identityClaims(decoded), JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+    // Mirror a normal vendor/sub-user login: issue BOTH a short-lived access
+    // token and a persisted refresh token, so an SSO-handoff session can renew
+    // itself the same way a password login can (previously it got a bare 15m
+    // access token with no way to refresh — it hard-expired and stalled).
+    const claims = TicketsAuthService.identityClaims(decoded);
+    const accessToken = jwt.sign(claims, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+    const refreshToken = this.generateRefreshToken();
+    const isSubUser = claims.userType === 'sub-user';
+    await this.storeRefreshToken(
+      refreshToken,
+      isSubUser ? claims.userId : undefined,
+      claims.vendorId,
+      isSubUser ? 'sub-user' : 'vendor',
+    );
+    return { accessToken, refreshToken };
   }
 
   /**

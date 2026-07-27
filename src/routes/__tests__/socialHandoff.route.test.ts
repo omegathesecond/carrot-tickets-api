@@ -26,6 +26,18 @@ describe('social SSO handoff', () => {
     const me = await request(app).get('/api/tickets/social/me').set('Authorization', `Bearer ${accessToken}`).expect(200);
     expect(me.body.data.id).toBe(String(vendor._id));
 
+    // The exchange ALSO issues a refresh token so the social site can renew a
+    // 15m access token without stalling (frontend refresh-and-retry). Without
+    // this, SSO-handoff sessions had no way to refresh and died at expiry.
+    const refreshToken = ex.body.data.refreshToken;
+    expect(typeof refreshToken).toBe('string');
+
+    // That refresh token mints a fresh, working access token.
+    const refreshed = await request(app).post('/api/tickets/auth/refresh').send({ refreshToken }).expect(200);
+    expect(typeof refreshed.body.data.accessToken).toBe('string');
+    const me2 = await request(app).get('/api/tickets/social/me').set('Authorization', `Bearer ${refreshed.body.data.accessToken}`).expect(200);
+    expect(me2.body.data.id).toBe(String(vendor._id));
+
     // Single-use: a second exchange of the same handoff is rejected.
     await request(app).post('/api/tickets/auth/handoff/exchange').send({ handoff }).expect(401);
   });
