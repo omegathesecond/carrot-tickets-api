@@ -87,6 +87,20 @@ export const qrcodeUpload = multer({
   fileFilter: createFileFilter(ALLOWED_QRCODE_TYPES, 'qrcode'),
 });
 
+// Community self-listing: one poster + up to 8 gallery images in a single
+// multipart submit (buyer creates a PENDING_APPROVAL event from the app).
+export const communityEventUpload = multer({
+  storage,
+  limits: {
+    fileSize: FILE_SIZE_LIMITS.gallery,
+    files: 9,
+  },
+  fileFilter: createFileFilter(ALLOWED_IMAGE_TYPES, 'community event media'),
+}).fields([
+  { name: 'poster', maxCount: 1 },
+  { name: 'media', maxCount: 8 },
+]);
+
 // Wristband artwork: photo-quality backgrounds can be large — 10MB, images only.
 export const wristbandUpload = multer({
   storage,

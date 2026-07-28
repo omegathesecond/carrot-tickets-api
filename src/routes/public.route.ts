@@ -8,7 +8,8 @@ import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
-import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
+import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
+import { CommunityEventSubmitController } from '@controllers/communityEventSubmit.controller';
 
 const router = Router();
 
@@ -144,6 +145,10 @@ router.get('/events/:eventId/reviews', ReviewController.listForEvent);
  * @access  Buyer (Bearer buyer token)
  * @body    rating (1-5), text?
  */
+// Community self-listing: a signed-in buyer submits an event (poster + media)
+// into the PENDING_APPROVAL review queue. Reuses the dashboard creation path.
+router.post('/events/submit', authenticateBuyer, communityEventUpload, handleMulterError, CommunityEventSubmitController.submit);
+
 router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.submit);
 
 /**

@@ -6,7 +6,9 @@ import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
 
 export interface CreateEventParams {
-  vendorId: string;
+  vendorId?: string;
+  submittedByBuyerId?: string;
+  status?: EventStatus;
   name: string;
   description?: string;
   venue: string;
@@ -76,6 +78,7 @@ export class EventService {
       // Create event
       const event = new Event({
         vendorId: params.vendorId,
+        submittedByBuyerId: params.submittedByBuyerId,
         name: params.name,
         description: params.description,
         venue: params.venue,
@@ -100,7 +103,7 @@ export class EventService {
           available: tt.quantity,
           isSoldOut: false
         })) : [],
-        status: EventStatus.DRAFT,
+        status: params.status ?? EventStatus.DRAFT,
         totalTicketsSold: 0,
         totalRevenue: 0
       });
@@ -222,7 +225,7 @@ export class EventService {
       throw new Error('Event not found');
     }
 
-    const creatorId = event.vendorId.toString();
+    const creatorId = event.vendorId!.toString();
     if (!isSuperAdmin && creatorId !== requesterVendorId) {
       throw new Error('You do not have access to this creator');
     }

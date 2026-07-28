@@ -796,7 +796,7 @@ export class TicketService {
 
     // sellTickets debits the wallet (face + service fee) and mints tickets.
     const result = await TicketService.sellTickets({
-      vendorId: event.vendorId.toString(),
+      vendorId: event.vendorId!.toString(),
       eventId,
       ticketTypeId,
       quantity,
@@ -805,7 +805,7 @@ export class TicketService {
       paymentMethod: PaymentMethod.KESHLESS_WALLET,
       keshlessCardNumber,
       keshlessPin,
-      soldBy: event.vendorId.toString(),
+      soldBy: event.vendorId!.toString(),
       soldByType: 'vendor',
       channel: SalesChannel.ONLINE,
       serviceFeeAmount,

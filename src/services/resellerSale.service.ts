@@ -118,7 +118,7 @@ export class ResellerSaleService {
         customerName: params.customerName,
         customerPhone: params.customerPhone ?? momoPhone,
         momoPhone,
-        vendorId: event.vendorId.toString(),
+        vendorId: event.vendorId!.toString(),
         soldBy: params.operatorId,
         soldByType: 'reseller-operator',
         resellerId: params.resellerId,
@@ -131,7 +131,7 @@ export class ResellerSaleService {
 
     const { sale, tickets, paymentMessage } = await TicketService.sellTickets({
       eventId: params.eventId,
-      vendorId: event.vendorId.toString(),
+      vendorId: event.vendorId!.toString(),
       ticketTypeId: params.ticketTypeId,
       quantity: params.quantity,
       paymentMethod: METHOD_ENUM[params.paymentMethod],
