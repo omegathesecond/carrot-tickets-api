@@ -60,14 +60,23 @@ export class FollowService {
   private static async notifyOrganizerFollowed(vendorId: string, followerType: FollowerType, followerId: string): Promise<void> {
     try {
       let name = 'Someone';
+      // `username` is carried in the payload so the notification row can link
+      // to the follower's profile (/u/:username) — without it a "new follower"
+      // notification has nowhere to go when tapped.
+      let username: string | undefined;
       if (followerType === 'buyer') {
         const b = await Buyer.findById(followerId).select('username name');
         name = b?.username ?? b?.name ?? 'Someone';
+        username = b?.username ?? undefined;
       } else {
         const v = await Vendor.findById(followerId).select('businessName');
         name = v?.businessName ?? 'A brand';
       }
-      await NotificationService.create('vendor', vendorId, 'follow', 'New follower', `${name} started following you`, { followerType, followerId });
+      await NotificationService.create('vendor', vendorId, 'follow', 'New follower', `${name} started following you`, {
+        followerType,
+        followerId,
+        ...(username ? { username } : {}),
+      });
     } catch (err: any) {
       console.error(`[follow] notify organizer ${vendorId} failed:`, err?.message);
     }
