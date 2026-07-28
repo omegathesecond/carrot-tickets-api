@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticateBuyer, authenticateCommunityViewer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { authenticateBuyer, authenticateCommunityViewer, optionalCommunityViewer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { CommunityController } from '@controllers/community.controller';
 import { MessageController } from '@controllers/message.controller';
 import { ReportController } from '@controllers/report.controller';
@@ -43,9 +43,11 @@ router.post('/questions/:questionId/replies', optionalTicketsAuth, EventQuestion
 router.post('/questions/:questionId/like', optionalTicketsAuth, EventQuestionController.like);
 
 router.post('/:eventId/join', authenticateBuyer, CommunityController.join);
-router.get('/:eventId', authenticateCommunityViewer, CommunityController.getView);
+// Who's-going social proof is public: optionalCommunityViewer lets signed-out
+// visitors read the community view + roster (join/messages stay gated).
+router.get('/:eventId', optionalCommunityViewer, CommunityController.getView);
 router.post('/:eventId/verify-ticket', authenticateBuyer, CommunityController.reverifyTicket);
-router.get('/:eventId/members', authenticateCommunityViewer, CommunityController.listMembers);
+router.get('/:eventId/members', optionalCommunityViewer, CommunityController.listMembers);
 router.get('/:eventId/questions', optionalTicketsAuth, EventQuestionController.list);
 router.post('/:eventId/questions', optionalTicketsAuth, EventQuestionController.create);
 

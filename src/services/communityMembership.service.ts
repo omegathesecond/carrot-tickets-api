@@ -70,6 +70,18 @@ export class CommunityMembershipService {
   }
 
   /**
+   * Anonymous, read-only community view (who's-going social proof for signed-out
+   * visitors). No membership → gated channels read as locked, no unread counts,
+   * `membership: null` — same shape a not-yet-joined member would see, minus any
+   * personal state. memberCount is the public "who's going" number.
+   */
+  static async getPublicView(eventId: string): Promise<CommunityView> {
+    const community = await Community.findOne({ eventId });
+    if (!community) throw new HttpError(404, 'Community not found for this event');
+    return CommunityMembershipService.buildView(String(community._id), eventId, null);
+  }
+
+  /**
    * Read-only community view for the managing organizer (spec: organizer peek).
    * No Membership is involved — the organizer sees every channel unlocked
    * (they own the event, gating doesn't apply to them), with no unread badges

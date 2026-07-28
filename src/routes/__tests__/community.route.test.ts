@@ -25,9 +25,15 @@ describe('community routes', () => {
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
-  it('rejects unauthenticated requests', async () => {
+  it('serves an anonymous viewer the public who’s-going view (no membership)', async () => {
     const { eventId } = await seedCommunityEvent();
-    await request(app).get(`/api/community/${eventId}`).expect(401);
+    const res = await request(app).get(`/api/community/${eventId}`).expect(200);
+    // Public social proof: channels + memberCount, but no personal state.
+    expect(res.body.data.eventId).toBe(eventId);
+    expect(res.body.data.membership).toBeNull();
+    expect(typeof res.body.data.memberCount).toBe('number');
+    // The roster is public too — a signed-out visitor can see who's going.
+    await request(app).get(`/api/community/${eventId}/members`).expect(200);
   });
 
   it('join creates a membership, assigns a username, and lists channels with locked flags', async () => {

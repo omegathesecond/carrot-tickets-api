@@ -46,6 +46,12 @@ export class CommunityController {
         const view = await CommunityMembershipService.getOrganizerView(eventId, organizer);
         return ApiResponseUtil.success(res, view);
       }
+      // Anonymous viewer (optionalCommunityViewer let them through): serve the
+      // public who's-going view — memberCount + channels, no personal state.
+      if (!(req as any).ticketsUser) {
+        const view = await CommunityMembershipService.getPublicView(eventId);
+        return ApiResponseUtil.success(res, view);
+      }
       const buyer = await CommunityController.requireBuyer(req, res);
       if (!buyer) return;
       const view = await CommunityMembershipService.getView(eventId, buyer);
@@ -77,16 +83,13 @@ export class CommunityController {
       const community = await Community.findOne({ eventId });
       if (!community) throw new HttpError(404, 'Community not found for this event');
 
-      // Organizer peek: gate on ownership. Buyer: gate on their own (un-banned)
-      // membership — attendees can only see the roster once they've joined.
+      // The who's-going roster is public social proof — any viewer (signed-out
+      // included, via optionalCommunityViewer) may read it. Names + avatars here
+      // are the same public buyer summaries shown on profiles and the feed.
+      // (Joining/messaging stays gated on the write routes.)
       const organizer = organizerFromRequest(req);
       if (organizer) {
         await assertOrganizerOwnsCommunity(community, organizer);
-      } else {
-        const buyer = await CommunityController.requireBuyer(req, res);
-        if (!buyer) return;
-        const me = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
-        if (!me || me.bannedAt) throw new HttpError(403, 'Join the community first');
       }
 
       const limitRaw = req.query['limit'];

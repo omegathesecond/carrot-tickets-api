@@ -217,6 +217,36 @@ export const authenticateCommunityViewer = async (
 };
 
 /**
+ * Like authenticateCommunityViewer, but NEVER rejects an anonymous request:
+ * a valid buyer/organizer token still populates `req.ticketsUser` (so the
+ * viewer gets their membership state), while a missing/invalid token falls
+ * through as anonymous (`ticketsUser` stays undefined). Used only on the public
+ * social-proof reads — who's-going roster + community view — so signed-out
+ * visitors can see who's going. Write/message routes stay on the strict
+ * middleware above.
+ */
+export const optionalCommunityViewer = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.replace('Bearer ', '');
+  if (token) {
+    try {
+      const decoded = TicketsAuthService.verifyToken(token) as any;
+      const isBuyer = decoded.userType === 'buyer' && decoded.userPhone;
+      const isOrganizer =
+        (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
+      if (isBuyer || isOrganizer) (req as any).ticketsUser = decoded;
+    } catch {
+      // Invalid/expired token on a public read → treat as anonymous, don't 401.
+    }
+  }
+  next();
+};
+
+/**
  * Require super-admin access.
  * Checks isSuperAdmin flag on the already-decoded ticketsUser.
  * Must be used after authenticateTickets.
