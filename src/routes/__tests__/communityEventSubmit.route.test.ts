@@ -74,6 +74,38 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     expect(ids).not.toContain(String(res.body.data._id));
   });
 
+  it('refuses to create sellable ticket types (selling is dashboard-only)', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    const req = request(app)
+      .post('/api/public/events/submit')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+    const withTiers = fields({
+      ticketing: 'carrot',
+      ticketTypes: JSON.stringify([{ name: 'General Admission', price: 100, quantity: 50 }]),
+    });
+    delete withTiers.externalTicketUrl;
+    Object.entries(withTiers).forEach(([k, v]) => req.field(k, v));
+    req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
+
+    const res = await req.expect(400);
+    expect(res.body.message).toMatch(/organizer dashboard/i);
+    expect(await Event.countDocuments({})).toBe(0);
+  });
+
+  it('lists a ticketless event (calendar/feed only) with no ticket types', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    const req = request(app)
+      .post('/api/public/events/submit')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+    const noTickets = fields({ ticketing: 'carrot' });
+    delete noTickets.externalTicketUrl;
+    Object.entries(noTickets).forEach(([k, v]) => req.field(k, v));
+    req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
+
+    const res = await req.expect(201);
+    expect(res.body.data.ticketTypes).toHaveLength(0);
+  });
+
   it('requires a poster image', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
     const req = request(app)

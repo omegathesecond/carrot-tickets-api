@@ -22,15 +22,22 @@ export class CommunityEventSubmitController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to list an event');
 
-      // Multipart text fields arrive as strings; ticketTypes is a JSON string.
       const body: Record<string, unknown> = { ...req.body };
-      if (typeof body['ticketTypes'] === 'string') {
-        try {
-          body['ticketTypes'] = JSON.parse(body['ticketTypes'] as string);
-        } catch {
-          return ApiResponseUtil.error(res, 'ticketTypes must be valid JSON', 400);
-        }
+
+      // Community self-listings are LISTINGS, not hosted events: they put the
+      // event on the feed/calendar and nothing more. Selling through Carrot
+      // requires a real organizer account (payouts, scanning, settlement), so
+      // ticket tiers are refused here outright rather than quietly dropped —
+      // a caller that asked to sell must be told it did not happen, and where
+      // to go instead. The current app never sends this field.
+      if (body['ticketTypes'] != null && body['ticketTypes'] !== '' && body['ticketTypes'] !== '[]') {
+        return ApiResponseUtil.error(
+          res,
+          'Community listings cannot sell tickets. Create your event on the organizer dashboard to sell tickets on Carrot.',
+          400,
+        );
       }
+      delete body['ticketTypes'];
       // URLs are set from the uploaded files below, never trusted from the body.
       delete body['posterUrl'];
       delete body['galleryImages'];
