@@ -29,7 +29,6 @@ import { normalizeHashtag } from '@utils/hashtags.util';
 import { UpdateController } from '@controllers/update.controller';
 import { getViewerReactions } from '@services/update.service';
 import { getActivityFeed } from '@services/activityFeed';
-import { resolveBuyerFromRequest } from '@/utils/buyerRequest.util';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
