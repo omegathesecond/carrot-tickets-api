@@ -14,10 +14,14 @@ export class CommunityService {
    * Default channels are ensured on EVERY call (upsert on the unique
    * (communityId, slug) index) so a crash between community creation and
    * channel creation self-heals on the next call.
+   *
+   * `vendorId` is null for a buyer self-listed event — it has no organizer,
+   * and the community must still exist or the event page's Community tab,
+   * its roster, and "Going" all 404.
    */
   static async ensureForEvent(
     eventId: string,
-    vendorId: string
+    vendorId: string | null
   ): Promise<{ community: ICommunity; created: boolean }> {
     const existing = await Community.findOne({ eventId });
     if (existing) {
@@ -26,7 +30,7 @@ export class CommunityService {
     }
 
     try {
-      const community = await Community.create({ eventId, vendorId });
+      const community = await Community.create({ eventId, ...(vendorId ? { vendorId } : {}) });
       await CommunityService.ensureDefaultChannels(community);
       return { community, created: true };
     } catch (err: any) {

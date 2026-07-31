@@ -77,10 +77,10 @@ describe('feed.service getFeed', () => {
 
   it('gates activity slides on published events and carries eventName', async () => {
     const published = await seedEvent('Published Show');
-    await seedCompletedSale(published._id, published.vendorId);
+    await seedCompletedSale(published._id, published.vendorId!);
 
     const cancelled = await seedEvent('Cancelled Show', EventStatus.CANCELLED);
-    await seedCompletedSale(cancelled._id, cancelled.vendorId);
+    await seedCompletedSale(cancelled._id, cancelled.vendorId!);
 
     const { items } = await getFeed({ tab: 'for-you', limit: 30 });
     const activitySlides = items.filter((i) => i.type === 'activity');

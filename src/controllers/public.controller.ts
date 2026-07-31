@@ -14,7 +14,11 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { getViewerEventReactions } from '@services/eventReaction.service';
+import { CalendarService } from '@services/calendar.service';
+import { GoingService } from '@services/going.service';
+import { buildEventCards } from '@services/eventCards.service';
 import { toPublicEventCard } from '@/utils/eventCard.util';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
@@ -227,6 +231,41 @@ export class PublicController {
     } catch (error) {
       console.error('Resolve public organizer error:', error);
       return null;
+    }
+  }
+
+  /**
+   * GET /api/public/calendar?year= — every published event in the year,
+   * grouped by month. The public "what's on" calendar: listing an event puts
+   * it here for everyone, immediately.
+   *
+   * Auth is OPTIONAL (optionalTicketsAuth). A signed-in buyer's rows carry
+   * `viewerIsGoing` / `viewerHasSaved` so the client can mark their own —
+   * marking only, never filtering. Signed-out visitors get the same calendar
+   * with both flags absent. Contrast /api/social/me/calendar, which is the
+   * personal going+saved calendar and requires auth.
+   */
+  static async getPublicCalendar(req: Request, res: Response): Promise<any> {
+    try {
+      const yearRaw = req.query['year'];
+      const year = yearRaw === undefined ? new Date().getUTCFullYear() : Number(yearRaw);
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+        return ApiResponseUtil.error(res, 'year must be a 4-digit year', 400);
+      }
+
+      const { monthCounts, eventIds } = await CalendarService.publicForYear(year);
+
+      // A viewer is optional here, so both lookups degrade to "no marks"
+      // rather than failing the calendar — but an anonymous request never
+      // attempts them in the first place.
+      const buyer = await resolveBuyerFromRequest(req).catch(() => null);
+      const actor = buyer ? { type: 'buyer' as const, id: String(buyer._id) } : null;
+      const goingEventIds = buyer ? new Set(await GoingService.goingEventIds(buyer)) : undefined;
+
+      const events = await buildEventCards(eventIds, actor, { ...(goingEventIds ? { goingEventIds } : {}) });
+      return ApiResponseUtil.success(res, { monthCounts, events });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load the calendar');
     }
   }
 
