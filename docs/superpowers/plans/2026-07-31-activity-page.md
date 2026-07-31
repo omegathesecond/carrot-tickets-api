@@ -768,7 +768,10 @@ describe('activity feed sources', () => {
     const a = await Buyer.create({ phone: '+26878100006', password: 'password123' });
     const b = await Buyer.create({ phone: '+26878100007', password: 'password123' });
     const older = await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'buyer', targetId: a._id });
-    await Follow.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } }, { timestamps: false });
+    // Backdate through the raw driver: Mongoose 7 marks createdAt immutable under
+    // `timestamps: true` and strips it from a $set, so Model.updateOne(..., {timestamps:false})
+    // silently no-ops. Confirmed the hard way in Task 3.
+    await Follow.collection.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } });
     const newer = await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'buyer', targetId: b._id });
 
     const rows = await followCandidates({ limit: 20, before: newer.createdAt as Date });
@@ -1221,6 +1224,7 @@ git commit -m "feat: add batch hydration for activity feed rows"
 
 **Interfaces:**
 - Consumes: `goingCandidates` (Task 3), the five source functions (Task 4), `hydrate` (Task 5), all types (Task 2).
+- **`goingCandidates` returns `{ candidates: ActivityCandidate[]; nextBefore: Date | null }`, NOT a bare array** — it merges two collections under one watermark and publishes the floor below which it could not guarantee completeness. The other five sources return bare arrays.
 - Produces: `getActivityFeed(opts: ActivityFeedOpts): Promise<{ items: ActivityItem[]; nextCursor: string | null }>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1407,7 +1411,7 @@ export async function getActivityFeed(
 
   const per = (type: ActivityType) => ({ before: watermark(cursor, type), limit, actorIds });
 
-  const [likeEvents, likePosts, follows, going, posts, events] = await Promise.all([
+  const [likeEvents, likePosts, follows, goingResult, posts, events] = await Promise.all([
     likeEventCandidates(per('like_event')),
     likePostCandidates(per('like_post')),
     followCandidates(per('follow')),
@@ -1415,6 +1419,18 @@ export async function getActivityFeed(
     postCandidates(per('post')),
     eventCandidates(per('event')),
   ]);
+
+  // `going` is the only source that merges TWO collections (Membership and
+  // Ticket) under one watermark. Their sub-windows are limited independently,
+  // so it publishes `nextBefore`: the floor below which THIS call could not
+  // guarantee completeness. Two rules follow, and both are load-bearing:
+  //   1. `g` must never advance PAST nextBefore, or a pair whose twin row sat
+  //      below the shallower sub-window is skipped on every subsequent page.
+  //   2. When no going candidate is consumed, `g` must advance TO nextBefore
+  //      anyway — otherwise a clamped-to-empty page re-issues the identical
+  //      query forever and the source wedges permanently.
+  const going = goingResult.candidates;
+  const goingFloor = goingResult.nextBefore;
 
   const all: ActivityCandidate[] = [...likeEvents, ...likePosts, ...follows, ...going, ...posts, ...events]
     .sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
@@ -1432,9 +1448,25 @@ export async function getActivityFeed(
     advanced = true;
   }
 
+  // Apply going's two rules (see the comment above goingFloor).
+  if (goingFloor) {
+    const floorIso = goingFloor.toISOString();
+    const consumed = next[SOURCE_KEYS.going];
+    // Rule 1 + 2 collapse to: take whichever is NEWER — the floor, or the last
+    // consumed going row. `undefined` (nothing consumed) falls through to the
+    // floor, which is what un-wedges a clamped-to-empty page.
+    if (!consumed || Date.parse(consumed) < goingFloor.getTime()) {
+      next[SOURCE_KEYS.going] = floorIso;
+    }
+    advanced = true; // a published floor is real progress even with zero rows
+  }
+
   // Exhausted when every source returned less than a full window AND the page
-  // consumed everything they gave us — there is nothing left behind.
+  // consumed everything they gave us — there is nothing left behind. `going`
+  // additionally must have published no floor: a non-null floor means it
+  // deliberately withheld rows below it, so there IS more to come.
   const exhausted = all.length <= limit
+    && !goingFloor
     && [likeEvents, likePosts, follows, going, posts, events].every((rows) => rows.length < limit);
 
   return { items, nextCursor: exhausted || !advanced ? null : encode(next) };
@@ -1712,7 +1744,7 @@ export const activityApi = {
     if (opts.cursor) params.set('cursor', opts.cursor);
     if (opts.limit) params.set('limit', String(opts.limit));
     const res = await fetchApi<Envelope<ActivityPage>>(
-      `/public/activity-feed?${params.toString()}`,
+      `/api/public/activity-feed?${params.toString()}`,
       getSessionType() ? { headers: authHeaders() } : undefined
     );
     return res.data;
