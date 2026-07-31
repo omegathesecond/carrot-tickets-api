@@ -63,7 +63,7 @@ describe('goingCandidates', () => {
     const buyer = await seedBuyer('+26878000001');
     await joinAt(buyer._id, community._id, new Date(Date.now() - DAY));
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.type).toBe('going');
     expect(rows[0]!.actor).toEqual({ kind: 'buyer', id: String(buyer._id) });
@@ -75,7 +75,7 @@ describe('goingCandidates', () => {
     const buyer = await seedBuyer('+26878000002');
     await ticketAt(event._id, vendor._id, buyer.phone, new Date(Date.now() - DAY));
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actor.id).toBe(String(buyer._id));
   });
@@ -88,7 +88,7 @@ describe('goingCandidates', () => {
     await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.sortAt.getTime()).toBe(ticketTime.getTime());
   });
@@ -106,28 +106,31 @@ describe('goingCandidates', () => {
     await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
-    const rows = await goingCandidates({ limit: 20, before: new Date(joinTime.getTime() + 1) });
+    const { candidates: rows } = await goingCandidates({ limit: 20, before: new Date(joinTime.getTime() + 1) });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.sortAt.getTime()).toBe(ticketTime.getTime());
 
-    const deeper = await goingCandidates({ limit: 20, before: ticketTime });
+    const { candidates: deeper } = await goingCandidates({ limit: 20, before: ticketTime });
     expect(deeper).toHaveLength(0);
   });
 
   it('suppresses the twin row even when the winning ticket is crowded out of its own window (cross-window dedupe)', async () => {
-    // Genuine cross-page case: the buyer's ticket is far older than a pile of
-    // OTHER live tickets, so with a small `limit` it never enters the ticket
-    // sub-window at all — only the join does. A per-page-only dedupe would
-    // see no competing row in this call and would wrongly emit the join. The
-    // correct behaviour relies on step 4's UNWINDOWED lookup (no `before`,
-    // no `limit`) to discover the older ticket anyway and suppress the join.
+    // Genuine cross-window case: the buyer's ticket is far older than a pile
+    // of OTHER live tickets, so with a small `limit` it never enters the
+    // ticket sub-window at all — only the join does. Crucially, the join
+    // here (0.5 days ago) sits ABOVE the resulting clamp boundary (3 days
+    // ago, the oldest crowding filler), so the round-2 boundary clamp does
+    // NOT withhold it — the ONLY thing that can suppress it is step 4's
+    // UNWINDOWED lookup (no `before`, no `limit`) discovering the older
+    // ticket anyway. A per-page-only dedupe (or a step 4 that isn't truly
+    // unwindowed) would see no competing row in this call and wrongly emit
+    // the join.
     const LIMIT = 3;
     const { vendor, event, community } = await seedEvent('E4B');
     const buyer = await seedBuyer('+26878000013');
     const ticketTime = new Date(Date.now() - 10 * DAY); // the true (older) winner
-    const joinTime = new Date(Date.now() - 5 * DAY); // loses, and would be the
-    // only row inside a `limit`-sized ticket window if the ticket weren't
-    // crowded out entirely
+    const joinTime = new Date(Date.now() - DAY / 2); // loses, but is NOT below
+    // the clamp boundary — only step 4's unwindowed lookup can catch it
     await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
@@ -138,7 +141,7 @@ describe('goingCandidates', () => {
       await ticketAt(event._id, vendor._id, `+2687899${9100 + i}`, new Date(Date.now() - (i + 1) * DAY));
     }
 
-    const rows = await goingCandidates({ limit: LIMIT });
+    const { candidates: rows } = await goingCandidates({ limit: LIMIT });
     const forPair = rows.filter((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
     expect(forPair).toHaveLength(0);
   });
@@ -176,30 +179,89 @@ describe('goingCandidates', () => {
     const boundary = fillerTimes[fillerTimes.length - 1]!.getTime(); // oldest fetched filler
 
     const page1 = await goingCandidates({ limit: LIMIT });
-    expect(page1).toHaveLength(0);
+    expect(page1.candidates).toHaveLength(0);
     // General invariant, not just this scenario's specific count: nothing
     // below the boundary may ever be returned.
-    for (const row of page1) {
+    for (const row of page1.candidates) {
       expect(row.sortAt.getTime()).toBeGreaterThanOrEqual(boundary);
     }
-    expect(page1.some((r) => r.actor.id === String(bystander._id))).toBe(false);
+    expect(page1.candidates.some((r) => r.actor.id === String(bystander._id))).toBe(false);
 
     // A caller that never sets `before` below the guaranteed boundary can
     // still reach both withheld rows on a later call — deferred, not lost.
     const page2 = await goingCandidates({ limit: LIMIT, before: new Date(boundary + 1) });
-    const recovered = page2.find((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    const recovered = page2.candidates.find((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
     expect(recovered).toBeDefined();
     expect(recovered!.sortAt.getTime()).toBe(ticketTime.getTime());
-    const bystanderRow = page2.find((r) => r.actor.id === String(bystander._id));
+    const bystanderRow = page2.candidates.find((r) => r.actor.id === String(bystander._id));
     expect(bystanderRow).toBeDefined();
     expect(bystanderRow!.sortAt.getTime()).toBe(bystanderJoinTime.getTime());
+  });
+
+  it('does not starve the following tab: actorIds is pushed into the ticket sub-query, not just applied post-hoc', async () => {
+    // Tickets link to accounts by customerPhone, not buyerId. If actorIds is
+    // only applied AFTER the ticket fetch, the query pulls the newest `limit`
+    // tickets PLATFORM-WIDE, so a pile of newer tickets from unrelated buyers
+    // can crowd a followed actor's own, older ticket out of the window
+    // entirely — the following tab would see nothing for them.
+    const LIMIT = 3;
+    const { vendor, event } = await seedEvent('E4D');
+    const followed = await seedBuyer('+26878000030');
+    const ticketTime = new Date(Date.now() - 10 * DAY); // followed buyer's real, older ticket
+    await ticketAt(event._id, vendor._id, followed.phone, ticketTime);
+
+    // Crowd the platform-wide ticket window with >= LIMIT newer tickets from
+    // unrelated buyers (walk-ups), so an actorIds-blind query never reaches
+    // the followed buyer's ticket at all.
+    for (let i = 0; i < LIMIT; i++) {
+      await ticketAt(event._id, vendor._id, `+2687899${9300 + i}`, new Date(Date.now() - (i + 1) * DAY));
+    }
+
+    const { candidates: rows } = await goingCandidates({ limit: LIMIT, actorIds: [String(followed._id)] });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor.id).toBe(String(followed._id));
+    expect(rows[0]!.target.id).toBe(String(event._id));
+    expect(rows[0]!.sortAt.getTime()).toBe(ticketTime.getTime());
+  });
+
+  it('publishes nextBefore so a zero-candidate clamp cannot wedge the source forever', async () => {
+    // The newest `limit` live tickets are ALL POS walk-ups (no matching
+    // Buyer), so the ticket sub-window is full (ticketFull) while producing
+    // zero rows of its own — and a real, membership-backed pair sits below
+    // the resulting boundary and gets clamped away too. If the function only
+    // returned `[]`, a caller that advances its watermark from a CONSUMED
+    // candidate would never move and would re-issue the identical query
+    // forever. `nextBefore` must let it advance anyway.
+    const LIMIT = 3;
+    const { vendor, event, community } = await seedEvent('E4E');
+    const buyer = await seedBuyer('+26878000040');
+    const joinTime = new Date(Date.now() - 10 * DAY); // the real pair, crowded below the boundary
+    await joinAt(buyer._id, community._id, joinTime);
+
+    const fillerTimes: Date[] = [];
+    for (let i = 0; i < LIMIT; i++) {
+      const at = new Date(Date.now() - (i + 1) * DAY);
+      fillerTimes.push(at);
+      await ticketAt(event._id, vendor._id, `+2687899${9400 + i}`, at);
+    }
+    const boundary = fillerTimes[fillerTimes.length - 1]!.getTime();
+
+    const page1 = await goingCandidates({ limit: LIMIT });
+    expect(page1.candidates).toHaveLength(0);
+    expect(page1.nextBefore).not.toBeNull();
+    expect(page1.nextBefore!.getTime()).toBe(boundary);
+
+    const page2 = await goingCandidates({ limit: LIMIT, before: page1.nextBefore! });
+    const recovered = page2.candidates.find((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    expect(recovered).toBeDefined();
+    expect(recovered!.sortAt.getTime()).toBe(joinTime.getTime());
   });
 
   it('skips a ticket whose phone matches no Carrot account (POS walk-up)', async () => {
     const { vendor, event } = await seedEvent('E5');
     await ticketAt(event._id, vendor._id, '+26878999999', new Date(Date.now() - DAY));
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(0);
   });
 
@@ -211,7 +273,7 @@ describe('goingCandidates', () => {
     await Membership.updateOne({ _id: m._id }, { $set: { bannedAt: new Date() } });
     await ticketAt(event._id, vendor._id, refunded.phone, new Date(Date.now() - DAY), TicketStatus.REFUNDED);
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(0);
   });
 
@@ -227,7 +289,7 @@ describe('goingCandidates', () => {
     await joinAt(b1._id, draft.community._id, new Date(Date.now() - DAY));
     await joinAt(b2._id, ended.community._id, new Date(Date.now() - DAY));
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.target.id).toBe(String(ended.event._id));
   });
@@ -239,7 +301,7 @@ describe('goingCandidates', () => {
     await joinAt(followed._id, community._id, new Date(Date.now() - DAY));
     await joinAt(stranger._id, community._id, new Date(Date.now() - DAY));
 
-    const rows = await goingCandidates({ limit: 20, actorIds: [String(followed._id)] });
+    const { candidates: rows } = await goingCandidates({ limit: 20, actorIds: [String(followed._id)] });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actor.id).toBe(String(followed._id));
   });
@@ -251,7 +313,7 @@ describe('goingCandidates', () => {
     await joinAt(buyer._id, a.community._id, new Date(Date.now() - 5 * DAY));
     await joinAt(buyer._id, b.community._id, new Date(Date.now() - 1 * DAY));
 
-    const rows = await goingCandidates({ limit: 20 });
+    const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows.map((r) => r.target.id)).toEqual([String(b.event._id), String(a.event._id)]);
   });
 });

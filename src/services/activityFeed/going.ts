@@ -36,29 +36,50 @@ const pairKey = (buyerId: string, eventId: string) => `${buyerId}|${eventId}`;
  *
  * The two per-source windows (memberships, tickets) are each capped at
  * `limit` independently, but they share one `before` watermark advanced by
- * the caller. When one source is far busier than the other, its window can
- * "crowd out" older rows before the other source's window even gets close —
- * e.g. enough new tickets exist that a buyer's own (much older) ticket falls
- * outside this call's ticket window entirely, while their join for the same
- * event is still comfortably inside the membership window. If we then
- * emitted every candidate this call resolved, the caller would set its next
- * `before` from the oldest row it saw — which could land ABOVE that buyer's
- * hidden ticket, permanently skipping past it on every future page (the
- * pair would never surface again, on any page). So: whenever a sub-query
- * came back full (hit `limit`, meaning older rows may exist beyond it that
- * we didn't fetch), we clamp the FINAL candidate set to rows at or after the
- * oldest fetched row of that source — for every pair, not just ones we can
- * tell are affected, since we can't know which unresolved rows are hiding
- * below the cut. Rows below that boundary are withheld this call and
- * deferred to whichever future call's window reaches them; they are never
- * dropped, because the clamp guarantees the watermark can't advance past
- * them.
+ * the caller (the `going` source keeps its OWN watermark — see
+ * `SOURCE_KEYS.going` in ./types — so this never gets dragged by another
+ * source's pagination). When one source is far busier than the other, its
+ * window can "crowd out" older rows before the other source's window even
+ * gets close — e.g. enough new tickets exist that a buyer's own (much
+ * older) ticket falls outside this call's ticket window entirely, while
+ * their join for the same event is still comfortably inside the membership
+ * window. If we then emitted every candidate this call resolved, the
+ * caller would advance `going`'s watermark from the oldest row it saw —
+ * which could land ABOVE that buyer's hidden ticket, permanently skipping
+ * past it on every future page (the pair would never surface again, on any
+ * page). So: whenever a sub-query came back full (hit `limit`, meaning
+ * older rows may exist beyond it that we didn't fetch), we clamp the FINAL
+ * candidate set to rows at or after the oldest fetched row of that source —
+ * for every pair, not just ones we can tell are affected, since we can't
+ * know which unresolved rows are hiding below the cut. Rows below that
+ * boundary are withheld this call and deferred to whichever future call's
+ * window reaches them; they are never dropped, because the clamp guarantees
+ * the watermark can't advance past them.
+ *
+ * That clamp can legitimately empty the whole result (e.g. the newest
+ * `limit` tickets are all POS walk-ups with no matching account, while a
+ * real pair sits below the boundary). A caller that only advances the
+ * watermark from a CONSUMED candidate would then never move past this call
+ * and would re-issue the identical query forever — wedged. So the boundary
+ * is returned explicitly as `nextBefore`, letting the caller advance even
+ * on a zero-candidate page. `nextBefore` is `null` only when BOTH
+ * sub-windows came back short of `limit` — genuinely exhausted, nothing
+ * left below `before` at all.
+ *
+ * `actorIds` (the following tab) is pushed into the ticket query itself via
+ * a phone lookup, not just applied after the fetch. Tickets link to
+ * accounts by `customerPhone`, not id, so post-hoc filtering let a flood of
+ * unrelated platform-wide tickets fill the whole `limit`-sized ticket
+ * window before ever reaching a followed actor's own (older) ticket —
+ * starving the following tab, and, worse, making `ticketFull` true on
+ * essentially every call (the boundary would clamp to "minutes ago" and
+ * wipe out the real results too).
  */
 export async function goingCandidates(opts: {
   before?: Date;
   limit: number;
   actorIds?: string[] | null;
-}): Promise<ActivityCandidate[]> {
+}): Promise<{ candidates: ActivityCandidate[]; nextBefore: Date | null }> {
   const { before, limit, actorIds } = opts;
 
   // ---- 1. window: newest rows from each source ----
@@ -70,12 +91,29 @@ export async function goingCandidates(opts: {
 
   const ticketQuery: any = { status: { $in: LIVE } };
   if (before) ticketQuery.createdAt = { $lt: before };
-  const tickets = await Ticket.find(ticketQuery)
-    .sort({ createdAt: -1 }).limit(limit).select('customerPhone eventId createdAt').lean();
+  let tickets: any[] = [];
+  if (actorIds) {
+    // Tickets have no buyerId — resolve the followed actors to phones first,
+    // then scope the query to those phones. An actor with no Buyer document
+    // (shouldn't happen for a real id, but be defensive) simply resolves to
+    // no phone and is excluded, same as it would be post-hoc.
+    const actorBuyers = await Buyer.find({ _id: { $in: actorIds } }).select('phone').lean();
+    const actorPhones = actorBuyers.map((b) => b.phone);
+    if (actorPhones.length > 0) {
+      ticketQuery.customerPhone = { $in: actorPhones };
+      tickets = await Ticket.find(ticketQuery)
+        .sort({ createdAt: -1 }).limit(limit).select('customerPhone eventId createdAt').lean();
+    }
+    // else: none of the followed actors have a resolvable phone — nothing to
+    // fetch, and running the query unfiltered would defeat the whole point.
+  } else {
+    tickets = await Ticket.find(ticketQuery)
+      .sort({ createdAt: -1 }).limit(limit).select('customerPhone eventId createdAt').lean();
+  }
 
   // A full sub-query (hit `limit`) means older rows of that source may exist
   // past the oldest one we fetched — completeness is only guaranteed at or
-  // after that point. See the boundary clamp at the bottom of this function.
+  // after that point. See the boundary clamp and `nextBefore` above.
   const membershipFull = limit > 0 && memberships.length === limit;
   const ticketFull = limit > 0 && tickets.length === limit;
   const boundary =
@@ -85,6 +123,7 @@ export async function goingCandidates(opts: {
           ticketFull ? (tickets[tickets.length - 1]!.createdAt as Date).getTime() : -Infinity
         )
       : undefined;
+  const nextBefore = boundary === undefined ? null : new Date(boundary);
 
   // ---- 2. resolve every windowed row to a (buyerId, eventId) pair ----
   const windowCommunities = memberships.length
@@ -112,7 +151,7 @@ export async function goingCandidates(opts: {
     if (actorIds && !actorIds.includes(buyerId)) continue;
     rows.push({ buyerId, eventId: String(t.eventId), at: t.createdAt as Date, sourceId: String(t._id) });
   }
-  if (rows.length === 0) return [];
+  if (rows.length === 0) return { candidates: [], nextBefore };
 
   const buyerIds = [...new Set(rows.map((r) => r.buyerId))];
   const eventIds = [...new Set(rows.map((r) => r.eventId))];
@@ -183,5 +222,8 @@ export async function goingCandidates(opts: {
   // skip past one we haven't actually resolved yet.
   const complete = boundary === undefined ? out : out.filter((c) => c.sortAt.getTime() >= boundary);
 
-  return complete.sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
+  return {
+    candidates: complete.sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime()),
+    nextBefore,
+  };
 }
