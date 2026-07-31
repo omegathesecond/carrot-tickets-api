@@ -40,7 +40,7 @@ describe('activity feed sources', () => {
     await EventReaction.create({ eventId: event._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
     await EventReaction.create({ eventId: event._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
-    const rows = await likeEventCandidates({ limit: 20 });
+    const { candidates: rows } = await likeEventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.type).toBe('like_event');
     expect(rows[0]!.target).toEqual({ kind: 'event', id: String(event._id) });
@@ -55,7 +55,7 @@ describe('activity feed sources', () => {
     await EventReaction.create({ eventId: draft.event._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
     await EventReaction.create({ eventId: ended.event._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
 
-    const rows = await likeEventCandidates({ limit: 20 });
+    const { candidates: rows } = await likeEventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.target.id).toBe(String(ended.event._id));
   });
@@ -68,7 +68,7 @@ describe('activity feed sources', () => {
     await UpdateReaction.create({ updateId: live._id, buyerId: vendor._id, actorType: 'vendor', type: 'like' });
     await UpdateReaction.create({ updateId: removed._id, buyerId: vendor._id, actorType: 'vendor', type: 'like' });
 
-    const rows = await likePostCandidates({ limit: 20 });
+    const { candidates: rows } = await likePostCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.type).toBe('like_post');
     expect(rows[0]!.actor).toEqual({ kind: 'organizer', id: String(vendor._id) });
@@ -82,7 +82,7 @@ describe('activity feed sources', () => {
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'buyer', targetId: other._id });
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: vendor._id });
 
-    const rows = await followCandidates({ limit: 20 });
+    const { candidates: rows } = await followCandidates({ limit: 20 });
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.target.kind).sort()).toEqual(['buyer', 'organizer']);
     expect(rows.every((r) => r.type === 'follow')).toBe(true);
@@ -96,7 +96,7 @@ describe('activity feed sources', () => {
       media: { rawKey: 'k2', status: 'processing' },
     });
 
-    const rows = await postCandidates({ limit: 20 });
+    const { candidates: rows } = await postCandidates({ limit: 20 });
     // The processing post is excluded: its media is not ready, so it would
     // render as a broken thumbnail in the feed.
     expect(rows.map((r) => r.target.id)).toEqual([String(ok._id)]);
@@ -108,7 +108,7 @@ describe('activity feed sources', () => {
     const { vendor, event } = await seedEvent('E7');
     await seedEvent('E8', EventStatus.DRAFT);
 
-    const rows = await eventCandidates({ limit: 20 });
+    const { candidates: rows } = await eventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.type).toBe('event');
     expect(rows[0]!.actor).toEqual({ kind: 'organizer', id: String(vendor._id) });
@@ -131,7 +131,7 @@ describe('activity feed sources', () => {
       { $unset: { publishedAt: '' }, $set: { createdAt: new Date(Date.now() - DAY) } }
     );
 
-    const rows = await eventCandidates({ limit: 1 });
+    const { candidates: rows } = await eventCandidates({ limit: 1 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.target.id).toBe(String(undated._id));
   });
@@ -147,7 +147,7 @@ describe('activity feed sources', () => {
     await Follow.collection.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } });
     const newer = await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'buyer', targetId: b._id });
 
-    const rows = await followCandidates({ limit: 20, before: newer.createdAt as Date });
+    const { candidates: rows } = await followCandidates({ limit: 20, before: newer.createdAt as Date });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.target.id).toBe(String(a._id));
   });
@@ -159,7 +159,7 @@ describe('activity feed sources', () => {
     await EventReaction.create({ eventId: event._id, buyerId: followed._id, actorType: 'buyer', type: 'like' });
     await EventReaction.create({ eventId: event._id, buyerId: stranger._id, actorType: 'buyer', type: 'like' });
 
-    const rows = await likeEventCandidates({ limit: 20, actorIds: [String(followed._id)] });
+    const { candidates: rows } = await likeEventCandidates({ limit: 20, actorIds: [String(followed._id)] });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actor.id).toBe(String(followed._id));
     expect(mongoose.isValidObjectId(rows[0]!.actor.id)).toBe(true);

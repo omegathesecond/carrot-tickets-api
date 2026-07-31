@@ -13,6 +13,18 @@ export interface SourceOpts {
   actorIds?: string[] | null;
 }
 
+/** Uniform per-source result shape (matches goingCandidates). `nextBefore` is
+ *  the scan floor — the oldest `createdAt`/`activityAt` among the rows the DB
+ *  actually RETURNED, before any post-fetch filter is applied — published
+ *  whenever that fetch came back full (`fetched.length === limit`), i.e.
+ *  older rows of THIS source may exist past it that weren't even scanned.
+ *  `null` means the scan reached genuinely to the end: nothing left below
+ *  `before` for this source, filtered or not. */
+export interface SourceResult {
+  candidates: ActivityCandidate[];
+  nextBefore: Date | null;
+}
+
 /** An actorType of 'vendor' means an organizer brand acting socially. */
 const actorKind = (actorType: string): 'buyer' | 'organizer' =>
   actorType === 'vendor' ? 'organizer' : 'buyer';
@@ -43,12 +55,26 @@ function windowed(base: any, opts: SourceOpts): any {
   return query;
 }
 
-export async function likeEventCandidates(opts: SourceOpts): Promise<ActivityCandidate[]> {
+/** The scan floor for a fetch sorted newest-first: the oldest FETCHED row's
+ *  timestamp, but only when the fetch came back full — a short fetch already
+ *  reached the true end, so there is no floor to publish. This is SCAN depth
+ *  (what the DB query returned), not survivor depth (what remains after a
+ *  post-fetch filter like "published" or "live") — a source that fetches a
+ *  full window and then filters every row to zero must still report how far
+ *  it looked, or the caller can't tell "nothing survived" apart from "nothing
+ *  exists," and would wrongly declare itself exhausted while unfiltered rows
+ *  sit just below the floor. */
+function scanFloor<T>(fetched: T[], limit: number, at: (row: T) => Date): Date | null {
+  return limit > 0 && fetched.length === limit ? at(fetched[fetched.length - 1]!) : null;
+}
+
+export async function likeEventCandidates(opts: SourceOpts): Promise<SourceResult> {
   const query = windowed({ type: 'like' }, opts);
   if (opts.actorIds) query.buyerId = { $in: opts.actorIds };
   const rows = await EventReaction.find(query).sort({ createdAt: -1 }).limit(opts.limit).lean();
+  const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);
   const published = await publishedEventIds(rows.map((r) => r.eventId));
-  return rows
+  const candidates = rows
     .filter((r) => published.has(String(r.eventId)))
     .map((r) => ({
       type: 'like_event' as const,
@@ -57,14 +83,16 @@ export async function likeEventCandidates(opts: SourceOpts): Promise<ActivityCan
       actor: { kind: actorKind(r.actorType), id: String(r.buyerId) },
       target: { kind: 'event' as const, id: String(r.eventId) },
     }));
+  return { candidates, nextBefore };
 }
 
-export async function likePostCandidates(opts: SourceOpts): Promise<ActivityCandidate[]> {
+export async function likePostCandidates(opts: SourceOpts): Promise<SourceResult> {
   const query = windowed({ type: 'like' }, opts);
   if (opts.actorIds) query.buyerId = { $in: opts.actorIds };
   const rows = await UpdateReaction.find(query).sort({ createdAt: -1 }).limit(opts.limit).lean();
+  const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);
   const live = await livePostIds(rows.map((r) => r.updateId));
-  return rows
+  const candidates = rows
     .filter((r) => live.has(String(r.updateId)))
     .map((r) => ({
       type: 'like_post' as const,
@@ -73,35 +101,40 @@ export async function likePostCandidates(opts: SourceOpts): Promise<ActivityCand
       actor: { kind: actorKind(r.actorType), id: String(r.buyerId) },
       target: { kind: 'post' as const, id: String(r.updateId) },
     }));
+  return { candidates, nextBefore };
 }
 
-export async function followCandidates(opts: SourceOpts): Promise<ActivityCandidate[]> {
+export async function followCandidates(opts: SourceOpts): Promise<SourceResult> {
   const query = windowed({}, opts);
   if (opts.actorIds) query.followerId = { $in: opts.actorIds };
   const rows = await Follow.find(query).sort({ createdAt: -1 }).limit(opts.limit).lean();
-  return rows.map((r) => ({
+  const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);
+  const candidates = rows.map((r) => ({
     type: 'follow' as const,
     sourceId: String(r._id),
     sortAt: r.createdAt as Date,
     actor: { kind: actorKind(r.followerType), id: String(r.followerId) },
     target: { kind: r.targetType === 'organizer' ? ('organizer' as const) : ('buyer' as const), id: String(r.targetId) },
   }));
+  return { candidates, nextBefore };
 }
 
-export async function postCandidates(opts: SourceOpts): Promise<ActivityCandidate[]> {
+export async function postCandidates(opts: SourceOpts): Promise<SourceResult> {
   const query = windowed({ status: 'active', 'media.status': 'ready' }, opts);
   if (opts.actorIds) query.authorId = { $in: opts.actorIds };
   const rows = await Update.find(query).sort({ createdAt: -1 }).limit(opts.limit).select('authorType authorId createdAt').lean();
-  return rows.map((r) => ({
+  const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);
+  const candidates = rows.map((r) => ({
     type: 'post' as const,
     sourceId: String(r._id),
     sortAt: r.createdAt as Date,
     actor: { kind: actorKind(r.authorType), id: String(r.authorId) },
     target: { kind: 'post' as const, id: String(r._id) },
   }));
+  return { candidates, nextBefore };
 }
 
-export async function eventCandidates(opts: SourceOpts): Promise<ActivityCandidate[]> {
+export async function eventCandidates(opts: SourceOpts): Promise<SourceResult> {
   // publishedAt is optional on older rows (and may even be explicitly stored
   // as null). An aggregation computes the effective timestamp ONCE, in an
   // `activityAt` field, and reuses it for the window predicate, the sort,
@@ -129,11 +162,13 @@ export async function eventCandidates(opts: SourceOpts): Promise<ActivityCandida
   );
 
   const rows = await Event.aggregate(pipeline);
-  return rows.map((r) => ({
+  const nextBefore = scanFloor(rows, opts.limit, (r) => r.activityAt as Date);
+  const candidates = rows.map((r) => ({
     type: 'event' as const,
     sourceId: String(r._id),
     sortAt: r.activityAt as Date,
     actor: { kind: 'organizer' as const, id: String(r.vendorId) },
     target: { kind: 'event' as const, id: String(r._id) },
   }));
+  return { candidates, nextBefore };
 }
