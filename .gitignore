@@ -39,3 +39,7 @@ temp/
 
 # Local Claude Code worktrees/config — never commit
 .claude/
+
+# SDD scratch — never commit
+.superpowers/
+.worktrees/
