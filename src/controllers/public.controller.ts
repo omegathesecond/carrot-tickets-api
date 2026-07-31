@@ -542,11 +542,19 @@ export class PublicController {
 
       let viewer: { type: 'buyer' | 'vendor'; id: string } | undefined;
       if (tabParam === 'following') {
-        const buyer = await resolveBuyerFromRequest(req);
+        // resolveActorFromRequest (not resolveBuyerFromRequest) so a
+        // signed-in VENDOR/brand session resolves too — the service
+        // explicitly supports vendor viewers on this tab (see
+        // activityFeed/index.ts), and the website treats a brand session as
+        // signed-in, so it always calls this tab expecting a real answer.
+        const actor = await resolveActorFromRequest(req);
         // The following tab cannot be answered without a viewer — say so
-        // loudly rather than silently degrading to the everyone tab.
-        if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to see who you follow');
-        viewer = { type: 'buyer', id: String(buyer._id) };
+        // loudly rather than silently degrading to the everyone tab. This
+        // check MUST stay here, before the service call: the service throws
+        // for tab "following" with no viewer, and the controller must never
+        // rely on catching that.
+        if (!actor) return ApiResponseUtil.unauthorized(res, 'Please sign in to see who you follow');
+        viewer = actor;
       }
 
       const cursor = req.query['cursor'] ? String(req.query['cursor']) : undefined;
@@ -564,8 +572,12 @@ export class PublicController {
       const result = await getActivityFeed({ tab: tabParam, cursor, limit, viewer });
       return ApiResponseUtil.success(res, result);
     } catch (error: any) {
+      // Log the real error server-side, but never let the feed service's
+      // detailed invariant-violation messages (they name internal source
+      // keys and timestamps — see activityFeed/index.ts) reach an
+      // unauthenticated client verbatim.
       console.error('Get activity feed error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to fetch activity');
+      return ApiResponseUtil.error(res, 'Failed to fetch activity');
     }
   }
 

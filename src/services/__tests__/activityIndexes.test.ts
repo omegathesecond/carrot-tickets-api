@@ -20,6 +20,9 @@ describe('activity feed recency indexes', () => {
 
   it('declares a newest-first index on every source the activity feed scans', () => {
     expect(hasIndex(Ticket, { status: 1, createdAt: -1 })).toBe(true);
+    // Following tab: goingCandidates() filters live tickets by
+    // customerPhone: { $in: [...] } sorted newest-first — see going.ts.
+    expect(hasIndex(Ticket, { customerPhone: 1, status: 1, createdAt: -1 })).toBe(true);
     expect(hasIndex(Membership, { createdAt: -1 })).toBe(true);
     expect(hasIndex(Follow, { createdAt: -1 })).toBe(true);
     expect(hasIndex(EventReaction, { type: 1, createdAt: -1 })).toBe(true);

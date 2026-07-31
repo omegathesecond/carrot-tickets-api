@@ -116,5 +116,13 @@ ticketSchema.index({ ticketId: 1 }, { unique: true });
 // Activity feed: global newest-first scan of live tickets (the "is going"
 // source). Every other Ticket index is a point lookup — none serves recency.
 ticketSchema.index({ status: 1, createdAt: -1 });
+// Activity feed, Following tab: goingCandidates() filters live tickets by
+// `customerPhone: { $in: [...followed actors' phones] }` sorted newest-first
+// (see services/activityFeed/going.ts). customerPhone was previously
+// unindexed, so the planner fell back to the { status:1, createdAt:-1 }
+// index above and scanned-and-discarded every live ticket looking for a
+// phone match — a viewer following people with no tickets scanned the whole
+// live-ticket collection, on every page. This index serves that query directly.
+ticketSchema.index({ customerPhone: 1, status: 1, createdAt: -1 });
 
 export const Ticket = mongoose.model<ITicket>('Ticket', ticketSchema);

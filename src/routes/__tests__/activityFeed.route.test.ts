@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
@@ -52,6 +52,23 @@ describe('GET /api/public/activity-feed', () => {
       .set('Authorization', `Bearer ${signBuyerToken(buyer.phone)}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data.items)).toBe(true);
+  });
+
+  it('serves the following tab to a VENDOR (brand) session, not a 401', async () => {
+    // Regression for the following-tab 401: the controller used to resolve
+    // the viewer with resolveBuyerFromRequest, which returns null for a
+    // vendor token, 401ing every organiser even though the service (and the
+    // website, which treats a brand session as signed-in) supports vendor
+    // viewers on this tab.
+    const { event } = await seedLike();
+    const vendor = await Vendor.create({ businessName: 'Follower Org', password: 'password123', slug: 'follower-org' });
+    const res = await request(app)
+      .get('/api/public/activity-feed?tab=following')
+      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data.items)).toBe(true);
+    // Sanity: the event from seedLike exists so this isn't a vacuous 200.
+    expect(event).toBeTruthy();
   });
 
   it('rejects an unknown tab value', async () => {
