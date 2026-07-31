@@ -93,7 +93,12 @@ describe('goingCandidates', () => {
     expect(rows[0]!.sortAt.getTime()).toBe(ticketTime.getTime());
   });
 
-  it('does not re-emit the pair on a later page (cross-page dedupe)', async () => {
+  it('suppresses the twin row when both source rows land in the same window (same-window dedupe)', async () => {
+    // NOTE: `before` is only an upper bound (`createdAt: { $lt: before }`),
+    // so both the ticket and the join below are still inside this window —
+    // this only proves the in-call `emitted` set works, not that the dedupe
+    // survives across pages. See the next test for the genuine cross-window
+    // case (the ticket and join land in DIFFERENT windows).
     const { vendor, event, community } = await seedEvent('E4');
     const buyer = await seedBuyer('+26878000004');
     const ticketTime = new Date(Date.now() - 5 * DAY);
@@ -101,14 +106,93 @@ describe('goingCandidates', () => {
     await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
-    // Page 2: window starts strictly before the join, so the join row is the
-    // only candidate in range. It must still be suppressed by the older ticket.
     const rows = await goingCandidates({ limit: 20, before: new Date(joinTime.getTime() + 1) });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.sortAt.getTime()).toBe(ticketTime.getTime());
 
     const deeper = await goingCandidates({ limit: 20, before: ticketTime });
     expect(deeper).toHaveLength(0);
+  });
+
+  it('suppresses the twin row even when the winning ticket is crowded out of its own window (cross-window dedupe)', async () => {
+    // Genuine cross-page case: the buyer's ticket is far older than a pile of
+    // OTHER live tickets, so with a small `limit` it never enters the ticket
+    // sub-window at all — only the join does. A per-page-only dedupe would
+    // see no competing row in this call and would wrongly emit the join. The
+    // correct behaviour relies on step 4's UNWINDOWED lookup (no `before`,
+    // no `limit`) to discover the older ticket anyway and suppress the join.
+    const LIMIT = 3;
+    const { vendor, event, community } = await seedEvent('E4B');
+    const buyer = await seedBuyer('+26878000013');
+    const ticketTime = new Date(Date.now() - 10 * DAY); // the true (older) winner
+    const joinTime = new Date(Date.now() - 5 * DAY); // loses, and would be the
+    // only row inside a `limit`-sized ticket window if the ticket weren't
+    // crowded out entirely
+    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await joinAt(buyer._id, community._id, joinTime);
+
+    // Crowd the ticket sub-window: >= LIMIT live tickets newer than
+    // ticketTime, for buyers with no Carrot account (POS walk-ups), so the
+    // window fills up with these before it ever reaches ticketTime.
+    for (let i = 0; i < LIMIT; i++) {
+      await ticketAt(event._id, vendor._id, `+2687899${9100 + i}`, new Date(Date.now() - (i + 1) * DAY));
+    }
+
+    const rows = await goingCandidates({ limit: LIMIT });
+    const forPair = rows.filter((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    expect(forPair).toHaveLength(0);
+  });
+
+  it('defers, but never permanently loses, a pair whose winning ticket a crowded window pushed out (boundary clamp)', async () => {
+    // Reproduces the desync counter-example: buyer B's ticket (T) is crowded
+    // out of the ticket sub-window by newer, unrelated tickets, while the
+    // membership sub-window is not crowded and reaches back past T to a
+    // BYSTANDER's own, older, unrelated join (M < T). If that bystander row
+    // were emitted this call, a real caller would naturally set its next
+    // `before` from it — landing below T and permanently skipping B's ticket
+    // on every future page. The fix must withhold the bystander row here
+    // too (not just B's pair), so the watermark can never fall below T.
+    const LIMIT = 3;
+    const { vendor, event, community } = await seedEvent('E4C');
+    const buyer = await seedBuyer('+26878000020');
+    const ticketTime = new Date(Date.now() - 10 * DAY); // B's true winner (T)
+    const joinTime = new Date(Date.now() - 6 * DAY); // B's join, loses to T
+    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await joinAt(buyer._id, community._id, joinTime);
+
+    const bystander = await seedBuyer('+26878000021');
+    const bystanderJoinTime = new Date(Date.now() - 12 * DAY); // M < T
+    await joinAt(bystander._id, community._id, bystanderJoinTime);
+
+    // Crowd the ticket sub-window with LIMIT newer, unrelated live tickets
+    // (POS walk-ups — no matching Carrot account, so they add no rows of
+    // their own, only window pressure).
+    const fillerTimes: Date[] = [];
+    for (let i = 0; i < LIMIT; i++) {
+      const at = new Date(Date.now() - (i + 1) * DAY);
+      fillerTimes.push(at);
+      await ticketAt(event._id, vendor._id, `+2687899${9200 + i}`, at);
+    }
+    const boundary = fillerTimes[fillerTimes.length - 1]!.getTime(); // oldest fetched filler
+
+    const page1 = await goingCandidates({ limit: LIMIT });
+    expect(page1).toHaveLength(0);
+    // General invariant, not just this scenario's specific count: nothing
+    // below the boundary may ever be returned.
+    for (const row of page1) {
+      expect(row.sortAt.getTime()).toBeGreaterThanOrEqual(boundary);
+    }
+    expect(page1.some((r) => r.actor.id === String(bystander._id))).toBe(false);
+
+    // A caller that never sets `before` below the guaranteed boundary can
+    // still reach both withheld rows on a later call — deferred, not lost.
+    const page2 = await goingCandidates({ limit: LIMIT, before: new Date(boundary + 1) });
+    const recovered = page2.find((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    expect(recovered).toBeDefined();
+    expect(recovered!.sortAt.getTime()).toBe(ticketTime.getTime());
+    const bystanderRow = page2.find((r) => r.actor.id === String(bystander._id));
+    expect(bystanderRow).toBeDefined();
+    expect(bystanderRow!.sortAt.getTime()).toBe(bystanderJoinTime.getTime());
   });
 
   it('skips a ticket whose phone matches no Carrot account (POS walk-up)', async () => {

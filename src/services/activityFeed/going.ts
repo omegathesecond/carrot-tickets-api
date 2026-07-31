@@ -33,6 +33,26 @@ const pairKey = (buyerId: string, eventId: string) => `${buyerId}|${eventId}`;
  *
  * Suspension is NOT filtered here — hydrate() drops suspended actors centrally
  * for all six sources.
+ *
+ * The two per-source windows (memberships, tickets) are each capped at
+ * `limit` independently, but they share one `before` watermark advanced by
+ * the caller. When one source is far busier than the other, its window can
+ * "crowd out" older rows before the other source's window even gets close —
+ * e.g. enough new tickets exist that a buyer's own (much older) ticket falls
+ * outside this call's ticket window entirely, while their join for the same
+ * event is still comfortably inside the membership window. If we then
+ * emitted every candidate this call resolved, the caller would set its next
+ * `before` from the oldest row it saw — which could land ABOVE that buyer's
+ * hidden ticket, permanently skipping past it on every future page (the
+ * pair would never surface again, on any page). So: whenever a sub-query
+ * came back full (hit `limit`, meaning older rows may exist beyond it that
+ * we didn't fetch), we clamp the FINAL candidate set to rows at or after the
+ * oldest fetched row of that source — for every pair, not just ones we can
+ * tell are affected, since we can't know which unresolved rows are hiding
+ * below the cut. Rows below that boundary are withheld this call and
+ * deferred to whichever future call's window reaches them; they are never
+ * dropped, because the clamp guarantees the watermark can't advance past
+ * them.
  */
 export async function goingCandidates(opts: {
   before?: Date;
@@ -52,6 +72,19 @@ export async function goingCandidates(opts: {
   if (before) ticketQuery.createdAt = { $lt: before };
   const tickets = await Ticket.find(ticketQuery)
     .sort({ createdAt: -1 }).limit(limit).select('customerPhone eventId createdAt').lean();
+
+  // A full sub-query (hit `limit`) means older rows of that source may exist
+  // past the oldest one we fetched — completeness is only guaranteed at or
+  // after that point. See the boundary clamp at the bottom of this function.
+  const membershipFull = limit > 0 && memberships.length === limit;
+  const ticketFull = limit > 0 && tickets.length === limit;
+  const boundary =
+    membershipFull || ticketFull
+      ? Math.max(
+          membershipFull ? (memberships[memberships.length - 1]!.createdAt as Date).getTime() : -Infinity,
+          ticketFull ? (tickets[tickets.length - 1]!.createdAt as Date).getTime() : -Infinity
+        )
+      : undefined;
 
   // ---- 2. resolve every windowed row to a (buyerId, eventId) pair ----
   const windowCommunities = memberships.length
@@ -145,5 +178,10 @@ export async function goingCandidates(opts: {
       target: { kind: 'event', id: r.eventId },
     });
   }
-  return out.sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
+  // Withhold anything below the completeness boundary (see comment above):
+  // we'd rather defer a row to a later page than let the caller's watermark
+  // skip past one we haven't actually resolved yet.
+  const complete = boundary === undefined ? out : out.filter((c) => c.sortAt.getTime() >= boundary);
+
+  return complete.sort((a, b) => b.sortAt.getTime() - a.sortAt.getTime());
 }
