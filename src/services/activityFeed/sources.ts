@@ -144,10 +144,17 @@ export async function eventCandidates(opts: SourceOpts): Promise<SourceResult> {
   // silently demoted recent no-publishedAt rows and could drop them past a
   // `before` cursor forever). `find()` does not offer a computed sort key,
   // hence the aggregation.
-  const match: any = { status: EventStatus.PUBLISHED };
+  // A buyer self-listed (community) event has no vendorId — there is no
+  // organizer to attribute an "announced" row to, and inventing one is
+  // forbidden. Exclude it here, in the $match, so it never consumes a page
+  // slot (rather than filtering it out after the fact and silently shrinking
+  // the page below `opts.limit`).
+  const match: any = { status: EventStatus.PUBLISHED, vendorId: { $exists: true, $ne: null } };
   // find() auto-casts query values against the schema; aggregation $match
   // does not, so actorIds strings must be cast to ObjectIds explicitly or
-  // vendorId: { $in: [...] } silently matches nothing.
+  // vendorId: { $in: [...] } silently matches nothing. This also already
+  // excludes vendorId-less rows, since $in of ObjectIds never matches a
+  // missing/null field.
   if (opts.actorIds) match.vendorId = { $in: opts.actorIds.map((id) => new Types.ObjectId(id)) };
 
   const pipeline: any[] = [

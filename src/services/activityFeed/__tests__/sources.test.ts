@@ -136,6 +136,20 @@ describe('activity feed sources', () => {
     expect(rows[0]!.target.id).toBe(String(undated._id));
   });
 
+  it('eventCandidates skips a self-listed event with no vendorId and does not throw', async () => {
+    const { event: withVendor } = await seedEvent('E12');
+    const { event: selfListed } = await seedEvent('E13');
+    // A buyer self-listed event has no organizer — simulate via the raw
+    // driver ($unset), since Mongoose's conditional `required` validator on
+    // `vendorId` only fires through `.create()`/`.save()`, not a bare $unset.
+    await Event.collection.updateOne({ _id: selfListed._id }, { $unset: { vendorId: '' } });
+
+    const { candidates: rows } = await eventCandidates({ limit: 20 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target.id).toBe(String(withVendor._id));
+    expect(rows.some((r) => r.target.id === String(selfListed._id))).toBe(false);
+  });
+
   it('honours the before watermark', async () => {
     const buyer = await Buyer.create({ phone: '+26878100005', password: 'password123' });
     const a = await Buyer.create({ phone: '+26878100006', password: 'password123' });

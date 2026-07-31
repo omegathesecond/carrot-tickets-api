@@ -1,8 +1,19 @@
+import { isValidObjectId } from 'mongoose';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { Update } from '@models/update.model';
 import type { ActivityCandidate, ActivityItem, ActivityActor, ActivityTarget } from './types';
+
+/** A source contract violation (e.g. a candidate id derived from an
+ *  optional/missing field upstream) must never 500 the whole page — one
+ *  malformed id is dropped here, defence-in-depth on top of each source
+ *  being responsible for not emitting one in the first place. The row it
+ *  belongs to then resolves to nothing via the normal buildActor/buildTarget
+ *  "not found" path below, which is the correct, honest outcome. */
+function onlyValidIds(ids: Iterable<string>): string[] {
+  return [...ids].filter((id) => isValidObjectId(id));
+}
 
 /** Mirrors landing/src/lib/eventUrl.ts slugifyEventName. Keep in sync — the
  *  client resolves an event by the trailing 24-hex id, so a drifting slug is
@@ -28,11 +39,16 @@ export async function hydrate(candidates: ActivityCandidate[]): Promise<Activity
 
   // Suspended actors are excluded HERE, once, for all six sources. A suspended
   // buyer can still be a follow TARGET (they are not erased), but never an actor.
+  const validBuyerIds = onlyValidIds(buyerIds);
+  const validVendorIds = onlyValidIds(vendorIds);
+  const validEventIds = onlyValidIds(eventIds);
+  const validPostIds = onlyValidIds(postIds);
+
   const [buyers, vendors, events, posts] = await Promise.all([
-    buyerIds.size ? Buyer.find({ _id: { $in: [...buyerIds] } }).select('name username avatarUrl socialSuspendedAt').lean() : [],
-    vendorIds.size ? Vendor.find({ _id: { $in: [...vendorIds] } }).select('businessName slug logoUrl').lean() : [],
-    eventIds.size ? Event.find({ _id: { $in: [...eventIds] } }).select('name posterUrl').lean() : [],
-    postIds.size ? Update.find({ _id: { $in: [...postIds] } }).select('media').lean() : [],
+    validBuyerIds.length ? Buyer.find({ _id: { $in: validBuyerIds } }).select('name username avatarUrl socialSuspendedAt').lean() : [],
+    validVendorIds.length ? Vendor.find({ _id: { $in: validVendorIds } }).select('businessName slug logoUrl').lean() : [],
+    validEventIds.length ? Event.find({ _id: { $in: validEventIds } }).select('name posterUrl').lean() : [],
+    validPostIds.length ? Update.find({ _id: { $in: validPostIds } }).select('media').lean() : [],
   ]);
 
   const buyerById = new Map(buyers.map((b) => [String(b._id), b]));

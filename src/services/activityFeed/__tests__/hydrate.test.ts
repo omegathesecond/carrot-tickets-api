@@ -98,6 +98,27 @@ describe('hydrate', () => {
     expect(item!.actor.href).toBe(`/u/${String(buyer._id)}`);
   });
 
+  it('drops rows with a malformed actor id instead of throwing', async () => {
+    const buyer = await Buyer.create({ phone: '+26878200010', password: 'password123', username: 'okbuyer' });
+    const items = await hydrate([
+      {
+        // Mirrors the production CastError: String(undefined) === "undefined"
+        // when an eventCandidates row has no vendorId (self-listed event).
+        type: 'event', sourceId: 's1', sortAt: at,
+        actor: { kind: 'organizer', id: 'undefined' },
+        target: { kind: 'event', id: String(new mongoose.Types.ObjectId()) },
+      },
+      {
+        // Well-formed but nonexistent — should also just resolve to nothing,
+        // not throw.
+        type: 'follow', sourceId: 's2', sortAt: at,
+        actor: { kind: 'buyer', id: String(new mongoose.Types.ObjectId()) },
+        target: { kind: 'buyer', id: String(buyer._id) },
+      },
+    ]);
+    expect(items).toHaveLength(0);
+  });
+
   it('preserves input order', async () => {
     const b1 = await Buyer.create({ phone: '+26878200007', password: 'password123', username: 'a1x' });
     const b2 = await Buyer.create({ phone: '+26878200008', password: 'password123', username: 'a2x' });
