@@ -97,7 +97,7 @@ describe('social graph routes', () => {
     void b;
   });
 
-  it('community members list: member-only, excludes banned, newest first', async () => {
+  it('community members list: public roster, excludes banned, newest first', async () => {
     const { a, b, c, authA, authB } = await seedBuyers();
     const seeded = await seedPublishedEvent();
     const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
@@ -118,12 +118,20 @@ describe('social graph routes', () => {
     expect(page2.body.data).toHaveLength(1);
     expect(page2.body.data[0].username).not.toBe(page1.body.data[0].username);
 
-    // non-member (fresh buyer) is refused
+    // The who's-going roster is public social proof (optionalCommunityViewer):
+    // a non-member — and a signed-out visitor — reads the same list. Joining
+    // and messaging stay gated on the write routes.
     await Buyer.create({ phone: '+26878000044', password: 'secret1' });
-    await request(app)
+    const nonMember = await request(app)
       .get(`/api/community/${seeded.eventId}/members`)
       .set('Authorization', `Bearer ${signBuyerToken('+26878000044')}`)
-      .expect(403);
+      .expect(200);
+    expect(nonMember.body.data.map((u: any) => u.username)).toEqual(['beta_two', 'alpha_one']);
+
+    const anon = await request(app)
+      .get(`/api/community/${seeded.eventId}/members`)
+      .expect(200);
+    expect(anon.body.data.map((u: any) => u.username)).toEqual(['beta_two', 'alpha_one']);
     void authB;
   });
 });
