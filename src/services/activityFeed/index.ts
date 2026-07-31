@@ -114,27 +114,35 @@ export async function getActivityFeed(
   // did — see going.ts's own doc comment for why it needs a floor at all):
   //   1. If the page consumed at least one candidate from a source, its key
   //      becomes that consumed row's (oldest, since `page` is newest-first)
-  //      sortAt.
-  //   2. Else, if that source published a non-null `nextBefore`, its key
-  //      advances TO `nextBefore` anyway — this is what un-wedges a source
-  //      that scanned a full window but kept nothing from it (filtered-to-
-  //      empty, e.g. `likeEventCandidates` on a page where an organizer
-  //      unpublished the newest-liked event) or resolved nothing (going's
-  //      boundary clamp): without this, a zero-candidate page would re-issue
-  //      the identical query forever.
-  //   3. A key must never advance PAST (older than) its own `nextBefore` —
-  //      for the five simple sources a consumed row is always at or after
-  //      the scan floor by construction, so this degenerates to a no-op;
-  //      for `going` it is load-bearing (a twin row's dedupe winner can sit
-  //      below the boundary of the OTHER sub-collection's window).
-  //   4. Otherwise (nothing consumed, no floor published) the source's key
-  //      is left untouched — it either wasn't queried deep enough to matter
-  //      this page, or it is genuinely exhausted; re-querying its unchanged
-  //      watermark is harmless.
+  //      sortAt. Every source's contract guarantees a consumed candidate
+  //      sits at or above that source's own published floor (see the
+  //      assertion below) — this is NOT a cap that silently corrects a
+  //      violation, it's a check that one never happened.
+  //   2. Else, if the source produced ZERO candidates at all this call AND
+  //      published a non-null `nextBefore`, its key advances TO
+  //      `nextBefore` anyway — this is what un-wedges a source that scanned
+  //      a full window but kept nothing from it (filtered-to-empty, e.g.
+  //      `likeEventCandidates` on a page where an organizer unpublished the
+  //      newest-liked event) or resolved nothing (going's boundary clamp):
+  //      without this, a zero-candidate page would re-issue the identical
+  //      query forever.
+  //      Deliberately narrower than "nothing CONSUMED" — a source can
+  //      produce real candidates that simply lost the ranking (didn't make
+  //      the top `limit` merged across all six sources) without being
+  //      anywhere near drained. Jumping such a source's key to its floor
+  //      would skip past those still-unconsumed rows and lose them forever,
+  //      by the same mechanism Finding 1 fixed for a different cause.
+  //   3. Otherwise (nothing consumed, and either no floor or the source
+  //      still holds unconsumed candidates) the source's key is left
+  //      untouched — it either wasn't queried deep enough to matter this
+  //      page, has more of its own candidates waiting for a page where they
+  //      rank higher, or is genuinely exhausted; re-querying its unchanged
+  //      watermark is harmless in every case.
   const next: ActivityCursor = { ...cursor };
   let advanced = false;
   for (const type of Object.keys(SOURCE_KEYS) as ActivityType[]) {
-    const floor = results[type].nextBefore;
+    const result = results[type];
+    const floor = result.nextBefore;
 
     // Oldest candidate of this type actually consumed into `page`. `page` is
     // globally sorted newest-first and each source's own candidates were
@@ -145,10 +153,26 @@ export async function getActivityFeed(
       if (c.type === type) consumed = c.sortAt;
     }
 
-    if (consumed && (!floor || consumed.getTime() >= floor.getTime())) {
+    if (consumed) {
+      // Invariant assertion, not a correction: every source's contract
+      // guarantees `candidates ⊆ { rows with sortAt >= nextBefore }` —
+      // going.ts explicitly clamps its output to `>= boundary`, and the five
+      // simple sources' floor is the oldest FETCHED row while `candidates`
+      // only ever loses rows to filtering, never gains an older one. A
+      // consumed row below its own source's floor means that contract broke
+      // upstream. Silently rewinding the cursor to a newer value here would
+      // just re-emit the same row on a later page — a silent duplicate
+      // producer, not a safety net — so this fails loudly instead per this
+      // codebase's no-silent-fallback rule.
+      if (floor && consumed.getTime() < floor.getTime()) {
+        throw new Error(
+          `getActivityFeed: source "${type}" consumed a candidate at ${consumed.toISOString()} ` +
+          `older than its own published nextBefore floor ${floor.toISOString()} — broken source contract`
+        );
+      }
       next[SOURCE_KEYS[type]] = consumed.toISOString();
       advanced = true;
-    } else if (floor) {
+    } else if (floor && result.candidates.length === 0) {
       next[SOURCE_KEYS[type]] = floor.toISOString();
       advanced = true;
     }

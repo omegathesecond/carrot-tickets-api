@@ -205,6 +205,66 @@ describe('getActivityFeed', () => {
     expect(seenTypes).toContain('like_event');
   });
 
+  it('does not lose a source\'s unconsumed candidates when they are simply outranked on the page, not drained (Finding 5)', async () => {
+    // A source can produce real candidates that never make the `limit`-sized
+    // page because other sources are busier and rank above them — that is
+    // NOT the same as the source having nothing left. Round 1 fixed the
+    // "scanned full, filtered to zero" case (Finding 1) but introduced a
+    // narrower regression: the floor-advance arm fired whenever nothing of
+    // that type was CONSUMED, even when the source had plenty of unconsumed
+    // candidates sitting just below the page cut. Advancing straight to the
+    // scan floor in that case jumps clean over them.
+    const LIMIT = 5;
+    const { event } = await seedVendorEvent('F5');
+
+    // Five recent likes: a full fetch for likeEventCandidates (publishes its
+    // own floor) and, being the newest rows in the whole DB, exactly fill
+    // page 1 on their own.
+    for (let i = 0; i < LIMIT; i++) {
+      const buyer = await Buyer.create({
+        phone: `+2687860${String(i).padStart(4, '0')}`, password: 'password123', username: `f5l${i}`,
+      });
+      await EventReaction.create({ eventId: event._id, buyerId: buyer._id, actorType: 'buyer', type: 'like' });
+    }
+
+    // Five OLDER follow rows: also a full fetch for followCandidates (also
+    // publishes its own floor), but every one of them legitimately ranks
+    // below the five likes above and so does not make page 1.
+    const follower = await Buyer.create({ phone: '+26878600099', password: 'password123', username: 'f5follower' });
+    const followIds: string[] = [];
+    for (let i = 0; i < LIMIT; i++) {
+      const target = await Buyer.create({
+        phone: `+2687860${100 + i}`, password: 'password123', username: `f5t${i}`,
+      });
+      const follow = await Follow.create({
+        followerType: 'buyer', followerId: follower._id, targetType: 'buyer', targetId: target._id,
+      });
+      await Follow.collection.updateOne({ _id: follow._id }, { $set: { createdAt: new Date(Date.now() - (10 + i) * DAY) } });
+      followIds.push(String(follow._id));
+    }
+
+    const page1 = await getActivityFeed({ tab: 'everyone', limit: LIMIT });
+    // Page 1 is legitimately all five likes — the follows are older and
+    // correctly lose the ranking, not the bug being tested here.
+    expect(page1.items.every((i) => i.type === 'like_event')).toBe(true);
+
+    // The bug: `follow`'s cursor key used to jump straight to its scan floor
+    // (the OLDEST of the five follows) after page 1, even though none of the
+    // five follows had been consumed yet — permanently skipping all five on
+    // page 2 (`createdAt < floor` excludes everything at or above it, i.e.
+    // every follow that still legitimately exists).
+    let cursor: string | undefined = page1.nextCursor ?? undefined;
+    const seenFollowIds: string[] = [];
+    for (let page = 0; page < 5 && cursor; page++) {
+      const res = await getActivityFeed({ tab: 'everyone', limit: LIMIT, cursor });
+      seenFollowIds.push(...res.items.filter((i) => i.type === 'follow').map((i) => i.id));
+      cursor = res.nextCursor ?? undefined;
+    }
+    for (const id of followIds) {
+      expect(seenFollowIds).toContain(`follow:${id}`);
+    }
+  });
+
   it('drops a cursor key whose value is not a parseable date instead of throwing (Finding 2)', async () => {
     const { event } = await seedVendorEvent('F2');
     const buyer = await Buyer.create({ phone: '+26878300010', password: 'password123', username: 'f2buyer' });
