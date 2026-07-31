@@ -144,18 +144,28 @@ export async function eventCandidates(opts: SourceOpts): Promise<SourceResult> {
   // silently demoted recent no-publishedAt rows and could drop them past a
   // `before` cursor forever). `find()` does not offer a computed sort key,
   // hence the aggregation.
-  // A buyer self-listed (community) event has no vendorId — there is no
-  // organizer to attribute an "announced" row to, and inventing one is
-  // forbidden. Exclude it here, in the $match, so it never consumes a page
-  // slot (rather than filtering it out after the fact and silently shrinking
-  // the page below `opts.limit`).
-  const match: any = { status: EventStatus.PUBLISHED, vendorId: { $exists: true, $ne: null } };
+  // An event's announcer is whichever of the two mutually-exclusive author
+  // fields the schema actually set: `vendorId` for an organizer-created
+  // event, `submittedByBuyerId` for a buyer self-listed (community) one —
+  // exactly one is always present (see event.model.ts's conditional
+  // `required`). A row with NEITHER has no one to attribute the
+  // announcement to, and inventing an actor is forbidden, so that (and only
+  // that) case is excluded here, in the $match, so it never consumes a page
+  // slot.
+  const match: any = {
+    status: EventStatus.PUBLISHED,
+    $or: [{ vendorId: { $exists: true, $ne: null } }, { submittedByBuyerId: { $exists: true, $ne: null } }],
+  };
   // find() auto-casts query values against the schema; aggregation $match
   // does not, so actorIds strings must be cast to ObjectIds explicitly or
-  // vendorId: { $in: [...] } silently matches nothing. This also already
-  // excludes vendorId-less rows, since $in of ObjectIds never matches a
-  // missing/null field.
-  if (opts.actorIds) match.vendorId = { $in: opts.actorIds.map((id) => new Types.ObjectId(id)) };
+  // an $in: [...] silently matches nothing. A followed actor may be an
+  // organizer (vendorId) OR a buyer who self-listed (submittedByBuyerId) —
+  // match against either field, replacing (not adding to) the existence
+  // check above, since $in against real ObjectIds already implies presence.
+  if (opts.actorIds) {
+    const ids = opts.actorIds.map((id) => new Types.ObjectId(id));
+    match.$or = [{ vendorId: { $in: ids } }, { submittedByBuyerId: { $in: ids } }];
+  }
 
   const pipeline: any[] = [
     { $match: match },
@@ -165,17 +175,30 @@ export async function eventCandidates(opts: SourceOpts): Promise<SourceResult> {
   pipeline.push(
     { $sort: { activityAt: -1 } },
     { $limit: opts.limit },
-    { $project: { vendorId: 1, activityAt: 1 } }
+    { $project: { vendorId: 1, submittedByBuyerId: 1, activityAt: 1 } }
   );
 
   const rows = await Event.aggregate(pipeline);
   const nextBefore = scanFloor(rows, opts.limit, (r) => r.activityAt as Date);
-  const candidates = rows.map((r) => ({
-    type: 'event' as const,
-    sourceId: String(r._id),
-    sortAt: r.activityAt as Date,
-    actor: { kind: 'organizer' as const, id: String(r.vendorId) },
-    target: { kind: 'event' as const, id: String(r._id) },
-  }));
+  const candidates = rows
+    .map((r) => {
+      // Exactly one of these should be set given the $match above; this is
+      // a defensive re-check, not a second filter — never invent an actor
+      // if somehow neither is present.
+      const actor = r.vendorId
+        ? { kind: 'organizer' as const, id: String(r.vendorId) }
+        : r.submittedByBuyerId
+        ? { kind: 'buyer' as const, id: String(r.submittedByBuyerId) }
+        : null;
+      if (!actor) return null;
+      return {
+        type: 'event' as const,
+        sourceId: String(r._id),
+        sortAt: r.activityAt as Date,
+        actor,
+        target: { kind: 'event' as const, id: String(r._id) },
+      };
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null);
   return { candidates, nextBefore };
 }

@@ -136,18 +136,62 @@ describe('activity feed sources', () => {
     expect(rows[0]!.target.id).toBe(String(undated._id));
   });
 
-  it('eventCandidates skips a self-listed event with no vendorId and does not throw', async () => {
-    const { event: withVendor } = await seedEvent('E12');
-    const { event: selfListed } = await seedEvent('E13');
-    // A buyer self-listed event has no organizer — simulate via the raw
-    // driver ($unset), since Mongoose's conditional `required` validator on
-    // `vendorId` only fires through `.create()`/`.save()`, not a bare $unset.
-    await Event.collection.updateOne({ _id: selfListed._id }, { $unset: { vendorId: '' } });
+  it('eventCandidates attributes a self-listed event to its buyer author', async () => {
+    const buyer = await Buyer.create({ phone: '+26878100010', password: 'password123' });
+    const { event: selfListed } = await seedEvent('E12');
+    // A buyer self-listed event has vendorId cleared and submittedByBuyerId
+    // set instead — simulate via the raw driver, since Mongoose's
+    // conditional `required` validator on `vendorId` only fires through
+    // `.create()`/`.save()`, not a bare $unset/$set.
+    await Event.collection.updateOne(
+      { _id: selfListed._id },
+      { $unset: { vendorId: '' }, $set: { submittedByBuyerId: buyer._id } }
+    );
+
+    const { candidates: rows } = await eventCandidates({ limit: 20 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target.id).toBe(String(selfListed._id));
+    expect(rows[0]!.actor).toEqual({ kind: 'buyer', id: String(buyer._id) });
+  });
+
+  it('eventCandidates still attributes a vendor-created event to its organizer (no regression)', async () => {
+    const { vendor, event } = await seedEvent('E12b');
+    const { candidates: rows } = await eventCandidates({ limit: 20 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target.id).toBe(String(event._id));
+    expect(rows[0]!.actor).toEqual({ kind: 'organizer', id: String(vendor._id) });
+  });
+
+  it('eventCandidates skips an event with neither vendorId nor submittedByBuyerId and does not throw', async () => {
+    const { event: withVendor } = await seedEvent('E12c');
+    const { event: orphaned } = await seedEvent('E13');
+    // Neither field present — no one to attribute the announcement to.
+    await Event.collection.updateOne({ _id: orphaned._id }, { $unset: { vendorId: '' } });
 
     const { candidates: rows } = await eventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.target.id).toBe(String(withVendor._id));
-    expect(rows.some((r) => r.target.id === String(selfListed._id))).toBe(false);
+    expect(rows.some((r) => r.target.id === String(orphaned._id))).toBe(false);
+  });
+
+  it('following tab: a viewer following the self-listing buyer sees that event row', async () => {
+    const buyer = await Buyer.create({ phone: '+26878100011', password: 'password123' });
+    const stranger = await Buyer.create({ phone: '+26878100012', password: 'password123' });
+    const { event: byBuyer } = await seedEvent('E14');
+    await Event.collection.updateOne(
+      { _id: byBuyer._id },
+      { $unset: { vendorId: '' }, $set: { submittedByBuyerId: buyer._id } }
+    );
+    const { event: byStranger } = await seedEvent('E15');
+    await Event.collection.updateOne(
+      { _id: byStranger._id },
+      { $unset: { vendorId: '' }, $set: { submittedByBuyerId: stranger._id } }
+    );
+
+    const { candidates: rows } = await eventCandidates({ limit: 20, actorIds: [String(buyer._id)] });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target.id).toBe(String(byBuyer._id));
+    expect(rows[0]!.actor).toEqual({ kind: 'buyer', id: String(buyer._id) });
   });
 
   it('honours the before watermark', async () => {
