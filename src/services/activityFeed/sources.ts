@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { EventReaction } from '@models/eventReaction.model';
 import { UpdateReaction } from '@models/updateReaction.model';
 import { Follow } from '@models/follow.model';
@@ -101,22 +102,37 @@ export async function postCandidates(opts: SourceOpts): Promise<ActivityCandidat
 }
 
 export async function eventCandidates(opts: SourceOpts): Promise<ActivityCandidate[]> {
-  // publishedAt is optional on older rows; createdAt is the fallback, which is
-  // why the window predicate is an $or rather than a single field.
-  const query: any = { status: EventStatus.PUBLISHED };
-  if (opts.before) {
-    query.$or = [
-      { publishedAt: { $lt: opts.before } },
-      { publishedAt: { $exists: false }, createdAt: { $lt: opts.before } },
-    ];
-  }
-  if (opts.actorIds) query.vendorId = { $in: opts.actorIds };
-  const rows = await Event.find(query).sort({ publishedAt: -1, createdAt: -1 }).limit(opts.limit)
-    .select('vendorId publishedAt createdAt').lean();
+  // publishedAt is optional on older rows (and may even be explicitly stored
+  // as null). An aggregation computes the effective timestamp ONCE, in an
+  // `activityAt` field, and reuses it for the window predicate, the sort,
+  // AND the emitted sortAt — so the three can never disagree the way a
+  // separate find() sort + $or window + `publishedAt ?? createdAt` mapping
+  // could (MongoDB sorts a missing/null field as below every Date, which
+  // silently demoted recent no-publishedAt rows and could drop them past a
+  // `before` cursor forever). `find()` does not offer a computed sort key,
+  // hence the aggregation.
+  const match: any = { status: EventStatus.PUBLISHED };
+  // find() auto-casts query values against the schema; aggregation $match
+  // does not, so actorIds strings must be cast to ObjectIds explicitly or
+  // vendorId: { $in: [...] } silently matches nothing.
+  if (opts.actorIds) match.vendorId = { $in: opts.actorIds.map((id) => new Types.ObjectId(id)) };
+
+  const pipeline: any[] = [
+    { $match: match },
+    { $addFields: { activityAt: { $ifNull: ['$publishedAt', '$createdAt'] } } },
+  ];
+  if (opts.before) pipeline.push({ $match: { activityAt: { $lt: opts.before } } });
+  pipeline.push(
+    { $sort: { activityAt: -1 } },
+    { $limit: opts.limit },
+    { $project: { vendorId: 1, activityAt: 1 } }
+  );
+
+  const rows = await Event.aggregate(pipeline);
   return rows.map((r) => ({
     type: 'event' as const,
     sourceId: String(r._id),
-    sortAt: (r.publishedAt ?? r.createdAt) as Date,
+    sortAt: r.activityAt as Date,
     actor: { kind: 'organizer' as const, id: String(r.vendorId) },
     target: { kind: 'event' as const, id: String(r._id) },
   }));

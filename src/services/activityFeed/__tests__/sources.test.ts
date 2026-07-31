@@ -115,6 +115,27 @@ describe('activity feed sources', () => {
     expect(rows[0]!.target).toEqual({ kind: 'event', id: String(event._id) });
   });
 
+  it('eventCandidates ranks a no-publishedAt event by its own createdAt, not below every dated one', async () => {
+    // Legacy row: publishedAt set, but old (5 days ago).
+    const { event: dated } = await seedEvent('E10');
+    await Event.updateOne({ _id: dated._id }, { $set: { publishedAt: new Date(Date.now() - 5 * DAY) } });
+
+    // A row missing publishedAt entirely (e.g. a bulk import / admin backfill
+    // that set status: PUBLISHED without stamping publishedAt), but recently
+    // created (1 day ago) — must still rank ABOVE the older dated row.
+    // Mongoose strips $unset-via-updateOne the same way it strips createdAt
+    // $set under `timestamps: true`, so this goes through the raw driver too.
+    const { event: undated } = await seedEvent('E11');
+    await Event.collection.updateOne(
+      { _id: undated._id },
+      { $unset: { publishedAt: '' }, $set: { createdAt: new Date(Date.now() - DAY) } }
+    );
+
+    const rows = await eventCandidates({ limit: 1 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target.id).toBe(String(undated._id));
+  });
+
   it('honours the before watermark', async () => {
     const buyer = await Buyer.create({ phone: '+26878100005', password: 'password123' });
     const a = await Buyer.create({ phone: '+26878100006', password: 'password123' });
