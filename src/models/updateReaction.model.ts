@@ -35,5 +35,8 @@ const schema = new Schema<IUpdateReaction>({
 // harmless if left (distinct actor ids never collide), so this is not urgent.
 schema.index({ updateId: 1, actorType: 1, buyerId: 1, type: 1 }, { unique: true });
 schema.index({ actorType: 1, buyerId: 1, type: 1, createdAt: -1 }); // "my saved updates"
+// Activity feed: global newest-first scan of likes across ALL actors. The
+// index above is actor-scoped and cannot serve this.
+schema.index({ type: 1, createdAt: -1 });
 
 export const UpdateReaction = mongoose.model<IUpdateReaction>('UpdateReaction', schema);

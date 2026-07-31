@@ -34,5 +34,7 @@ const membershipSchema = new Schema<IMembership>(
 );
 
 membershipSchema.index({ buyerId: 1, communityId: 1 }, { unique: true });
+// Activity feed: global newest-first scan of community joins ("is going").
+membershipSchema.index({ createdAt: -1 });
 
 export const Membership = model<IMembership>('Membership', membershipSchema);

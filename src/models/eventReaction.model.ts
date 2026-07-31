@@ -30,5 +30,7 @@ const schema = new Schema<IEventReaction>({
 // UpdateReaction's rows predate its actorType field, which is why it needed
 // `npm run backfill:social-actor-types` to run before its code shipped.
 schema.index({ eventId: 1, actorType: 1, buyerId: 1, type: 1 }, { unique: true });
+// Activity feed: global newest-first scan of likes (saves are never shown).
+schema.index({ type: 1, createdAt: -1 });
 
 export const EventReaction = mongoose.model<IEventReaction>('EventReaction', schema);

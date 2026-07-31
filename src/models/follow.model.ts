@@ -43,5 +43,7 @@ const followSchema = new Schema<IFollow>(
 followSchema.index({ followerType: 1, followerId: 1, targetType: 1, targetId: 1 }, { unique: true });
 // Follower counts / lists for a target.
 followSchema.index({ targetType: 1, targetId: 1 });
+// Activity feed: global newest-first scan of follow edges.
+followSchema.index({ createdAt: -1 });
 
 export const Follow = model<IFollow>('Follow', followSchema);

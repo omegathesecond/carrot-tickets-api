@@ -262,5 +262,7 @@ eventSchema.methods.isSoldOut = function(this: IEvent): boolean {
 eventSchema.index({ vendorId: 1, status: 1 });
 eventSchema.index({ eventDate: 1, status: 1 });
 eventSchema.index({ vendorId: 1, eventDate: -1 });
+// Activity feed: newest-first scan of published events ("announced").
+eventSchema.index({ status: 1, publishedAt: -1 });
 
 export const Event = mongoose.model<IEvent>('Event', eventSchema);

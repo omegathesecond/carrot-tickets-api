@@ -113,5 +113,8 @@ ticketSchema.index({ vendorId: 1, status: 1 });
 ticketSchema.index({ saleId: 1 });
 ticketSchema.index({ purchasedBy: 1 });
 ticketSchema.index({ ticketId: 1 }, { unique: true });
+// Activity feed: global newest-first scan of live tickets (the "is going"
+// source). Every other Ticket index is a point lookup — none serves recency.
+ticketSchema.index({ status: 1, createdAt: -1 });
 
 export const Ticket = mongoose.model<ITicket>('Ticket', ticketSchema);
