@@ -46,6 +46,15 @@ router.get('/events', PublicController.getPublicEvents);
 router.get('/activity', PublicController.getActivity);
 
 /**
+ * @route   GET /api/public/activity-feed
+ * @desc    The Activity page feed — real likes, follows, going, posts and
+ *          event announcements across the platform, newest first. Public;
+ *          ?tab=following requires a buyer session.
+ * @access  Public
+ */
+router.get('/activity-feed', optionalTicketsAuth, PublicController.getActivityFeed);
+
+/**
  * @route   GET /api/public/trending
  * @desc    Trending hashtags for the TopicsPage rail, ranked by post volume
  *          over the last 14 days across active, ready updates. Top 3 are

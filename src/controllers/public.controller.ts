@@ -24,6 +24,8 @@ import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 import { normalizeHashtag } from '@utils/hashtags.util';
 import { UpdateController } from '@controllers/update.controller';
 import { getViewerReactions } from '@services/update.service';
+import { getActivityFeed } from '@services/activityFeed';
+import { resolveBuyerFromRequest } from '@/utils/buyerRequest.util';
 
 // "Recent activity" window for the public FOMO surfaces (ticker + trending
 // badges): only sales in the last 48h count as momentum.
@@ -480,6 +482,42 @@ export class PublicController {
       return ApiResponseUtil.success(res, { activity });
     } catch (error: any) {
       console.error('Get activity error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to fetch activity');
+    }
+  }
+
+  /**
+   * GET /api/public/activity-feed
+   * The Activity page: real social activity across the platform — likes,
+   * follows, going, posts and event announcements — newest first.
+   *
+   * NOT to be confused with getActivity above, which powers the homepage
+   * ticker and deliberately blends synthetic purchases. This endpoint is
+   * real-only and shares no code with it.
+   */
+  static async getActivityFeed(req: Request, res: Response): Promise<any> {
+    try {
+      const tabParam = String(req.query['tab'] ?? 'everyone');
+      if (tabParam !== 'everyone' && tabParam !== 'following') {
+        return ApiResponseUtil.error(res, 'tab must be "everyone" or "following"', 400);
+      }
+
+      let viewer: { type: 'buyer' | 'vendor'; id: string } | undefined;
+      if (tabParam === 'following') {
+        const buyer = await resolveBuyerFromRequest(req);
+        // The following tab cannot be answered without a viewer — say so
+        // loudly rather than silently degrading to the everyone tab.
+        if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to see who you follow');
+        viewer = { type: 'buyer', id: String(buyer._id) };
+      }
+
+      const cursor = req.query['cursor'] ? String(req.query['cursor']) : undefined;
+      const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
+
+      const result = await getActivityFeed({ tab: tabParam, cursor, limit, viewer });
+      return ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Get activity feed error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to fetch activity');
     }
   }
