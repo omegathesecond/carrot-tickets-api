@@ -521,7 +521,7 @@ export class PublicController {
       // its own default/clamp (limit=0 and huge limits are already handled
       // correctly there and are covered by tests below).
       const rawLimit = req.query['limit'] !== undefined ? Number(req.query['limit']) : undefined;
-      const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined;
+      const limit = rawLimit !== undefined && Number.isInteger(rawLimit) ? rawLimit : undefined;
 
       const result = await getActivityFeed({ tab: tabParam, cursor, limit, viewer });
       return ApiResponseUtil.success(res, result);

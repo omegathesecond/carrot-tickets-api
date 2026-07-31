@@ -86,4 +86,11 @@ describe('GET /api/public/activity-feed', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.items.length).toBeLessThanOrEqual(50);
   });
+
+  it('falls back to the default limit instead of 500ing on a non-integer limit', async () => {
+    await seedLike();
+    const res = await request(app).get('/api/public/activity-feed?limit=2.5');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data.items)).toBe(true);
+  });
 });
