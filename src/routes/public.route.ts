@@ -37,6 +37,16 @@ router.get('/payment-methods', PublicController.getPaymentMethods);
 router.get('/events', PublicController.getPublicEvents);
 
 /**
+ * @route   GET /api/public/calendar
+ * @desc    Every published event in a year, grouped by month ("what's on").
+ *          Optional auth only marks the viewer's going/saved rows — it never
+ *          changes which events are returned.
+ * @access  Public
+ * @query   year (defaults to the current UTC year)
+ */
+router.get('/calendar', optionalTicketsAuth, PublicController.getPublicCalendar);
+
+/**
  * @route   GET /api/public/activity
  * @desc    Recent REAL purchase activity across published events for the live
  *          FOMO ticker. Names are masked to "Sipho D."; returns [] when quiet.

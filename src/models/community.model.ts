@@ -6,7 +6,10 @@ import { Schema, model, Document, Types } from 'mongoose';
  */
 export interface ICommunity extends Document {
   eventId: Types.ObjectId;
-  vendorId: Types.ObjectId;
+  /** Denormalized owner. ABSENT for a buyer self-listed (community) event,
+   *  which has no organizer — ownership checks walk the Event anyway (see
+   *  assertOrganizerOwnsCommunity). */
+  vendorId?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -14,7 +17,7 @@ export interface ICommunity extends Document {
 const communitySchema = new Schema<ICommunity>(
   {
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, unique: true, index: true },
-    vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', required: true, index: true },
+    vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', index: true },
   },
   { timestamps: true }
 );

@@ -125,6 +125,36 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     expect(res.body.data.ticketTypes).toHaveLength(0);
   });
 
+  // Communities used to be created only by the superadmin publish path, which
+  // a self-listing skips — leaving the event page's Community tab, its roster
+  // and "Going" all 404, so the event could never reach anyone's calendar.
+  it('creates the community so the roster and Going work on a listing', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    const req = request(app)
+      .post('/api/public/events/submit')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+    const noTickets = fields({ ticketing: 'carrot' });
+    delete noTickets.externalTicketUrl;
+    Object.entries(noTickets).forEach(([k, v]) => req.field(k, v));
+    req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
+    const eventId = (await req.expect(201)).body.data._id;
+
+    // Public who's-going view resolves (no organizer behind it).
+    await request(app).get(`/api/community/${eventId}`).expect(200);
+
+    // And a buyer with no ticket can say they're going — a listing sells
+    // nothing, so ticket verification must not gate the join.
+    const other = '+26878000099';
+    await Buyer.create({ phone: other, password: 'secret1', name: 'Attendee' });
+    await request(app)
+      .post(`/api/community/${eventId}/join`)
+      .set('Authorization', `Bearer ${signBuyerToken(other)}`)
+      .expect(200);
+
+    const roster = await request(app).get(`/api/community/${eventId}/members`).expect(200);
+    expect(roster.body.data).toHaveLength(1);
+  });
+
   it('requires a poster image', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
     const req = request(app)

@@ -50,12 +50,15 @@ export class CommunityMembershipService {
     }
     if (!membership) throw new HttpError(500, 'Failed to join community');
 
-    // Externally-sold events have no Carrot ticket to verify against — skip
-    // the check entirely so the join is open. Carrot events (and legacy
-    // events with no stored `ticketing`, which read as 'carrot') keep the
-    // existing ticket-verification requirement unchanged.
-    const event = await Event.findById(eventId).select('ticketing');
-    const requiresTicket = !event || event.ticketing !== 'external';
+    // Only an event that actually SELLS on Carrot can require a Carrot ticket
+    // to join. Externally-sold events have none to verify against, and neither
+    // does a community self-listing (no tiers at all) — gating those on a
+    // ticket would make "Going" impossible, not selective. Carrot events with
+    // real tiers (and legacy events with no stored `ticketing`, which read as
+    // 'carrot') keep the existing verification requirement unchanged.
+    const event = await Event.findById(eventId).select('ticketing ticketTypes');
+    const sellsOnCarrot = !!event && event.ticketing !== 'external' && (event.ticketTypes?.length ?? 0) > 0;
+    const requiresTicket = !event || sellsOnCarrot;
     if (requiresTicket) {
       await CommunityMembershipService.refreshTicketVerification(eventId, buyer, membership);
     }

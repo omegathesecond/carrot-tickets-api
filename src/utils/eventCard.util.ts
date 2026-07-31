@@ -4,6 +4,10 @@ export interface PublicEventCardExtras {
   viewerHasLiked?: boolean;
   /** Bookmark state — entirely independent of viewerHasLiked (see EventReaction's 'save' type). */
   viewerHasSaved?: boolean;
+  /** Is the viewer going? (joined the community or holds a live ticket — see
+   *  GoingService.) Distinct from saved: going is attendance, saved is a
+   *  bookmark. Used to mark the viewer's own rows on the public calendar. */
+  viewerIsGoing?: boolean;
   likeCount?: number;
   organizer?: { id: string; businessName: string; logoUrl: string | null } | null;
 }
@@ -74,5 +78,6 @@ export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}
   if ('likeCount' in extras) card.likeCount = extras.likeCount;
   if ('viewerHasLiked' in extras) card.viewerHasLiked = extras.viewerHasLiked;
   if ('viewerHasSaved' in extras) card.viewerHasSaved = extras.viewerHasSaved;
+  if ('viewerIsGoing' in extras) card.viewerIsGoing = extras.viewerIsGoing;
   return card;
 }

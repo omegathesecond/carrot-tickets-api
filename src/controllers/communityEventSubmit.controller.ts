@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { EventService } from '@services/event.service';
+import { CommunityService } from '@services/community.service';
 import { R2Service } from '@utils/r2.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
@@ -83,6 +84,12 @@ export class CommunityEventSubmitController {
         );
         event.galleryImages = uploaded.map((u) => u.url);
       }
+      // The Community tab is the event page's default tab, so the community
+      // must exist the moment the event goes live — same rule as the admin
+      // publish path in EventService, and the reason it runs BEFORE the status
+      // commit. A listing has no organizer, hence the null vendor.
+      await CommunityService.ensureForEvent(String(event._id), null);
+
       // Live now — no admin review for a listing that sells nothing.
       event.status = EventStatus.PUBLISHED;
       await event.save();
