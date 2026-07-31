@@ -65,4 +65,25 @@ describe('GET /api/public/activity-feed', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveProperty('activity');
   });
+
+  it('falls back to the default limit instead of 500ing on a non-numeric limit', async () => {
+    await seedLike();
+    const res = await request(app).get('/api/public/activity-feed?limit=abc');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data.items)).toBe(true);
+  });
+
+  it('clamps limit=0 up to a sane minimum instead of erroring', async () => {
+    await seedLike();
+    const res = await request(app).get('/api/public/activity-feed?limit=0');
+    expect(res.status).toBe(200);
+    expect(res.body.data.items.length).toBeLessThanOrEqual(50);
+  });
+
+  it('clamps a huge limit down to the service max instead of erroring', async () => {
+    await seedLike();
+    const res = await request(app).get('/api/public/activity-feed?limit=9999');
+    expect(res.status).toBe(200);
+    expect(res.body.data.items.length).toBeLessThanOrEqual(50);
+  });
 });

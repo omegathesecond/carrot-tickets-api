@@ -512,7 +512,16 @@ export class PublicController {
       }
 
       const cursor = req.query['cursor'] ? String(req.query['cursor']) : undefined;
-      const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
+      // A non-numeric ?limit= (e.g. "abc") must not 500: Number('abc') is NaN,
+      // which is neither null nor undefined so the service's `?? 30` default
+      // never substitutes for it, and NaN poisons Math.max/Math.min in the
+      // service's clamp, reaching Mongoose's .limit()/$limit as NaN — Mongo
+      // rejects that and the whole request 500s. Only pass a finite number
+      // through; anything else falls back to undefined so the service applies
+      // its own default/clamp (limit=0 and huge limits are already handled
+      // correctly there and are covered by tests below).
+      const rawLimit = req.query['limit'] !== undefined ? Number(req.query['limit']) : undefined;
+      const limit = rawLimit !== undefined && Number.isFinite(rawLimit) ? rawLimit : undefined;
 
       const result = await getActivityFeed({ tab: tabParam, cursor, limit, viewer });
       return ApiResponseUtil.success(res, result);
