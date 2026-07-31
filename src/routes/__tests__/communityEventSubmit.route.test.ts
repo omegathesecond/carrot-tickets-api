@@ -51,7 +51,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     await request(app).post('/api/public/events/submit').field(fields()).expect(401);
   });
 
-  it('creates a PENDING_APPROVAL event owned by the buyer, with an uploaded poster', async () => {
+  it('publishes the event immediately (no admin review) with an uploaded poster', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
@@ -61,17 +61,36 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     req.attach('media', Buffer.from('fake-jpeg-2'), { filename: 'crowd.jpg', contentType: 'image/jpeg' });
 
     const res = await req.expect(201);
-    expect(res.body.data.status).toBe(EventStatus.PENDING_APPROVAL);
+    expect(res.body.data.status).toBe(EventStatus.PUBLISHED);
     expect(res.body.data.submittedByBuyerId).toBe(String(buyer._id));
     expect(res.body.data.vendorId).toBeFalsy();
     expect(res.body.data.posterUrl).toContain('/poster/');
     expect(res.body.data.galleryImages).toHaveLength(1);
     expect(R2Service.uploadEventMedia).toHaveBeenCalledTimes(2); // poster + 1 media
 
-    // Pending → hidden from the public listing (which filters status=PUBLISHED).
+    // Live on the public listing right away — no approval step, and a
+    // vendor-less event must survive the organizer hydration there.
     const list = await request(app).get('/api/public/events').expect(200);
-    const ids = (list.body.data.events as any[]).map((e) => e._id);
-    expect(ids).not.toContain(String(res.body.data._id));
+    const listed = (list.body.data.events as any[]).find((e) => e._id === String(res.body.data._id));
+    expect(listed).toBeTruthy();
+    expect(listed.posterUrl).toContain('/poster/');
+    expect(listed.organizer ?? null).toBeNull();
+  });
+
+  // The poster upload happens AFTER the row is created; publishing before it
+  // lands would put a posterless event on the feed and leave it there when the
+  // upload fails. It must stay an invisible draft instead.
+  it('leaves nothing published when the poster upload fails', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    (R2Service.uploadEventMedia as jest.Mock).mockRejectedValueOnce(new Error('R2 down'));
+    const req = request(app)
+      .post('/api/public/events/submit')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+    Object.entries(fields()).forEach(([k, v]) => req.field(k, v));
+    req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
+
+    await req.expect(500);
+    expect(await Event.countDocuments({ status: EventStatus.PUBLISHED })).toBe(0);
   });
 
   it('refuses to create sellable ticket types (selling is dashboard-only)', async () => {

@@ -145,8 +145,9 @@ router.get('/events/:eventId/reviews', ReviewController.listForEvent);
  * @access  Buyer (Bearer buyer token)
  * @body    rating (1-5), text?
  */
-// Community self-listing: a signed-in buyer submits an event (poster + media)
-// into the PENDING_APPROVAL review queue. Reuses the dashboard creation path.
+// Community self-listing: a signed-in buyer lists an event (poster + media).
+// Reuses the dashboard creation path, but publishes immediately — no admin
+// review, because a community listing sells no tickets (see the controller).
 router.post('/events/submit', authenticateBuyer, communityEventUpload, handleMulterError, CommunityEventSubmitController.submit);
 
 router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.submit);

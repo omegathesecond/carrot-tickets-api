@@ -35,8 +35,8 @@ export interface IEvent extends Document {
   // Optional: a community/self-listed event (submitted by a buyer, pending
   // review) has no owning vendor until an admin approves/assigns it.
   vendorId?: Types.ObjectId;
-  // Set when a buyer self-lists an event from the consumer app (goes into the
-  // PENDING_APPROVAL queue). Mutually exclusive with vendorId at creation.
+  // Set when a buyer self-lists an event from the consumer app (published
+  // straight away, sells nothing). Mutually exclusive with vendorId.
   submittedByBuyerId?: Types.ObjectId;
 
   // Event Details

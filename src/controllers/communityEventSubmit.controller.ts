@@ -12,9 +12,14 @@ type UploadedFiles = { poster?: Express.Multer.File[]; media?: Express.Multer.Fi
  * Consumer self-listing: a signed-in buyer submits an event from the app. It
  * REUSES the organizer dashboard's creation path — same `createEventSchema`
  * validation, same `EventService.createEvent`, same `R2Service.uploadEventMedia`
- * — but stamps it PENDING_APPROVAL with `submittedByBuyerId` (no vendor), so it
- * enters the existing admin review queue and stays hidden from public listings
- * until approved.
+ * — stamped with `submittedByBuyerId` (no vendor).
+ *
+ * Published IMMEDIATELY, no admin review. Approval exists to gate SELLING —
+ * money, payouts and scanning — and a community listing sells nothing (ticket
+ * tiers are refused below). Gating a calendar entry behind a human review queue
+ * only means events go live after they've happened. Dashboard-created events,
+ * which do sell, keep the DRAFT → PENDING_APPROVAL → PUBLISHED flow untouched
+ * (see EventService.publishEvent).
  */
 export class CommunityEventSubmitController {
   static async submit(req: Request, res: Response): Promise<any> {
@@ -54,11 +59,14 @@ export class CommunityEventSubmitController {
         return ApiResponseUtil.error(res, 'An event poster image is required', 400);
       }
 
-      // Same creation logic the dashboard uses — just buyer-submitted + pending.
+      // Same creation logic the dashboard uses — just buyer-submitted. Created
+      // as a DRAFT and flipped to PUBLISHED only after the media lands: an
+      // upload failure below must not leave a posterless event sitting live on
+      // the feed (it stays an invisible draft, and the caller gets the error).
       const event = await EventService.createEvent({
         ...value,
         submittedByBuyerId: String(buyer._id),
-        status: EventStatus.PENDING_APPROVAL,
+        status: EventStatus.DRAFT,
       });
 
       const poster = await R2Service.uploadEventMedia(
@@ -75,9 +83,11 @@ export class CommunityEventSubmitController {
         );
         event.galleryImages = uploaded.map((u) => u.url);
       }
+      // Live now — no admin review for a listing that sells nothing.
+      event.status = EventStatus.PUBLISHED;
       await event.save();
 
-      return ApiResponseUtil.created(res, event, "Event submitted — we'll review it and publish it shortly.");
+      return ApiResponseUtil.created(res, event, 'Your event is live.');
     } catch (error: any) {
       console.error('Community event submit error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to submit event');

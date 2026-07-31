@@ -51,11 +51,13 @@ const eventSchema = new Schema<IEvent>({
     type: Schema.Types.ObjectId,
     ref: 'Vendor',
     // Required for organizer-created events; a buyer self-listed (community)
-    // event has no vendor until an admin approves it, so it's exempt.
+    // event never has a vendor — nobody sells or gets paid for it — so it's
+    // exempt.
     required: [function (this: any) { return !this.submittedByBuyerId; }, 'Vendor ID is required'],
     index: true
   },
-  // Buyer who self-listed this event from the consumer app (PENDING_APPROVAL).
+  // Buyer who self-listed this event from the consumer app (no vendor, no
+  // ticket sales — published without admin review).
   submittedByBuyerId: {
     type: Schema.Types.ObjectId,
     ref: 'Buyer',
