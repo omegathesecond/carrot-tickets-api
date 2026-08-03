@@ -91,6 +91,14 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     index: true,
     trim: true
   },
+  // DeltaPay hosted-checkout session ID (UUID). Sole lookup key for the return
+  // redirect, the session callback, the buyer poll and the reconcile sweep.
+  deltapaySessionId: {
+    type: String,
+    sparse: true,
+    index: true,
+    trim: true
+  },
   reservationExpiresAt: {
     type: Date,
     index: true

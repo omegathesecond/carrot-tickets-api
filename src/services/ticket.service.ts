@@ -9,6 +9,7 @@ import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
+import { DeltapayClient, classifySessionStatus } from '@services/payments/deltapay.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -891,8 +892,13 @@ export class TicketService {
   private static momoClient = new MtnMomoClient();
   // ── Peach card async payment client (mocked in tests via jest.mock at module level) ──
   private static peachClient = new PeachClient();
+  // ── DeltaPay hosted-checkout client (mocked in tests via jest.mock at module level) ──
+  private static deltapayClient = new DeltapayClient();
   private static MOMO_TTL_MS = 5 * 60_000; // 5 minutes
   private static CARD_TTL_MS = 15 * 60_000; // 15 min — card redirect (3DS/OTP) takes longer than MoMo
+  // 12 min — deliberately LONGER than DeltaPay's hard 10-min session expiry, so the
+  // inventory hold never lapses while a payment could still legitimately land.
+  private static DELTAPAY_TTL_MS = 12 * 60_000;
 
   /**
    * Initiate an async MTN MoMo purchase:
@@ -1161,6 +1167,156 @@ export class TicketService {
    */
   static async getCardSaleByPaymentId(id: string): Promise<InstanceType<typeof TicketSale> | null> {
     return TicketSale.findOne({ peachPaymentId: id });
+  }
+
+  /**
+   * Initiate an async DeltaPay hosted-checkout purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Create the hosted-checkout session — on failure, release reservation +
+   *    fail sale + rethrow (never a silent fallback; the buyer sees the error).
+   *
+   * Mirrors initiateCardPurchase; differences: paymentMethod = DELTAPAY, the
+   * provider call is deltapayClient.createSession, and the buyer's phone is
+   * offered upfront as the payer identifier to skip a step on DeltaPay's page.
+   */
+  static async initiateDeltapayPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone?: string;
+    customerName?: string;
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
+    channel?: SalesChannel;
+  }): Promise<{ checkoutSessionId: string; checkoutUrl: string; saleId: string; expiresAt: Date }> {
+    if (!this.deltapayClient.isConfigured()) throw new Error('DeltaPay is not available');
+
+    // Checked up-front, BEFORE any sale row or inventory hold exists — a throw
+    // after the reserve would strand held tickets until the expiry sweep.
+    const returnUrl = process.env['DELTAPAY_RETURN_URL'];
+    if (!returnUrl) throw new Error('DELTAPAY_RETURN_URL is not configured');
+
+    const cfg = await PaymentConfigService.get();
+    if (!cfg.deltapayEnabled) throw new Error('DeltaPay is not available');
+
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+    assertCarrotTicketing(event);
+
+    // Attribution: mirror initiateCardPurchase defaults exactly.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const channel = p.channel ?? deriveChannel(mappedSoldByType);
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — DeltaPay is electronic so custody derives to 'carrot'.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.DELTAPAY,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+    });
+    const resellerAttribution = {
+      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+    };
+
+    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
+    const { serviceFeeAmount, amountCharged } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.DELTAPAY, cfg)
+        : { serviceFeeAmount: 0, amountCharged: totalAmount };
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      totalAmount,
+      paymentMethod: PaymentMethod.DELTAPAY,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy,
+      soldByType: mappedSoldByType,
+      channel,
+      ...resellerAttribution,
+      ...econ,
+      serviceFeeAmount,
+      amountCharged,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.DELTAPAY_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Create the hosted-checkout session; on failure release + fail + rethrow
+    try {
+      // Offer the buyer's phone upfront so DeltaPay can skip identifier entry.
+      // An unknown/invalid identifier does NOT fail session creation — DeltaPay
+      // falls back to prompting on its page — so this is safe to always send.
+      const normalizedPhone = p.customerPhone ? normalizePhone(p.customerPhone) : '';
+      const payerIdentifier = /^\+\d{10,15}$/.test(normalizedPhone) ? normalizedPhone : undefined;
+
+      const session = await this.deltapayClient.createSession({
+        amount: amountCharged,
+        merchantReference: sale.saleId,
+        returnUrl,
+        displayDescription: `${p.quantity} x ${tt.name || 'Ticket'} — ${event.name}`.slice(0, 200),
+        ...(process.env['DELTAPAY_CALLBACK_URL']
+          ? { sessionCallbackUrl: process.env['DELTAPAY_CALLBACK_URL'] }
+          : {}),
+        ...(payerIdentifier
+          ? { payerIdentifier, payerIdentifierType: 'phone_number' as const }
+          : {}),
+      });
+
+      sale.deltapaySessionId = session.checkoutSessionId;
+      await sale.save();
+      return {
+        checkoutSessionId: session.checkoutSessionId,
+        checkoutUrl: session.checkoutUrl,
+        saleId: sale._id.toString(),
+        expiresAt,
+      };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Look up a DeltaPay sale by its hosted-checkout session ID.
+   * Returns null if not found. Never throws.
+   */
+  static async getDeltapaySaleBySessionId(
+    sessionId: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ deltapaySessionId: sessionId });
   }
 
   /**
@@ -1466,6 +1622,154 @@ export class TicketService {
       }
     }
     if (finalized > 0) console.log(`[card-reconcile] finalised ${finalized}/${stuck.length} stuck card sale(s)`);
+    return finalized;
+  }
+
+  /**
+   * Finalize a DeltaPay hosted-checkout sale identified by its session ID. Idempotent.
+   *
+   * - Sale not PENDING → return current status immediately (no re-mint).
+   * - Ask DeltaPay for the AUTHORITATIVE outcome via verify-return. The buyer's
+   *   return redirect is never proof of payment — they can close the tab, lose
+   *   connectivity, or hit the return URL by hand.
+   * - pending/processing (and any UNRECOGNISED status) → return pending, hold untouched.
+   * - failed/expired/cancelled → release the hold + mark FAILED.
+   * - succeeded → AMOUNT GUARD: the amount DeltaPay reports must equal what we
+   *   charged (amountCharged, falling back to totalAmount for pre-service-fee
+   *   rows). Mismatch → log loudly, release, fail, no mint. No currency check:
+   *   DeltaPay is SZL-only and returns no currency field.
+   * - ATOMIC claim via findOneAndUpdate({_id, paymentStatus: PENDING}) so a
+   *   concurrent return + callback + poll cannot double-mint. Then mint tickets,
+   *   confirm the reservation (reserved→sold), update sold counts, best-effort SMS.
+   *
+   * Mirrors finalizeCardSale; differences: lookup by deltapaySessionId and the
+   * status comes from a plain enum rather than a provider result code.
+   */
+  static async finalizeDeltapaySale(
+    sessionId: string
+  ): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ deltapaySessionId: sessionId });
+    if (!sale) throw new Error('Sale not found for checkout session id');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const verified = await this.deltapayClient.verifySession(sessionId);
+    const outcome = classifySessionStatus(verified.status);
+
+    if (outcome === 'pending') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (outcome === 'rejected') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // succeeded — verify the EXACT amount DeltaPay reports before minting.
+    const expectedAmount = sale.amountCharged ?? sale.totalAmount;
+    const confirmedAmount = Number(verified.amount);
+    if (!Number.isFinite(confirmedAmount) || confirmedAmount !== expectedAmount) {
+      console.error('[deltapay finalize] amount mismatch — refusing to mint', {
+        sessionId,
+        expected: expectedAmount,
+        confirmed: verified.amount,
+      });
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // Atomically CLAIM the sale so concurrent return + callback + poll can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized
+
+    // Mint tickets, confirm reservation (reserved→sold), best-effort SMS
+    const event = await Event.findById(sale.eventId);
+    const ticketTypeDoc = event?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = this.buildTicket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        saleId: sale._id,
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (sale.customerPhone && event) {
+      SmsService.sendTicketConfirmation(
+        sale.customerPhone,
+        tickets.map(t => ({
+          ticketId: t.ticketId,
+          eventName: event.name,
+          eventDate: event.eventDate.toISOString(),
+          venue: event.venue,
+        }))
+      ).catch(err => console.error('[SMS] deltapay confirmation threw', err));
+    }
+
+    return { status: 'completed' };
+  }
+
+  /**
+   * Reconciliation backstop: finalise DeltaPay sales still PENDING despite the
+   * buyer having (possibly) paid — i.e. the return endpoint, the session
+   * callback AND the SPA poll all missed. Mirrors reconcilePendingCardSales.
+   *
+   * `olderThanMs` skips brand-new sales where the buyer is still on the hosted
+   * page; the 2-min default sits far inside the 12-min DELTAPAY_TTL_MS hold, so
+   * a paid sale is recovered long before the reservation-expiry sweep fails it.
+   */
+  static async reconcilePendingDeltapaySales(olderThanMs = 2 * 60_000): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await TicketSale.find({
+      paymentMethod: PaymentMethod.DELTAPAY,
+      paymentStatus: PaymentStatus.PENDING,
+      deltapaySessionId: { $exists: true, $nin: [null, ''] },
+      createdAt: { $lt: cutoff },
+    }).limit(50);
+
+    let finalized = 0;
+    for (const sale of stuck) {
+      try {
+        const r = await this.finalizeDeltapaySale(sale.deltapaySessionId as string);
+        if (r.status !== 'pending') finalized++;
+      } catch (err) {
+        console.error(`[deltapay-reconcile] failed for sale ${sale.saleId}`, err);
+      }
+    }
+    if (finalized > 0) {
+      console.log(`[deltapay-reconcile] finalised ${finalized}/${stuck.length} stuck DeltaPay sale(s)`);
+    }
     return finalized;
   }
 

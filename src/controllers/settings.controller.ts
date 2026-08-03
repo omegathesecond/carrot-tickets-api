@@ -11,12 +11,14 @@ const patchSchema = Joi.object({
   mtnMomoEnabled: Joi.boolean(),
   cashEnabled: Joi.boolean(),
   peachCardEnabled: Joi.boolean(),
+  deltapayEnabled: Joi.boolean(),
   defaultResellerCommissionPercent: Joi.number().min(0).max(100),
   platformFeePercent: Joi.number().min(0).max(100),
   // Buyer-paid FLAT service fee (E) per online method.
   keshlessServiceFee: Joi.number().min(0).max(100000),
   momoServiceFee: Joi.number().min(0).max(100000),
   cardServiceFee: Joi.number().min(0).max(100000),
+  deltapayServiceFee: Joi.number().min(0).max(100000),
 }).min(1);
 
 export class SettingsController {

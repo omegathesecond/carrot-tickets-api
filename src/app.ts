@@ -57,6 +57,7 @@ import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
 import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
+import deltapayRoutes from '@routes/deltapay.route';
 import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
@@ -129,19 +130,31 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-// API Documentation
-const swaggerUiOptions = {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'Keshless Tickets API Documentation',
-};
+// API Documentation — OFF by default, opt in with API_DOCS_ENABLED=true.
+//
+// The docs describe every route including admin, payout, withdrawal and
+// settlement paths, so publishing them hands anyone a complete map of the API.
+// They are genuinely useful locally, hence a switch rather than deletion.
+//
+// NOTE: the spec is currently EMPTY in production regardless — swagger.config.ts
+// globs './src/**/*.ts' while the container runs compiled dist/**/*.js, so
+// nothing matches. That is an accident, not a safeguard: pointing the glob at
+// dist/ (a reasonable-looking "fix") would silently publish the whole surface.
+// This gate is what actually keeps it private.
+if (process.env['API_DOCS_ENABLED'] === 'true') {
+  const swaggerUiOptions = {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'Carrot Tickets API Documentation',
+  };
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
 
-// Swagger JSON endpoint
-app.get('/api-docs.json', (_req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerSpec);
-});
+  // Swagger JSON endpoint
+  app.get('/api-docs.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 // API Routes
 app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored updates (organizer dashboard) - mounted before the broader /api/tickets below so this specific path isn't shadowed
@@ -156,6 +169,7 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/public/updates', updateRoutes);          // Buyer updates (Discover feed) - mounted before the broader /api/public below
 app.use('/api/public', publicRoutes);                  // Public routes - no auth required
 app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
+app.use('/api/public/purchase/deltapay', deltapayRoutes);    // DeltaPay return + session callback (unauthenticated)
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 app.use('/api/community', communityRoutes);          // Event communities (buyer social)
@@ -265,7 +279,9 @@ if (process.env['NODE_ENV'] !== 'test') {
     console.log(`🌍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
     console.log(`📍 Base URL: http://localhost:${PORT}`);
     console.log(`💚 Health check: http://localhost:${PORT}/health`);
-    console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+    if (process.env['API_DOCS_ENABLED'] === 'true') {
+      console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+    }
     console.log(`🔗 API Endpoint: http://localhost:${PORT}/api`);
     console.log('');
   });

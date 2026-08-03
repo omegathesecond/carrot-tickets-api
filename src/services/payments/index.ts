@@ -4,12 +4,14 @@ import { CashProcessor } from './cash.processor';
 import { KeshlessWalletProcessor } from './keshlessWallet.processor';
 import { MtnMomoProcessor } from './mtnMomo.processor';
 import { CardProcessor } from './card.processor';
+import { DeltapayProcessor } from './deltapay.processor';
 
 const processors: Record<string, PaymentProcessor> = {
   [PaymentMethod.CASH]: new CashProcessor(),
   [PaymentMethod.KESHLESS_WALLET]: new KeshlessWalletProcessor(),
   [PaymentMethod.MTN_MOMO]: new MtnMomoProcessor(),
   [PaymentMethod.PEACH_CARD]: new CardProcessor(),
+  [PaymentMethod.DELTAPAY]: new DeltapayProcessor(),
 };
 
 export function getProcessor(method: PaymentMethod): PaymentProcessor {

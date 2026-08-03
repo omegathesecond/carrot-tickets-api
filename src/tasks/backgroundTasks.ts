@@ -12,6 +12,11 @@ const RESERVATION_SWEEP_MS = 60_000;
 // sale is minted, never failed. See TicketService.reconcilePendingCardSales.
 const CARD_RECONCILE_MS = 60_000;
 
+// Reconcile paid-but-stuck DeltaPay sales (return redirect + session callback +
+// poll all missed). Runs ahead of the 12-min reservation hold so a paid sale is
+// minted, never failed. See TicketService.reconcilePendingDeltapaySales.
+const DELTAPAY_RECONCILE_MS = 60_000;
+
 // Event reminders (spec §6): T-24h and day-of pushes for ticket holders.
 const REMINDER_SWEEP_MS = 600_000;
 
@@ -46,6 +51,10 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     TicketService.reconcilePendingCardSales().catch(err => console.error('[card-reconcile] error', err));
   }, CARD_RECONCILE_MS));
+
+  handles.push(setInterval(() => {
+    TicketService.reconcilePendingDeltapaySales().catch(err => console.error('[deltapay-reconcile] error', err));
+  }, DELTAPAY_RECONCILE_MS));
 
   handles.push(setInterval(() => {
     EventReminderService.sweep().catch((err) => console.error('[reminder-sweep] error', err));

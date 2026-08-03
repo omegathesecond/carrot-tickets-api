@@ -1,9 +1,17 @@
+import type { PaymentMethod } from '@interfaces/ticket.interface';
+
 export type FundsCustody = 'carrot' | 'reseller' | 'vendor';
 export type SaleSoldByType = 'Vendor' | 'VendorSubUser' | 'ResellerOperator';
 
 export interface SaleEconomicsInput {
   faceAmount: number;
-  paymentMethod: 'cash' | 'mtn_momo' | 'keshless_wallet' | 'peach_card';
+  /**
+   * Derived from the PaymentMethod enum's VALUES (not the enum type) so this
+   * module stays decoupled at runtime and callers may still pass plain string
+   * literals — while a new payment method automatically widens this union
+   * instead of silently missing the custody rule below.
+   */
+  paymentMethod: `${PaymentMethod}`;
   soldByType: SaleSoldByType;
   resellerCommissionPercent: number;
   platformFeePercent: number;

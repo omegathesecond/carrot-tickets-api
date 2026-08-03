@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PeachClient } from '@services/payments/peach.client';
 import { TicketService } from '@services/ticket.service';
 import { BookingService } from '@services/transport/booking.service';
+import { paymentResultPageUrl, paymentResultRedirect } from '@utils/paymentResult.util';
 
 /** True when `e` is the ticket finalizer's "not a ticket sale" miss — the
  * signal to fall through to the bus-booking finalizer instead. */
@@ -87,8 +88,6 @@ export class CardController {
       req.query['id'] || req.body?.id || req.query['paymentId'] || req.body?.paymentId;
     const paymentId = typeof raw === 'string' && raw ? raw : undefined;
 
-    const pageUrl = process.env['CARD_RESULT_PAGE_URL'] || 'https://carrottickets.com/payment-result';
-
     if (paymentId) {
       let status: 'completed' | 'failed' | 'pending' | undefined;
       try {
@@ -111,10 +110,9 @@ export class CardController {
       // depending on the buyer being signed in on this device (3DS can return
       // on a different browser/device). Polling stays the authoritative re-check;
       // a spoofed &status grants no ticket (minting is server-side only).
-      const q = `?id=${encodeURIComponent(paymentId)}${status ? `&status=${status}` : ''}`;
-      return res.redirect(302, `${pageUrl}${q}`);
+      return res.redirect(302, paymentResultRedirect(paymentId, status, 'peach_card'));
     }
     // No id — send the buyer to the result page anyway; it will show a generic state.
-    return res.redirect(302, pageUrl);
+    return res.redirect(302, paymentResultPageUrl());
   }
 }

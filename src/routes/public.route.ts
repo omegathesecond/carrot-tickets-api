@@ -307,4 +307,23 @@ router.post('/purchase/peach-card', authenticateBuyer, PublicController.initiate
  */
 router.get('/purchase/peach-card/:paymentId/status', authenticateBuyer, PublicController.getCardStatus);
 
+/**
+ * @route   POST /api/public/purchase/deltapay
+ * @desc    Initiate an async DeltaPay hosted-checkout ticket purchase. Phone
+ *          comes from the buyer token (req.ticketsUser.userPhone), NOT the body.
+ *          Returns { checkoutSessionId, checkoutUrl, saleId, expiresAt } — the
+ *          buyer is redirected to DeltaPay's hosted checkout page.
+ * @access  Buyer (Bearer buyer token)
+ * @body    eventId, ticketTypeId, quantity, customerName?
+ */
+router.post('/purchase/deltapay', authenticateBuyer, PublicController.initiateDeltapayPurchase);
+
+/**
+ * @route   GET /api/public/purchase/deltapay/:sessionId/status
+ * @desc    Poll the status of a pending DeltaPay payment. Also triggers
+ *          finalization (ticket minting) when DeltaPay reports `succeeded`.
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/purchase/deltapay/:sessionId/status', authenticateBuyer, PublicController.getDeltapayStatus);
+
 export default router;

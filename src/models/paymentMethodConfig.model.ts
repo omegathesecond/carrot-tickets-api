@@ -6,6 +6,7 @@ export interface IPaymentMethodConfig extends mongoose.Document {
   keshlessWalletEnabled: boolean;
   mtnMomoEnabled: boolean;
   peachCardEnabled: boolean;
+  deltapayEnabled: boolean;
   defaultResellerCommissionPercent: number;
   platformFeePercent: number;
   // Buyer-paid FLAT service fee (in E) per ONLINE method — added on top of the
@@ -13,6 +14,7 @@ export interface IPaymentMethodConfig extends mongoose.Document {
   keshlessServiceFee: number;
   momoServiceFee: number;
   cardServiceFee: number;
+  deltapayServiceFee: number;
   updatedAt: Date;
 }
 
@@ -22,11 +24,13 @@ const schema = new Schema<IPaymentMethodConfig>({
   keshlessWalletEnabled: { type: Boolean, default: false },
   mtnMomoEnabled: { type: Boolean, default: true },
   peachCardEnabled: { type: Boolean, default: false },
+  deltapayEnabled: { type: Boolean, default: false },
   defaultResellerCommissionPercent: { type: Number, default: 0 },
   platformFeePercent: { type: Number, default: 0 },
   keshlessServiceFee: { type: Number, default: 0 },
   momoServiceFee: { type: Number, default: 0 },
   cardServiceFee: { type: Number, default: 0 },
+  deltapayServiceFee: { type: Number, default: 0 },
 }, { timestamps: true });
 
 export const PaymentMethodConfig = mongoose.model<IPaymentMethodConfig>('PaymentMethodConfig', schema);

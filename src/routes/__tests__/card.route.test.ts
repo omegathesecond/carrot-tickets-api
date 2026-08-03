@@ -66,13 +66,16 @@ describe('POST /api/public/purchase/peach-card/webhook', () => {
 
 describe('Peach shopperResultUrl return endpoint', () => {
   const PAGE = 'https://carrottickets.com/payment-result';
+  // The shared result page serves every redirect method (card, DeltaPay), so the
+  // redirect tags which one this was — the page picks its poll endpoint from it.
+  const METHOD = '&method=peach_card';
 
   it('GET with ?id finalises server-side and 302s to the SPA result page with id + outcome', async () => {
     const res = await request(app).get('/api/public/purchase/peach-card/return?id=pay_get');
 
     expect(res.status).toBe(302);
     expect(mockFinalizeCardSale).toHaveBeenCalledWith('pay_get');
-    expect(res.headers['location']).toBe(`${PAGE}?id=pay_get&status=completed`);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_get&status=completed${METHOD}`);
   });
 
   it('POST (3DS form-urlencoded) finalises and 302s to the SPA result page', async () => {
@@ -83,7 +86,7 @@ describe('Peach shopperResultUrl return endpoint', () => {
 
     expect(res.status).toBe(302);
     expect(mockFinalizeCardSale).toHaveBeenCalledWith('pay_post');
-    expect(res.headers['location']).toBe(`${PAGE}?id=pay_post&status=completed`);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_post&status=completed${METHOD}`);
   });
 
   it('carries a failed outcome through to the page', async () => {
@@ -91,7 +94,7 @@ describe('Peach shopperResultUrl return endpoint', () => {
     const res = await request(app).get('/api/public/purchase/peach-card/return?id=pay_fail');
 
     expect(res.status).toBe(302);
-    expect(res.headers['location']).toBe(`${PAGE}?id=pay_fail&status=failed`);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_fail&status=failed${METHOD}`);
   });
 
   it('still 302s to the result page (no id) when finalize is impossible', async () => {
@@ -107,6 +110,6 @@ describe('Peach shopperResultUrl return endpoint', () => {
     const res = await request(app).get('/api/public/purchase/peach-card/return?id=pay_boom');
 
     expect(res.status).toBe(302);
-    expect(res.headers['location']).toBe(`${PAGE}?id=pay_boom`);
+    expect(res.headers['location']).toBe(`${PAGE}?id=pay_boom${METHOD}`);
   });
 });

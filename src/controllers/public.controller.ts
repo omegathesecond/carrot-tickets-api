@@ -12,6 +12,7 @@ import { normalizePhone } from '@utils/phone.util';
 import { notEndedFilter } from '@utils/eventVisibility.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
+import { DeltapayClient } from '@services/payments/deltapay.client';
 import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
@@ -149,6 +150,15 @@ const contactMessageSchema = Joi.object({
 
 // Validation schema for Peach card purchase initiation
 const cardInitiateSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
+  customerName: Joi.string().max(100).optional(),
+});
+
+// Validation schema for DeltaPay hosted-checkout purchase initiation.
+// Same shape as card: DeltaPay collects the payer identifier on its own page.
+const deltapayInitiateSchema = Joi.object({
   eventId: Joi.string().hex().length(24).required(),
   ticketTypeId: Joi.string().hex().length(24).required(),
   quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
@@ -870,12 +880,16 @@ export class PublicController {
       if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
       if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
       if (cfg.peachCardEnabled && new PeachClient().isConfigured()) methods.push('peach_card');
+      // DeltaPay needs BOTH the config toggle and live credentials — a
+      // half-configured deploy hides the button instead of failing at checkout.
+      if (cfg.deltapayEnabled && new DeltapayClient().isConfigured()) methods.push('deltapay');
       // Per-method flat buyer service fee (E) so checkout can show a live
       // breakdown. The charge is recomputed server-side on purchase (display only).
       const serviceFees = {
         keshless_wallet: cfg.keshlessServiceFee,
         mtn_momo: cfg.momoServiceFee,
         peach_card: cfg.cardServiceFee,
+        deltapay: cfg.deltapayServiceFee,
       };
       return ApiResponseUtil.success(res, { methods, serviceFees });
     } catch (error: any) {
@@ -971,6 +985,55 @@ export class PublicController {
       }
 
       const result = await TicketService.finalizeCardSale(paymentId);
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
+   * Initiate an async DeltaPay hosted-checkout purchase. Buyer-authed.
+   * Returns the checkout URL for the SPA to redirect to.
+   */
+  static async initiateDeltapayPurchase(req: Request, res: Response): Promise<any> {
+    const { error, value } = deltapayInitiateSchema.validate(req.body);
+    if (error) return ApiResponseUtil.badRequest(res, error.message);
+    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    try {
+      const r = await TicketService.initiateDeltapayPurchase({
+        ...value,
+        customerPhone,
+        channel: SalesChannel.ONLINE,
+      });
+      return ApiResponseUtil.success(res, r);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Could not start DeltaPay payment', 400);
+    }
+  }
+
+  /**
+   * Poll the outcome of a DeltaPay purchase. Buyer-authed.
+   *
+   * Mirrors getCardStatus, including the ownership check: the sale's phone must
+   * match the signed-in buyer's, and a mismatch returns 404 (not 403) so this
+   * endpoint can't be used to enumerate other buyers' checkout sessions.
+   */
+  static async getDeltapayStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!buyerPhone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const sessionId = req.params['sessionId']!;
+      const sale = await TicketService.getDeltapaySaleBySessionId(sessionId);
+
+      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
+      const result = await TicketService.finalizeDeltapaySale(sessionId);
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);

@@ -5,6 +5,7 @@ const DEFAULTS = {
   mtnMomoEnabled: true,
   keshlessWalletEnabled: false, // Keshless decoupled — off for now
   peachCardEnabled: false,
+  deltapayEnabled: false, // off until DeltaPay issues live credentials
   defaultResellerCommissionPercent: 0,
   platformFeePercent: 0,
   // Live launch values (flat E, added on top at online checkout). Overridable in
@@ -12,6 +13,7 @@ const DEFAULTS = {
   keshlessServiceFee: 0,
   momoServiceFee: 5,
   cardServiceFee: 10,
+  deltapayServiceFee: 5, // wallet rail — priced like MoMo
 };
 
 type PaymentConfig = typeof DEFAULTS;
@@ -24,11 +26,13 @@ export class PaymentConfigService {
       mtnMomoEnabled: doc?.mtnMomoEnabled ?? DEFAULTS.mtnMomoEnabled,
       keshlessWalletEnabled: doc?.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
       peachCardEnabled: doc?.peachCardEnabled ?? DEFAULTS.peachCardEnabled,
+      deltapayEnabled: doc?.deltapayEnabled ?? DEFAULTS.deltapayEnabled,
       defaultResellerCommissionPercent: doc?.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
       platformFeePercent: doc?.platformFeePercent ?? DEFAULTS.platformFeePercent,
       keshlessServiceFee: doc?.keshlessServiceFee ?? DEFAULTS.keshlessServiceFee,
       momoServiceFee: doc?.momoServiceFee ?? DEFAULTS.momoServiceFee,
       cardServiceFee: doc?.cardServiceFee ?? DEFAULTS.cardServiceFee,
+      deltapayServiceFee: doc?.deltapayServiceFee ?? DEFAULTS.deltapayServiceFee,
     };
   }
 
@@ -43,11 +47,13 @@ export class PaymentConfigService {
       mtnMomoEnabled: doc!.mtnMomoEnabled ?? DEFAULTS.mtnMomoEnabled,
       keshlessWalletEnabled: doc!.keshlessWalletEnabled ?? DEFAULTS.keshlessWalletEnabled,
       peachCardEnabled: doc!.peachCardEnabled ?? DEFAULTS.peachCardEnabled,
+      deltapayEnabled: doc!.deltapayEnabled ?? DEFAULTS.deltapayEnabled,
       defaultResellerCommissionPercent: doc!.defaultResellerCommissionPercent ?? DEFAULTS.defaultResellerCommissionPercent,
       platformFeePercent: doc!.platformFeePercent ?? DEFAULTS.platformFeePercent,
       keshlessServiceFee: doc!.keshlessServiceFee ?? DEFAULTS.keshlessServiceFee,
       momoServiceFee: doc!.momoServiceFee ?? DEFAULTS.momoServiceFee,
       cardServiceFee: doc!.cardServiceFee ?? DEFAULTS.cardServiceFee,
+      deltapayServiceFee: doc!.deltapayServiceFee ?? DEFAULTS.deltapayServiceFee,
     };
   }
 }
