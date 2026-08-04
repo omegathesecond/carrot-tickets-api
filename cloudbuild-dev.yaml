@@ -1,0 +1,24 @@
+steps:
+  - id: Build
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_IMAGE}', '.', '-f', 'Dockerfile']
+  - id: Push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '${_IMAGE}']
+  - id: Deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - carrot-tickets-api-dev
+      - --platform=managed
+      - --image=${_IMAGE}
+      - --region=europe-west1
+      - --quiet
+substitutions:
+  _IMAGE: europe-west1-docker.pkg.dev/contracts-470406/cloud-run-source-deploy/carrot-tickets-api/carrot-tickets-api-dev:${COMMIT_SHA}
+images: ['${_IMAGE}']
+options:
+  logging: CLOUD_LOGGING_ONLY
