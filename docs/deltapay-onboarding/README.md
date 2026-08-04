@@ -25,25 +25,32 @@ file together with the two logo files in `assets/`.
 
 ## 2. Domains and URLs to allow-list
 
-There is **one** domain to allow-list:
+There are **two** domains to allow-list — production and sandbox/testing:
 
 | Purpose | Value |
 |---|---|
-| **Allowed return domain** | `api.carrottickets.com` |
-| **Default return URL** | `https://api.carrottickets.com/api/public/purchase/deltapay/return` |
-| **Session callback URL** ("webhook") | `https://api.carrottickets.com/api/public/purchase/deltapay/callback` |
+| **Allowed return domain (production)** | `api.carrottickets.com` |
+| **Allowed return domain (sandbox/testing)** | `dev-api.carrottickets.com` |
+| **Default return URL (production)** | `https://api.carrottickets.com/api/public/purchase/deltapay/return` |
+| **Default return URL (sandbox)** | `https://dev-api.carrottickets.com/api/public/purchase/deltapay/return` |
+| **Session callback URL (production)** ("webhook") | `https://api.carrottickets.com/api/public/purchase/deltapay/callback` |
+| **Session callback URL (sandbox)** | `https://dev-api.carrottickets.com/api/public/purchase/deltapay/callback` |
 
-Both the return URL and the session callback sit on `api.carrottickets.com`, so that
-single host covers both. We do not need a separate staging domain — we will verify
-end to end against **your sandbox** (`https://api.dev.deltacrypt.net`) using these
-same URLs, with the payment method hidden from buyers behind a feature switch until
-the test passes.
+Sandbox testing runs against **your sandbox** (`https://api.dev.deltacrypt.net`) with
+return/callback URLs on `dev-api.carrottickets.com`; production runs against
+**your production** (`https://api.prod.deltacrypt.net`) with return/callback URLs on
+`api.carrottickets.com`. Both hosts need to be allow-listed in this one request —
+you validate `return_url` against the allow-list in sandbox exactly as in production,
+so allow-listing only the production host would fail sandbox testing. The payment
+method stays hidden from buyers behind a feature switch until the sandbox test
+passes.
 
 ### All Carrot Tickets domains, for reference
 
 | Domain | What it is | Relevant to this integration |
 |---|---|---|
-| `api.carrottickets.com` | Production API (Google Cloud Run) | **Yes — allow-list this** |
+| `api.carrottickets.com` | Production API (Google Cloud Run) | **Yes — allow-list this (production)** |
+| `dev-api.carrottickets.com` | Development API (Google Cloud Run) | **Yes — allow-list this (sandbox/testing)** |
 | `carrottickets.com` | Public storefront (static site) | Buyers land back here after we finalise; no DeltaPay traffic |
 | `manage.carrottickets.com` | Organizer dashboard | No |
 | `realtime.carrottickets.com` | Realtime/chat gateway | No |
@@ -69,10 +76,10 @@ For your team's testing:
 Both endpoints are publicly reachable over HTTPS. **No IP allow-listing is required
 on our side** — DeltaPay can call them from any address.
 
-> ⚠️ **These two URLs currently return `404`.** The integration code is written and
-> tested but not yet deployed, since it is waiting on your API key. They go live the
-> moment we deploy, which we will do as soon as credentials arrive. You can allow-list
-> the domain now — no need to wait for the endpoints to respond.
+> The production return and callback endpoints are **live now** on
+> `api.carrottickets.com`. The sandbox endpoints on `dev-api.carrottickets.com` go
+> live with our dev environment. You can allow-list both domains now — no need to
+> wait for either to respond.
 
 ---
 
@@ -134,8 +141,9 @@ To be completed by Carrot Tickets before sending:
    not plain email.
 2. **Confirmation of our base URLs**: sandbox `https://api.dev.deltacrypt.net`,
    production `https://api.prod.deltacrypt.net`.
-3. **Confirmation that `api.carrottickets.com` is allow-listed** as a return domain
-   (this covers both the return URL and the session callback).
+3. **Confirmation that both `api.carrottickets.com` (production) and
+   `dev-api.carrottickets.com` (sandbox/testing) are allow-listed** as return
+   domains (each covers its own return URL and session callback).
 4. **A sandbox test wallet** (phone number or username with test balance) so we can
    complete a full purchase before enabling DeltaPay for real buyers.
 

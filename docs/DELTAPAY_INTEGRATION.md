@@ -22,7 +22,7 @@ Everything below is what DeltaPay needs from us to provision the integration.
 | Field | Value |
 |---|---|
 | **Platform type** | `custom_website` |
-| **Allowed return domains** | `api.carrottickets.com` — the only one. Carrot has no separate dev API host (local dev proxies to prod, and `keshless-tickets-api` is a stale legacy service); pre-launch testing runs against DeltaPay's **sandbox** using these same URLs with the method toggled off for buyers. |
+| **Allowed return domains** | `api.carrottickets.com` (production) **and** `dev-api.carrottickets.com` (sandbox/testing) — both must be allow-listed in one request. DeltaPay validates `return_url` against the allow-list in sandbox exactly as in production, so pre-launch testing against DeltaPay's **sandbox** uses `dev-api.carrottickets.com` with the method toggled off for buyers. |
 | **Default return URL** | `https://api.carrottickets.com/api/public/purchase/deltapay/return` |
 | **Session callback URL** | `https://api.carrottickets.com/api/public/purchase/deltapay/callback` |
 | **Display name** | `Carrot Tickets` |
@@ -33,12 +33,13 @@ Everything below is what DeltaPay needs from us to provision the integration.
 | **Currency** | SZL |
 | **Support contact** | support@carrottickets.com |
 
-Both the return URL and the callback URL are on `api.carrottickets.com`, so
-**that single domain must be allow-listed** — DeltaPay validates both against the
-allowed-domain list at session creation.
+The return URL and callback URL sit on `api.carrottickets.com` in production and on
+`dev-api.carrottickets.com` in sandbox, so **both domains must be allow-listed** —
+DeltaPay validates `return_url` against the allowed-domain list at session creation,
+in sandbox exactly as in production.
 
-Note: both URLs return `404` until this branch is deployed. Allow-listing does not
-depend on them responding.
+Note: the production endpoints are live now. The sandbox endpoints on
+`dev-api.carrottickets.com` go live with the dev environment.
 
 > Note on the return URL: it points at our **API**, not our website. Our storefront
 > is a static site that cannot finalise a payment, so DeltaPay returns the buyer to
