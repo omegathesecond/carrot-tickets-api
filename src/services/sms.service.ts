@@ -17,6 +17,7 @@
 
 import { groupTicketCode } from '@utils/ticketCode.util';
 import { normalizePhone } from '@utils/phone.util';
+import { shouldSendSms } from '@utils/smsPolicy.util';
 import { YeboLinkClient } from './yebolink.client';
 
 const KESHLESS_API_URL = process.env['KESHLESS_API_URL'] || 'http://localhost:3000/api';
@@ -43,6 +44,14 @@ export class SmsService {
    * outcome.
    */
   private static async send(phoneNumber: string, message: string): Promise<boolean> {
+    // Delivery policy gate. `send` is the single choke point — sendInternational
+    // is only ever reached from here — so gating once covers both legs.
+    const policy = shouldSendSms(phoneNumber);
+    if (!policy.send) {
+      console.log(`[SMS] Skipped send to ${phoneNumber}: ${policy.reason}`);
+      return false;
+    }
+
     const normalized = normalizePhone(phoneNumber);
 
     if (!normalized.startsWith('+268')) {
