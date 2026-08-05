@@ -48,4 +48,25 @@ export const YeboLinkClient = {
       status: body.data?.status ?? '',
     };
   },
+
+  async sendEmail(to: string, subject: string, html: string, fromName = 'Carrot Tickets'): Promise<YeboLinkSendResult> {
+    const res = await fetch(`${YEBOLINK_API_URL}/api/v1/messages/send`, {
+      method: 'POST',
+      headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to,
+        channel: 'email',
+        content: { subject, html, from_name: fromName },
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      error?: string;
+      data?: { message_id?: string; status?: string };
+    };
+    if (!res.ok || !body.success) {
+      throw new Error(`YeboLink email send failed (${res.status}): ${body.error ?? 'unknown error'}`);
+    }
+    return { messageId: body.data?.message_id ?? '', status: body.data?.status ?? '' };
+  },
 };
