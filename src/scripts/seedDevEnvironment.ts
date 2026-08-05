@@ -18,7 +18,7 @@
  *
  * Usage (values supplied at the call site, not stored here):
  *   MONGODB_URI='<dev uri>' \
- *   SEED_BUYER_PHONE='+268...' SEED_BUYER_PASSWORD='...' \
+ *   SEED_BUYER_PHONE='+268...' SEED_BUYER_PASSWORD='...' SEED_BUYER_NAME='...' \
  *   SEED_VENDOR_EMAIL='...' SEED_VENDOR_PASSWORD='...' \
  *   npx ts-node -r tsconfig-paths/register src/scripts/seedDevEnvironment.ts
  */
@@ -152,7 +152,9 @@ async function seed(): Promise<void> {
   // Same reasoning: assign then save() so the bcrypt pre-save hook hashes it.
   let buyer = await Buyer.findOne({ phone: buyerPhone });
   if (!buyer) {
-    buyer = new Buyer({ phone: buyerPhone, name: 'Laslie' });
+    // Name is set on CREATION only — re-running with an existing phone updates
+    // the password but never overwrites a name the buyer may have changed.
+    buyer = new Buyer({ phone: buyerPhone, name: process.env['SEED_BUYER_NAME'] || 'Dev Buyer' });
   }
   buyer.password = buyerPassword;
   await buyer.save();
