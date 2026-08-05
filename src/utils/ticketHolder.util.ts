@@ -32,12 +32,21 @@ export async function isTicketHolder(eventId: string, rawPhone: string): Promise
  * reasoning applies to buyerId, so `_id` is optional here too (Mongoose's
  * Document typing has `_id` as optional even though a persisted buyer always
  * has one) and is only added to the clause when present.
+ *
+ * A buyer with NONE of the three handles produces an EMPTY array. Composed
+ * as `$or: []`, MongoDB treats that as vacuously true — matching every
+ * document — which would be a silent auth-bypass (a degenerate buyer
+ * "holding" every ticket for every event). Fail loud instead: this should
+ * never happen for a real buyer (the schema requires phone or email, and a
+ * persisted document always has an _id), so a caller hitting this is a bug,
+ * not a valid state to filter past.
  */
 export function buyerTicketOr(buyer: { _id?: unknown; phone?: string; email?: string }): Record<string, unknown>[] {
   const or: Record<string, unknown>[] = [];
   if (buyer._id) or.push({ buyerId: buyer._id });
   if (buyer.phone) or.push({ customerPhone: normalizePhone(buyer.phone) });
   if (buyer.email) or.push({ customerEmail: buyer.email.toLowerCase() });
+  if (or.length === 0) throw new Error('buyerTicketOr: buyer has no _id/phone/email to match on');
   return or;
 }
 

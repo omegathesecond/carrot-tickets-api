@@ -3,7 +3,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
-import { isTicketHolder, isTicketHolderForBuyer } from '@utils/ticketHolder.util';
+import { isTicketHolder, isTicketHolderForBuyer, buyerTicketOr } from '@utils/ticketHolder.util';
 
 describe('isTicketHolder', () => {
   beforeAll(connectTestDb);
@@ -104,5 +104,15 @@ describe('isTicketHolderForBuyer', () => {
 
     const buyer = { _id: new mongoose.Types.ObjectId(), email: 'buyer@example.com' };
     expect(await isTicketHolderForBuyer(eventId, buyer)).toBe(false);
+  });
+});
+
+describe('buyerTicketOr', () => {
+  // Regression: an empty $or clause is vacuously true in Mongo — a buyer
+  // with no _id/phone/email must never silently produce `[]` (which,
+  // composed as `$or: []`, would match EVERY ticket document — an
+  // auth-bypass, not a "no match" result). Fail loud instead.
+  it('throws for a buyer with no _id, phone, or email (would otherwise produce a vacuously-true $or: [])', () => {
+    expect(() => buyerTicketOr({})).toThrow(/no _id\/phone\/email/);
   });
 });
