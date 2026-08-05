@@ -12,7 +12,6 @@ import { phoneLoginCandidates } from '@utils/phone.util';
 import { JWT_SECRET } from '@config/jwt.config';
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
-const JWT_REFRESH_SECRET: string = process.env['JWT_REFRESH_SECRET'] || 'your-refresh-secret-key';
 const JWT_REFRESH_EXPIRY: string = process.env['JWT_REFRESH_EXPIRY'] || '7d';
 
 // Log JWT configuration at startup for debugging

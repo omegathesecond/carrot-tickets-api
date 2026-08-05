@@ -24,7 +24,8 @@
     "test:comprehensive": "ts-node -r tsconfig-paths/register src/scripts/comprehensiveTest.ts",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "test": "jest"
+    "test": "jest",
+    "seed:dev": "ts-node -r tsconfig-paths/register src/scripts/seedDevEnvironment.ts"
   },
   "keywords": [
     "api",
