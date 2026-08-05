@@ -49,6 +49,18 @@ const ticketSchema = new Schema<ITicket>({
     type: String,
     trim: true
   },
+  customerEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    index: true
+  },
+  buyerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Buyer',
+    index: true,
+    sparse: true
+  },
   saleId: {
     type: Schema.Types.ObjectId,
     ref: 'TicketSale',

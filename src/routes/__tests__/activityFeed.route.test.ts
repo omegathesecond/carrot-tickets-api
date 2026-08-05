@@ -49,7 +49,7 @@ describe('GET /api/public/activity-feed', () => {
     const { buyer } = await seedLike();
     const res = await request(app)
       .get('/api/public/activity-feed?tab=following')
-      .set('Authorization', `Bearer ${signBuyerToken(buyer.phone)}`);
+      .set('Authorization', `Bearer ${signBuyerToken(buyer.phone!)}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data.items)).toBe(true);
   });

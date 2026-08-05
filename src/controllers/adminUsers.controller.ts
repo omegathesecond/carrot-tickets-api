@@ -40,8 +40,12 @@ export class AdminUsersController {
         Buyer.countDocuments(filter),
       ]);
 
-      // Aggregate purchase stats for just the phones on this page.
-      const phones = buyers.map((b) => b.phone);
+      // Aggregate purchase stats for just the phones on this page. Filter out
+      // email-only buyers (undefined phone) — otherwise it serializes into
+      // the $in array as BSON null, and `customerPhone: { $in: [null, ...] }`
+      // would match phone-less tickets, corrupting every other buyer's stats
+      // row with unrelated tickets.
+      const phones = buyers.map((b) => b.phone).filter((p): p is string => !!p);
       const statsRows = phones.length
         ? await TicketSale.aggregate<{ _id: string; ticketsBought: number; totalSpent: number; lastPurchaseAt: Date }>([
             { $match: { customerPhone: { $in: phones }, paymentStatus: PaymentStatus.COMPLETED } },
@@ -59,7 +63,7 @@ export class AdminUsersController {
       const statsByPhone = new Map(statsRows.map((s) => [s._id, s]));
 
       const users = buyers.map((b) => {
-        const s = statsByPhone.get(b.phone);
+        const s = b.phone ? statsByPhone.get(b.phone) : undefined;
         return {
           id: String(b._id),
           name: b.name ?? null,

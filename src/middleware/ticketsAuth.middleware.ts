@@ -134,11 +134,13 @@ export const requireTicketsOwner = (req: Request, res: Response, next: NextFunct
 /**
  * Authenticate a buyer (ticket holder) on the public site.
  *
- * Buyer tokens carry { app: 'tickets', userType: 'buyer', userPhone } and are
- * verified with the same secret as vendor tokens. We require userType to be
- * 'buyer' here so a vendor/sub-user token can't be used to hit buyer routes
- * (and vice-versa — buyer tokens carry no permissions, so they can't reach the
- * permission-gated vendor endpoints).
+ * Buyer tokens carry { app, userType:'buyer', buyerId?, userPhone?, userEmail? }
+ * and are verified with the same secret as vendor tokens. buyerId is the
+ * canonical identity (email-only buyers always carry it); phone tokens
+ * without a buyerId fall back to userPhone — resolveBuyerFromRequest mirrors
+ * this precedence. We require userType to be 'buyer' here so a vendor/sub-user
+ * token can't be used to hit buyer routes (and vice-versa — buyer tokens carry
+ * no permissions, so they can't reach the permission-gated vendor endpoints).
  */
 export const authenticateBuyer = async (
   req: Request,
@@ -159,7 +161,7 @@ export const authenticateBuyer = async (
     }
 
     const decoded = TicketsAuthService.verifyToken(token);
-    if ((decoded as any).userType !== 'buyer' || !(decoded as any).userPhone) {
+    if ((decoded as any).userType !== 'buyer' || !((decoded as any).buyerId || (decoded as any).userPhone)) {
       ApiResponseUtil.unauthorized(res, 'Invalid buyer token');
       return;
     }
@@ -201,7 +203,7 @@ export const authenticateCommunityViewer = async (
     }
 
     const decoded = TicketsAuthService.verifyToken(token) as any;
-    const isBuyer = decoded.userType === 'buyer' && decoded.userPhone;
+    const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);
     const isOrganizer =
       (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
     if (!isBuyer && !isOrganizer) {
@@ -235,7 +237,7 @@ export const optionalCommunityViewer = async (
   if (token) {
     try {
       const decoded = TicketsAuthService.verifyToken(token) as any;
-      const isBuyer = decoded.userType === 'buyer' && decoded.userPhone;
+      const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);
       const isOrganizer =
         (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
       if (isBuyer || isOrganizer) (req as any).ticketsUser = decoded;

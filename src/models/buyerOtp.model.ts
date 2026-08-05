@@ -1,16 +1,19 @@
 import { Schema, model, Document } from 'mongoose';
 
+export type OtpChannel = 'sms' | 'email';
+
 /**
  * One-time passcode for buyer (ticket holder) login on the public site.
  *
- * Buyers don't have passwords — they prove ownership of the phone number
+ * Buyers don't have passwords — they prove ownership of the phone number or email
  * their tickets were bought against. We store only a SHA-256 hash of the
  * code (never the plaintext), cap verification attempts, and let MongoDB's
  * TTL index sweep expired/used rows.
  */
 export interface IBuyerOtp extends Document {
-  phone: string;          // normalised, e.g. +26878422613
-  codeHash: string;       // sha256(code)
+  channel: OtpChannel;                // 'sms' or 'email'
+  destination: string;                // normalised phone or lowercased email
+  codeHash: string;                   // sha256(code)
   expiresAt: Date;
   attempts: number;
   consumed: boolean;
@@ -19,7 +22,8 @@ export interface IBuyerOtp extends Document {
 
 const buyerOtpSchema = new Schema<IBuyerOtp>(
   {
-    phone: { type: String, required: true, index: true },
+    channel: { type: String, enum: ['sms', 'email'], required: true },
+    destination: { type: String, required: true, index: true },
     codeHash: { type: String, required: true },
     expiresAt: { type: Date, required: true, index: true },
     attempts: { type: Number, default: 0 },

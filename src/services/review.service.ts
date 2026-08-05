@@ -3,7 +3,7 @@ import { Review, IReview } from '@models/review.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { IBuyer } from '@models/buyer.model';
-import { isTicketHolder } from '@utils/ticketHolder.util';
+import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
@@ -33,7 +33,7 @@ export class ReviewService {
     if (new Date() < new Date(endsAt)) {
       throw new HttpError(403, 'Reviews open after the event ends');
     }
-    if (!(await isTicketHolder(eventId, buyer.phone))) {
+    if (!(await isTicketHolderForBuyer(eventId, buyer))) {
       throw new HttpError(403, 'Only ticket holders can review this event');
     }
 
