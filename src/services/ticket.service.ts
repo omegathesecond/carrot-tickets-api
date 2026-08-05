@@ -7,6 +7,7 @@ import { EventService } from '@services/event.service';
 import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
 import { normalizePhone } from '@utils/phone.util';
+import { buyerTicketOr } from '@utils/ticketHolder.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
 import { DeltapayClient, classifySessionStatus } from '@services/payments/deltapay.client';
@@ -25,6 +26,10 @@ export interface SellTicketsParams {
   quantity: number;
   customerName?: string;
   customerPhone?: string;
+  // Buyer identity (buyer-authed purchase paths only — VENDOR/POS sales
+  // leave these unset, since there's no logged-in buyer to stamp).
+  customerEmail?: string;
+  buyerId?: string;
   paymentMethod: PaymentMethod;
   keshlessCardNumber?: string;
   keshlessPin?: string;
@@ -107,6 +112,8 @@ export class TicketService {
     price: number;
     customerName?: string;
     customerPhone?: string;
+    customerEmail?: string;
+    buyerId?: any;
     saleId?: any;
   }) {
     return new Ticket({
@@ -120,6 +127,8 @@ export class TicketService {
       // matches a "My Tickets" login that normalizes to "+26878422613".
       customerPhone: p.customerPhone ? normalizePhone(p.customerPhone) : p.customerPhone,
       status: TicketStatus.SOLD,
+      ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
+      ...(p.buyerId ? { buyerId: p.buyerId } : {}),
       ...(p.saleId ? { saleId: p.saleId } : {}),
     });
   }
@@ -210,6 +219,8 @@ export class TicketService {
         ticketTypeId,
         quantity,
         customerName,
+        customerEmail,
+        buyerId,
         paymentMethod,
         keshlessCardNumber,
         keshlessPin,
@@ -310,6 +321,8 @@ export class TicketService {
           price: ticketTypeData.price,
           customerName,
           customerPhone,
+          customerEmail,
+          buyerId,
         });
 
         // First save might fail with transaction error, catch and retry
@@ -332,6 +345,8 @@ export class TicketService {
                 price: ticketTypeData.price,
                 customerName,
                 customerPhone,
+                customerEmail,
+                buyerId,
               });
               await t.save();
               ticketsWithoutSession.push(t);
@@ -345,6 +360,8 @@ export class TicketService {
               quantity,
               customerName,
               customerPhone,
+              ...(customerEmail ? { customerEmail: customerEmail.toLowerCase() } : {}),
+              ...(buyerId ? { buyerId } : {}),
               totalAmount,
               paymentMethod,
               paymentStatus,
@@ -393,6 +410,8 @@ export class TicketService {
         quantity,
         customerName,
         customerPhone,
+        ...(customerEmail ? { customerEmail: customerEmail.toLowerCase() } : {}),
+        ...(buyerId ? { buyerId } : {}),
         totalAmount,
         paymentMethod,
         paymentStatus,
@@ -735,6 +754,10 @@ export class TicketService {
     quantity: number;
     customerPhone: string;
     customerName?: string;
+    // Buyer identity, when purchasing while logged in — stamped on the sale
+    // + tickets so "My Tickets" / findTicketsForBuyer can match them.
+    customerEmail?: string;
+    buyerId?: string;
     keshlessCardNumber: string;
     keshlessPin?: string;
   }): Promise<{
@@ -754,6 +777,8 @@ export class TicketService {
       eventId,
       ticketTypeId,
       quantity,
+      customerEmail,
+      buyerId,
       keshlessCardNumber,
       keshlessPin,
     } = params;
@@ -803,6 +828,8 @@ export class TicketService {
       quantity,
       customerName,
       customerPhone,
+      customerEmail,
+      buyerId,
       paymentMethod: PaymentMethod.KESHLESS_WALLET,
       keshlessCardNumber,
       keshlessPin,
@@ -869,6 +896,33 @@ export class TicketService {
   }
 
   /**
+   * Find every ticket belonging to a buyer, matching by whichever handles
+   * they have — buyerId (canonical, stamped on tickets purchased while
+   * logged in), customerPhone, or customerEmail (both normalized the same
+   * way tickets are written at purchase). This is the buyerId/email-aware
+   * successor to findTicketsByCustomerPhone: an email-only buyer's tickets
+   * are found even though they have no phone to match on.
+   *
+   * Uses the DRY $or builder (buyerTicketOr) shared with the ticket-holder
+   * checks (message/review/community-membership gating) so the match
+   * contract can never drift between "My Tickets" and "can this buyer post".
+   */
+  static async findTicketsForBuyer(
+    buyer: { _id: any; phone?: string; email?: string }
+  ): Promise<ITicket[]> {
+    try {
+      const tickets = await Ticket.find({ $or: buyerTicketOr(buyer) })
+        .populate('eventId', 'name venue eventDate startTime endTime posterUrl')
+        .sort({ createdAt: -1 })
+        .lean();
+      return tickets;
+    } catch (error: any) {
+      console.error('[my-tickets] find for buyer error:', error);
+      throw new Error(error.message || 'Failed to fetch tickets');
+    }
+  }
+
+  /**
    * Get ticket by ID
    */
   static async getTicketById(ticketId: string, vendorId: string): Promise<ITicket> {
@@ -912,6 +966,10 @@ export class TicketService {
     quantity: number;
     customerPhone: string;
     customerName?: string;
+    // Buyer identity, when purchasing while logged in — persisted on the
+    // PENDING sale so finalizeMomoSale can stamp it onto the minted tickets.
+    customerEmail?: string;
+    buyerId?: string;
     momoPhone: string;
     // Optional reseller attribution (additive — buyer/vendor callers omit these
     // and keep the existing vendor-default behavior). When provided, the PENDING
@@ -976,6 +1034,8 @@ export class TicketService {
       quantity: p.quantity,
       customerName: p.customerName,
       customerPhone: p.customerPhone,
+      ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
+      ...(p.buyerId ? { buyerId: p.buyerId } : {}),
       totalAmount,
       paymentMethod: PaymentMethod.MTN_MOMO,
       paymentStatus: PaymentStatus.PENDING,
@@ -1058,6 +1118,10 @@ export class TicketService {
     quantity: number;
     customerPhone?: string;
     customerName?: string;
+    // Buyer identity, when purchasing while logged in — persisted on the
+    // PENDING sale so finalizeCardSale can stamp it onto the minted tickets.
+    customerEmail?: string;
+    buyerId?: string;
     vendorId?: string;
     soldBy?: string;
     soldByType?: 'vendor' | 'reseller-operator';
@@ -1114,6 +1178,8 @@ export class TicketService {
       quantity: p.quantity,
       customerName: p.customerName,
       customerPhone: p.customerPhone,
+      ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
+      ...(p.buyerId ? { buyerId: p.buyerId } : {}),
       totalAmount,
       paymentMethod: PaymentMethod.PEACH_CARD,
       paymentStatus: PaymentStatus.PENDING,
@@ -1186,6 +1252,10 @@ export class TicketService {
     quantity: number;
     customerPhone?: string;
     customerName?: string;
+    // Buyer identity, when purchasing while logged in — persisted on the
+    // PENDING sale so finalizeDeltapaySale can stamp it onto the minted tickets.
+    customerEmail?: string;
+    buyerId?: string;
     vendorId?: string;
     soldBy?: string;
     soldByType?: 'vendor' | 'reseller-operator';
@@ -1247,6 +1317,8 @@ export class TicketService {
       quantity: p.quantity,
       customerName: p.customerName,
       customerPhone: p.customerPhone,
+      ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
+      ...(p.buyerId ? { buyerId: p.buyerId } : {}),
       totalAmount,
       paymentMethod: PaymentMethod.DELTAPAY,
       paymentStatus: PaymentStatus.PENDING,
@@ -1436,6 +1508,8 @@ export class TicketService {
         price: sale.totalAmount / sale.quantity,
         customerName: sale.customerName,
         customerPhone: sale.customerPhone,
+        customerEmail: sale.customerEmail,
+        buyerId: sale.buyerId,
         saleId: sale._id,
       });
       await t.save();
@@ -1556,6 +1630,8 @@ export class TicketService {
         price: sale.totalAmount / sale.quantity,
         customerName: sale.customerName,
         customerPhone: sale.customerPhone,
+        customerEmail: sale.customerEmail,
+        buyerId: sale.buyerId,
         saleId: sale._id,
       });
       await t.save();
@@ -1706,6 +1782,8 @@ export class TicketService {
         price: sale.totalAmount / sale.quantity,
         customerName: sale.customerName,
         customerPhone: sale.customerPhone,
+        customerEmail: sale.customerEmail,
+        buyerId: sale.buyerId,
         saleId: sale._id,
       });
       await t.save();
