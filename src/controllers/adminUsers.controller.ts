@@ -59,7 +59,7 @@ export class AdminUsersController {
       const statsByPhone = new Map(statsRows.map((s) => [s._id, s]));
 
       const users = buyers.map((b) => {
-        const s = statsByPhone.get(b.phone);
+        const s = b.phone ? statsByPhone.get(b.phone) : undefined;
         return {
           id: String(b._id),
           name: b.name ?? null,

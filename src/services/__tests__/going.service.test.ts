@@ -94,6 +94,25 @@ describe('GoingService.goingEventIds', () => {
     const ids = await GoingService.goingEventIds(buyer as any);
     expect(ids).toEqual([]);
   });
+
+  it('includes events where an email-only buyer holds a ticket matched by customerEmail', async () => {
+    const buyer = await Buyer.create({ email: 'buyer@example.com', password: 'secret1', name: 'Email Only' });
+    const e = await makeEvent('Email Ticket');
+    await Ticket.create({ eventId: e._id, vendorId: e.vendorId, ticketType: 'GA', price: 0, customerEmail: 'buyer@example.com', status: TicketStatus.SOLD });
+
+    const ids = await GoingService.goingEventIds(buyer as any);
+    expect(ids).toContain(String(e._id));
+  });
+
+  it('does NOT let an email-only buyer inherit phone-less tickets (closes the {customerPhone: undefined} leak)', async () => {
+    const buyer = await Buyer.create({ email: 'noleak@example.com', password: 'secret1', name: 'No Leak' });
+    const e = await makeEvent('Phoneless Unrelated Ticket');
+    // No customerPhone, no matching buyerId/email — must not leak into "going".
+    await Ticket.create({ eventId: e._id, vendorId: e.vendorId, ticketType: 'GA', price: 0, customerEmail: 'someone-else@example.com', status: TicketStatus.SOLD });
+
+    const ids = await GoingService.goingEventIds(buyer as any);
+    expect(ids).not.toContain(String(e._id));
+  });
 });
 
 // FINDING 2 fix: suggestions' peopleYouMayKnow used to call goingEventIds
@@ -138,5 +157,25 @@ describe('GoingService.goingEventIdsBatch', () => {
   it('returns an empty map for an empty input', async () => {
     const result = await GoingService.goingEventIdsBatch([]);
     expect(result.size).toBe(0);
+  });
+
+  it('resolves an email-only buyer correctly alongside a phone buyer, without leaking phone-less unrelated tickets', async () => {
+    const phoneBuyer = await Buyer.create({ phone: '+26878000005', password: 'secret1', name: 'Phone Buyer' });
+    const emailBuyer = await Buyer.create({ email: 'batch@example.com', password: 'secret1', name: 'Email Buyer' });
+
+    const phoneEvent = await makeEvent('Phone Buyer Batch');
+    await Ticket.create({ eventId: phoneEvent._id, vendorId: phoneEvent.vendorId, ticketType: 'GA', price: 0, customerPhone: phoneBuyer.phone, status: TicketStatus.SOLD });
+
+    const emailEvent = await makeEvent('Email Buyer Batch');
+    await Ticket.create({ eventId: emailEvent._id, vendorId: emailEvent.vendorId, ticketType: 'GA', price: 0, customerEmail: 'batch@example.com', status: TicketStatus.SOLD });
+
+    // Phone-less ticket with an unrelated email — must not leak to the email-only buyer.
+    const unrelatedEvent = await makeEvent('Unrelated Batch');
+    await Ticket.create({ eventId: unrelatedEvent._id, vendorId: unrelatedEvent.vendorId, ticketType: 'GA', price: 0, customerEmail: 'someone-else@example.com', status: TicketStatus.SOLD });
+
+    const result = await GoingService.goingEventIdsBatch([phoneBuyer, emailBuyer] as any);
+
+    expect(result.get(String(phoneBuyer._id))).toEqual(new Set([String(phoneEvent._id)]));
+    expect(result.get(String(emailBuyer._id))).toEqual(new Set([String(emailEvent._id)]));
   });
 });

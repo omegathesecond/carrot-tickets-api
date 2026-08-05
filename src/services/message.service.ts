@@ -4,7 +4,7 @@ import { Membership } from '@models/membership.model';
 import { Message, IMessage } from '@models/message.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
-import { isTicketHolder } from '@utils/ticketHolder.util';
+import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
 import { OrganizerViewer, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
@@ -57,7 +57,7 @@ export class MessageService {
     if (membership.bannedAt) throw new HttpError(403, 'You have been banned from this community');
 
     if (channel.gated && !membership.ticketVerifiedAt) {
-      if (await isTicketHolder(String(community.eventId), buyer.phone)) {
+      if (await isTicketHolderForBuyer(String(community.eventId), buyer)) {
         membership.ticketVerifiedAt = new Date();
         await membership.save();
       } else {

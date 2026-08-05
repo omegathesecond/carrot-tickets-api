@@ -1,8 +1,9 @@
+import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
-import { isTicketHolder } from '@utils/ticketHolder.util';
+import { isTicketHolder, isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 
 describe('isTicketHolder', () => {
   beforeAll(connectTestDb);
@@ -50,5 +51,58 @@ describe('isTicketHolder', () => {
   it('false for empty phone', async () => {
     const { eventId } = await seedPublishedEvent();
     expect(await isTicketHolder(eventId, '')).toBe(false);
+  });
+});
+
+describe('isTicketHolderForBuyer', () => {
+  beforeAll(connectTestDb);
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  it('true when the ticket carries the buyer\'s buyerId', async () => {
+    const { eventId, vendorId } = await seedPublishedEvent();
+    const buyerId = new mongoose.Types.ObjectId();
+    await Ticket.create({
+      eventId,
+      vendorId,
+      ticketType: 'General',
+      price: 100,
+      buyerId,
+      status: TicketStatus.SOLD,
+    });
+
+    const buyer = { _id: buyerId };
+    expect(await isTicketHolderForBuyer(eventId, buyer)).toBe(true);
+  });
+
+  it('true for an email-only buyer matched by customerEmail', async () => {
+    const { eventId, vendorId } = await seedPublishedEvent();
+    await Ticket.create({
+      eventId,
+      vendorId,
+      ticketType: 'General',
+      price: 100,
+      customerEmail: 'buyer@example.com',
+      status: TicketStatus.SOLD,
+    });
+
+    const buyer = { _id: new mongoose.Types.ObjectId(), email: 'buyer@example.com' };
+    expect(await isTicketHolderForBuyer(eventId, buyer)).toBe(true);
+  });
+
+  it('false for an email-only buyer against a phone-less, unrelated-email ticket (no undefined-phone leak)', async () => {
+    const { eventId, vendorId } = await seedPublishedEvent();
+    // Ticket has no customerPhone and an unrelated customerEmail — must NOT match.
+    await Ticket.create({
+      eventId,
+      vendorId,
+      ticketType: 'General',
+      price: 100,
+      customerEmail: 'someone-else@example.com',
+      status: TicketStatus.SOLD,
+    });
+
+    const buyer = { _id: new mongoose.Types.ObjectId(), email: 'buyer@example.com' };
+    expect(await isTicketHolderForBuyer(eventId, buyer)).toBe(false);
   });
 });

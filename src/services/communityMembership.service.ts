@@ -4,7 +4,7 @@ import { Membership, IMembership } from '@models/membership.model';
 import { Message } from '@models/message.model';
 import { Event } from '@models/event.model';
 import { IBuyer } from '@models/buyer.model';
-import { isTicketHolder } from '@utils/ticketHolder.util';
+import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { OrganizerViewer, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
@@ -137,7 +137,7 @@ export class CommunityMembershipService {
     buyer: IBuyer,
     membership: IMembership
   ): Promise<void> {
-    if (!membership.ticketVerifiedAt && (await isTicketHolder(eventId, buyer.phone))) {
+    if (!membership.ticketVerifiedAt && (await isTicketHolderForBuyer(eventId, buyer))) {
       membership.ticketVerifiedAt = new Date();
       await membership.save();
     }
