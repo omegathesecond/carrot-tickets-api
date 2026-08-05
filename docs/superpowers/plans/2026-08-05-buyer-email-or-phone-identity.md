@@ -12,7 +12,7 @@
 
 - **Spec:** `api/docs/superpowers/specs/2026-08-05-buyer-email-or-phone-identity-design.md` — authoritative.
 - **No silent fallbacks** (global rule): OTP send failures (SMS or email) throw a user-facing error. No canned success. Only fire-and-forget telemetry may swallow errors.
-- **No unrequested backward compatibility** (global rule): the token change is a deliberate **hard cutover** — do NOT add a legacy `userPhone`-only token acceptance branch. Active buyers re-login once.
+- **Token model: `buyerId`-primary with a `userPhone` fallback** (human-ruled 2026-08-05, superseding the earlier "hard cutover"): the buyer middleware/resolvers resolve by `buyerId` when present (email buyers always have one), else fall back to `userPhone`. This keeps ~150 existing `signBuyerToken(phone)` test call sites working, avoids force-logging-out existing buyers, and the phone branch ages out naturally as 30-day tokens expire. It is NOT a dead legacy branch — it is the migration path. The `identifier`-only request-body cutover (Task 6, no `phone` fallback) still stands.
 - **DRY / YAGNI / TDD:** reuse `SmsService`/`YeboLinkClient` patterns; do NOT build account-linking or "add a second handle" flows.
 - **Two repos:** API changes in `api/` (git `main`). Frontend in `landing/` (git `dev`). Commit per-repo.
 - **Min password length:** 6 (`MIN_PASSWORD_LENGTH`). **OTP:** 6 digits, 10-min TTL, 5 attempts — unchanged.
@@ -731,20 +731,22 @@ git -C api commit -m "feat(public): buyer auth endpoints accept email-or-phone i
 
 ---
 
-## Task 7: Middleware + identity resolution — hard cutover to buyerId
+## Task 7: Middleware + identity resolution — buyerId-primary with phone fallback
+
+**Approach (human-ruled 2026-08-05):** accept a buyer token that carries `buyerId` **or** `userPhone`; resolve the Buyer by `buyerId` when present, else by `userPhone`. Email-only buyers always have `buyerId`; existing phone tokens keep working via the fallback. `signBuyerToken` and its ~150 callers are UNCHANGED.
 
 **Files:**
 - Modify: `api/src/middleware/ticketsAuth.middleware.ts` (`authenticateBuyer`, `authenticateCommunityViewer`, `optionalCommunityViewer`)
 - Modify: `api/src/utils/buyerRequest.util.ts`
 - Modify: `api/src/utils/socialActor.util.ts`
 - Modify: `api/src/realtime/socketAuth.ts`
-- Test: `api/src/middleware/__tests__/authenticateBuyer.test.ts` (create)
+- Test: `api/src/middleware/__tests__/authenticateBuyer.test.ts` (create), plus a `resolveBuyerFromRequest` DB test.
 
 **Interfaces:**
-- Consumes: token payload `{ userType:'buyer', buyerId, userPhone?, userEmail? }`.
-- Produces: `resolveBuyerFromRequest(req)` resolves the Buyer via `buyerId`.
+- Consumes: token payload `{ userType:'buyer', buyerId?, userPhone?, userEmail? }` (at least one of buyerId/userPhone present).
+- Produces: `resolveBuyerFromRequest(req)` resolves the Buyer via `buyerId` first, else `userPhone`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```ts
 // api/src/middleware/__tests__/authenticateBuyer.test.ts
@@ -759,8 +761,8 @@ const mockRes = () => {
   return res;
 };
 
-it('accepts a buyerId buyer token', async () => {
-  const token = jwt.sign({ userType: 'buyer', app: 'tickets', buyerId: 'abc123' }, JWT_SECRET);
+it('accepts a buyerId-only (email buyer) token', async () => {
+  const token = jwt.sign({ userType: 'buyer', app: 'tickets', buyerId: 'abc123', userEmail: 'e@x.com' }, JWT_SECRET);
   const req: any = { headers: { authorization: `Bearer ${token}` } };
   const next = jest.fn();
   await authenticateBuyer(req, mockRes(), next);
@@ -768,8 +770,17 @@ it('accepts a buyerId buyer token', async () => {
   expect(req.ticketsUser.buyerId).toBe('abc123');
 });
 
-it('rejects a legacy userPhone-only buyer token (hard cutover)', async () => {
+it('still accepts a userPhone-only (existing) token', async () => {
   const token = jwt.sign({ userType: 'buyer', app: 'tickets', userPhone: '+26878422613' }, JWT_SECRET);
+  const req: any = { headers: { authorization: `Bearer ${token}` } };
+  const next = jest.fn();
+  await authenticateBuyer(req, mockRes(), next);
+  expect(next).toHaveBeenCalled();
+  expect(req.ticketsUser.userPhone).toBe('+26878422613');
+});
+
+it('rejects a buyer token carrying neither buyerId nor userPhone', async () => {
+  const token = jwt.sign({ userType: 'buyer', app: 'tickets' }, JWT_SECRET);
   const req: any = { headers: { authorization: `Bearer ${token}` } };
   const next = jest.fn();
   const res = mockRes();
@@ -779,52 +790,60 @@ it('rejects a legacy userPhone-only buyer token (hard cutover)', async () => {
 });
 ```
 
+Also add a `resolveBuyerFromRequest` DB test (in-memory Mongo, `connectTestDb`/`disconnectTestDb`): create an email-only buyer, put `{ buyerId: String(buyer._id) }` on `req.ticketsUser`, assert it resolves; create a phone buyer, put `{ userPhone: buyer.phone }`, assert the phone fallback resolves it.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd api && npx jest src/middleware/__tests__/authenticateBuyer.test.ts`
-Expected: FAIL (legacy token still accepted).
+Expected: FAIL (buyerId-only token currently rejected by the `!userPhone` check).
 
-- [ ] **Step 3: Implement the cutover**
+- [ ] **Step 3: Implement**
 
-`ticketsAuth.middleware.ts` — change the three buyer checks:
-- `authenticateBuyer` (line ~162): `if ((decoded as any).userType !== 'buyer' || !(decoded as any).buyerId) { ... 'Invalid buyer token' }`
-- `authenticateCommunityViewer` (line ~204): `const isBuyer = decoded.userType === 'buyer' && decoded.buyerId;`
-- `optionalCommunityViewer` (line ~238): `const isBuyer = decoded.userType === 'buyer' && decoded.buyerId;`
-- Update the docblock at line ~137 to `{ app, userType:'buyer', buyerId, userPhone?, userEmail? }`.
+`ticketsAuth.middleware.ts` — accept buyerId OR userPhone in the three buyer checks:
+- `authenticateBuyer` (line ~162): `if ((decoded as any).userType !== 'buyer' || !((decoded as any).buyerId || (decoded as any).userPhone)) { ... 'Invalid buyer token' }`
+- `authenticateCommunityViewer` (line ~204): `const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);`
+- `optionalCommunityViewer` (line ~238): `const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);`
+- Update the docblock at line ~137 to `{ app, userType:'buyer', buyerId?, userPhone?, userEmail? }`.
 
-`buyerRequest.util.ts` — resolve by id:
+`buyerRequest.util.ts` — resolve by buyerId, else phone:
 ```ts
 import { Request } from 'express';
 import { Buyer, IBuyer } from '@models/buyer.model';
+import { normalizePhone } from '@utils/phone.util';
 
-/** Resolve the signed-in buyer document from the verified token buyerId. */
+/**
+ * Resolve the signed-in buyer from the verified token. buyerId is the canonical
+ * key (email buyers always carry it); older/phone tokens fall back to userPhone.
+ */
 export async function resolveBuyerFromRequest(req: Request): Promise<IBuyer | null> {
-  const buyerId = (req as any).ticketsUser?.buyerId as string | undefined;
-  if (!buyerId) return null;
-  return Buyer.findById(buyerId);
+  const u = (req as any).ticketsUser;
+  if (u?.buyerId) return Buyer.findById(u.buyerId);
+  const phone = normalizePhone(u?.userPhone || '');
+  if (phone) return Buyer.findOne({ phone });
+  return null;
 }
 ```
 
-`socialActor.util.ts` (line ~22) — branch on buyerId:
+`socialActor.util.ts` (line ~22) — accept either handle:
 ```ts
-if (user.userType === 'buyer' && user.buyerId) {
+if (user.userType === 'buyer' && (user.buyerId || user.userPhone)) {
   const buyer = await resolveBuyerFromRequest(req);
   if (buyer) return { type: 'buyer', id: String(buyer._id) };
 }
 ```
 
-`realtime/socketAuth.ts` (lines ~25-29) — gate + resolve on buyerId instead of `normalizePhone(decoded.userPhone)`. Load the buyer by `decoded.buyerId` and use its `_id` for the social identity (match whatever the socket layer currently derives from phone — replace the phone lookup with `Buyer.findById(decoded.buyerId)`).
+`realtime/socketAuth.ts` (lines ~25-40) — accept a buyer token with buyerId OR userPhone, and resolve the buyer the same way: `const buyer = decoded.buyerId ? await Buyer.findById(decoded.buyerId) : await Buyer.findOne({ phone: normalizePhone(decoded.userPhone) });` then keep the existing `if (!buyer) return next(new Error('Account not found'));`, `ensureUsername`, and `socket.data` assignments. Update the gate `if (decoded?.userType !== 'buyer' || !(decoded?.buyerId || decoded?.userPhone))`.
 
-- [ ] **Step 4: Run middleware + affected tests**
+- [ ] **Step 4: Run middleware + realtime + full suite**
 
 Run: `cd api && npx jest src/middleware/__tests__/authenticateBuyer.test.ts src/realtime`
-Expected: PASS. Also run `npx jest src/utils` and any social tests that stub `ticketsUser` — update stubs to include `buyerId`.
+Expected: PASS. Then the FULL suite `npx jest 2>&1 | tail -3` — the ~150 `signBuyerToken(phone)` callers must all STILL pass (that's the point of the fallback). `npx tsc --noEmit` → 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git -C api add src/middleware/ticketsAuth.middleware.ts src/utils/buyerRequest.util.ts src/utils/socialActor.util.ts src/realtime/socketAuth.ts src/middleware/__tests__/authenticateBuyer.test.ts
-git -C api commit -m "feat(auth): hard cutover to buyerId identity in middleware + resolvers"
+git -C api commit -m "feat(auth): buyerId-primary buyer identity with userPhone fallback in middleware + resolvers"
 ```
 
 ---
