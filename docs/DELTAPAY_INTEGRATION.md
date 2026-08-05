@@ -23,8 +23,10 @@ Everything below is what DeltaPay needs from us to provision the integration.
 |---|---|
 | **Platform type** | `custom_website` |
 | **Allowed return domains** | `api.carrottickets.com` (production) **and** `dev-api.carrottickets.com` (sandbox/testing) — both must be allow-listed in one request. DeltaPay validates `return_url` against the allow-list in sandbox exactly as in production, so pre-launch testing against DeltaPay's **sandbox** uses `dev-api.carrottickets.com` with the method toggled off for buyers. |
-| **Default return URL** | `https://api.carrottickets.com/api/public/purchase/deltapay/return` |
-| **Session callback URL** | `https://api.carrottickets.com/api/public/purchase/deltapay/callback` |
+| **Default return URL (production)** | `https://api.carrottickets.com/api/public/purchase/deltapay/return` |
+| **Default return URL (sandbox)** | `https://dev-api.carrottickets.com/api/public/purchase/deltapay/return` |
+| **Session callback URL (production)** | `https://api.carrottickets.com/api/public/purchase/deltapay/callback` |
+| **Session callback URL (sandbox)** | `https://dev-api.carrottickets.com/api/public/purchase/deltapay/callback` |
 | **Display name** | `Carrot Tickets` |
 | **Brand colour** | `#FF6B35` — Carrot coral, `hsl(16 100% 60%)`; white (`#FFFFFF`) text on it |
 | **Logo** | `docs/deltapay-onboarding/assets/carrot-tickets-logo-horizontal.png` (1280×853, transparent PNG). Square slots: `carrot-tickets-icon-square.png` (500×500) |
@@ -38,8 +40,8 @@ The return URL and callback URL sit on `api.carrottickets.com` in production and
 DeltaPay validates `return_url` against the allowed-domain list at session creation,
 in sandbox exactly as in production.
 
-Note: the production endpoints are live now. The sandbox endpoints on
-`dev-api.carrottickets.com` go live with the dev environment.
+Note: both the production endpoints and the sandbox endpoints on
+`dev-api.carrottickets.com` are live now.
 
 > Note on the return URL: it points at our **API**, not our website. Our storefront
 > is a static site that cannot finalise a payment, so DeltaPay returns the buyer to

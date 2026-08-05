@@ -61,6 +61,12 @@ passes.
 > endpoint that calls `verify-return` and then forwards them to
 > `https://carrottickets.com/payment-result`.
 
+> **Sandbox note:** our sandbox result page, `https://dev.carrottickets.com/payment-result`,
+> sits behind an SSO/access gate. Your QA team will hit a login wall after a sandbox
+> return redirect — that's expected. The `302` from our return endpoint is the part of
+> the contract we're testing; the landing page behind it is not reachable without our
+> credentials, so please don't file that as a bug.
+
 ### Endpoint specification
 
 For your team's testing:
@@ -76,10 +82,10 @@ For your team's testing:
 Both endpoints are publicly reachable over HTTPS. **No IP allow-listing is required
 on our side** — DeltaPay can call them from any address.
 
-> The production return and callback endpoints are **live now** on
-> `api.carrottickets.com`. The sandbox endpoints on `dev-api.carrottickets.com` go
-> live with our dev environment. You can allow-list both domains now — no need to
-> wait for either to respond.
+> Both the production return/callback endpoints on `api.carrottickets.com` and the
+> sandbox return/callback endpoints on `dev-api.carrottickets.com` are **live now**.
+> You can allow-list both domains and start testing against sandbox immediately —
+> no need to wait for either to respond.
 
 ---
 

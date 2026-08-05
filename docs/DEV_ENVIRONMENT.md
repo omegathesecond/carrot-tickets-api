@@ -65,8 +65,15 @@ To deploy dev, from a clean checkout of the `dev` branch:
 ```bash
 git checkout dev && git pull
 gcloud --configuration=deployer builds submit --config=cloudbuild-dev.yaml \
-  --project=contracts-470406 .
+  --project=contracts-470406 \
+  --substitutions=_IMAGE=europe-west1-docker.pkg.dev/contracts-470406/cloud-run-source-deploy/carrot-tickets-api/carrot-tickets-api-dev:$(git rev-parse --short HEAD) .
 ```
+
+`cloudbuild-dev.yaml` defaults `_IMAGE` to a tag ending in `${COMMIT_SHA}`. That
+variable is only populated when Cloud Build is triggered from a connected GitHub
+repo — a local `gcloud builds submit` leaves it empty, producing an invalid image
+reference (`...carrot-tickets-api-dev:`) that fails at step 0. Always pass
+`--substitutions=_IMAGE=...` explicitly as shown above.
 
 `cloudbuild-dev.yaml` (on the `dev` branch — it does not exist on `main`) builds the
 image, pushes it to Artifact Registry, and runs `gcloud run services update
@@ -111,14 +118,39 @@ Dev's `JWT_SECRET` is freshly generated and is not shared with production. This
 matters beyond hygiene: JWTs are just signed claims, so if dev and production shared a
 signing secret, a token minted by the dev API (e.g. by an engineer testing something,
 or by anyone who can reach the public dev API) would also be a **valid, accepted
-token against the production API**. A separate secret means a dev session can never
-authenticate as a production user.
+token against the production API**. A separate `JWT_SECRET` means a dev-issued user
+session token can never authenticate as a production user.
+
+`SERVICE_KEY` (the shared secret the main Keshless API uses to authenticate
+service-to-service calls, see `src/middleware/serviceAuth.middleware.ts`) is a
+**separate credential from `JWT_SECRET`** and was previously a byte-identical copy of
+production's — meaning dev was effectively a second deployment of a key that fully
+authenticates (`permissions: ['all']`) against production. It has since been rotated
+to its own random value on `carrot-tickets-api-dev`; production's `SERVICE_KEY` was
+not touched.
+
+### What dev DOES intentionally share with production
+
+Not everything is isolated. By design, dev currently shares:
+
+- **The R2 media bucket and CDN** (`UPDATES_R2_*`, `cdn.carrottickets.com`) — dev has
+  no separate media bucket yet.
+- **YeboLink credits** (`YEBOLINK_API_KEY`) — dev sends real international SMS out of
+  the same workspace/credit pool as production.
+- **The transcoder** (`TRANSCODER_URL`) — dev media uploads are processed by the same
+  Cloud Run transcoder service as production.
+
+**Dev writes to the production media bucket.** Uploading, overwriting, or deleting
+media while testing on dev touches real production objects in R2/CDN. Do not run
+destructive media tests (bulk delete, overwrite-by-key, etc.) against dev assuming
+they're sandboxed — they aren't.
 
 ## SMS
 
 `SMS_ALLOWLIST=+26878422613` is set on the dev API. This means dev's SMS sending path
-only ever actually delivers to that one number — any other destination is silently
-skipped by the allowlist check, regardless of what a purchase or test entered. This
+only ever actually delivers to that one number — any other destination is skipped by
+the allowlist check (logged per-send, see `sms.service.ts`), regardless of what a
+purchase or test entered. This
 keeps dev testing from spamming real phone numbers. To test with a different number,
 update `SMS_ALLOWLIST` on the `carrot-tickets-api-dev` Cloud Run service (comma-separate
 multiple numbers if more than one tester needs to receive dev SMS) — use
@@ -128,7 +160,7 @@ multiple numbers if more than one tester needs to receive dev SMS) — use
 
 | Provider | Dev status | To enable |
 |---|---|---|
-| MTN MoMo | **Enabled** (`MTN_MOMO_ENABLED=true`), pointed at `https://proxy.momoapi.mtn.com`, target env `mtnswaziland` | Already live on dev — no action needed |
+| MTN MoMo | **Disabled** (`MTN_MOMO_ENABLED=false`). Base URL and target env now point at the MTN sandbox (`https://sandbox.momodeveloper.mtn.com`, target env `sandbox`) — previously they pointed at the live production MTN endpoint (`proxy.momoapi.mtn.com` / `mtnswaziland`), which was a loaded gun even with the enable flag off. | Bind a sandbox `MTN_MOMO_SUBSCRIPTION_KEY` / `MTN_MOMO_API_USER` / `MTN_MOMO_API_KEY` via `--update-secrets`, then set `MTN_MOMO_ENABLED=true`. Never point dev at the production MoMo endpoint. |
 | Peach (card) | Disabled (`CARD_PAYMENTS_ENABLED=false`) | Set `CARD_PAYMENTS_ENABLED=true` and bind sandbox Peach credentials via `--update-secrets` once Peach issues them |
 | DeltaPay | Wired but disabled (`DELTAPAY_ENABLED=false`); base URL already pointed at the DeltaPay sandbox, `https://api.dev.deltacrypt.net`; callback/return URLs already point at `dev-api.carrottickets.com` | Once DeltaPay provisions the sandbox integration and issues an API key, bind the key via `--update-secrets` and flip `DELTAPAY_ENABLED=true`. Full registration details are in `docs/DELTAPAY_INTEGRATION.md`. |
 
@@ -150,13 +182,13 @@ isn't — `false` means no SMS goes out to real customers at all. Leave it `true
 
 ```bash
 # dev
-curl -s https://dev-api.carrottickets.com/health                       # expect 200
-curl -s -o /dev/null -w '%{http_code}\n' https://dev-api.carrottickets.com/api-docs   # expect 200 (redirects to /api-docs/)
-curl -s -o /dev/null -w '%{http_code}\n' https://dev-api.carrottickets.com/api/admin/users  # expect 401
+curl -s -o /dev/null -w '%{http_code}\n' https://dev-api.carrottickets.com/health          # expect 200
+curl -s -o /dev/null -w '%{http_code}\n' https://dev-api.carrottickets.com/api-docs        # expect 301 (redirects to /api-docs/; add -L to follow and expect 200)
+curl -s -o /dev/null -w '%{http_code}\n' https://dev-api.carrottickets.com/api/admin/users # expect 401
 
 # prod, for contrast
-curl -s https://api.carrottickets.com/health                           # expect 200
-curl -s -o /dev/null -w '%{http_code}\n' https://api.carrottickets.com/api-docs       # expect 404 (docs gated in prod)
+curl -s -o /dev/null -w '%{http_code}\n' https://api.carrottickets.com/health              # expect 200
+curl -s -o /dev/null -w '%{http_code}\n' https://api.carrottickets.com/api-docs            # expect 404 (docs gated in prod)
 ```
 
 Note: `keshless-tickets-api`, an older Cloud Run service that still serves production
