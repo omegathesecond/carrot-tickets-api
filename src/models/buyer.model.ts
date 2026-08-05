@@ -81,13 +81,7 @@ const buyerSchema = new Schema<IBuyer>(
       type: String,
       required: [true, 'Password is required'],
       minlength: [6, 'Password must be at least 6 characters long'],
-      select: false,
-      validate: {
-        validator: function(this: any) {
-          return !!(this.phone || this.email);
-        },
-        message: 'A buyer needs a phone or email'
-      }
+      select: false
     },
     name: { type: String, trim: true, maxlength: 100 },
     avatarUrl: { type: String, trim: true },
@@ -145,6 +139,16 @@ const buyerSchema = new Schema<IBuyer>(
 // Sparse by nature (docs missing `location` are excluded automatically) —
 // most buyers never opt in, and $geoNear can only run once this index exists.
 buyerSchema.index({ location: '2dsphere' });
+
+// At least one contact handle must exist — phone and email are peers, but a
+// buyer with neither has no identity to key tickets / tokens off.
+buyerSchema.pre('validate', function (next) {
+  if (!this.phone && !this.email) {
+    next(new Error('A buyer needs a phone or email'));
+    return;
+  }
+  next();
+});
 
 // Hash the password whenever it is set/changed.
 buyerSchema.pre('save', async function (next) {
