@@ -342,7 +342,7 @@ describe('getActivityFeed', () => {
     const buyer = await Buyer.create({ phone: '+26878600020', password: 'password123', username: 'f4bbuyer' });
     const ticketTime = new Date(Date.now() - 10 * DAY); // buyer's true (older) winner
     const joinTime = new Date(Date.now() - 6 * DAY); // buyer's join, loses to the ticket
-    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await ticketAt(event._id, vendor._id, buyer.phone!, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
     const bystander = await Buyer.create({ phone: '+26878600021', password: 'password123', username: 'f4bystandr' });

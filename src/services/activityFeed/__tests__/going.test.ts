@@ -73,7 +73,7 @@ describe('goingCandidates', () => {
   it('returns a going row for a live ticket with no community join', async () => {
     const { vendor, event } = await seedEvent('E2');
     const buyer = await seedBuyer('+26878000002');
-    await ticketAt(event._id, vendor._id, buyer.phone, new Date(Date.now() - DAY));
+    await ticketAt(event._id, vendor._id, buyer.phone!, new Date(Date.now() - DAY));
 
     const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
@@ -85,7 +85,7 @@ describe('goingCandidates', () => {
     const buyer = await seedBuyer('+26878000003');
     const ticketTime = new Date(Date.now() - 5 * DAY); // earlier — owns the pair
     const joinTime = new Date(Date.now() - 1 * DAY);
-    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await ticketAt(event._id, vendor._id, buyer.phone!, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
     const { candidates: rows } = await goingCandidates({ limit: 20 });
@@ -103,7 +103,7 @@ describe('goingCandidates', () => {
     const buyer = await seedBuyer('+26878000004');
     const ticketTime = new Date(Date.now() - 5 * DAY);
     const joinTime = new Date(Date.now() - 1 * DAY);
-    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await ticketAt(event._id, vendor._id, buyer.phone!, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
     const { candidates: rows } = await goingCandidates({ limit: 20, before: new Date(joinTime.getTime() + 1) });
@@ -131,7 +131,7 @@ describe('goingCandidates', () => {
     const ticketTime = new Date(Date.now() - 10 * DAY); // the true (older) winner
     const joinTime = new Date(Date.now() - DAY / 2); // loses, but is NOT below
     // the clamp boundary — only step 4's unwindowed lookup can catch it
-    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await ticketAt(event._id, vendor._id, buyer.phone!, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
     // Crowd the ticket sub-window: >= LIMIT live tickets newer than
@@ -160,7 +160,7 @@ describe('goingCandidates', () => {
     const buyer = await seedBuyer('+26878000020');
     const ticketTime = new Date(Date.now() - 10 * DAY); // B's true winner (T)
     const joinTime = new Date(Date.now() - 6 * DAY); // B's join, loses to T
-    await ticketAt(event._id, vendor._id, buyer.phone, ticketTime);
+    await ticketAt(event._id, vendor._id, buyer.phone!, ticketTime);
     await joinAt(buyer._id, community._id, joinTime);
 
     const bystander = await seedBuyer('+26878000021');
@@ -208,7 +208,7 @@ describe('goingCandidates', () => {
     const { vendor, event } = await seedEvent('E4D');
     const followed = await seedBuyer('+26878000030');
     const ticketTime = new Date(Date.now() - 10 * DAY); // followed buyer's real, older ticket
-    await ticketAt(event._id, vendor._id, followed.phone, ticketTime);
+    await ticketAt(event._id, vendor._id, followed.phone!, ticketTime);
 
     // Crowd the platform-wide ticket window with >= LIMIT newer tickets from
     // unrelated buyers (walk-ups), so an actorIds-blind query never reaches
@@ -271,7 +271,7 @@ describe('goingCandidates', () => {
     const refunded = await seedBuyer('+26878000007');
     const m = await joinAt(banned._id, community._id, new Date(Date.now() - DAY));
     await Membership.updateOne({ _id: m._id }, { $set: { bannedAt: new Date() } });
-    await ticketAt(event._id, vendor._id, refunded.phone, new Date(Date.now() - DAY), TicketStatus.REFUNDED);
+    await ticketAt(event._id, vendor._id, refunded.phone!, new Date(Date.now() - DAY), TicketStatus.REFUNDED);
 
     const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(0);
