@@ -733,12 +733,14 @@ export class PublicController {
         keshlessPin
       } = value;
 
-      // The buyer is authenticated (authenticateBuyer middleware), so their
-      // phone is already OTP-verified and carried on the token. We trust THAT,
-      // never a client-supplied value — the ticket is bound to the number they
-      // proved they own, so it always appears under their "My Tickets".
-      const tokenPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-      if (!tokenPhone) {
+      // The buyer is authenticated (authenticateBuyer middleware). Identity is
+      // resolved buyerId-primary (falling back to phone) — never a
+      // client-supplied value — so the ticket is bound to the account they
+      // proved they own and always appears under their "My Tickets". Mirrors
+      // initiateMomoPurchase/card/DeltaPay so an email-only buyer (no
+      // userPhone on the token) isn't wrongly rejected here.
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
       }
 
@@ -748,7 +750,9 @@ export class PublicController {
         eventId,
         ticketTypeId,
         quantity,
-        customerPhone: tokenPhone,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
         customerName: value.customerName as string | undefined,
         keshlessCardNumber,
         keshlessPin,

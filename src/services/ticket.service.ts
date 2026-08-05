@@ -752,7 +752,8 @@ export class TicketService {
     eventId: string;
     ticketTypeId: string;
     quantity: number;
-    customerPhone: string;
+    // Optional — email-only buyers (no verified phone on file) have none.
+    customerPhone?: string;
     customerName?: string;
     // Buyer identity, when purchasing while logged in — stamped on the sale
     // + tickets so "My Tickets" / findTicketsForBuyer can match them.
@@ -783,10 +784,10 @@ export class TicketService {
       keshlessPin,
     } = params;
 
-    const customerPhone = normalizePhone(params.customerPhone);
-    // Name only personalises the printed ticket; fall back to the phone so a
-    // ticket is never nameless.
-    const customerName = params.customerName?.trim() || customerPhone;
+    const customerPhone = params.customerPhone ? normalizePhone(params.customerPhone) : undefined;
+    // Name only personalises the printed ticket; fall back to phone, then
+    // email, so an email-only buyer's ticket is never nameless.
+    const customerName = params.customerName?.trim() || customerPhone || params.customerEmail || 'Guest';
 
     // Only published events are buyable.
     const event = await Event.findOne({ _id: eventId, status: EventStatus.PUBLISHED });
