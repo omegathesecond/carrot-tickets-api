@@ -1279,10 +1279,20 @@ export class TicketService {
       const normalizedPhone = p.customerPhone ? normalizePhone(p.customerPhone) : '';
       const payerIdentifier = /^\+\d{10,15}$/.test(normalizedPhone) ? normalizedPhone : undefined;
 
+      // Thread OUR reference through the return URL. DeltaPay's return redirect
+      // carries no query parameters of its own, so without this the return
+      // handler cannot tell which sale the buyer is coming back from.
+      // This is a LOOKUP HINT ONLY — never proof of anything. Whatever it
+      // resolves to is still put through finalizeDeltapaySale, which asks
+      // DeltaPay via verify-return and mints only on `succeeded` with an exact
+      // amount match. A forged or guessed ref therefore grants nothing.
+      const returnUrlWithRef = new URL(returnUrl);
+      returnUrlWithRef.searchParams.set('ref', sale.saleId);
+
       const session = await this.deltapayClient.createSession({
         amount: amountCharged,
         merchantReference: sale.saleId,
-        returnUrl,
+        returnUrl: returnUrlWithRef.toString(),
         displayDescription: `${p.quantity} x ${tt.name || 'Ticket'} — ${event.name}`.slice(0, 200),
         ...(process.env['DELTAPAY_CALLBACK_URL']
           ? { sessionCallbackUrl: process.env['DELTAPAY_CALLBACK_URL'] }
@@ -1317,6 +1327,25 @@ export class TicketService {
     sessionId: string
   ): Promise<InstanceType<typeof TicketSale> | null> {
     return TicketSale.findOne({ deltapaySessionId: sessionId });
+  }
+
+  /**
+   * Look up a DeltaPay sale by OUR OWN merchant reference (sale.saleId).
+   *
+   * DeltaPay's return redirect arrives with NO query parameters at all — it does
+   * not echo the checkout_session_id back (verified against the live dev
+   * environment: `GET /deltapay/return` with an empty query string). So the
+   * return handler has nothing to look the sale up by, and the buyer lands on a
+   * result page that cannot tell them what happened.
+   *
+   * The fix is to thread a reference we control through the return_url query
+   * when creating the session, and resolve it here. Scoped to DELTAPAY so a
+   * reference cannot be used to reach a sale belonging to another method.
+   */
+  static async getDeltapaySaleByReference(
+    reference: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ saleId: reference, paymentMethod: PaymentMethod.DELTAPAY });
   }
 
   /**
