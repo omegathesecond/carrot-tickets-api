@@ -1349,6 +1349,30 @@ export class TicketService {
   }
 
   /**
+   * The signed-in buyer's most recent DeltaPay sale.
+   *
+   * This is the RELIABLE way to answer "did my payment go through?" after a
+   * DeltaPay return. Everything carried on the redirect itself is unreliable —
+   * DeltaPay echoes no identifiers back, and query parameters we add to
+   * return_url are not guaranteed to survive either. But the buyer IS
+   * authenticated in the SPA, so instead of trying to read something out of the
+   * URL we simply look up their own latest DeltaPay purchase.
+   *
+   * Scoped to the caller's own phone, so a buyer can only ever reach their own
+   * sale. Ordered by createdAt (not soldAt, which is set at initiation for every
+   * pending sale and would tie) so "most recent attempt" is unambiguous.
+   */
+  static async getLatestDeltapaySaleForBuyer(
+    customerPhone: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({
+      customerPhone: normalizePhone(customerPhone),
+      paymentMethod: PaymentMethod.DELTAPAY,
+      deltapaySessionId: { $exists: true, $nin: [null, ''] },
+    }).sort({ createdAt: -1 });
+  }
+
+  /**
    * Finalize an MTN MoMo sale identified by referenceId. Idempotent.
    * - If sale is not PENDING → return current status immediately.
    * - Query MTN status; PENDING → return pending; FAILED → release + fail.

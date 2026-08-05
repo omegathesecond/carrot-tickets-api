@@ -319,6 +319,19 @@ router.get('/purchase/peach-card/:paymentId/status', authenticateBuyer, PublicCo
 router.post('/purchase/deltapay', authenticateBuyer, PublicController.initiateDeltapayPurchase);
 
 /**
+ * @route   GET /api/public/purchase/deltapay/latest/status
+ * @desc    Outcome of the buyer's MOST RECENT DeltaPay payment. The reliable way
+ *          to answer "did it go through?" after a DeltaPay return, because the
+ *          return redirect carries no identifiers we can depend on. Also
+ *          finalises (mints) as a side effect. Returns { status: 'none' } if the
+ *          buyer has never paid with DeltaPay.
+ *          MUST stay ABOVE the /:sessionId/status route below — otherwise
+ *          "latest" is captured as a sessionId and never reaches this handler.
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/purchase/deltapay/latest/status', authenticateBuyer, PublicController.getLatestDeltapayStatus);
+
+/**
  * @route   GET /api/public/purchase/deltapay/:sessionId/status
  * @desc    Poll the status of a pending DeltaPay payment. Also triggers
  *          finalization (ticket minting) when DeltaPay reports `succeeded`.
