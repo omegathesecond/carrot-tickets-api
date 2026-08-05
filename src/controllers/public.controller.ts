@@ -900,16 +900,22 @@ export class PublicController {
 
   /**
    * Initiate an async MTN MoMo purchase.
-   * Phone comes from the buyer token (req.ticketsUser.userPhone), NEVER the body.
-   * momoPhone (the MoMo wallet number) IS from body.
+   * Identity comes from the resolved buyer (buyerId-primary, phone fallback),
+   * NEVER the body. momoPhone (the MoMo wallet number) IS from body.
    */
   static async initiateMomoPurchase(req: Request, res: Response): Promise<any> {
     const { error, value } = momoInitiateSchema.validate(req.body);
     if (error) return ApiResponseUtil.badRequest(res, error.message);
-    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
     try {
-      const r = await TicketService.initiateMomoPurchase({ ...value, customerPhone, channel: SalesChannel.ONLINE });
+      const r = await TicketService.initiateMomoPurchase({
+        ...value,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
+        channel: SalesChannel.ONLINE,
+      });
       return ApiResponseUtil.success(res, r);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Could not start MoMo payment', 400);
@@ -918,23 +924,29 @@ export class PublicController {
 
   /**
    * Poll MTN MoMo payment status and trigger finalization on SUCCESSFUL.
-   * Ownership check: the authenticated buyer's phone must match the sale's
-   * customerPhone (both normalized) — prevents IDOR on the referenceId namespace.
-   * A mismatched or missing sale returns 404 to avoid leaking existence info.
+   * Ownership check: buyerId-primary (the sale's stamped buyerId must match
+   * the authenticated buyer's _id), with a legacy phone fallback for sales
+   * that predate buyerId stamping. A mismatched or missing sale returns 404
+   * to avoid leaking existence info.
    */
   static async getMomoStatus(req: Request, res: Response): Promise<any> {
     try {
-      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-      if (!buyerPhone) {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
       const referenceId = req.params['referenceId']!;
       const sale = await TicketService.getMomoSaleByReference(referenceId);
 
-      // Normalize both phones with the same util used at purchase time.
-      // If sale is missing, or phones don't match → 404 (don't reveal existence).
-      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+      const owns =
+        sale &&
+        ((sale.buyerId && String(sale.buyerId) === String(buyer._id)) ||
+          (!sale.buyerId &&
+            sale.customerPhone &&
+            buyer.phone &&
+            normalizePhone(sale.customerPhone) === normalizePhone(buyer.phone)));
+      if (!owns) {
         return ApiResponseUtil.notFound(res, 'Payment not found');
       }
 
@@ -947,15 +959,22 @@ export class PublicController {
 
   /**
    * Initiate an async Peach card payment.
-   * Phone comes from the buyer token (req.ticketsUser.userPhone), NEVER the body.
+   * Identity comes from the resolved buyer (buyerId-primary, phone fallback),
+   * NEVER the body.
    */
   static async initiateCardPurchase(req: Request, res: Response): Promise<any> {
     const { error, value } = cardInitiateSchema.validate(req.body);
     if (error) return ApiResponseUtil.badRequest(res, error.message);
-    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
     try {
-      const r = await TicketService.initiateCardPurchase({ ...value, customerPhone, channel: SalesChannel.ONLINE });
+      const r = await TicketService.initiateCardPurchase({
+        ...value,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
+        channel: SalesChannel.ONLINE,
+      });
       return ApiResponseUtil.success(res, r);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Could not start card payment', 400);
@@ -964,23 +983,29 @@ export class PublicController {
 
   /**
    * Poll Peach card payment status and trigger finalization.
-   * Ownership check: the authenticated buyer's phone must match the sale's
-   * customerPhone (both normalized) — prevents IDOR on the paymentId namespace.
-   * A mismatched or missing sale returns 404 to avoid leaking existence info.
+   * Ownership check: buyerId-primary (the sale's stamped buyerId must match
+   * the authenticated buyer's _id), with a legacy phone fallback for sales
+   * that predate buyerId stamping. A mismatched or missing sale returns 404
+   * to avoid leaking existence info.
    */
   static async getCardStatus(req: Request, res: Response): Promise<any> {
     try {
-      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-      if (!buyerPhone) {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
       const paymentId = req.params['paymentId']!;
       const sale = await TicketService.getCardSaleByPaymentId(paymentId);
 
-      // Normalize both phones with the same util used at purchase time.
-      // If sale is missing, or phones don't match → 404 (don't reveal existence).
-      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+      const owns =
+        sale &&
+        ((sale.buyerId && String(sale.buyerId) === String(buyer._id)) ||
+          (!sale.buyerId &&
+            sale.customerPhone &&
+            buyer.phone &&
+            normalizePhone(sale.customerPhone) === normalizePhone(buyer.phone)));
+      if (!owns) {
         return ApiResponseUtil.notFound(res, 'Payment not found');
       }
 
@@ -998,12 +1023,14 @@ export class PublicController {
   static async initiateDeltapayPurchase(req: Request, res: Response): Promise<any> {
     const { error, value } = deltapayInitiateSchema.validate(req.body);
     if (error) return ApiResponseUtil.badRequest(res, error.message);
-    const customerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-    if (!customerPhone) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
     try {
       const r = await TicketService.initiateDeltapayPurchase({
         ...value,
-        customerPhone,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
         channel: SalesChannel.ONLINE,
       });
       return ApiResponseUtil.success(res, r);
@@ -1015,21 +1042,30 @@ export class PublicController {
   /**
    * Poll the outcome of a DeltaPay purchase. Buyer-authed.
    *
-   * Mirrors getCardStatus, including the ownership check: the sale's phone must
-   * match the signed-in buyer's, and a mismatch returns 404 (not 403) so this
-   * endpoint can't be used to enumerate other buyers' checkout sessions.
+   * Mirrors getCardStatus, including the ownership check: buyerId-primary
+   * (the sale's stamped buyerId must match the authenticated buyer's _id),
+   * with a legacy phone fallback for sales that predate buyerId stamping.
+   * A mismatch returns 404 (not 403) so this endpoint can't be used to
+   * enumerate other buyers' checkout sessions.
    */
   static async getDeltapayStatus(req: Request, res: Response): Promise<any> {
     try {
-      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
-      if (!buyerPhone) {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
       const sessionId = req.params['sessionId']!;
       const sale = await TicketService.getDeltapaySaleBySessionId(sessionId);
 
-      if (!sale || normalizePhone(sale.customerPhone || '') !== normalizePhone(buyerPhone)) {
+      const owns =
+        sale &&
+        ((sale.buyerId && String(sale.buyerId) === String(buyer._id)) ||
+          (!sale.buyerId &&
+            sale.customerPhone &&
+            buyer.phone &&
+            normalizePhone(sale.customerPhone) === normalizePhone(buyer.phone)));
+      if (!owns) {
         return ApiResponseUtil.notFound(res, 'Payment not found');
       }
 
@@ -1041,18 +1077,23 @@ export class PublicController {
   }
 
   /**
-   * List the signed-in buyer's tickets. authenticateBuyer has already put the
-   * verified phone on req.ticketsUser.userPhone; we reuse the same phone-keyed
-   * lookup the Keshless user-app proxy uses, with matching normalisation.
+   * List the signed-in buyer's tickets. Resolves the buyer (buyerId-primary,
+   * userPhone fallback — see resolveBuyerFromRequest) and matches tickets by
+   * whichever handle(s) that buyer has, so an email-only buyer's tickets are
+   * found even without a phone.
    */
   static async getMyTickets(req: Request, res: Response): Promise<any> {
     try {
-      const phone = (req as any).ticketsUser?.userPhone as string | undefined;
-      if (!phone) {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to view your tickets');
       }
 
-      const tickets = await TicketService.findTicketsByCustomerPhone(normalizePhone(phone));
+      const tickets = await TicketService.findTicketsForBuyer({
+        _id: buyer._id,
+        phone: buyer.phone,
+        email: buyer.email,
+      });
       return ApiResponseUtil.success(res, tickets);
     } catch (error: any) {
       console.error('Get buyer tickets error:', error);

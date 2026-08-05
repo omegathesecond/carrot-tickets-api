@@ -964,7 +964,10 @@ export class TicketService {
     eventId: string;
     ticketTypeId: string;
     quantity: number;
-    customerPhone: string;
+    // Contact/attribution phone — optional because an email-only buyer may
+    // not have one (the MoMo wallet number to actually debit is the
+    // separate, still-required `momoPhone` field below).
+    customerPhone?: string;
     customerName?: string;
     // Buyer identity, when purchasing while logged in — persisted on the
     // PENDING sale so finalizeMomoSale can stamp it onto the minted tickets.

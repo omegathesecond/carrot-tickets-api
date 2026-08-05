@@ -1,8 +1,12 @@
 import request from 'supertest';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Buyer } from '@models/buyer.model';
+import { Ticket } from '@models/ticket.model';
 import { EmailService } from '@services/email.service';
+import { JWT_SECRET } from '@config/jwt.config';
 
 jest.mock('@services/email.service');
 
@@ -47,5 +51,33 @@ describe('POST /api/public/auth/request-otp + /auth/register', () => {
     expect(registerRes.status).toBe(200);
     expect(registerRes.body.data.accessToken).toBeTruthy();
     expect(registerRes.body.data.identity.email).toBe('new@x.com');
+  });
+});
+
+describe('GET /api/public/my-tickets', () => {
+  it('returns tickets for an email-only buyer, resolved by buyerId', async () => {
+    const buyer = await Buyer.create({ email: 'mt@x.com', password: 'secret6', emailVerifiedAt: new Date() });
+    await Ticket.create({
+      eventId: new mongoose.Types.ObjectId(),
+      vendorId: new mongoose.Types.ObjectId(),
+      ticketType: 'GA',
+      price: 0,
+      ticketId: 'Z',
+      buyerId: buyer._id,
+    } as any);
+    const token = jwt.sign(
+      { userType: 'buyer', app: 'tickets', buyerId: String(buyer._id), userEmail: 'mt@x.com' },
+      JWT_SECRET
+    );
+
+    const res = await request(app).get('/api/public/my-tickets').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((t: any) => t.ticketId)).toContain('Z');
+  });
+
+  it('401s when no buyer can be resolved from the token', async () => {
+    const res = await request(app).get('/api/public/my-tickets');
+    expect(res.status).toBe(401);
   });
 });
