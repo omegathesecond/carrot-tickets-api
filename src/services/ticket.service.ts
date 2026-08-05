@@ -6,6 +6,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { EventService } from '@services/event.service';
 import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
+import { EmailService } from '@services/email.service';
 import { normalizePhone } from '@utils/phone.util';
 import { buyerTicketOr } from '@utils/ticketHolder.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
@@ -840,17 +841,20 @@ export class TicketService {
       serviceFeeAmount,
     });
 
-    // Best-effort SMS confirmation — never roll back the purchase on SMS failure.
+    // Best-effort confirmation — never roll back the purchase on send failure.
+    const summaries = result.tickets.map((t) => ({
+      ticketId: t.ticketId,
+      eventName: event.name,
+      eventDate: event.eventDate.toISOString(),
+      venue: event.venue,
+    }));
     if (customerPhone) {
-      SmsService.sendTicketConfirmation(
-        customerPhone,
-        result.tickets.map((t) => ({
-          ticketId: t.ticketId,
-          eventName: event.name,
-          eventDate: event.eventDate.toISOString(),
-          venue: event.venue,
-        })),
-      ).catch((err) => console.error('[SMS] confirmation send threw', err));
+      SmsService.sendTicketConfirmation(customerPhone, summaries)
+        .catch((err) => console.error('[SMS] confirmation send threw', err));
+    }
+    if (customerEmail) {
+      EmailService.sendTicketConfirmation(customerEmail, summaries)
+        .catch((err) => console.error('[Email] confirmation send threw', err));
     }
 
     return {
@@ -1533,16 +1537,21 @@ export class TicketService {
       ); // sold += qty
     }
 
-    if (sale.customerPhone && event) {
-      SmsService.sendTicketConfirmation(
-        sale.customerPhone,
-        tickets.map(t => ({
-          ticketId: t.ticketId,
-          eventName: event.name,
-          eventDate: event.eventDate.toISOString(),
-          venue: event.venue,
-        }))
-      ).catch(err => console.error('[SMS] momo confirmation threw', err));
+    if (event) {
+      const summaries = tickets.map(t => ({
+        ticketId: t.ticketId,
+        eventName: event.name,
+        eventDate: event.eventDate.toISOString(),
+        venue: event.venue,
+      }));
+      if (sale.customerPhone) {
+        SmsService.sendTicketConfirmation(sale.customerPhone, summaries)
+          .catch(err => console.error('[SMS] momo confirmation threw', err));
+      }
+      if (sale.customerEmail) {
+        EmailService.sendTicketConfirmation(sale.customerEmail, summaries)
+          .catch(err => console.error('[Email] momo confirmation threw', err));
+      }
     }
 
     console.log('[momo finalize] ✓ completed — tickets minted', {
@@ -1655,16 +1664,21 @@ export class TicketService {
       ); // sold += qty
     }
 
-    if (sale.customerPhone && event) {
-      SmsService.sendTicketConfirmation(
-        sale.customerPhone,
-        tickets.map(t => ({
-          ticketId: t.ticketId,
-          eventName: event.name,
-          eventDate: event.eventDate.toISOString(),
-          venue: event.venue,
-        }))
-      ).catch(err => console.error('[SMS] card confirmation threw', err));
+    if (event) {
+      const summaries = tickets.map(t => ({
+        ticketId: t.ticketId,
+        eventName: event.name,
+        eventDate: event.eventDate.toISOString(),
+        venue: event.venue,
+      }));
+      if (sale.customerPhone) {
+        SmsService.sendTicketConfirmation(sale.customerPhone, summaries)
+          .catch(err => console.error('[SMS] card confirmation threw', err));
+      }
+      if (sale.customerEmail) {
+        EmailService.sendTicketConfirmation(sale.customerEmail, summaries)
+          .catch(err => console.error('[Email] card confirmation threw', err));
+      }
     }
 
     return { status: 'completed' };
@@ -1807,16 +1821,21 @@ export class TicketService {
       ); // sold += qty
     }
 
-    if (sale.customerPhone && event) {
-      SmsService.sendTicketConfirmation(
-        sale.customerPhone,
-        tickets.map(t => ({
-          ticketId: t.ticketId,
-          eventName: event.name,
-          eventDate: event.eventDate.toISOString(),
-          venue: event.venue,
-        }))
-      ).catch(err => console.error('[SMS] deltapay confirmation threw', err));
+    if (event) {
+      const summaries = tickets.map(t => ({
+        ticketId: t.ticketId,
+        eventName: event.name,
+        eventDate: event.eventDate.toISOString(),
+        venue: event.venue,
+      }));
+      if (sale.customerPhone) {
+        SmsService.sendTicketConfirmation(sale.customerPhone, summaries)
+          .catch(err => console.error('[SMS] deltapay confirmation threw', err));
+      }
+      if (sale.customerEmail) {
+        EmailService.sendTicketConfirmation(sale.customerEmail, summaries)
+          .catch(err => console.error('[Email] deltapay confirmation threw', err));
+      }
     }
 
     return { status: 'completed' };

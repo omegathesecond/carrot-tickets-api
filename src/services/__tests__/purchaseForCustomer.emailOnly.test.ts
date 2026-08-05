@@ -17,6 +17,8 @@ jest.mock('@services/payments', () => ({
 
 import { TicketService } from '@services/ticket.service';
 import { PaymentConfigService } from '@services/paymentConfig.service';
+import { EmailService } from '@services/email.service';
+import { SmsService } from '@services/sms.service';
 import { Ticket } from '@models/ticket.model';
 import { TicketSale } from '@models/ticketSale.model';
 import mongoose from 'mongoose';
@@ -25,6 +27,7 @@ beforeAll(connectTestDb);
 afterEach(async () => {
   await clearTestDb();
   mockCharge.mockReset();
+  jest.restoreAllMocks();
 });
 afterAll(disconnectTestDb);
 
@@ -86,5 +89,37 @@ describe('TicketService.purchaseForCustomer — email-only buyer (no customerPho
 
     const ticket = await Ticket.findOne({ ticketId: result.tickets[0]!.ticketId });
     expect(ticket!.customerName).toBe('Guest');
+  });
+
+  it('fires the email confirmation (not SMS) for an email-only buyer', async () => {
+    await PaymentConfigService.update({ platformFeePercent: 0, keshlessServiceFee: 0 });
+    const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 30, capacity: 5 });
+
+    mockCharge.mockResolvedValue({
+      status: 'completed',
+      providerRef: 'WALLET-REF-3',
+      message: 'ok',
+    });
+
+    const emailSpy = jest.spyOn(EmailService, 'sendTicketConfirmation').mockResolvedValue(true);
+    const smsSpy = jest.spyOn(SmsService, 'sendTicketConfirmation').mockResolvedValue(true);
+
+    const result = await TicketService.purchaseForCustomer({
+      eventId,
+      ticketTypeId,
+      quantity: 1,
+      // No customerPhone — email-only buyer.
+      customerEmail: 'buyer@example.com',
+      keshlessCardNumber: '1234567890123456',
+    });
+
+    expect(result.tickets).toHaveLength(1);
+    expect(emailSpy).toHaveBeenCalledWith(
+      'buyer@example.com',
+      expect.arrayContaining([
+        expect.objectContaining({ ticketId: result.tickets[0]!.ticketId }),
+      ]),
+    );
+    expect(smsSpy).not.toHaveBeenCalled();
   });
 });
