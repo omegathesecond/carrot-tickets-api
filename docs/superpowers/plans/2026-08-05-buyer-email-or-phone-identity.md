@@ -1208,3 +1208,15 @@ Two execution options:
 
 1. **Subagent-Driven (recommended)** — fresh subagent per task, review between tasks.
 2. **Inline Execution** — batch execution with checkpoints in this session.
+
+---
+
+## Task R1 (inserted during execution, 2026-08-05)
+
+Discovered while executing Task 5: making `Buyer.phone` optional (Task 1) broke 4 files at the type level and — more importantly — left `isTicketHolder` and `GoingService` matching tickets by phone only, so email-only buyers would be misrecognized (incl. a latent `{customerPhone: undefined}` match bug in GoingService). Inserted a remediation task, ordered AFTER Task 8 (needs `buyerId`/`customerEmail` on tickets) and BEFORE Task 6.
+
+Scope: shared `buyerTicketOr(buyer)` matcher + `isTicketHolderForBuyer` in `ticketHolder.util.ts`; route `message.service`, `review.service`, `communityMembership.service`, and `GoingService` (single + batch) through it; guard optional `b.phone` in `adminUsers.controller`; green `tsc`. Task 9's `findTicketsForBuyer` REUSES `buyerTicketOr`.
+
+Deferred minor (logged for final review): `activityFeed/going.ts` "who's-going roster" still keys off followed-actors' phones — an email-only followee won't appear in a roster until extended. Degrades gracefully (display completeness), not an auth/data bug.
+
+Full brief: `.superpowers/sdd/2026-08-05-buyer-email-or-phone-identity/task-R1-brief.md`
