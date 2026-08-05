@@ -216,16 +216,19 @@ router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 /**
  * Buyer (ticket-holder) authentication.
  *
- * Returning buyers sign in with phone + password (/auth/login). First-time
- * registration is OTP-gated: /auth/login returns { requiresRegistration: true }
- * for an unknown number, the client requests an SMS code (/auth/request-otp),
- * then creates the account with code + password (/auth/register). This proves
- * phone ownership once, at account creation, then relies on the password.
- * @route   POST /api/public/auth/login           { phone, password }              -> { requiresRegistration } | { accessToken }
- * @route   POST /api/public/auth/request-otp     { phone }                        -> sends code (new numbers only)
- * @route   POST /api/public/auth/register        { phone, code, password, name? } -> { accessToken }
- * @route   POST /api/public/auth/forgot-password { phone }                        -> sends reset code (existing numbers only)
- * @route   POST /api/public/auth/reset-password  { phone, code, password }        -> { accessToken }
+ * Returning buyers sign in with identifier + password (/auth/login), where
+ * identifier is EITHER an email address OR a phone number — classified
+ * automatically (email vs SMS channel). First-time registration is
+ * OTP-gated: /auth/login returns { requiresRegistration: true } for an
+ * unknown identifier, the client requests a code sent over the matching
+ * channel (/auth/request-otp), then creates the account with code + password
+ * (/auth/register). This proves ownership of the email or phone once, at
+ * account creation, then relies on the password.
+ * @route   POST /api/public/auth/login           { identifier, password }              -> { requiresRegistration, channel } | { accessToken, identity }
+ * @route   POST /api/public/auth/request-otp     { identifier }                        -> sends code via email or SMS (new identifiers only)
+ * @route   POST /api/public/auth/register        { identifier, code, password, name? } -> { accessToken, identity }
+ * @route   POST /api/public/auth/forgot-password { identifier }                        -> sends reset code via email or SMS (existing identifiers only)
+ * @route   POST /api/public/auth/reset-password  { identifier, code, password }        -> { accessToken, identity }
  */
 router.post('/auth/login', PublicController.loginBuyer);
 router.post('/auth/request-otp', PublicController.requestBuyerRegistrationOtp);

@@ -762,26 +762,26 @@ export class PublicController {
   }
 
   /**
-   * Buyer sign-in — phone + password for EXISTING accounts.
+   * Buyer sign-in — email or phone + password for EXISTING accounts.
    *
-   * If the number has no account yet, registration is OTP-gated: we return
-   * `{ requiresRegistration: true }` (HTTP 200) so the client routes the buyer
-   * to requestBuyerRegistrationOtp -> registerBuyer rather than silently
-   * creating an account for an unproven phone.
+   * If the identifier has no account yet, registration is OTP-gated: we
+   * return `{ requiresRegistration: true }` (HTTP 200) so the client routes
+   * the buyer to requestBuyerRegistrationOtp -> registerBuyer rather than
+   * silently creating an account for an unproven email or phone.
    */
   static async loginBuyer(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, password } = req.body;
-      if (!phone || !password) {
-        return ApiResponseUtil.error(res, 'Phone number and password are required', 400);
+      const { identifier, password } = req.body;
+      if (!identifier || !password) {
+        return ApiResponseUtil.error(res, 'Email or phone and password are required', 400);
       }
 
-      const result = await BuyerAuthService.login(phone, password);
+      const result = await BuyerAuthService.login(identifier, password);
       if (result.requiresRegistration) {
         return ApiResponseUtil.success(
           res,
           result,
-          'Verify your phone number to create your account'
+          'Verify your email or phone to create your account'
         );
       }
       return ApiResponseUtil.success(res, result, 'Signed in successfully');
@@ -792,18 +792,18 @@ export class PublicController {
   }
 
   /**
-   * Registration step 1: send an SMS verification code to a NEW phone number.
-   * Rejects numbers that already have an account.
+   * Registration step 1: send a verification code to a NEW email or phone.
+   * Rejects identifiers that already have an account.
    */
   static async requestBuyerRegistrationOtp(req: Request, res: Response): Promise<any> {
     try {
-      const { phone } = req.body;
-      if (!phone || typeof phone !== 'string') {
-        return ApiResponseUtil.error(res, 'Phone number is required', 400);
+      const { identifier } = req.body;
+      if (!identifier || typeof identifier !== 'string') {
+        return ApiResponseUtil.error(res, 'Email or phone is required', 400);
       }
 
-      const result = await BuyerAuthService.requestRegistrationOtp(phone);
-      return ApiResponseUtil.success(res, result, 'We sent a verification code to your phone');
+      const result = await BuyerAuthService.requestRegistrationOtp(identifier);
+      return ApiResponseUtil.success(res, result, 'We sent a code to your email or phone');
     } catch (error: any) {
       console.error('Request buyer registration OTP error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to send verification code', 400);
@@ -816,12 +816,12 @@ export class PublicController {
    */
   static async registerBuyer(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, code, password, name } = req.body;
-      if (!phone || !code || !password) {
-        return ApiResponseUtil.error(res, 'Phone number, code and password are required', 400);
+      const { identifier, code, password, name } = req.body;
+      if (!identifier || !code || !password) {
+        return ApiResponseUtil.error(res, 'Email or phone, code and password are required', 400);
       }
 
-      const result = await BuyerAuthService.registerWithOtp(phone, code, password, name);
+      const result = await BuyerAuthService.registerWithOtp(identifier, code, password, name);
       return ApiResponseUtil.success(res, result, 'Account created — you are signed in');
     } catch (error: any) {
       console.error('Register buyer error:', error);
@@ -830,18 +830,18 @@ export class PublicController {
   }
 
   /**
-   * Password reset step 1: SMS a code to a phone that HAS an account. Rejects
-   * numbers with no account (they must sign up).
+   * Password reset step 1: send a code to an email or phone that HAS an
+   * account. Rejects identifiers with no account (they must sign up).
    */
   static async forgotPasswordBuyer(req: Request, res: Response): Promise<any> {
     try {
-      const { phone } = req.body;
-      if (!phone || typeof phone !== 'string') {
-        return ApiResponseUtil.error(res, 'Phone number is required', 400);
+      const { identifier } = req.body;
+      if (!identifier || typeof identifier !== 'string') {
+        return ApiResponseUtil.error(res, 'Email or phone is required', 400);
       }
 
-      const result = await BuyerAuthService.requestPasswordResetOtp(phone);
-      return ApiResponseUtil.success(res, result, 'We sent a reset code to your phone');
+      const result = await BuyerAuthService.requestPasswordResetOtp(identifier);
+      return ApiResponseUtil.success(res, result, 'We sent a reset code to your email or phone');
     } catch (error: any) {
       console.error('Forgot password buyer error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to send reset code', 400);
@@ -854,12 +854,12 @@ export class PublicController {
    */
   static async resetPasswordBuyer(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, code, password } = req.body;
-      if (!phone || !code || !password) {
-        return ApiResponseUtil.error(res, 'Phone number, code and new password are required', 400);
+      const { identifier, code, password } = req.body;
+      if (!identifier || !code || !password) {
+        return ApiResponseUtil.error(res, 'Email or phone, code and new password are required', 400);
       }
 
-      const result = await BuyerAuthService.resetPassword(phone, code, password);
+      const result = await BuyerAuthService.resetPassword(identifier, code, password);
       return ApiResponseUtil.success(res, result, 'Password reset — you are signed in');
     } catch (error: any) {
       console.error('Reset password buyer error:', error);
