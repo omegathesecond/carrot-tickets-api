@@ -46,6 +46,8 @@ export interface ITicket extends Document {
   purchasedBy?: Types.ObjectId; // User ID (if from Keshless app)
   customerName?: string; // For cash/walk-in purchases
   customerPhone?: string;
+  customerEmail?: string; // Buyer email for email-based identity
+  buyerId?: Types.ObjectId; // Ref to Buyer (for email/phone identity)
   saleId?: Types.ObjectId; // Link to sale transaction
 
   // Status
@@ -80,6 +82,8 @@ export interface ITicketSale extends Document {
   // Customer Info
   customerName?: string;
   customerPhone?: string;
+  customerEmail?: string; // Buyer email for email-based identity
+  buyerId?: Types.ObjectId; // Ref to Buyer (for email/phone identity)
   customerUserId?: Types.ObjectId; // If purchased via Keshless app
 
   // Payment
