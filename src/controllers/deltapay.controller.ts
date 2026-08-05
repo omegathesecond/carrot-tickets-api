@@ -54,10 +54,29 @@ export class DeltapayController {
       req.query['checkoutSessionId'] ||
       req.query['session_id'] ||
       req.query['id'];
-    const sessionId = typeof raw === 'string' && raw ? raw : undefined;
+    let sessionId = typeof raw === 'string' && raw ? raw : undefined;
+
+    // DeltaPay's return redirect carries NO query parameters — it does not echo
+    // the session id back (verified against the live dev environment). So fall
+    // back to the `ref` we threaded through return_url ourselves at session
+    // creation, and resolve it to the session id via our own sale record.
+    //
+    // The ref is a LOOKUP HINT, never evidence: the sale it resolves to is still
+    // put through finalizeDeltapaySale, which calls verify-return and mints only
+    // on `succeeded` with an exact amount match. Guessing a ref grants nothing.
+    if (!sessionId) {
+      const ref = req.query['ref'];
+      if (typeof ref === 'string' && ref) {
+        const sale = await TicketService.getDeltapaySaleByReference(ref);
+        sessionId = sale?.deltapaySessionId;
+      }
+    }
 
     if (!sessionId) {
-      // No id — send the buyer to the result page anyway; it shows a generic state.
+      // Nothing to identify the payment by. The session callback finalises
+      // independently, so the sale may well have completed — send the buyer to
+      // the result page WITHOUT a failed status so it can show a neutral
+      // "confirming" state rather than alarming a buyer who has actually paid.
       return res.redirect(302, paymentResultPageUrl());
     }
 

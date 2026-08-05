@@ -28,6 +28,9 @@ import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
 const mockFinalize = TicketService.finalizeDeltapaySale as jest.MockedFunction<
   typeof TicketService.finalizeDeltapaySale
 >;
+const mockByRef = TicketService.getDeltapaySaleByReference as jest.MockedFunction<
+  typeof TicketService.getDeltapaySaleByReference
+>;
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
@@ -87,6 +90,36 @@ describe('DeltaPay return endpoint', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers['location']).toBe(`${PAGE}?id=sess_bad&status=failed${METHOD}`);
+  });
+
+  // DeltaPay's return redirect carries NO query parameters — it does not echo
+  // checkout_session_id back. We thread our own `ref` through return_url at
+  // session creation and resolve it here. Without this the buyer lands on a
+  // result page that cannot tell them anything, which read as "Payment Failed"
+  // even for a payment that had already succeeded.
+  it('falls back to our own ?ref when DeltaPay sends no session id', async () => {
+    mockByRef.mockResolvedValueOnce({ deltapaySessionId: 'sess_from_ref' } as any);
+
+    const res = await request(app).get(
+      '/api/public/purchase/deltapay/return?ref=SALE-123-ABC'
+    );
+
+    expect(mockByRef).toHaveBeenCalledWith('SALE-123-ABC');
+    // The ref is a lookup hint only — the resolved session STILL goes through
+    // finalizeDeltapaySale, which re-verifies with DeltaPay before minting.
+    expect(mockFinalize).toHaveBeenCalledWith('sess_from_ref');
+    expect(res.status).toBe(302);
+    expect(res.headers['location']).toBe(`${PAGE}?id=sess_from_ref&status=completed${METHOD}`);
+  });
+
+  it('does not finalise anything when the ref matches no sale', async () => {
+    mockByRef.mockResolvedValueOnce(null);
+
+    const res = await request(app).get('/api/public/purchase/deltapay/return?ref=SALE-BOGUS');
+
+    expect(mockFinalize).not.toHaveBeenCalled();
+    expect(res.status).toBe(302);
+    expect(res.headers['location']).toBe(PAGE);
   });
 
   it('302s to the bare result page when no session id is present', async () => {
