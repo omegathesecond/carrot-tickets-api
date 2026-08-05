@@ -1041,6 +1041,39 @@ export class PublicController {
   }
 
   /**
+   * Outcome of the signed-in buyer's MOST RECENT DeltaPay payment. Buyer-authed.
+   *
+   * This exists because nothing on the DeltaPay return redirect can be relied on
+   * to identify the payment: DeltaPay echoes no identifiers back, and query
+   * parameters added to return_url are not guaranteed to survive. Rather than
+   * parse the URL, the result page asks this endpoint — the buyer is already
+   * authenticated, so their own latest purchase is the unambiguous answer.
+   *
+   * Like the by-session endpoint, it finalises as a side effect: the sale is put
+   * through verify-return, which is what actually mints tickets. Returns
+   * `{ status: 'none' }` when the buyer has no DeltaPay purchase at all, so the
+   * page can distinguish "nothing to show" from "failed".
+   */
+  static async getLatestDeltapayStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyerPhone = (req as any).ticketsUser?.userPhone as string | undefined;
+      if (!buyerPhone) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const sale = await TicketService.getLatestDeltapaySaleForBuyer(buyerPhone);
+      if (!sale?.deltapaySessionId) {
+        return ApiResponseUtil.success(res, { status: 'none' });
+      }
+
+      const result = await TicketService.finalizeDeltapaySale(sale.deltapaySessionId);
+      return ApiResponseUtil.success(res, { ...result, sessionId: sale.deltapaySessionId });
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
    * List the signed-in buyer's tickets. authenticateBuyer has already put the
    * verified phone on req.ticketsUser.userPhone; we reuse the same phone-keyed
    * lookup the Keshless user-app proxy uses, with matching normalisation.
