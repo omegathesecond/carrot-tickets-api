@@ -8,6 +8,8 @@ import { Follow } from '@models/follow.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 
+const PHONE = '+26878422613';
+
 describe('GET /api/social/suggestions/people', () => {
   beforeAll(async () => { await connectTestDb(); await Follow.init(); });
   afterEach(clearTestDb); afterAll(disconnectTestDb);
@@ -196,5 +198,31 @@ describe('GET /api/social/suggestions/people', () => {
     const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames.indexOf('same_city')).toBeLessThan(usernames.indexOf('other_city'));
+  });
+
+  it('with a seed, returns a deterministic order that changes with the seed (fallback pool)', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    for (let i = 0; i < 8; i++) {
+      await Buyer.create({ phone: `+2687000000${i}`, password: 'secret1', name: `P${i}`, username: `pp${i}` });
+    }
+    const token = signBuyerToken(PHONE);
+    const a1 = await request(app).get('/api/social/suggestions/people?seed=7').set('Authorization', `Bearer ${token}`).expect(200);
+    const a2 = await request(app).get('/api/social/suggestions/people?seed=7').set('Authorization', `Bearer ${token}`).expect(200);
+    const b = await request(app).get('/api/social/suggestions/people?seed=999').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(a1.body.data.map((p: any) => p.id)).toEqual(a2.body.data.map((p: any) => p.id));
+    expect(a1.body.data.map((p: any) => p.id)).not.toEqual(b.body.data.map((p: any) => p.id));
+  });
+
+  it('with a fixed seed, paginates the fallback pool without overlap', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    for (let i = 0; i < 6; i++) {
+      await Buyer.create({ phone: `+2687100000${i}`, password: 'secret1', name: `Q${i}`, username: `qq${i}` });
+    }
+    const token = signBuyerToken(PHONE);
+    const p1 = await request(app).get('/api/social/suggestions/people?seed=42&limit=2&page=1').set('Authorization', `Bearer ${token}`).expect(200);
+    const p2 = await request(app).get('/api/social/suggestions/people?seed=42&limit=2&page=2').set('Authorization', `Bearer ${token}`).expect(200);
+    const ids1 = p1.body.data.map((p: any) => p.id);
+    const ids2 = p2.body.data.map((p: any) => p.id);
+    expect(ids1.filter((id: string) => ids2.includes(id))).toHaveLength(0);
   });
 });

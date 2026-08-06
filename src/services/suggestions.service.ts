@@ -78,7 +78,7 @@ export class SuggestionsService {
    *  ranked candidate set, so pagination is deterministic. */
   static async peopleYouMayKnow(
     buyerId: string,
-    { limit = 20, page = 1 }: SuggestionsPageOptions = {}
+    { limit = 20, page = 1, seed }: SuggestionsPageOptions = {}
   ): Promise<Array<{ buyer: IBuyer; mutualCount: number }>> {
     const viewer = await Buyer.findById(buyerId);
     const iFollow = await FollowService.followingIds(buyerId, 'buyer');
@@ -143,14 +143,16 @@ export class SuggestionsService {
       return { buyer, mutualCount: c.mutualCount, score };
     });
 
-    // Final tiebreak on _id keeps ordering fully deterministic (stable
-    // pagination) even when every scored signal is exactly equal.
-    scored.sort((a, b) =>
-      b.score !== a.score ? b.score - a.score : String(a.buyer._id).localeCompare(String(b.buyer._id))
-    );
+    // seed present → shuffle the quality pool; absent → today's composite-score
+    // ranking. Both paginate the same way, so pages stay stable within a visit.
+    const ordered = seed === undefined
+      ? [...scored].sort((a, b) =>
+          b.score !== a.score ? b.score - a.score : String(a.buyer._id).localeCompare(String(b.buyer._id))
+        )
+      : seededShuffle(scored, seed);
 
     const skip = (Math.max(1, page) - 1) * limit;
-    return scored.slice(skip, skip + limit).map(({ buyer, mutualCount }) => ({ buyer, mutualCount }));
+    return ordered.slice(skip, skip + limit).map(({ buyer, mutualCount }) => ({ buyer, mutualCount }));
   }
 
   /** Active, verified organizers to follow, ranked by follower count. May

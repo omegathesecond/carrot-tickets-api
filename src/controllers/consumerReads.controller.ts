@@ -96,8 +96,8 @@ export class ConsumerReadsController {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const { page, limit } = ConsumerReadsController.parsePageLimit(req);
-      const rows = await SuggestionsService.peopleYouMayKnow(String(buyer._id), { page, limit });
+      const { page, limit, seed } = ConsumerReadsController.parsePageLimit(req);
+      const rows = await SuggestionsService.peopleYouMayKnow(String(buyer._id), { page, limit, seed });
       const data = rows.map(({ buyer: b, mutualCount }) => ({
         id: String(b._id),
         name: b.name ?? null,
