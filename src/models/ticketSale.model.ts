@@ -43,6 +43,18 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     type: String,
     trim: true
   },
+  customerEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    index: true
+  },
+  buyerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Buyer',
+    index: true,
+    sparse: true
+  },
   customerUserId: {
     type: Schema.Types.ObjectId,
     ref: 'User', // Keshless user

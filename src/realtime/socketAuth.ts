@@ -22,12 +22,13 @@ export async function socketAuthMiddleware(
     }
 
     const decoded: any = TicketsAuthService.verifyToken(token);
-    if (decoded?.userType !== 'buyer' || !decoded?.userPhone) {
+    if (decoded?.userType !== 'buyer' || !(decoded?.buyerId || decoded?.userPhone)) {
       return next(new Error('Invalid buyer token'));
     }
 
-    const phone = normalizePhone(decoded.userPhone);
-    const buyer = await Buyer.findOne({ phone });
+    const buyer = decoded.buyerId
+      ? await Buyer.findById(decoded.buyerId)
+      : await Buyer.findOne({ phone: normalizePhone(decoded.userPhone) });
     if (!buyer) return next(new Error('Account not found'));
     await ensureUsername(buyer);
 

@@ -24,14 +24,16 @@ export interface IBuyerLocation {
 /**
  * Buyer (ticket-holder) account for the public site.
  *
- * Buyers authenticate with phone + password — no SMS one-time codes. The
- * phone is the unique identity (tickets are keyed off customerPhone, so the
- * minted JWT carries `userPhone` and the existing "My Tickets" lookup keeps
- * working unchanged). Passwords are bcrypt-hashed via the pre-save hook and
- * are never returned by default (`select: false`).
+ * Buyers authenticate with phone or email + password — no SMS one-time codes.
+ * The _id is the unique identity (tickets are keyed off _id via customerPhone lookup).
+ * Phone and email are verified handles; buyers must have at least one to receive tickets.
+ * Passwords are bcrypt-hashed via the pre-save hook and are never returned by default (`select: false`).
  */
 export interface IBuyer extends Document {
-  phone: string; // normalised, e.g. +26878422613
+  phone?: string; // normalised, e.g. +26878422613 (optional — email-only buyers have none)
+  email?: string; // lowercased, unique among buyers with an email
+  emailVerifiedAt?: Date;
+  phoneVerifiedAt?: Date;
   password: string; // bcrypt hash (select: false)
   name?: string;
   avatarUrl?: string; // public R2 URL of the buyer's profile picture (optional)
@@ -63,7 +65,18 @@ export interface IBuyer extends Document {
 
 const buyerSchema = new Schema<IBuyer>(
   {
-    phone: { type: String, required: true, unique: true, index: true, trim: true },
+    phone: { type: String, unique: true, sparse: true, index: true, trim: true },
+    email: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+      trim: true,
+      lowercase: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please enter a valid email address'],
+    },
+    emailVerifiedAt: { type: Date },
+    phoneVerifiedAt: { type: Date },
     password: {
       type: String,
       required: [true, 'Password is required'],
@@ -126,6 +139,16 @@ const buyerSchema = new Schema<IBuyer>(
 // Sparse by nature (docs missing `location` are excluded automatically) —
 // most buyers never opt in, and $geoNear can only run once this index exists.
 buyerSchema.index({ location: '2dsphere' });
+
+// At least one contact handle must exist — phone and email are peers, but a
+// buyer with neither has no identity to key tickets / tokens off.
+buyerSchema.pre('validate', function (next) {
+  if (!this.phone && !this.email) {
+    next(new Error('A buyer needs a phone or email'));
+    return;
+  }
+  next();
+});
 
 // Hash the password whenever it is set/changed.
 buyerSchema.pre('save', async function (next) {
