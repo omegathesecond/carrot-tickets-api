@@ -149,3 +149,39 @@ describe('BuyerAuthService email identity', () => {
     expect(buyer).toBeNull();
   });
 });
+
+describe('BuyerAuthService OTP resend cooldown', () => {
+  beforeEach(() => {
+    (EmailService.sendOtp as jest.Mock).mockResolvedValue(true);
+    (SmsService.sendOtp as jest.Mock).mockResolvedValue(true);
+  });
+
+  it('rejects a second code request to the same destination within the cooldown', async () => {
+    await BuyerAuthService.requestRegistrationOtp('cool@x.com');
+    await expect(BuyerAuthService.requestRegistrationOtp('cool@x.com'))
+      .rejects.toThrow(/wait \d+ seconds? before requesting another code/i);
+    // The spam attempt sent exactly one email (the first), not two.
+    expect((EmailService.sendOtp as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  it('cools down the reset path too, and shares the window across request types', async () => {
+    await Buyer.create({ phone: '+26878000123', password: 'secret6', phoneVerifiedAt: new Date() });
+    await BuyerAuthService.requestPasswordResetOtp('+26878000123');
+    await expect(BuyerAuthService.requestPasswordResetOtp('+26878000123'))
+      .rejects.toThrow(/wait \d+ seconds? before requesting another code/i);
+  });
+
+  it('allows a new code once the cooldown has elapsed', async () => {
+    await BuyerAuthService.requestRegistrationOtp('cool2@x.com');
+    // Backdate the just-created OTP past the 60s window. Use the raw driver:
+    // Mongoose marks timestamps.createdAt immutable, so a model updateMany
+    // would silently drop the $set.
+    await BuyerOtp.collection.updateMany(
+      { destination: 'cool2@x.com' },
+      { $set: { createdAt: new Date(Date.now() - 61_000) } }
+    );
+    await expect(BuyerAuthService.requestRegistrationOtp('cool2@x.com'))
+      .resolves.toMatchObject({ channel: 'email', identifier: 'cool2@x.com' });
+    expect((EmailService.sendOtp as jest.Mock).mock.calls).toHaveLength(2);
+  });
+});
