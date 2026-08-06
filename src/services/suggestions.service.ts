@@ -6,10 +6,12 @@ import { EventStatus } from '@interfaces/event.interface';
 import { VerificationStatus } from '@interfaces/vendor.interface';
 import { FollowService } from '@services/follow.service';
 import { GoingService } from '@services/going.service';
+import { seededShuffle } from '@utils/seededShuffle.util';
 
 export interface SuggestionsPageOptions {
   limit?: number;
   page?: number;
+  seed?: number;
 }
 
 // Safety cap on the "follows no one" fallback candidate pool — big enough to
@@ -162,10 +164,13 @@ export class SuggestionsService {
    *  never appear, on top of firing ~2 queries per vendor. */
   static async organizersToFollow(
     buyerId: string,
-    { limit = 20, page = 1 }: SuggestionsPageOptions = {}
+    { limit = 20, page = 1, seed }: SuggestionsPageOptions = {}
   ): Promise<Array<{ vendor: any; eventCount: number; followerCount: number; isFollowing: boolean }>> {
     const skip = (Math.max(1, page) - 1) * limit;
-    const rows = await Vendor.aggregate([
+
+    // Ranking pipeline shared by both paths — identical to the pre-shuffle
+    // version up to and including the $project.
+    const basePipeline: any[] = [
       { $match: { isActive: true, verificationStatus: VerificationStatus.VERIFIED } },
       {
         // Follower count for this organizer. `from` is read off the actual
@@ -201,10 +206,21 @@ export class SuggestionsService {
       // Stable tiebreak on _id keeps pagination deterministic when several
       // organizers tie on followerCount.
       { $sort: { followerCount: -1, _id: 1 } },
-      { $skip: skip },
-      { $limit: limit },
       { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1 } },
-    ]);
+    ];
+
+    let rows: any[];
+    if (seed === undefined) {
+      // Deterministic path — the caller's exact page, ranked by follower count.
+      rows = await Vendor.aggregate([...basePipeline, { $skip: skip }, { $limit: limit }]);
+    } else {
+      // Seeded path — a bounded quality pool (top organizers by follower count),
+      // seed-shuffled in-app then paginated. Established organizers stay in the
+      // pool but are no longer permanently pinned to the top.
+      const POOL_SIZE = Math.max(60, limit * 3);
+      const pool = await Vendor.aggregate([...basePipeline, { $limit: POOL_SIZE }]);
+      rows = seededShuffle(pool, seed).slice(skip, skip + limit);
+    }
 
     const following = new Set(await FollowService.followingIds(buyerId, 'organizer'));
     return rows.map((v: any) => ({

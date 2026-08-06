@@ -152,4 +152,42 @@ describe('GET /api/social/suggestions/organizers', () => {
     const ids2 = page2.body.data.map((o: any) => o.id);
     expect(ids1.filter((id: string) => ids2.includes(id))).toHaveLength(0);
   });
+
+  it('with a seed, returns the same order for the same seed', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    for (let i = 0; i < 6; i++) {
+      await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    }
+    const token = signBuyerToken(PHONE);
+    const a = await request(app).get('/api/social/suggestions/organizers?seed=12345').set('Authorization', `Bearer ${token}`).expect(200);
+    const b = await request(app).get('/api/social/suggestions/organizers?seed=12345').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(a.body.data.map((o: any) => o.id)).toEqual(b.body.data.map((o: any) => o.id));
+  });
+
+  it('with different seeds, returns different orders', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    for (let i = 0; i < 10; i++) {
+      await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    }
+    const token = signBuyerToken(PHONE);
+    const a = await request(app).get('/api/social/suggestions/organizers?seed=1').set('Authorization', `Bearer ${token}`).expect(200);
+    const b = await request(app).get('/api/social/suggestions/organizers?seed=2').set('Authorization', `Bearer ${token}`).expect(200);
+    // 10! permutations — a collision between two seeds is astronomically unlikely.
+    expect(a.body.data.map((o: any) => o.id)).not.toEqual(b.body.data.map((o: any) => o.id));
+  });
+
+  it('with a fixed seed, paginates without overlap across pages', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    for (let i = 0; i < 6; i++) {
+      await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    }
+    const token = signBuyerToken(PHONE);
+    const p1 = await request(app).get('/api/social/suggestions/organizers?seed=42&limit=2&page=1').set('Authorization', `Bearer ${token}`).expect(200);
+    const p2 = await request(app).get('/api/social/suggestions/organizers?seed=42&limit=2&page=2').set('Authorization', `Bearer ${token}`).expect(200);
+    const ids1 = p1.body.data.map((o: any) => o.id);
+    const ids2 = p2.body.data.map((o: any) => o.id);
+    expect(ids1).toHaveLength(2);
+    expect(ids2).toHaveLength(2);
+    expect(ids1.filter((id: string) => ids2.includes(id))).toHaveLength(0);
+  });
 });

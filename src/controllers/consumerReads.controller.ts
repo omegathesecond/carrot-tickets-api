@@ -14,6 +14,7 @@ import { RecommendationsService } from '@services/recommendations.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { notEndedFilter } from '@utils/eventVisibility.util';
+import { parseSeed } from '@utils/seededShuffle.util';
 
 export class ConsumerReadsController {
   /** GET /api/social/me/saved */
@@ -84,10 +85,10 @@ export class ConsumerReadsController {
 
   /** Shared page/limit parsing for the two suggestions endpoints below —
    *  same convention as AdminUsersController.listUsers. */
-  private static parsePageLimit(req: Request): { page: number; limit: number } {
+  private static parsePageLimit(req: Request): { page: number; limit: number; seed: number | undefined } {
     const page = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query['limit'] ?? '20'), 10) || 20));
-    return { page, limit };
+    return { page, limit, seed: parseSeed(req.query['seed']) };
   }
 
   /** GET /api/social/suggestions/people?page=&limit= — "people you may know". */
@@ -118,8 +119,8 @@ export class ConsumerReadsController {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const { page, limit } = ConsumerReadsController.parsePageLimit(req);
-      const rows = await SuggestionsService.organizersToFollow(String(buyer._id), { page, limit });
+      const { page, limit, seed } = ConsumerReadsController.parsePageLimit(req);
+      const rows = await SuggestionsService.organizersToFollow(String(buyer._id), { page, limit, seed });
       const data = rows.map(({ vendor: v, eventCount, followerCount, isFollowing }) => ({
         id: String(v._id),
         businessName: v.businessName,
