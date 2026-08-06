@@ -206,14 +206,18 @@ export class BuyerAuthService {
       throw new Error('This account already exists. Please sign in instead.');
     }
 
-    await this.consumeOtp(id, code);
-
-    const buyer = await Buyer.create({
-      ...(id.channel === 'sms' ? { phone: id.value, phoneVerifiedAt: new Date() } : { email: id.value, emailVerifiedAt: new Date() }),
-      password,
-      ...(name ? { name } : {}),
-      lastLoginAt: new Date(),
-    });
+    // Verify the code, THEN create — and only mark the code consumed once the
+    // account actually exists. If Buyer.create throws (e.g. a duplicate-key
+    // race), the code stays valid so the buyer can simply retry rather than
+    // being told it "expired".
+    const buyer = await this.withVerifiedOtp(id, code, () =>
+      Buyer.create({
+        ...(id.channel === 'sms' ? { phone: id.value, phoneVerifiedAt: new Date() } : { email: id.value, emailVerifiedAt: new Date() }),
+        password,
+        ...(name ? { name } : {}),
+        lastLoginAt: new Date(),
+      })
+    );
 
     return { accessToken: this.signToken(buyer), identity: this.identityOf(buyer) };
   }
@@ -262,22 +266,31 @@ export class BuyerAuthService {
       throw new Error("We couldn't find an account for this identifier. Please sign up instead.");
     }
 
-    await this.consumeOtp(id, code);
-
-    buyer.password = newPassword;
-    buyer.lastLoginAt = new Date();
-    await buyer.save();
+    // Verify first, apply the new password inside the guarded action, and only
+    // consume the code once the save has landed (see withVerifiedOtp).
+    await this.withVerifiedOtp(id, code, async () => {
+      buyer.password = newPassword;
+      buyer.lastLoginAt = new Date();
+      await buyer.save();
+    });
 
     return { accessToken: this.signToken(buyer), identity: this.identityOf(buyer) };
   }
 
   /**
-   * Validate + consume the newest unconsumed OTP for an identifier. Throws a
-   * user-facing Error on any failure (expired, too many attempts, mismatch)
-   * and marks the code consumed on success. No token is minted here — the
-   * caller decides what proving ownership grants.
+   * Verify the newest unconsumed OTP for an identifier, run the caller's
+   * side-effect (`action`), and only then mark the code consumed. Throws a
+   * user-facing Error on any verification failure (expired, too many attempts,
+   * mismatch); wrong guesses still burn an attempt.
+   *
+   * The action runs AFTER verification but BEFORE the code is consumed on
+   * purpose: if the action throws (a duplicate-key race on account creation, a
+   * failed password save), the code is left valid so the buyer can retry the
+   * same code — instead of being stranded on a bogus "that code has expired"
+   * because a create failure had already burned it. No token is minted here —
+   * the caller decides what proving ownership grants.
    */
-  private static async consumeOtp(id: Identifier, code: string): Promise<void> {
+  private static async withVerifiedOtp<T>(id: Identifier, code: string, action: () => Promise<T>): Promise<T> {
     if (!code || !/^\d{6}$/.test(code)) {
       throw new Error('Enter the 6-digit code we sent you');
     }
@@ -310,7 +323,10 @@ export class BuyerAuthService {
       throw new Error('That code is incorrect. Please try again.');
     }
 
+    const result = await action();
+
     otp.consumed = true;
     await otp.save();
+    return result;
   }
 }

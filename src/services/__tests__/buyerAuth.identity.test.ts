@@ -148,6 +148,52 @@ describe('BuyerAuthService email identity', () => {
     const buyer = await Buyer.findOne({ email: 'wrongcode@x.com' });
     expect(buyer).toBeNull();
   });
+
+  // Regression: a legacy NON-sparse unique index on `phone` stored every
+  // email-only buyer's absent phone as `null` and collided the 2nd+ of them
+  // with E11000 { phone: null }, so no email buyer after the first could ever
+  // register. The partial `$type: 'string'` index must let them coexist while
+  // still enforcing uniqueness on real string handles.
+  it('lets many email-only buyers coexist yet still rejects a duplicate email', async () => {
+    await Buyer.syncIndexes(); // build the partial phone/email indexes in the test DB
+    await Buyer.create({ email: 'a@x.com', password: 'secret6', emailVerifiedAt: new Date() });
+    await expect(
+      Buyer.create({ email: 'b@x.com', password: 'secret6', emailVerifiedAt: new Date() })
+    ).resolves.toBeTruthy();
+    await expect(
+      Buyer.create({ email: 'a@x.com', password: 'secret6', emailVerifiedAt: new Date() })
+    ).rejects.toThrow();
+    // Two phone-absent buyers coexisting is the whole point.
+    expect(await Buyer.countDocuments({ email: { $in: ['a@x.com', 'b@x.com'] } })).toBe(2);
+  });
+
+  // Regression: registerWithOtp used to consume the code BEFORE creating the
+  // account, so a create failure burned a valid code and the retry hit a bogus
+  // "that code has expired". The code must survive a failed create and stay
+  // retryable.
+  it('keeps the OTP valid and retryable when account creation fails after verification', async () => {
+    (EmailService.sendOtp as jest.Mock).mockResolvedValue(true);
+    await BuyerAuthService.requestRegistrationOtp('retry@x.com');
+    const code = (EmailService.sendOtp as jest.Mock).mock.calls[0][1];
+
+    const spy = jest
+      .spyOn(Buyer, 'create')
+      .mockRejectedValueOnce(new Error('transient write error') as never);
+    await expect(
+      BuyerAuthService.registerWithOtp('retry@x.com', code, 'secret6')
+    ).rejects.toThrow('transient write error');
+
+    // Code must NOT have been burned by the failed create.
+    const otp = await BuyerOtp.findOne({ channel: 'email', destination: 'retry@x.com' });
+    expect(otp!.consumed).toBe(false);
+
+    // Same code now works once create succeeds again.
+    spy.mockRestore();
+    const result = await BuyerAuthService.registerWithOtp('retry@x.com', code, 'secret6');
+    expect(result.identity).toEqual({ email: 'retry@x.com' });
+    const consumed = await BuyerOtp.findOne({ channel: 'email', destination: 'retry@x.com' });
+    expect(consumed!.consumed).toBe(true);
+  });
 });
 
 describe('BuyerAuthService OTP resend cooldown', () => {

@@ -65,12 +65,16 @@ export interface IBuyer extends Document {
 
 const buyerSchema = new Schema<IBuyer>(
   {
-    phone: { type: String, unique: true, sparse: true, index: true, trim: true },
+    // Uniqueness for phone/email is enforced by PARTIAL indexes declared below
+    // (not inline `unique + sparse`). A sparse unique index still collides on an
+    // explicit `null`, so with email-only buyers (phone absent) and phone-only
+    // buyers (email absent) coexisting, sparse is a footgun: it's what left a
+    // legacy non-sparse phone_1 rejecting every email-only buyer after the first
+    // with `E11000 { phone: null }`. The partial `$type: 'string'` filter indexes
+    // only real string values, ignoring null/absent entirely.
+    phone: { type: String, trim: true },
     email: {
       type: String,
-      unique: true,
-      sparse: true,
-      index: true,
       trim: true,
       lowercase: true,
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please enter a valid email address'],
@@ -135,6 +139,14 @@ const buyerSchema = new Schema<IBuyer>(
   },
   { timestamps: true }
 );
+
+// Partial-unique on the two contact handles: index ONLY documents whose value
+// is an actual string, so phone-absent (email-only) and email-absent
+// (phone-only) buyers never collide on a null while real handles stay unique.
+// Must match the live DB exactly (see scripts/fixBuyerContactIndexes.ts) or
+// autoIndex logs an IndexOptionsConflict on every boot.
+buyerSchema.index({ phone: 1 }, { unique: true, partialFilterExpression: { phone: { $type: 'string' } } });
+buyerSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: 'string' } } });
 
 // Sparse by nature (docs missing `location` are excluded automatically) —
 // most buyers never opt in, and $geoNear can only run once this index exists.
