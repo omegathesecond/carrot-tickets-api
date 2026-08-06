@@ -55,14 +55,19 @@ super-admin endpoint → new dashboard page. Rides on existing patterns:
 **New service** `src/services/fees.service.ts`, one exported function:
 
 ```
-getFeesByEvent({ startDate?, endDate?, search?, page = 1, pageSize = 25 }) =>
-  { data: FeeByEventRow[], totals: FeeTotals, pagination: Pagination }
+getFeesByEvent({ startDate?, endDate?, eventId?, search?, page = 1, limit = 25 }) =>
+  { events: FeeByEventRow[], totals: FeeTotals, pagination: Pagination }
 ```
+
+`eventId` narrows to a single event (the "filter by event to see its revenue" case);
+`EventService.getEvents` already returns all events for a super admin, so the
+frontend event picker is populated from that.
 
 Mongoose aggregation pipeline over `TicketSale`:
 
-1. `$match`: `paymentStatus: 'completed'`; if `startDate`/`endDate` given, bound
-   `soldAt` (fall back to `createdAt` semantics consistent with existing analytics).
+1. `$match`: `paymentStatus: 'completed'`; if `eventId` given, filter to it; if
+   `startDate`/`endDate` given, bound `soldAt` (the field existing analytics
+   filters on).
 2. `$group` by `{ eventId, paymentMethod }`: sum `serviceFeeAmount` (bookingFees),
    `platformFeeAmount` (platformFees), `totalAmount` (faceValue), `quantity`
    (ticketsSold), sale `count`.
@@ -96,8 +101,11 @@ existing `requireSuperAdmin` middleware (same as `/admin/organizers`).
 
 - **KPI tiles** (`StatsCard` row): Total Carrot Fees · Booking Fees · Platform
   Commission · Tickets Sold — fed from the response `totals`.
-- **Filter row:** `DateRangePicker` (defaults to all-time / no bound) +
-  debounced (350ms) event-name search that resets page to 1.
+- **Filter row:** `DateRangePicker` (defaults to all-time / no bound) + an
+  **event picker** (`SearchableSelect` populated from `apiClient.events.getEvents`,
+  all events for a super admin) to filter to a single event and see just its
+  revenue + fees. Both reset page to 1. The per-event `faceValue` column already
+  surfaces each event's revenue alongside its fees.
 - **Table** (shared `Table` primitives inside a `Card`, `overflow-x-auto`):
   columns *Event · Tickets · Face Value · Booking Fee · Platform Commission ·
   **Total Fees***. Numeric columns right-aligned. Each row is **expandable**
