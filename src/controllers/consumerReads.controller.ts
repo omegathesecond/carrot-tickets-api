@@ -178,7 +178,8 @@ export class ConsumerReadsController {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const { basisEvent, eventIds } = await RecommendationsService.forBuyer(String(buyer._id));
+      const seed = parseSeed(req.query['seed']);
+      const { basisEvent, eventIds } = await RecommendationsService.forBuyer(String(buyer._id), { seed });
       const events = await buildEventCards(eventIds, { type: 'buyer', id: String(buyer._id) });
       return ApiResponseUtil.success(res, { basisEvent, events });
     } catch (error: any) {

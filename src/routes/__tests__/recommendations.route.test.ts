@@ -49,4 +49,35 @@ describe('GET /api/social/recommendations', () => {
     const names = res.body.data.events.map((c: any) => c.name);
     expect(names).toContain('In Progress Show');
   });
+
+  it('with a seed, keeps the same-organizer picks while varying the generic fill', async () => {
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret1' });
+    const soon = (mins: number) => new Date(Date.now() + mins * 60000);
+    const evt = (vendorId: any, name: string, mins: number) =>
+      Event.create({ vendorId, name, venue: 'V', eventDate: soon(mins), startTime: soon(mins), endTime: soon(mins + 60), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
+
+    const saved = await evt(v._id, 'Saved', 60);
+    // Two more by the SAME organizer — the personalized picks (never shuffled).
+    await evt(v._id, 'Org Pick 1', 200);
+    await evt(v._id, 'Org Pick 2', 300);
+    // A dozen-plus unrelated upcoming events — the generic fill pool.
+    for (let i = 0; i < 14; i++) {
+      const ov = await Vendor.create({ businessName: `Other ${i}`, password: 'secret1' });
+      await evt(ov._id, `Generic ${i}`, 400 + i);
+    }
+    await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
+    const token = signBuyerToken('+26878422613');
+
+    const a = await request(app).get('/api/social/recommendations?seed=1').set('Authorization', `Bearer ${token}`).expect(200);
+    const b = await request(app).get('/api/social/recommendations?seed=2').set('Authorization', `Bearer ${token}`).expect(200);
+    const namesA = a.body.data.events.map((c: any) => c.name);
+    const namesB = b.body.data.events.map((c: any) => c.name);
+
+    // Personalized same-organizer picks are present regardless of seed.
+    expect(namesA).toEqual(expect.arrayContaining(['Org Pick 1', 'Org Pick 2']));
+    expect(namesB).toEqual(expect.arrayContaining(['Org Pick 1', 'Org Pick 2']));
+    // The generic fill differs between the two seeds.
+    expect(namesA).not.toEqual(namesB);
+  });
 });
