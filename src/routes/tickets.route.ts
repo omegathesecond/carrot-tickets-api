@@ -13,6 +13,7 @@ import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
+import { AdminFeesController } from '@controllers/adminFees.controller';
 import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
@@ -71,6 +72,9 @@ router.get(
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
 router.post('/admin/organizers', requireSuperAdmin, AdminOrganizersController.createOrganizer);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
+
+// Fees — per-event booking charges Carrot has collected (super-admin only)
+router.get('/admin/fees', requireSuperAdmin, AdminFeesController.getFees);
 
 /**
  * Wristband printing — platform staff only (Carrot office printer + Tyvek
