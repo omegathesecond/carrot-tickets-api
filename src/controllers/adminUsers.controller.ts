@@ -27,7 +27,9 @@ export class AdminUsersController {
       const filter: Record<string, unknown> = {};
       if (search) {
         const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-        filter['$or'] = [{ name: rx }, { phone: rx }];
+        // Email-only buyers carry no phone, so search must also match email —
+        // otherwise an admin searching a buyer's address gets "no users match".
+        filter['$or'] = [{ name: rx }, { phone: rx }, { email: rx }];
       }
 
       const [buyers, total] = await Promise.all([
@@ -35,7 +37,7 @@ export class AdminUsersController {
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
-          .select('name phone createdAt lastLoginAt')
+          .select('name phone email createdAt lastLoginAt')
           .lean(),
         Buyer.countDocuments(filter),
       ]);
@@ -67,7 +69,8 @@ export class AdminUsersController {
         return {
           id: String(b._id),
           name: b.name ?? null,
-          phone: b.phone,
+          phone: b.phone ?? null,
+          email: b.email ?? null,
           createdAt: b.createdAt,
           lastLoginAt: b.lastLoginAt ?? null,
           ticketsBought: s?.ticketsBought ?? 0,
