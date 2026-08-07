@@ -152,6 +152,11 @@ buyerSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email
 // most buyers never opt in, and $geoNear can only run once this index exists.
 buyerSchema.index({ location: '2dsphere' });
 
+// Recency index for the activity feed's "just joined" source: joinCandidates()
+// queries { createdAt: { $lt } } sorted newest-first. Must match the live DB
+// (autoIndex) — see the partial-index note above.
+buyerSchema.index({ createdAt: -1 });
+
 // At least one contact handle must exist — phone and email are peers, but a
 // buyer with neither has no identity to key tickets / tokens off.
 buyerSchema.pre('validate', function (next) {
