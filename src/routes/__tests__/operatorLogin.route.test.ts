@@ -5,6 +5,8 @@ import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedOperator } from '../../__tests__/helpers/fixtures';
 import { GateOperator } from '@models/gateOperator.model';
+import { Merchant } from '@models/merchant.model';
+import mongoose from 'mongoose';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 beforeAll(connectTestDb);
@@ -29,6 +31,24 @@ it('routes a gate login to type=gate with a tickets-scoped token', async () => {
   expect(decoded.userType).toBe('gate-operator');
   expect(decoded.isSuperAdmin).toBe(true);
   expect(decoded.permissions).toEqual(expect.arrayContaining(['tickets:scan_tickets', 'tickets:view_scans']));
+});
+
+it('routes a merchant login to type=merchant with a merchant-scoped token', async () => {
+  const eventId = new mongoose.Types.ObjectId();
+  const merchant = await Merchant.create({
+    name: 'Fixture Merchant', eventId, commissionPercent: 5, loginCode: '700003', pin: '445566',
+  });
+  const res = await request(app).post('/api/operator/login').send({ loginCode: '700003', pin: '445566' });
+  expect(res.status).toBe(200);
+  expect(res.body.data.type).toBe('merchant');
+  expect(res.body.data.operator.merchantId).toBe(String(merchant._id));
+  expect(res.body.data.operator.eventId).toBe(String(eventId));
+
+  const decoded: any = jwt.verify(res.body.data.accessToken, JWT_SECRET);
+  expect(decoded.scope).toBe('merchant');
+  expect(decoded.merchantId).toBe(String(merchant._id));
+  expect(decoded.eventId).toBe(String(eventId));
+  expect(decoded.permissions).toEqual(['merchant:charge']);
 });
 
 it('rejects an unknown login code', async () => {
