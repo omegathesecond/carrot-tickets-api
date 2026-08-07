@@ -9,6 +9,7 @@ import { Community } from '@models/community.model';
 import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { organizerFromRequest, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
+import type { SocialActor } from '@utils/socialActor.util';
 
 export class CommunityController {
   /** Resolve the buyer and make sure they carry a username before any social action. */
@@ -21,15 +22,29 @@ export class CommunityController {
     return ensureUsername(buyer);
   }
 
+  /**
+   * Resolve the acting community identity — a buyer OR an organizer brand.
+   * A vendor/sub-user token acts AS the brand (no username needed); otherwise
+   * we fall back to the buyer path (401s anonymous, ensures a username). Both
+   * kinds can now join and post, so the write routes resolve through here.
+   */
+  private static async requireActor(req: Request, res: Response): Promise<SocialActor | null> {
+    const organizer = organizerFromRequest(req);
+    if (organizer) return { type: 'vendor', id: organizer.vendorId };
+    const buyer = await CommunityController.requireBuyer(req, res);
+    if (!buyer) return null;
+    return { type: 'buyer', id: String(buyer._id) };
+  }
+
   private static fail(res: Response, error: any, fallback: string) {
     return failWithHttpError(res, error, fallback);
   }
 
   static async join(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await CommunityController.requireBuyer(req, res);
-      if (!buyer) return;
-      const view = await CommunityMembershipService.join(req.params['eventId'] as string, buyer);
+      const actor = await CommunityController.requireActor(req, res);
+      if (!actor) return;
+      const view = await CommunityMembershipService.join(req.params['eventId'] as string, actor);
       return ApiResponseUtil.success(res, view, 'Joined community');
     } catch (error: any) {
       return CommunityController.fail(res, error, 'Failed to join community');
@@ -39,22 +54,17 @@ export class CommunityController {
   static async getView(req: Request, res: Response): Promise<any> {
     try {
       const eventId = req.params['eventId'] as string;
-      // An organizer token gets the read-only owner peek; a buyer token gets
-      // the normal member view (resolved via their phone/Membership).
-      const organizer = organizerFromRequest(req);
-      if (organizer) {
-        const view = await CommunityMembershipService.getOrganizerView(eventId, organizer);
-        return ApiResponseUtil.success(res, view);
-      }
       // Anonymous viewer (optionalCommunityViewer let them through): serve the
       // public who's-going view — memberCount + channels, no personal state.
       if (!(req as any).ticketsUser) {
         const view = await CommunityMembershipService.getPublicView(eventId);
         return ApiResponseUtil.success(res, view);
       }
-      const buyer = await CommunityController.requireBuyer(req, res);
-      if (!buyer) return;
-      const view = await CommunityMembershipService.getView(eventId, buyer);
+      // A signed-in buyer OR brand: getView resolves their membership (or the
+      // managing-brand read-only peek when a brand owns but hasn't joined).
+      const actor = await CommunityController.requireActor(req, res);
+      if (!actor) return;
+      const view = await CommunityMembershipService.getView(eventId, actor);
       return ApiResponseUtil.success(res, view);
     } catch (error: any) {
       return CommunityController.fail(res, error, 'Failed to load community');
@@ -106,10 +116,32 @@ export class CommunityController {
 
       const query: Record<string, unknown> = { communityId: community._id, bannedAt: { $exists: false } };
       if (before) query['_id'] = { $lt: before };
-      const memberships = await Membership.find(query).sort({ _id: -1 }).limit(limit).populate('buyerId');
+      const memberships = await Membership.find(query)
+        .sort({ _id: -1 })
+        .limit(limit)
+        .populate('buyerId', 'username name avatarUrl')
+        .populate('vendorId', 'businessName logoUrl');
+      // Rows carry a `type` so the client can route to /o/:id (organizer) vs
+      // /u/:username|:id (buyer) — the same buyer|organizer discriminator the
+      // followers/search rows use.
       const members = memberships
-        .filter((m: any) => m.buyerId && typeof m.buyerId === 'object')
-        .map((m: any) => ({ ...toBuyerSummary(m.buyerId), cursor: String(m._id) }));
+        .map((m: any) => {
+          if (m.vendorId && typeof m.vendorId === 'object') {
+            return {
+              id: String(m.vendorId._id),
+              type: 'organizer' as const,
+              username: null,
+              name: m.vendorId.businessName ?? null,
+              avatarUrl: m.vendorId.logoUrl ?? null,
+              cursor: String(m._id),
+            };
+          }
+          if (m.buyerId && typeof m.buyerId === 'object') {
+            return { ...toBuyerSummary(m.buyerId), type: 'buyer' as const, cursor: String(m._id) };
+          }
+          return null;
+        })
+        .filter((r: unknown): r is NonNullable<typeof r> => r !== null);
       return ApiResponseUtil.success(res, members);
     } catch (error: any) {
       return CommunityController.fail(res, error, 'Failed to load members');

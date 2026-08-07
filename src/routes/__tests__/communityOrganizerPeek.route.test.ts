@@ -9,12 +9,20 @@ import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
 import { Message } from '@models/message.model';
 import { Buyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
 
 const PHONE = '+26878422613';
 
+let ownerSeq = 0;
 async function seedOwnedCommunity() {
-  const vendorId = new mongoose.Types.ObjectId();
-  const seeded = await seedPublishedEvent({ vendorId });
+  // A REAL Vendor doc (not a bare ObjectId) so senderVendorId populates and a
+  // brand-authored message renders with organizer identity.
+  const vendor = await Vendor.create({
+    businessName: `Owner Brand ${++ownerSeq}`,
+    email: `owner${ownerSeq}@example.com`,
+    password: 'secret123',
+  });
+  const seeded = await seedPublishedEvent({ vendorId: vendor._id });
   await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   return seeded; // vendorId === the community owner
 }
@@ -42,14 +50,18 @@ describe('community organizer read-only peek', () => {
     expect(view.channels.every((c: any) => c.locked === false)).toBe(true);
   });
 
-  it("403s when a vendor peeks an event they don't manage", async () => {
+  it("lets a non-managing brand view a community it can join (true parity — no longer 403)", async () => {
     const { eventId } = await seedOwnedCommunity();
     const otherVendorId = new mongoose.Types.ObjectId().toString();
 
-    await request(app)
+    const res = await request(app)
       .get(`/api/community/${eventId}`)
       .set('Authorization', `Bearer ${signVendorToken(otherVendorId)}`)
-      .expect(403);
+      .expect(200);
+
+    // Not the owner peek and not yet a member: a plain "can join" view.
+    expect(res.body.data.membership).toBeNull();
+    expect(res.body.data.viewerRole).toBeUndefined();
   });
 
   it('lets the managing organizer list members without a membership of their own', async () => {
@@ -86,24 +98,41 @@ describe('community organizer read-only peek', () => {
     expect(res.body.data[0].body).toBe('Welcome all');
   });
 
-  it('still refuses organizer WRITES — posting a message is buyer-only (401)', async () => {
+  it('requires a brand to JOIN before posting (403 until it does), then lets it post as the brand', async () => {
     const { eventId, vendorId } = await seedOwnedCommunity();
     const community = await Community.findOne({ eventId });
     const general = await Channel.findOne({ communityId: community!._id, slug: 'general' });
+    const token = `Bearer ${signVendorToken(vendorId)}`;
 
+    // Not a member yet → 403 "Join the community first" (no longer a blanket 401).
     await request(app)
       .post(`/api/community/channels/${general!._id}/messages`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
-      .send({ body: 'organizers cannot post here' })
-      .expect(401);
+      .set('Authorization', token)
+      .send({ body: 'before joining' })
+      .expect(403);
+
+    // Join, then post — the message is attributed to the brand (organizer).
+    await request(app).post(`/api/community/${eventId}/join`).set('Authorization', token).expect(200);
+    const posted = await request(app)
+      .post(`/api/community/channels/${general!._id}/messages`)
+      .set('Authorization', token)
+      .send({ body: 'hello from the brand' })
+      .expect(201);
+    expect(posted.body.data.senderType).toBe('organizer');
+    expect(posted.body.data.body).toBe('hello from the brand');
   });
 
-  it('still refuses organizer join — a vendor cannot become a member (401)', async () => {
+  it('lets a brand JOIN the community (true parity) — the managing brand joins as an organizer-role member', async () => {
     const { eventId, vendorId } = await seedOwnedCommunity();
 
-    await request(app)
+    const res = await request(app)
       .post(`/api/community/${eventId}/join`)
       .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
-      .expect(401);
+      .expect(200);
+
+    // The owner joins as 'organizer' (every channel unlocked, may post in
+    // organizer-only channels).
+    expect(res.body.data.membership).not.toBeNull();
+    expect(res.body.data.membership.role).toBe('organizer');
   });
 });

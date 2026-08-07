@@ -30,11 +30,18 @@ export class SocialProfileViewService {
    * (buyer viewer, mounted at /api/social) and
    * VendorSocialController.publicProfile (vendor viewer, mounted at
    * /api/tickets/social) so the two routes can never drift on shape or on
-   * how the viewer-relative flags are derived. Returns null when no buyer
-   * has that username — callers translate that into a 404.
+   * how the viewer-relative flags are derived. Accepts either a username OR a
+   * raw buyer id: a usernameless buyer (username is auto-generated only on a
+   * buyer's first social touch) has no /u/:username address, so link surfaces
+   * fall back to /u/:id. A real username can never be 24 hex chars
+   * (USERNAME_REGEX caps them at [a-z0-9_]{3,20}), so the shape is
+   * unambiguous — hex-24 → look up by _id, otherwise by username. Returns null
+   * when no buyer matches — callers translate that into a 404.
    */
-  static async forViewer(username: string, viewer: SocialActor): Promise<PublicBuyerProfile | null> {
-    const buyer = await Buyer.findOne({ username });
+  static async forViewer(usernameOrId: string, viewer: SocialActor): Promise<PublicBuyerProfile | null> {
+    const buyer = /^[0-9a-f]{24}$/.test(usernameOrId)
+      ? await Buyer.findById(usernameOrId)
+      : await Buyer.findOne({ username: usernameOrId });
     if (!buyer) return null;
 
     const targetId = String(buyer._id);

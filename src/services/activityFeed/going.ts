@@ -83,7 +83,13 @@ export async function goingCandidates(opts: {
   const { before, limit, actorIds } = opts;
 
   // ---- 1. window: newest rows from each source ----
-  const membershipQuery: any = { bannedAt: { $exists: false } };
+  // Buyer memberships only: the "going" activity row is keyed on a buyer
+  // (pairKey + the phone-based ticket twin below both assume it), and every
+  // emitted actor is `kind:'buyer'`. Organizer-brand memberships (buyerId
+  // absent, since Membership went polymorphic) must NOT leak in here or they'd
+  // emit a buyer actor with an undefined id. "Brand is going" in the activity
+  // feed is a separate, deliberate follow-up.
+  const membershipQuery: any = { bannedAt: { $exists: false }, buyerId: { $exists: true } };
   if (before) membershipQuery.createdAt = { $lt: before };
   if (actorIds) membershipQuery.buyerId = { $in: actorIds };
   const memberships = await Membership.find(membershipQuery)

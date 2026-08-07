@@ -152,7 +152,7 @@ export class VendorSocialController {
     }
   }
 
-  /** GET /api/tickets/social/users/search?q= — buyers by username prefix + brands by name. */
+  /** GET /api/tickets/social/users/search?q= — buyers by name (contains) or username (prefix) + brands by name. */
   static async searchUsers(req: Request, res: Response): Promise<any> {
     try {
       const vendorId = VendorSocialController.vendorId(req);
@@ -161,8 +161,16 @@ export class VendorSocialController {
       if (q.length < 2 || q.length > 30) return ApiResponseUtil.error(res, 'q must be 2-30 characters', 400);
       const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       // No block filtering: block is not a vendor concept until SP1b-c.
+      // Match buyer display name too, not just username — usernameless
+      // ticket-buyers (username is auto-generated on first social touch) were
+      // unfindable when this only matched the handle.
       const [buyers, brands] = await Promise.all([
-        Buyer.find({ username: { $regex: `^${escaped}`, $options: 'i' } }).limit(20),
+        Buyer.find({
+          $or: [
+            { name: { $regex: escaped, $options: 'i' } },
+            { username: { $regex: `^${escaped}`, $options: 'i' } },
+          ],
+        }).limit(20),
         Vendor.find({ businessName: { $regex: escaped, $options: 'i' }, isActive: true, _id: { $ne: vendorId } })
           .select('businessName slug logoUrl').limit(20),
       ]);

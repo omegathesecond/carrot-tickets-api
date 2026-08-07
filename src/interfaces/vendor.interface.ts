@@ -39,6 +39,16 @@ export interface IVendor extends Document {
     postalCode?: string;
   };
 
+  // Nearby opt-in (v1) — a brand sharing its location so it can discover nearby
+  // people (and, later, be discoverable itself). Mirrors Buyer.location:
+  // GeoJSON Point with coordinates in [lng, lat] order, absent until the brand
+  // opts in via PATCH /api/tickets/social/me/location (sparse 2dsphere index).
+  location?: {
+    type: 'Point';
+    coordinates: [number, number]; // [lng, lat]
+  };
+  locationUpdatedAt?: Date;
+
   // Verification
   verificationStatus: VerificationStatus;
   verifiedAt?: Date;

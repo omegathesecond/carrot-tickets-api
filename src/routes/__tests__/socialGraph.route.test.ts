@@ -97,6 +97,28 @@ describe('social graph routes', () => {
     void b;
   });
 
+  it('user search matches display name and includes usernameless buyers', async () => {
+    const { authA } = await seedBuyers();
+    // A buyer who never had a social touch: has a name, no username at all.
+    const noHandle = await Buyer.create({ phone: '+26878000044', password: 'secret1', name: 'Sipho Dlamini' });
+
+    const hits = await request(app).get('/api/social/users/search?q=sipho').set('Authorization', authA).expect(200);
+    expect(hits.body.data).toHaveLength(1);
+    expect(hits.body.data[0].id).toBe(String(noHandle._id));
+    expect(hits.body.data[0].name).toBe('Sipho Dlamini');
+    expect(hits.body.data[0].username).toBeNull();
+  });
+
+  it('resolves a usernameless buyer profile by id (the /u/<id> fallback)', async () => {
+    const { authA } = await seedBuyers();
+    const noHandle = await Buyer.create({ phone: '+26878000045', password: 'secret1', name: 'Thandi' });
+
+    const res = await request(app).get(`/api/social/users/${String(noHandle._id)}`).set('Authorization', authA).expect(200);
+    expect(res.body.data.id).toBe(String(noHandle._id));
+    expect(res.body.data.name).toBe('Thandi');
+    expect(res.body.data.username).toBeNull();
+  });
+
   it('community members list: public roster, excludes banned, newest first', async () => {
     const { a, b, c, authA, authB } = await seedBuyers();
     const seeded = await seedPublishedEvent();

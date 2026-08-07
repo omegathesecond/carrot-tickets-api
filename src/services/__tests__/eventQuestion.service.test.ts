@@ -9,6 +9,7 @@ import { EventQuestionReply } from '@models/eventQuestionReply.model';
 import {
   listQuestions,
   listRecent,
+  getQuestion,
   createQuestion,
   createReply,
   toggleQuestionLike,
@@ -351,6 +352,29 @@ describe('eventQuestion.service', () => {
       await listRecent(null);
       expect(eventFindSpy).toHaveBeenCalledTimes(1);
       eventFindSpy.mockRestore();
+    });
+  });
+
+  describe('getQuestion', () => {
+    it('returns one hydrated question with its event block and replies', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const asker = await seedBuyer({ phone: '+26878000100', name: 'Asker' });
+      const replier = await seedBuyer({ phone: '+26878000101', name: 'Replier' });
+      const q = await createQuestion(eventId, { type: 'buyer', id: String(asker._id) }, 'What should I wear?');
+      await createReply(q.id, { type: 'buyer', id: String(replier._id) }, 'Neon colours obviously');
+
+      const detail = await getQuestion(q.id, null);
+      expect(detail).toMatchObject({
+        id: q.id,
+        body: 'What should I wear?',
+        event: { id: eventId, name: 'Snapshot Test Event' },
+      });
+      expect(detail.replies).toHaveLength(1);
+      expect(detail.replies[0]).toMatchObject({ body: 'Neon colours obviously', author: { name: 'Replier' } });
+    });
+
+    it('returns null for a non-existent id (so the controller 404s, not 500s)', async () => {
+      expect(await getQuestion(String(new mongoose.Types.ObjectId()), null)).toBeNull();
     });
   });
 });

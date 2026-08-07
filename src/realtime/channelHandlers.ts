@@ -39,8 +39,11 @@ export function registerChannelHandlers(io: Server, socket: Socket): void {
         if (!buyer) throw new HttpError(401, 'Account not found');
 
         // The exact same authz as the REST message endpoints — membership,
-        // ban, gating with on-demand ticket re-verify.
-        await MessageService.requireChannelAccess(channelId, buyer);
+        // ban, gating with on-demand ticket re-verify. The chat socket is
+        // buyer-only today (socketAuth rejects vendor tokens), so the actor is
+        // always a buyer here; a brand posts/read via the REST endpoints until
+        // vendor sockets land.
+        await MessageService.requireChannelAccess(channelId, { type: 'buyer', id: String(buyer._id) });
         await socket.join(channelRoom(channelId));
 
         // The join is committed; presence is best-effort decoration. During

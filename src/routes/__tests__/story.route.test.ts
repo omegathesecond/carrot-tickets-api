@@ -23,6 +23,15 @@ describe('Stories API', () => {
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
+  /** A ready-to-play image story by `authorId`, active for 24h. */
+  const seedReadyStory = (authorId: string, overrides: Record<string, unknown> = {}) =>
+    Story.create({
+      authorType: 'buyer', authorId, kind: 'image',
+      media: { rawKey: 'k', status: 'ready', image: { url: `https://cdn.carrottickets.com/${authorId}.jpg`, width: 1, height: 1 } },
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      ...overrides,
+    });
+
   describe('POST /api/social/stories', () => {
     it('creates a processing story and returns a presigned upload url', async () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
@@ -100,14 +109,6 @@ describe('Stories API', () => {
   });
 
   describe('GET /api/social/stories', () => {
-    const seedReadyStory = (authorId: string, overrides: Record<string, unknown> = {}) =>
-      Story.create({
-        authorType: 'buyer', authorId, kind: 'image',
-        media: { rawKey: 'k', status: 'ready', image: { url: `https://cdn.carrottickets.com/${authorId}.jpg`, width: 1, height: 1 } },
-        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
-        ...overrides,
-      });
-
     it("returns a followed author's ready active story grouped, seen:false, then seen:true after marking it seen", async () => {
       const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
       const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
@@ -154,11 +155,136 @@ describe('Stories API', () => {
     it('401s without a token', async () => {
       await request(app).get('/api/social/stories').expect(401);
     });
+
+    // Regression: durationSec used to come back null for images (only the
+    // video transcoder ever set one), and the client's Math.max(1, null)
+    // collapsed that to a 1-second flash. It must always be a real number.
+    it('gives an image story a real 5s playback duration, never null', async () => {
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
+      await FollowService.follow(viewer, 'buyer', String(author._id));
+      await seedReadyStory(String(author._id));
+
+      const res = await request(app)
+        .get('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+      expect(res.body.data.stories[0].items[0].durationSec).toBe(5);
+    });
+
+    it('clamps a long video story to 30s', async () => {
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
+      await FollowService.follow(viewer, 'buyer', String(author._id));
+      await Story.create({
+        authorType: 'buyer', authorId: String(author._id), kind: 'video',
+        media: {
+          rawKey: 'k', status: 'ready',
+          video: { url: 'https://cdn.carrottickets.com/v.mp4', poster: 'https://cdn.carrottickets.com/p.jpg', width: 1, height: 1, durationSec: 120 },
+        },
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      });
+
+      const res = await request(app)
+        .get('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+      expect(res.body.data.stories[0].items[0].durationSec).toBe(30);
+    });
+
+    it('reports viewerCount on your OWN items but never on other authors\' items', async () => {
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
+      const watcher = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Watcher' });
+      const story = await seedReadyStory(String(owner._id));
+      await FollowService.follow(watcher, 'buyer', String(owner._id));
+
+      await request(app)
+        .post(`/api/social/stories/${story.id}/seen`)
+        .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
+        .expect(200);
+
+      const mine = await request(app)
+        .get('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+      expect(mine.body.data.stories[0].isOwn).toBe(true);
+      expect(mine.body.data.stories[0].items[0].viewerCount).toBe(1);
+
+      const theirs = await request(app)
+        .get('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
+        .expect(200);
+      expect(theirs.body.data.stories[0].isOwn).toBe(false);
+      expect(theirs.body.data.stories[0].items[0].viewerCount).toBeUndefined();
+    });
   });
 
   describe('POST /api/social/stories/:id/seen', () => {
     it('401s without a token', async () => {
       await request(app).post('/api/social/stories/000000000000000000000000/seen').expect(401);
+    });
+
+    // Previewing your own status is not a view: it must not add you to your
+    // own viewer list, and must not dim your own ring (seen stays false).
+    it('does NOT record the author viewing their own story', async () => {
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
+      const story = await seedReadyStory(String(owner._id));
+      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+
+      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', auth).expect(200);
+
+      const viewers = await request(app).get(`/api/social/stories/${story.id}/viewers`).set('Authorization', auth).expect(200);
+      expect(viewers.body.data.count).toBe(0);
+
+      const rail = await request(app).get('/api/social/stories').set('Authorization', auth).expect(200);
+      expect(rail.body.data.stories[0].seen).toBe(false);
+    });
+  });
+
+  describe('GET /api/social/stories/:id/viewers', () => {
+    it('lists who saw the story, newest first, for the author', async () => {
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
+      const first = await Buyer.create({ phone: '+26878400202', password: 'secret1', name: 'First Watcher', username: 'firstw' });
+      const second = await Buyer.create({ phone: '+26878400303', password: 'secret1', name: 'Second Watcher', username: 'secondw' });
+      const story = await seedReadyStory(String(owner._id));
+      await FollowService.follow(first, 'buyer', String(owner._id));
+      await FollowService.follow(second, 'buyer', String(owner._id));
+
+      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', `Bearer ${signBuyerToken('+26878400202')}`).expect(200);
+      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', `Bearer ${signBuyerToken('+26878400303')}`).expect(200);
+
+      const res = await request(app)
+        .get(`/api/social/stories/${story.id}/viewers`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+
+      expect(res.body.data.count).toBe(2);
+      expect(res.body.data.viewers.map((v: any) => v.name)).toEqual(['Second Watcher', 'First Watcher']);
+      expect(res.body.data.viewers[0]).toMatchObject({ type: 'buyer', username: 'secondw', id: String(second._id) });
+      expect(res.body.data.viewers[0].seenAt).toBeTruthy();
+    });
+
+    it("403s a non-author asking who saw someone else's story", async () => {
+      const owner = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Owner' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Nosy' });
+      const story = await seedReadyStory(String(owner._id));
+
+      await request(app)
+        .get(`/api/social/stories/${story.id}/viewers`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(403);
+    });
+
+    it('404s an unknown story id', async () => {
+      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
+      await request(app)
+        .get('/api/social/stories/000000000000000000000000/viewers')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(404);
+    });
+
+    it('401s without a token', async () => {
+      await request(app).get('/api/social/stories/000000000000000000000000/viewers').expect(401);
     });
   });
 });

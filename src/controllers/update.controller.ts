@@ -257,6 +257,7 @@ export class UpdateController {
       saveCount: update.saveCount,
       shareCount: update.shareCount,
       viewCount: update.viewCount ?? 0,
+      commentCount: update.commentCount ?? 0,
       createdAt: update.createdAt,
       viewerReactions: reactions ?? null,
       viewerIsAuthor,

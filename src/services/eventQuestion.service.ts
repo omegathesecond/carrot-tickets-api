@@ -2,85 +2,12 @@ import { Event } from '@models/event.model';
 import { EventQuestion, IEventQuestion } from '@models/eventQuestion.model';
 import { EventQuestionReply } from '@models/eventQuestionReply.model';
 import { EventQuestionReaction } from '@models/eventQuestionReaction.model';
-import { Vendor } from '@models/vendor.model';
-import { Buyer } from '@models/buyer.model';
 import { toggleReactionGeneric } from '@services/reactions.service';
+import { assertActorNotSuspended, authorDto, loadAuthorMaps, type AuthorMaps } from '@services/socialAuthor.service';
 import { HttpError } from '@utils/httpError.util';
-import { assertNotSuspended } from '@utils/socialSuspension.util';
-import type { SocialActor, SocialActorType } from '@utils/socialActor.util';
+import type { SocialActor } from '@utils/socialActor.util';
 
 const MAX_BODY_LENGTH = 1000;
-
-/**
- * A brand acting as an organizer has no `socialSuspendedAt` — only buyer
- * actors can be suspended (see @utils/socialSuspension.util). Shared by
- * createQuestion/createReply/toggleQuestionLike so a suspended buyer can't
- * post or like world-readable Q&A content.
- */
-async function assertActorNotSuspended(actor: SocialActor): Promise<void> {
-  if (actor.type !== 'buyer') return;
-  const buyer = await Buyer.findById(actor.id);
-  if (!buyer) throw new HttpError(404, 'Account not found');
-  assertNotSuspended(buyer);
-}
-
-interface BuyerAuthorDTO {
-  type: 'buyer';
-  id: string;
-  name: string | null;
-  username: string | null;
-  avatarUrl: string | null;
-}
-
-interface OrganizerAuthorDTO {
-  type: 'organizer';
-  id: string;
-  name: string;
-  avatarUrl: string | null;
-}
-
-type AuthorDTO = BuyerAuthorDTO | OrganizerAuthorDTO;
-
-interface AuthoredItem {
-  authorType: SocialActorType;
-  authorId: unknown;
-}
-
-interface AuthorMaps {
-  vendors: Map<string, any>;
-  buyers: Map<string, any>;
-}
-
-/**
- * Batch-load the Vendor/Buyer docs behind a set of (authorType, authorId)
- * pairs in at most two queries total, mirroring
- * UpdateService.buildUpdateSlides — callers (listQuestions, createQuestion,
- * createReply) pass every question+reply row at once so author hydration
- * never becomes one query per row.
- */
-async function loadAuthorMaps(items: AuthoredItem[]): Promise<AuthorMaps> {
-  const vendorIds = [...new Set(items.filter((i) => i.authorType === 'vendor').map((i) => String(i.authorId)))];
-  const buyerIds = [...new Set(items.filter((i) => i.authorType === 'buyer').map((i) => String(i.authorId)))];
-
-  const [vendors, buyers] = await Promise.all([
-    vendorIds.length ? Vendor.find({ _id: { $in: vendorIds } }).select('businessName logoUrl') : Promise.resolve([]),
-    buyerIds.length ? Buyer.find({ _id: { $in: buyerIds } }).select('name username avatarUrl') : Promise.resolve([]),
-  ]);
-
-  return {
-    vendors: new Map(vendors.map((v: any) => [String(v._id), v])),
-    buyers: new Map(buyers.map((b: any) => [String(b._id), b])),
-  };
-}
-
-function authorDto(authorType: SocialActorType, authorId: unknown, maps: AuthorMaps): AuthorDTO {
-  if (authorType === 'vendor') {
-    const v = maps.vendors.get(String(authorId));
-    return { type: 'organizer', id: String(authorId), name: v?.businessName ?? 'Organizer', avatarUrl: v?.logoUrl ?? null };
-  }
-  const b = maps.buyers.get(String(authorId));
-  return { type: 'buyer', id: String(authorId), name: b?.name ?? null, username: b?.username ?? null, avatarUrl: b?.avatarUrl ?? null };
-}
 
 function replyDto(reply: any, maps: AuthorMaps) {
   return {
@@ -158,6 +85,20 @@ async function hydrateQuestions(questions: any[], actor: SocialActor | null): Pr
 export async function listQuestions(eventId: string, actor: SocialActor | null): Promise<any[]> {
   const questions = await EventQuestion.find({ eventId }).sort({ createdAt: -1 }).lean();
   return hydrateQuestions(questions, actor);
+}
+
+/**
+ * One question by id, hydrated exactly like the feed rows (author, replies
+ * oldest-first, viewerHasLiked) PLUS its owning event {id, name} — powers the
+ * standalone topic-detail conversation page (/topic/:id). Returns null when the
+ * id doesn't resolve so the controller can 404 rather than 500.
+ */
+export async function getQuestion(questionId: string, actor: SocialActor | null): Promise<any | null> {
+  const question = await EventQuestion.findById(questionId).lean();
+  if (!question) return null;
+  const [hydrated] = await hydrateQuestions([question], actor);
+  const event = await Event.findById(question.eventId).select('name').lean();
+  return { ...hydrated, event: { id: String(question.eventId), name: (event as any)?.name ?? null } };
 }
 
 /**

@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { DmThread, IDmThread } from '@models/dmThread.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
-import { Membership } from '@models/membership.model';
 import { Message } from '@models/message.model';
 import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
@@ -33,8 +32,9 @@ export class DmThreadService {
   }
 
   /**
-   * The spec's DM privacy gate (§2.4). Order matters: block beats everything,
-   * then the target's own privacy setting decides.
+   * The DM privacy gate (§2.4). Order matters: a block beats everything, then
+   * the target's own privacy setting decides. 'friends' accepts messages from
+   * friends only; the default ('community') accepts anyone on the platform.
    */
   static async assertCanDm(sender: IBuyer, target: IBuyer): Promise<void> {
     const senderId = String(sender._id);
@@ -44,21 +44,10 @@ export class DmThreadService {
       throw new HttpError(403, 'You cannot message this user');
     }
 
-    const friends = await FollowService.isFriend(senderId, targetId);
     if (target.dmPrivacy === 'friends') {
+      const friends = await FollowService.isFriend(senderId, targetId);
       if (!friends) throw new HttpError(403, 'This user only accepts messages from friends');
-      return;
     }
-
-    // 'community' (default): friends OR any shared community.
-    if (friends) return;
-    const myCommunities = await Membership.find({ buyerId: sender._id, bannedAt: { $exists: false } }).select('communityId');
-    const shared = await Membership.exists({
-      buyerId: target._id,
-      bannedAt: { $exists: false },
-      communityId: { $in: myCommunities.map((m) => m.communityId) },
-    });
-    if (!shared) throw new HttpError(403, 'You can only message people you share a community with');
   }
 
   static async openThread(creator: IBuyer, participantIds: string[]): Promise<IDmThread> {

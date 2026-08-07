@@ -42,6 +42,7 @@ router.post('/stories', authenticateBuyer, StoryController.create);
 router.post('/stories/:id/finalize', authenticateBuyer, StoryController.finalize);
 router.get('/stories', authenticateBuyer, StoryController.list);
 router.post('/stories/:id/seen', authenticateBuyer, StoryController.seen);
+router.get('/stories/:id/viewers', authenticateBuyer, StoryController.viewers);
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.
 router.get('/users/search', authenticateBuyer, SocialProfileController.searchUsers);
 router.get('/users/:username', authenticateBuyer, SocialProfileController.publicProfile);

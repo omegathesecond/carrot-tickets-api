@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
-import { listQuestions, listRecent, createQuestion, createReply, toggleQuestionLike } from '@services/eventQuestion.service';
+import { listQuestions, listRecent, getQuestion, createQuestion, createReply, toggleQuestionLike } from '@services/eventQuestion.service';
 
 /**
  * Event Q&A — questions/replies/likes scoped to an event, for the
@@ -45,6 +45,23 @@ export class EventQuestionController {
       return ApiResponseUtil.success(res, { questions });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load recent questions');
+    }
+  }
+
+  /**
+   * GET /api/community/questions/:questionId
+   * One topic (question) hydrated with its replies + event, for the standalone
+   * conversation page. Public + optionalTicketsAuth: anonymous callers can read
+   * the thread (viewerHasLiked:false); a missing id 404s.
+   */
+  static async get(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      const question = await getQuestion(req.params['questionId'] as string, actor);
+      if (!question) return ApiResponseUtil.notFound(res, 'Topic not found');
+      return ApiResponseUtil.success(res, question);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load topic');
     }
   }
 

@@ -86,6 +86,9 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     type: 'update', id: String(u._id), sortAt: u.createdAt.toISOString(),
     kind: u.kind, caption: u.caption, media: u.media,
     likeCount: u.likeCount, saveCount: u.saveCount, shareCount: u.shareCount, viewCount: u.viewCount ?? 0,
+    // `?? 0`: posts created before the counter existed have no stored field,
+    // and `undefined + 1` would render NaN on the rail after the first comment.
+    commentCount: u.commentCount ?? 0,
     eventId: u.eventId ? String(u.eventId) : null,
     author: u.authorType === 'vendor'
       ? { type: 'organizer', id: String(u.authorId), name: vendorMap.get(String(u.authorId))?.businessName ?? 'Organizer', avatarUrl: vendorMap.get(String(u.authorId))?.logoUrl ?? null, slug: vendorMap.get(String(u.authorId))?.slug }

@@ -84,4 +84,20 @@ describe('GET /api/public/trending', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({ trending: [] });
   });
+
+  it('attaches a representative thumbnail per tag (image url, or a video poster)', async () => {
+    await Update.create(makeUpdate(['gallery'], { media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn/pic.jpg', width: 1, height: 1 } } }));
+    await Update.create(
+      makeUpdate(['reel'], {
+        kind: 'video',
+        media: { rawKey: 'k', status: 'ready', video: { url: 'https://cdn/v.mp4', poster: 'https://cdn/poster.jpg', width: 1, height: 1, durationSec: 3 } },
+      }),
+    );
+
+    const res = await request(app).get('/api/public/trending');
+    expect(res.status).toBe(200);
+    const byTag = Object.fromEntries(res.body.data.trending.map((t: any) => [t.tag, t.image]));
+    expect(byTag['gallery']).toBe('https://cdn/pic.jpg');
+    expect(byTag['reel']).toBe('https://cdn/poster.jpg');
+  });
 });

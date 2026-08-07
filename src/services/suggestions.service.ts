@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { Follow } from '@models/follow.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
@@ -7,6 +8,7 @@ import { VerificationStatus } from '@interfaces/vendor.interface';
 import { FollowService } from '@services/follow.service';
 import { GoingService } from '@services/going.service';
 import { seededShuffle } from '@utils/seededShuffle.util';
+import type { SocialActor } from '@utils/socialActor.util';
 
 export interface SuggestionsPageOptions {
   limit?: number;
@@ -77,12 +79,18 @@ export class SuggestionsService {
    *  socially-suspended buyers. Paginated via `page`/`limit` over the fully
    *  ranked candidate set, so pagination is deterministic. */
   static async peopleYouMayKnow(
-    buyerId: string,
+    actor: SocialActor,
     { limit = 20, page = 1, seed }: SuggestionsPageOptions = {}
   ): Promise<Array<{ buyer: IBuyer; mutualCount: number }>> {
-    const viewer = await Buyer.findById(buyerId);
-    const iFollow = await FollowService.followingIds(buyerId, 'buyer');
-    const exclude = new Set<string>([buyerId, ...iFollow]);
+    // Viewer profile (city + shared-event signals) only exists for a buyer
+    // actor. A vendor brand has no Buyer row, so those two composite-score
+    // signals simply fall to 0/false and ranking leans on mutual-count +
+    // recency — the follow-graph half below works identically for either actor.
+    const viewer = actor.type === 'buyer' ? await Buyer.findById(actor.id) : null;
+    const iFollow = await FollowService.followingIds(actor.id, 'buyer', actor.type);
+    // A vendor id is never a buyer candidate, so self-exclusion only matters
+    // for a buyer viewer.
+    const exclude = new Set<string>(actor.type === 'buyer' ? [actor.id, ...iFollow] : iFollow);
 
     let candidates: Array<{ id: string; mutualCount: number }>;
     if (iFollow.length === 0) {
@@ -165,15 +173,19 @@ export class SuggestionsService {
    *  BEFORE ranking, which meant a popular organizer past the 100th row could
    *  never appear, on top of firing ~2 queries per vendor. */
   static async organizersToFollow(
-    buyerId: string,
+    actor: SocialActor,
     { limit = 20, page = 1, seed }: SuggestionsPageOptions = {}
   ): Promise<Array<{ vendor: any; eventCount: number; followerCount: number; isFollowing: boolean }>> {
     const skip = (Math.max(1, page) - 1) * limit;
 
+    // A vendor viewing "organizers to follow" must never be offered itself.
+    const match: Record<string, unknown> = { isActive: true, verificationStatus: VerificationStatus.VERIFIED };
+    if (actor.type === 'vendor') match['_id'] = { $ne: new Types.ObjectId(actor.id) };
+
     // Ranking pipeline shared by both paths — identical to the pre-shuffle
     // version up to and including the $project.
     const basePipeline: any[] = [
-      { $match: { isActive: true, verificationStatus: VerificationStatus.VERIFIED } },
+      { $match: match },
       {
         // Follower count for this organizer. `from` is read off the actual
         // registered Mongoose collection (not a hardcoded string) so a
@@ -224,7 +236,7 @@ export class SuggestionsService {
       rows = seededShuffle(pool, seed).slice(skip, skip + limit);
     }
 
-    const following = new Set(await FollowService.followingIds(buyerId, 'organizer'));
+    const following = new Set(await FollowService.followingIds(actor.id, 'organizer', actor.type));
     return rows.map((v: any) => ({
       vendor: v,
       followerCount: v.followerCount,

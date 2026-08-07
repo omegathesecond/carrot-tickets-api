@@ -34,19 +34,15 @@ describe('DmThreadService', () => {
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
-  it('community privacy: shared community allows, stranger is refused', async () => {
+  it('default privacy: anyone can message, no shared community needed', async () => {
     const a = await seedBuyer('+26878000001');
     const b = await seedBuyer('+26878000002');
-    await expect(DmThreadService.assertCanDm(a, b)).rejects.toMatchObject({ statusCode: 403 });
-
-    await shareCommunity(a, b);
     await expect(DmThreadService.assertCanDm(a, b)).resolves.toBeUndefined();
   });
 
-  it('friends privacy: community is not enough, friendship is', async () => {
+  it('friends privacy: a stranger is refused, a friend is allowed', async () => {
     const a = await seedBuyer('+26878000001');
     const b = await seedBuyer('+26878000002', 'friends');
-    await shareCommunity(a, b);
     await expect(DmThreadService.assertCanDm(a, b)).rejects.toMatchObject({ statusCode: 403 });
 
     await makeFriends(a, b);
@@ -106,9 +102,9 @@ describe('DmThreadService', () => {
 
     await expect(DmThreadService.openThread(a, [])).rejects.toMatchObject({ statusCode: 400 });
 
-    const stranger = await seedBuyer('+26878000099'); // no shared community
+    const guarded = await seedBuyer('+26878000099', 'friends'); // friends-only, not a friend
     await expect(
-      DmThreadService.openThread(a, [...others.map((o) => String(o._id)), String(stranger._id)])
+      DmThreadService.openThread(a, [...others.map((o) => String(o._id)), String(guarded._id)])
     ).rejects.toMatchObject({ statusCode: 403 });
   });
 

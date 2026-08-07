@@ -35,7 +35,7 @@ describe('external event community join', () => {
     // directly here since this test creates the Event via the model.
     await Community.create({ eventId: e._id, vendorId: e.vendorId });
 
-    const view = await CommunityMembershipService.join(String(e._id), buyer as any);
+    const view = await CommunityMembershipService.join(String(e._id), { type: 'buyer', id: String(buyer._id) });
     expect(view.membership).not.toBeNull();
   });
 
@@ -54,7 +54,7 @@ describe('external event community join', () => {
       price: 100, customerPhone: PHONE, status: TicketStatus.SOLD,
     });
 
-    const view = await CommunityMembershipService.join(String(e._id), buyer as any);
+    const view = await CommunityMembershipService.join(String(e._id), { type: 'buyer', id: String(buyer._id) });
     expect(view.membership).not.toBeNull();
     expect(view.membership!.ticketVerified).toBe(false);
   });

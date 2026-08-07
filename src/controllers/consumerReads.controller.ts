@@ -97,7 +97,7 @@ export class ConsumerReadsController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const { page, limit, seed } = ConsumerReadsController.parsePageLimit(req);
-      const rows = await SuggestionsService.peopleYouMayKnow(String(buyer._id), { page, limit, seed });
+      const rows = await SuggestionsService.peopleYouMayKnow({ type: 'buyer', id: String(buyer._id) }, { page, limit, seed });
       const data = rows.map(({ buyer: b, mutualCount }) => ({
         id: String(b._id),
         name: b.name ?? null,
@@ -120,7 +120,7 @@ export class ConsumerReadsController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const { page, limit, seed } = ConsumerReadsController.parsePageLimit(req);
-      const rows = await SuggestionsService.organizersToFollow(String(buyer._id), { page, limit, seed });
+      const rows = await SuggestionsService.organizersToFollow({ type: 'buyer', id: String(buyer._id) }, { page, limit, seed });
       const data = rows.map(({ vendor: v, eventCount, followerCount, isFollowing }) => ({
         id: String(v._id),
         businessName: v.businessName,
@@ -154,7 +154,7 @@ export class ConsumerReadsController {
       }
       const radiusKm = NearbyService.resolveRadiusKm(req.query['radiusKm']);
 
-      const rows = await NearbyService.nearbyPeople(String(buyer._id), lat, lng, radiusKm);
+      const rows = await NearbyService.nearbyPeople({ type: 'buyer', id: String(buyer._id) }, lat, lng, radiusKm);
       const people = rows.map((r) => ({
         id: r.id,
         name: r.name,
@@ -179,7 +179,7 @@ export class ConsumerReadsController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const seed = parseSeed(req.query['seed']);
-      const { basisEvent, eventIds } = await RecommendationsService.forBuyer(String(buyer._id), { seed });
+      const { basisEvent, eventIds } = await RecommendationsService.forViewer({ type: 'buyer', id: String(buyer._id) }, { seed });
       const events = await buildEventCards(eventIds, { type: 'buyer', id: String(buyer._id) });
       return ApiResponseUtil.success(res, { basisEvent, events });
     } catch (error: any) {

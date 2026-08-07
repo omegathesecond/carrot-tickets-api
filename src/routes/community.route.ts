@@ -4,6 +4,7 @@ import { CommunityController } from '@controllers/community.controller';
 import { MessageController } from '@controllers/message.controller';
 import { ReportController } from '@controllers/report.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
+import { TopicsMineController } from '@controllers/topicsMine.controller';
 
 const router = Router();
 
@@ -15,17 +16,20 @@ const router = Router();
 // /:eventId route below is 1-2 segments, so segment count alone already
 // disambiguates them regardless of registration order.
 //
-// READ routes use authenticateCommunityViewer (buyer OR managing organizer);
-// the controllers branch on token type and give an organizer a read-only,
-// ownership-gated peek. WRITE routes stay authenticateBuyer, so an organizer
-// token structurally can't post, join, mark-read or delete — read-only is
-// enforced by routing, not by per-handler role checks.
+// Community membership is polymorphic now: a buyer OR an organizer brand can
+// join and post. So read AND write routes both use authenticateCommunityViewer
+// (buyer OR vendor/sub-user token); the controllers resolve a SocialActor and
+// enforce membership per-handler (a non-member — brand or buyer — is 403'd by
+// requireChannelAccess). A managing brand that hasn't joined still gets the
+// read-only ownership-gated peek on the READ paths. verify-ticket + reports
+// stay authenticateBuyer — a brand holds no ticket and buyer-reporting is a
+// buyer concept.
 
 router.get('/channels/:channelId/messages', authenticateCommunityViewer, MessageController.list);
-router.post('/channels/:channelId/messages', authenticateBuyer, MessageController.send);
-router.post('/channels/:channelId/read', authenticateBuyer, MessageController.markRead);
+router.post('/channels/:channelId/messages', authenticateCommunityViewer, MessageController.send);
+router.post('/channels/:channelId/read', authenticateCommunityViewer, MessageController.markRead);
 router.get('/channels/:channelId/pins', authenticateCommunityViewer, MessageController.listPins);
-router.delete('/messages/:messageId', authenticateBuyer, MessageController.deleteOwn);
+router.delete('/messages/:messageId', authenticateCommunityViewer, MessageController.deleteOwn);
 
 /**
  * Buyer report filing — a message or another buyer. Admin review lives at
@@ -39,10 +43,19 @@ router.post('/reports', authenticateBuyer, ReportController.file);
  * the controller resolves the SocialActor and 401s writes itself when one
  * doesn't resolve, so anonymous callers can still GET the thread.
  */
+// "YOUR TOPICS" — the actor's own topics + per-topic read cursor. Registered
+// before the /questions/:questionId writes: 'mine' is a literal 2-segment GET
+// that must never be captured as a :questionId. Both 401 without an actor.
+router.get('/questions/mine', optionalTicketsAuth, TopicsMineController.listMine);
+// Single topic (conversation page). After /questions/mine so the literal wins;
+// a 2-segment GET that never collides with the 3-segment POSTs below.
+router.get('/questions/:questionId', optionalTicketsAuth, EventQuestionController.get);
+router.post('/questions/:questionId/read', optionalTicketsAuth, TopicsMineController.markRead);
+
 router.post('/questions/:questionId/replies', optionalTicketsAuth, EventQuestionController.reply);
 router.post('/questions/:questionId/like', optionalTicketsAuth, EventQuestionController.like);
 
-router.post('/:eventId/join', authenticateBuyer, CommunityController.join);
+router.post('/:eventId/join', authenticateCommunityViewer, CommunityController.join);
 // Who's-going social proof is public: optionalCommunityViewer lets signed-out
 // visitors read the community view + roster (join/messages stay gated).
 router.get('/:eventId', optionalCommunityViewer, CommunityController.getView);

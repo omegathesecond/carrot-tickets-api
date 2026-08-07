@@ -2,24 +2,32 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Buyer } from '@models/buyer.model';
 import { R2Service } from '@utils/r2.service';
-import { normalizePhone } from '@utils/phone.util';
+import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 
 /**
  * Buyer profile endpoints for the public site. A buyer is identified by the
- * verified phone carried on their token (req.ticketsUser.userPhone) — the same
- * identity used by "My Tickets" — so these routes sit behind authenticateBuyer.
+ * verified identity carried on their token — buyerId is canonical (email-only
+ * buyers always carry it), with older phone-only tokens falling back to
+ * userPhone — the same precedence "My Tickets" uses, so these routes sit behind
+ * authenticateBuyer.
  *
  * Only the profile picture is editable here. The name is set at registration;
  * the avatar is stored in the shared tickets R2 bucket (reusing R2Service, the
  * same storage the event media uses) and its public URL is saved on the Buyer.
  */
 export class BuyerProfileController {
-  /** Resolve the signed-in buyer from the token's verified phone. */
+  /**
+   * Resolve the signed-in buyer from the token, mirroring resolveBuyerFromRequest
+   * (buyerId first, then userPhone). `signedIn` reflects that the token carries a
+   * usable buyer identity — it must NOT be derived from phone alone, or email-only
+   * buyers (buyerId, no userPhone) get wrongly told to sign in again.
+   */
   private static async resolveBuyer(req: Request) {
-    const phone = normalizePhone((req as any).ticketsUser?.userPhone || '');
-    if (!phone) return { phone: null, buyer: null };
-    const buyer = await Buyer.findOne({ phone });
-    return { phone, buyer };
+    const u = (req as any).ticketsUser;
+    const signedIn = Boolean(u?.buyerId || u?.userPhone);
+    if (!signedIn) return { signedIn: false, buyer: null };
+    const buyer = await resolveBuyerFromRequest(req);
+    return { signedIn: true, buyer };
   }
 
   /**
@@ -30,12 +38,12 @@ export class BuyerProfileController {
    */
   static async getProfile(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, buyer } = await BuyerProfileController.resolveBuyer(req);
-      if (!phone) {
+      const { signedIn, buyer } = await BuyerProfileController.resolveBuyer(req);
+      if (!signedIn) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to view your profile');
       }
       return ApiResponseUtil.success(res, {
-        phone,
+        phone: buyer?.phone ?? null,
         name: buyer?.name ?? null,
         avatarUrl: buyer?.avatarUrl ?? null,
       });
@@ -53,8 +61,8 @@ export class BuyerProfileController {
    */
   static async uploadAvatar(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, buyer } = await BuyerProfileController.resolveBuyer(req);
-      if (!phone) {
+      const { signedIn, buyer } = await BuyerProfileController.resolveBuyer(req);
+      if (!signedIn) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to update your profile');
       }
       if (!buyer) {
@@ -96,8 +104,8 @@ export class BuyerProfileController {
    */
   static async deleteAvatar(req: Request, res: Response): Promise<any> {
     try {
-      const { phone, buyer } = await BuyerProfileController.resolveBuyer(req);
-      if (!phone) {
+      const { signedIn, buyer } = await BuyerProfileController.resolveBuyer(req);
+      if (!signedIn) {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to update your profile');
       }
       if (!buyer) {
