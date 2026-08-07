@@ -14,7 +14,9 @@ export interface IUpdate extends Document {
   saveCount: number;
   shareCount: number;
   viewCount: number;
-  commentCount: number;   // stays 0 in v1
+  /** Maintained by updateComment.service ($inc on create, clamped $subtract on
+   *  soft-delete) — never recomputed from a count() on read. */
+  commentCount: number;
   status: 'active' | 'removed';
   createdAt: Date;
   updatedAt: Date;
