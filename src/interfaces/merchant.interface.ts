@@ -29,5 +29,7 @@ export interface MerchantToken {
   merchantId: string;
   eventId: string;
   name: string;
+  /** The event's display name, for UI headers (e.g. the vendor/POS chrome) — optional so older tokens without it still verify. */
+  eventName?: string;
   permissions: MerchantPermission[];
 }

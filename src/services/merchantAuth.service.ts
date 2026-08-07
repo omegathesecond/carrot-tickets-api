@@ -1,6 +1,7 @@
 // api/src/services/merchantAuth.service.ts
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { Merchant } from '@models/merchant.model';
+import { Event } from '@models/event.model';
 import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 
@@ -44,11 +45,17 @@ export class MerchantAuthService {
     merchant.lastLoginAt = new Date();
     await merchant.save();
 
+    // The app's vendor header shows this instead of a raw eventId — best
+    // effort: a missing/deleted event must not block login, it just means
+    // eventName comes back undefined and the UI falls back to the id.
+    const event = await Event.findById(merchant.eventId).select('name').lean();
+
     const payload: MerchantToken = {
       scope: 'merchant',
       merchantId: (merchant._id as any).toString(),
       eventId: merchant.eventId.toString(),
       name: merchant.name,
+      ...(event?.name ? { eventName: event.name } : {}),
       permissions: [MerchantPermission.CHARGE],
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
@@ -59,6 +66,7 @@ export class MerchantAuthService {
         merchantId: payload.merchantId,
         name: merchant.name,
         eventId: payload.eventId,
+        eventName: event?.name,
       },
     };
   }
