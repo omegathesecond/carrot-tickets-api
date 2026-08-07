@@ -264,4 +264,23 @@ export class WalletService {
       await session.endSession();
     }
   }
+
+  /**
+   * Gate-side read: resolve a tapped band's wallet (cashless spec §5.1/§5.3) —
+   * balance, cash-funded portion, status, and its 10 most recent top-ups.
+   * Scoped to one event (a band UID is only unique per event, per the
+   * {eventId, bandUid} partial index on Wallet), so callers must always pass
+   * the event the band was tapped at. Returns null for an unbound/unknown uid
+   * rather than throwing, so the controller can turn that into a clean 404.
+   */
+  static async getWalletViewByBand(bandUid: string, eventId: string) {
+    const wallet = await Wallet.findOne({ eventId, bandUid });
+    if (!wallet) return null;
+    const history = await WalletTopup.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean();
+    return {
+      ticket: { id: String(wallet.ticketId) },
+      balance: wallet.balance, cashFundedBalance: wallet.cashFundedBalance, status: wallet.status,
+      history: history.map(h => ({ type: 'topup', method: h.method, amount: h.amount, at: h.createdAt })),
+    };
+  }
 }

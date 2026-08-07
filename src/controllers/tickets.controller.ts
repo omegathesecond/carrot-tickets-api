@@ -7,6 +7,8 @@ import { TicketService } from '@services/ticket.service';
 import { ScanService } from '@services/scan.service';
 import { AnalyticsService } from '@services/analytics.service';
 import { ExportService } from '@services/export.service';
+import { WalletService } from '@services/wallet.service';
+import { normalizeBandUid } from '@utils/bandUid.util';
 import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
@@ -897,6 +899,33 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Reissue band error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to reissue band', 400);
+    }
+  }
+
+  /**
+   * Gate: Look up a tapped band's cashless wallet (cashless spec §5.1/§5.3) —
+   * balance, cash-funded portion, status, and recent top-up history. Read-only,
+   * gated by the same SCAN_TICKETS permission as the rest of the gate flow.
+   * eventId is required (a band uid is only unique per event) and must be a
+   * 24-hex ObjectId; anything else is a 400, not a 500.
+   */
+  static async walletByBand(req: Request, res: Response): Promise<any> {
+    try {
+      const uid = normalizeBandUid(req.params.uid as string);
+      const eventId = String(req.query.eventId || '');
+      if (!/^[0-9a-fA-F]{24}$/.test(eventId)) {
+        return ApiResponseUtil.error(res, 'eventId is required', 400);
+      }
+
+      const view = await WalletService.getWalletViewByBand(uid, eventId);
+      if (!view) {
+        return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 404);
+      }
+
+      return ApiResponseUtil.success(res, view);
+    } catch (error: any) {
+      console.error('Wallet by band error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Lookup failed', 500);
     }
   }
 

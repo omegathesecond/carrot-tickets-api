@@ -400,6 +400,17 @@ router.post(
   TicketsController.reissueBand
 );
 
+/**
+ * Gate-side cashless wallet lookup (cashless spec §5.1/§5.3) — tap a band, see
+ * its wallet balance + recent history. Same SCAN_TICKETS gate as the rest of
+ * the gate flow above.
+ */
+router.get(
+  '/wallets/by-band/:uid',
+  requireTicketsPermission(TicketsPermission.SCAN_TICKETS),
+  TicketsController.walletByBand
+);
+
 router.get(
   '/scans/stats',
   requireTicketsPermission(TicketsPermission.VIEW_SCANS),
