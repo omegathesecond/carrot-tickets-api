@@ -415,13 +415,22 @@ export const validateTicketSchema = Joi.object({
     .messages({ 'string.pattern.base': 'Invalid event ID' })
 });
 
+// Gate check-in accepts EITHER a scanned QR/short-code ticketId OR a tapped
+// cashless band uid (cashless spec §5.1) — never both, never neither. bandUid
+// uses the same 14-hex (7-byte) minimum as bindBandSchema/reissueBandSchema.
 export const checkInTicketSchema = Joi.object({
   ticketId: Joi.string()
-    .required()
     .trim()
     .messages({
-      'string.empty': 'Ticket ID is required',
-      'any.required': 'Ticket ID is required'
+      'string.empty': 'Ticket ID is required'
+    }),
+  bandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{14,}$/)
+    .messages({
+      'string.empty': 'Band UID is required',
+      'string.pattern.base': 'Band UID must be at least 7 bytes (14 hex chars)'
     }),
   expectedEventId: Joi.string()
     .optional()
@@ -433,6 +442,8 @@ export const checkInTicketSchema = Joi.object({
     .messages({
       'string.max': 'Notes cannot exceed 500 characters'
     })
+}).xor('ticketId', 'bandUid').messages({
+  'object.xor': 'Provide exactly one of ticketId or bandUid'
 });
 
 // Band binding is a dedicated band-desk action (cashless spec §5.1) — see

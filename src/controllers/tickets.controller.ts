@@ -9,6 +9,9 @@ import { AnalyticsService } from '@services/analytics.service';
 import { ExportService } from '@services/export.service';
 import { WalletService } from '@services/wallet.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
+import { Event } from '@models/event.model';
+import { Wallet } from '@models/wallet.model';
+import { Ticket } from '@models/ticket.model';
 import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
@@ -809,13 +812,46 @@ export class TicketsController {
         return;
       }
 
+      // Resolve a tapped band's uid to a ticket BEFORE handing off to
+      // ScanService.checkInTicket — the QR/ticketId path below is otherwise
+      // completely unchanged. `findTicketByCode` (used inside checkInTicket)
+      // only matches Ticket.ticketId (the short code), never `_id`, but
+      // Wallet.ticketId stores the Ticket's `_id` — so the ticket must be
+      // loaded by `_id` here first and its short code passed through.
+      let ticketId = value.ticketId;
+      if (value.bandUid) {
+        const eventId = value.expectedEventId;
+        if (!eventId) {
+          return ApiResponseUtil.error(res, 'expectedEventId is required for band check-in', 400);
+        }
+
+        const event = await Event.findById(eventId).lean();
+        if (!event) {
+          return ApiResponseUtil.error(res, 'Event not found', 404);
+        }
+        if (!event.cashless) {
+          return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+        }
+
+        const wallet = await Wallet.findOne({ eventId, bandUid: normalizeBandUid(value.bandUid) });
+        if (!wallet) {
+          return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 400);
+        }
+
+        const ticket = await Ticket.findById(wallet.ticketId);
+        if (!ticket) {
+          return ApiResponseUtil.error(res, 'Ticket not found for that wallet', 400);
+        }
+        ticketId = ticket.ticketId;
+      }
+
       const scannedByType =
         ticketsUser.userType === 'vendor' ? 'vendor'
         : ticketsUser.userType === 'gate-operator' ? 'gate-operator'
         : 'sub-user';
 
       const result = await ScanService.checkInTicket({
-        ticketId: value.ticketId,
+        ticketId,
         vendorId: ticketsUser.vendorId as string,
         scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
         scannedByType,
