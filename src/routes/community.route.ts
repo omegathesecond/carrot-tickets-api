@@ -16,17 +16,20 @@ const router = Router();
 // /:eventId route below is 1-2 segments, so segment count alone already
 // disambiguates them regardless of registration order.
 //
-// READ routes use authenticateCommunityViewer (buyer OR managing organizer);
-// the controllers branch on token type and give an organizer a read-only,
-// ownership-gated peek. WRITE routes stay authenticateBuyer, so an organizer
-// token structurally can't post, join, mark-read or delete — read-only is
-// enforced by routing, not by per-handler role checks.
+// Community membership is polymorphic now: a buyer OR an organizer brand can
+// join and post. So read AND write routes both use authenticateCommunityViewer
+// (buyer OR vendor/sub-user token); the controllers resolve a SocialActor and
+// enforce membership per-handler (a non-member — brand or buyer — is 403'd by
+// requireChannelAccess). A managing brand that hasn't joined still gets the
+// read-only ownership-gated peek on the READ paths. verify-ticket + reports
+// stay authenticateBuyer — a brand holds no ticket and buyer-reporting is a
+// buyer concept.
 
 router.get('/channels/:channelId/messages', authenticateCommunityViewer, MessageController.list);
-router.post('/channels/:channelId/messages', authenticateBuyer, MessageController.send);
-router.post('/channels/:channelId/read', authenticateBuyer, MessageController.markRead);
+router.post('/channels/:channelId/messages', authenticateCommunityViewer, MessageController.send);
+router.post('/channels/:channelId/read', authenticateCommunityViewer, MessageController.markRead);
 router.get('/channels/:channelId/pins', authenticateCommunityViewer, MessageController.listPins);
-router.delete('/messages/:messageId', authenticateBuyer, MessageController.deleteOwn);
+router.delete('/messages/:messageId', authenticateCommunityViewer, MessageController.deleteOwn);
 
 /**
  * Buyer report filing — a message or another buyer. Admin review lives at
@@ -52,7 +55,7 @@ router.post('/questions/:questionId/read', optionalTicketsAuth, TopicsMineContro
 router.post('/questions/:questionId/replies', optionalTicketsAuth, EventQuestionController.reply);
 router.post('/questions/:questionId/like', optionalTicketsAuth, EventQuestionController.like);
 
-router.post('/:eventId/join', authenticateBuyer, CommunityController.join);
+router.post('/:eventId/join', authenticateCommunityViewer, CommunityController.join);
 // Who's-going social proof is public: optionalCommunityViewer lets signed-out
 // visitors read the community view + roster (join/messages stay gated).
 router.get('/:eventId', optionalCommunityViewer, CommunityController.getView);

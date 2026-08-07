@@ -77,6 +77,22 @@ const vendorSchema = new Schema<IVendor>({
     postalCode: { type: String, trim: true }
   },
 
+  // Nearby opt-in — a real single-nested subdocument WITHOUT a default (same
+  // reasoning as Buyer.location): a plain nested-path definition would seed
+  // `{}` on every vendor and defeat the sparse 2dsphere index below. Kept
+  // `undefined` until PATCH /api/tickets/social/me/location sets it.
+  location: {
+    type: new Schema(
+      {
+        type: { type: String, enum: ['Point'], required: true },
+        coordinates: { type: [Number], required: true },
+      },
+      { _id: false }
+    ),
+    required: false,
+  },
+  locationUpdatedAt: { type: Date },
+
   // Verification Status
   verificationStatus: {
     type: String,
@@ -213,5 +229,8 @@ vendorSchema.index({ phoneNumber: 1 });
 vendorSchema.index({ slug: 1 });
 vendorSchema.index({ isActive: 1, isVerified: 1 });
 vendorSchema.index({ keshlessVendorId: 1 });
+// Sparse by nature: a 2dsphere index only covers docs that actually have the
+// geo field, so brands that never opted into location sharing are excluded.
+vendorSchema.index({ location: '2dsphere' });
 
 export const Vendor = mongoose.model<IVendor>('Vendor', vendorSchema);

@@ -2,13 +2,15 @@ import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { Message, IMessage } from '@models/message.model';
-import { Buyer, IBuyer } from '@models/buyer.model';
+import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { consumeToken } from '@utils/rateLimit.util';
 import { HttpError } from '@utils/httpError.util';
 import { OrganizerViewer, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
+import { assertActorNotSuspended } from '@services/socialAuthor.service';
+import { memberKey } from '@utils/communityMember.util';
 import { emitToRoom, isSocketEmitterInitialized } from '@/realtime/emitter';
 import { channelRoom, dmRoom } from '@/realtime/rooms';
 import { DmThreadService } from '@services/dmThread.service';
@@ -44,7 +46,7 @@ export class MessageService {
    * src/realtime/channelHandlers.ts), so WS room membership can never be
    * broader than REST access.
    */
-  static async requireChannelAccess(channelId: string, buyer: IBuyer) {
+  static async requireChannelAccess(channelId: string, actor: SocialActor) {
     const channel = await Channel.findById(channelId);
     if (!channel) throw new HttpError(404, 'Channel not found');
     if (channel.archived) throw new HttpError(403, 'This channel is archived');
@@ -52,14 +54,23 @@ export class MessageService {
     const community = await Community.findById(channel.communityId);
     if (!community) throw new HttpError(404, 'Community not found');
 
-    const membership = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
+    const membership = await Membership.findOne({ ...memberKey(actor), communityId: community._id });
     if (!membership) throw new HttpError(403, 'Join the community first');
     if (membership.bannedAt) throw new HttpError(403, 'You have been banned from this community');
 
-    if (channel.gated && !membership.ticketVerifiedAt) {
-      if (await isTicketHolderForBuyer(String(community.eventId), buyer)) {
-        membership.ticketVerifiedAt = new Date();
-        await membership.save();
+    // Gated channels need a verified ticket. A brand that manages the event
+    // (role 'organizer') owns the gating and is exempt; any other brand holds
+    // no Carrot ticket, so it can't unlock a gated channel. Only a buyer can
+    // clear the gate on-demand (a fresh purchase unlocks without an extra call).
+    if (channel.gated && !membership.ticketVerifiedAt && membership.role !== 'organizer') {
+      if (actor.type === 'buyer') {
+        const buyer = await Buyer.findById(actor.id);
+        if (buyer && (await isTicketHolderForBuyer(String(community.eventId), buyer))) {
+          membership.ticketVerifiedAt = new Date();
+          await membership.save();
+        } else {
+          throw new HttpError(403, 'This channel is for ticket holders only');
+        }
       } else {
         throw new HttpError(403, 'This channel is for ticket holders only');
       }
@@ -137,11 +148,21 @@ export class MessageService {
 
   static async listMessages(
     channelId: string,
-    buyer: IBuyer,
+    actor: SocialActor,
     opts: { before?: string; after?: string; limit?: number } = {}
   ): Promise<MessageView[]> {
-    await MessageService.requireChannelAccess(channelId, buyer);
+    await MessageService.requireChannelAccess(channelId, actor);
     return MessageService.listWithCursor({ channelId }, opts);
+  }
+
+  /** Cheap "is this actor a member of the channel's community?" check with no
+   *  gating/side-effects — lets a read controller pick the member path vs the
+   *  managing-brand read-only peek without a try/catch on access errors. */
+  static async hasChannelMembership(channelId: string, actor: SocialActor): Promise<boolean> {
+    const channel = await Channel.findById(channelId).select('communityId');
+    if (!channel) return false;
+    const membership = await Membership.exists({ ...memberKey(actor), communityId: channel.communityId });
+    return membership !== null;
   }
 
   /**
@@ -182,32 +203,38 @@ export class MessageService {
 
   static async sendMessage(
     channelId: string,
-    buyer: IBuyer,
+    actor: SocialActor,
     input: { body: string; replyTo?: string }
   ): Promise<MessageView> {
-    assertNotSuspended(buyer);
-    const { channel, community, membership } = await MessageService.requireChannelAccess(channelId, buyer);
+    await assertActorNotSuspended(actor);
+    const { channel, community, membership } = await MessageService.requireChannelAccess(channelId, actor);
 
-    if (channel.postPolicy === 'organizer') {
+    // Organizer-only channels (e.g. #announcements) accept only a managing
+    // brand — a plain member (buyer or a non-owning brand) can't post there.
+    if (channel.postPolicy === 'organizer' && membership.role !== 'organizer') {
       throw new HttpError(403, 'Only the organizer can post in this channel');
     }
     if (membership.mutedUntil && membership.mutedUntil > new Date()) {
       throw new HttpError(403, 'You are muted in this community');
     }
-    if (!consumeToken(`msg:${String(buyer._id)}`)) {
+    // Buyers and brands keep separate rate-limit buckets, mirroring DM sends.
+    const rateKey = actor.type === 'buyer' ? `msg:${actor.id}` : `msg:v:${actor.id}`;
+    if (!consumeToken(rateKey)) {
       throw new HttpError(429, 'You are sending messages too quickly — slow down');
     }
 
     const mentionIds = await MessageService.resolveChannelMentions(
       input.body,
       String(community._id),
-      String(buyer._id)
+      actor.type === 'buyer' ? actor.id : '', // no self-exclude for a brand sender
     );
 
     const message = await Message.create({
       channelId: channel._id,
       communityId: community._id,
-      senderId: buyer._id,
+      ...(actor.type === 'buyer'
+        ? { senderId: new mongoose.Types.ObjectId(actor.id) }
+        : { senderVendorId: new mongoose.Types.ObjectId(actor.id) }),
       body: input.body,
       replyTo: input.replyTo || undefined,
       mentions: mentionIds,
@@ -218,16 +245,28 @@ export class MessageService {
     MessageService.broadcastRoom(channelRoom(String(channel._id)), 'message:new', view);
 
     if (mentionIds.length > 0) {
+      const senderLabel = await MessageService.actorMentionLabel(actor);
       NotificationDispatcher.dispatchAsync(
         mentionIds,
         'mention',
-        buyer.username ?? buyer.name ?? 'Mention',
+        senderLabel,
         MessageService.trunc(input.body),
         { eventId: String(community.eventId), channelId: String(channel._id), messageId: view.id },
-        String(buyer._id)
+        actor.id
       );
     }
     return view;
+  }
+
+  /** Display label for a mention notification's "from" — a buyer's handle/name
+   *  or a brand's business name. */
+  private static async actorMentionLabel(actor: SocialActor): Promise<string> {
+    if (actor.type === 'buyer') {
+      const b = await Buyer.findById(actor.id).select('username name');
+      return b?.username ?? b?.name ?? 'Mention';
+    }
+    const v = await Vendor.findById(actor.id).select('businessName');
+    return v?.businessName ?? 'Mention';
   }
 
   static async sendDmMessage(
@@ -342,15 +381,22 @@ export class MessageService {
     });
   }
 
-  static async deleteOwnMessage(messageId: string, buyer: IBuyer): Promise<void> {
+  static async deleteOwnMessage(messageId: string, actor: SocialActor): Promise<void> {
     const message = await Message.findById(messageId);
     if (!message || message.deletedAt) throw new HttpError(404, 'Message not found');
-    if (String(message.senderId) !== String(buyer._id)) {
+    // Authorship is polymorphic: a buyer owns senderId, a brand owns
+    // senderVendorId. The actor-type clause is load-bearing (an id-only compare
+    // would let a buyer whose id equalled a vendor's delete that brand's post).
+    const isAuthor =
+      actor.type === 'buyer'
+        ? String(message.senderId) === actor.id
+        : String(message.senderVendorId) === actor.id;
+    if (!isAuthor) {
       throw new HttpError(403, 'You can only delete your own messages');
     }
 
     if (message.dmThreadId) {
-      await DmThreadService.requireDmAccess(String(message.dmThreadId), { type: 'buyer', id: String(buyer._id) });
+      await DmThreadService.requireDmAccess(String(message.dmThreadId), actor);
       message.deletedAt = new Date();
       await message.save();
       MessageService.broadcastRoom(dmRoom(String(message.dmThreadId)), 'message:deleted', {
@@ -363,7 +409,7 @@ export class MessageService {
     // "Banned members are blocked everywhere" — including cleaning up their
     // own history. The message carries communityId, so no channel load needed.
     const membership = await Membership.findOne({
-      buyerId: buyer._id,
+      ...memberKey(actor),
       communityId: message.communityId,
     });
     if (!membership) throw new HttpError(403, 'Join the community first');
@@ -377,8 +423,8 @@ export class MessageService {
    * gate as listMessages (requireChannelAccess). Newest-pinned-first, capped
    * at 10 (the same cap ModerationService.pinMessage enforces on write).
    */
-  static async listPinnedMessages(channelId: string, buyer: IBuyer): Promise<MessageView[]> {
-    await MessageService.requireChannelAccess(channelId, buyer);
+  static async listPinnedMessages(channelId: string, actor: SocialActor): Promise<MessageView[]> {
+    await MessageService.requireChannelAccess(channelId, actor);
     return MessageService.listPinsFor(channelId);
   }
 
@@ -400,9 +446,9 @@ export class MessageService {
     return docs.map((doc) => MessageService.toView(doc));
   }
 
-  /** Stamp the buyer's read cursor for a channel (drives unread badges). */
-  static async markRead(channelId: string, buyer: IBuyer): Promise<void> {
-    const { channel, membership } = await MessageService.requireChannelAccess(channelId, buyer);
+  /** Stamp the member's read cursor for a channel (drives unread badges). */
+  static async markRead(channelId: string, actor: SocialActor): Promise<void> {
+    const { channel, membership } = await MessageService.requireChannelAccess(channelId, actor);
     // Key by the CANONICAL id — the raw param can arrive as uppercase hex,
     // which casts fine for queries but would orphan the Map entry the view
     // reads back via String(channel._id).

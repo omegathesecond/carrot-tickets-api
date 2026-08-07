@@ -26,7 +26,7 @@ describe('CommunityView.memberCount', () => {
     await Membership.create({ buyerId: other._id, communityId: community._id });
     await Membership.create({ buyerId: banned._id, communityId: community._id, bannedAt: new Date() });
 
-    const view = await CommunityMembershipService.getView(eventId, me as any);
+    const view = await CommunityMembershipService.getView(eventId, { type: 'buyer', id: String(me._id) });
 
     // 3 memberships exist; the banned one must not be counted.
     expect(view.memberCount).toBe(2);
@@ -45,7 +45,7 @@ describe('CommunityView.memberCount', () => {
     await Membership.create({ buyerId: me._id, communityId: community._id });
     await Membership.create({ buyerId: stranger._id, communityId: otherCommunity._id });
 
-    const view = await CommunityMembershipService.getView(eventId, me as any);
+    const view = await CommunityMembershipService.getView(eventId, { type: 'buyer', id: String(me._id) });
     expect(view.memberCount).toBe(1);
   });
 });

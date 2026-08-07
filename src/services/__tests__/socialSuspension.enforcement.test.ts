@@ -39,7 +39,7 @@ describe('platform social suspension — enforcement', () => {
       await Membership.create({ buyerId: buyer._id, communityId: community._id });
 
       await expect(
-        MessageService.sendMessage(String(general._id), buyer, { body: 'hi' })
+        MessageService.sendMessage(String(general._id), { type: 'buyer', id: String(buyer._id) }, { body: 'hi' })
       ).rejects.toMatchObject({ statusCode: 403, message: SUSPENDED });
     });
 
@@ -96,7 +96,7 @@ describe('platform social suspension — enforcement', () => {
       const seeded = await seedPublishedEvent();
 
       await expect(
-        CommunityMembershipService.join(seeded.eventId, buyer)
+        CommunityMembershipService.join(seeded.eventId, { type: 'buyer', id: String(buyer._id) })
       ).rejects.toMatchObject({ statusCode: 403, message: SUSPENDED });
     });
   });

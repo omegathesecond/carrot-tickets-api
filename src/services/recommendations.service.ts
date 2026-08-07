@@ -3,18 +3,23 @@ import { EventStatus } from '@interfaces/event.interface';
 import { SavedContentService } from '@services/savedContent.service';
 import { notEndedFilter } from '@utils/eventVisibility.util';
 import { seededShuffle } from '@utils/seededShuffle.util';
+import type { SocialActor } from '@utils/socialActor.util';
 
 const TARGET = 8;
 
 export class RecommendationsService {
   /** v1: basis = most-recently-saved event; recommend that organizer's other
    *  upcoming events first, then top up with soonest-upcoming, excluding saved.
-   *  (Phase 2 adds same-category matching.) */
-  static async forBuyer(
-    buyerId: string,
+   *  (Phase 2 adds same-category matching.)
+   *
+   *  A vendor brand has no "saved" list, so it gets basisEvent:null and the
+   *  pure soonest-upcoming (optionally seed-shuffled) fill — the same generic
+   *  path a buyer who has saved nothing already hits. */
+  static async forViewer(
+    actor: SocialActor,
     { seed }: { seed?: number } = {}
   ): Promise<{ basisEvent: { id: string; name: string } | null; eventIds: string[] }> {
-    const savedIds = await SavedContentService.savedEventIds(buyerId);
+    const savedIds = actor.type === 'buyer' ? await SavedContentService.savedEventIds(actor.id) : [];
     const exclude = new Set(savedIds);
     const base = { status: EventStatus.PUBLISHED, ...notEndedFilter() };
 

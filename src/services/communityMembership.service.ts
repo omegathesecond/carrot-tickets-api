@@ -3,11 +3,13 @@ import { Channel, IChannel } from '@models/channel.model';
 import { Membership, IMembership } from '@models/membership.model';
 import { Message } from '@models/message.model';
 import { Event } from '@models/event.model';
-import { IBuyer } from '@models/buyer.model';
+import { Buyer, IBuyer } from '@models/buyer.model';
 import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
-import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { OrganizerViewer, assertOrganizerOwnsCommunity } from '@utils/communityViewer.util';
+import { assertActorNotSuspended } from '@services/socialAuthor.service';
+import { memberKey } from '@utils/communityMember.util';
+import type { SocialActor } from '@utils/socialActor.util';
 
 export interface ChannelView {
   id: string;
@@ -34,42 +36,71 @@ export interface CommunityView {
 }
 
 export class CommunityMembershipService {
-  static async join(eventId: string, buyer: IBuyer): Promise<CommunityView> {
-    assertNotSuspended(buyer);
+  static async join(eventId: string, actor: SocialActor): Promise<CommunityView> {
+    await assertActorNotSuspended(actor);
     const community = await Community.findOne({ eventId });
     if (!community) throw new HttpError(404, 'Community not found for this event');
 
-    let membership = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
+    const key = memberKey(actor);
+    // A brand that manages this event joins as 'organizer' (every channel
+    // unlocked, may post in organizer-only channels); any other actor joins as
+    // a plain 'member'. Ownership is checked against the Event (source of
+    // truth), matching assertOrganizerOwnsCommunity.
+    const role = (await CommunityMembershipService.actorOwnsEvent(eventId, actor)) ? 'organizer' : 'member';
+
+    let membership = await Membership.findOne({ ...key, communityId: community._id });
     if (!membership) {
       try {
-        membership = await Membership.create({ buyerId: buyer._id, communityId: community._id });
+        membership = await Membership.create({ ...key, communityId: community._id, role });
       } catch (err: any) {
         if (err?.code !== 11000) throw err; // double-click race — take the winner's row
-        membership = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
+        membership = await Membership.findOne({ ...key, communityId: community._id });
       }
     }
     if (!membership) throw new HttpError(500, 'Failed to join community');
 
-    // Only an event that actually SELLS on Carrot can require a Carrot ticket
-    // to join. Externally-sold events have none to verify against, and neither
-    // does a community self-listing (no tiers at all) — gating those on a
-    // ticket would make "Going" impossible, not selective. Carrot events with
-    // real tiers (and legacy events with no stored `ticketing`, which read as
-    // 'carrot') keep the existing verification requirement unchanged.
-    const event = await Event.findById(eventId).select('ticketing ticketTypes');
-    const sellsOnCarrot = !!event && event.ticketing !== 'external' && (event.ticketTypes?.length ?? 0) > 0;
-    const requiresTicket = !event || sellsOnCarrot;
-    if (requiresTicket) {
-      await CommunityMembershipService.refreshTicketVerification(eventId, buyer, membership);
+    // Ticket verification is a buyer concept — a brand holds no Carrot ticket,
+    // so its membership is never ticket-gated (gated channels simply stay
+    // locked to a non-organizer brand). Only an event that actually SELLS on
+    // Carrot can require a ticket; externally-sold events and community
+    // self-listings (no tiers) have none to verify against, so gating those
+    // would make "Going" impossible, not selective.
+    if (actor.type === 'buyer') {
+      const event = await Event.findById(eventId).select('ticketing ticketTypes');
+      const sellsOnCarrot = !!event && event.ticketing !== 'external' && (event.ticketTypes?.length ?? 0) > 0;
+      const requiresTicket = !event || sellsOnCarrot;
+      if (requiresTicket) {
+        const buyer = await Buyer.findById(actor.id);
+        if (buyer) await CommunityMembershipService.refreshTicketVerification(eventId, buyer, membership);
+      }
     }
     return CommunityMembershipService.buildView(String(community._id), eventId, membership);
   }
 
-  static async getView(eventId: string, buyer: IBuyer): Promise<CommunityView> {
+  /** Community view for a signed-in actor. A buyer or a brand that has JOINED
+   *  sees their member view (unread cursors, join affordance resolved). A
+   *  brand that manages the event but hasn't joined falls back to the
+   *  read-only organizer peek; any other non-member sees the public "can join"
+   *  view. */
+  static async getView(eventId: string, actor: SocialActor): Promise<CommunityView> {
     const community = await Community.findOne({ eventId });
     if (!community) throw new HttpError(404, 'Community not found for this event');
-    const membership = await Membership.findOne({ buyerId: buyer._id, communityId: community._id });
-    return CommunityMembershipService.buildView(String(community._id), eventId, membership);
+    const membership = await Membership.findOne({ ...memberKey(actor), communityId: community._id });
+    if (membership) {
+      return CommunityMembershipService.buildView(String(community._id), eventId, membership);
+    }
+    // A managing brand that hasn't joined keeps its existing read-only peek.
+    if (actor.type === 'vendor' && (await CommunityMembershipService.actorOwnsEvent(eventId, actor))) {
+      return CommunityMembershipService.getOrganizerView(eventId, { vendorId: actor.id, isSuperAdmin: false });
+    }
+    return CommunityMembershipService.buildView(String(community._id), eventId, null);
+  }
+
+  /** Does this actor manage the event (a vendor owner)? Buyers never do. */
+  private static async actorOwnsEvent(eventId: string, actor: SocialActor): Promise<boolean> {
+    if (actor.type !== 'vendor') return false;
+    const event = await Event.findById(eventId).select('vendorId');
+    return !!event && String(event.vendorId) === actor.id;
   }
 
   /**
@@ -149,7 +180,10 @@ export class CommunityMembershipService {
     membership: IMembership | null
   ): Promise<CommunityView> {
     const channels = await Channel.find({ communityId, archived: false }).sort({ createdAt: 1 });
-    const verified = Boolean(membership?.ticketVerifiedAt);
+    // A brand that manages the event (role 'organizer') sees every channel
+    // unlocked — it owns the gating, it isn't subject to it. Everyone else
+    // needs a verified ticket for gated channels.
+    const verified = Boolean(membership?.ticketVerifiedAt) || membership?.role === 'organizer';
 
     const channelViews: ChannelView[] = await Promise.all(
       channels.map(async (c: IChannel) => {

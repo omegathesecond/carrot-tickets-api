@@ -219,12 +219,12 @@ describe('ChannelAdminService', () => {
       const created = await ChannelAdminService.create(eid, { name: 'Pop-up Room' });
       const buyer = await seedBuyerInCommunity(eid, community._id as mongoose.Types.ObjectId);
 
-      const beforeArchive = await CommunityMembershipService.getView(eid, buyer);
+      const beforeArchive = await CommunityMembershipService.getView(eid, { type: 'buyer', id: String(buyer._id) });
       expect(beforeArchive.channels.map((c) => c.slug)).toContain('pop-up-room');
 
       await updateChannel(created.id, { archived: true });
 
-      const afterArchive = await CommunityMembershipService.getView(eid, buyer);
+      const afterArchive = await CommunityMembershipService.getView(eid, { type: 'buyer', id: String(buyer._id) });
       expect(afterArchive.channels.map((c) => c.slug)).not.toContain('pop-up-room');
     });
 
@@ -234,12 +234,12 @@ describe('ChannelAdminService', () => {
       const buyer = await seedBuyerInCommunity(eid, community._id as mongoose.Types.ObjectId);
 
       // sanity: sending works before archiving
-      await MessageService.sendMessage(created.id, buyer, { body: 'hello before archive' });
+      await MessageService.sendMessage(created.id, { type: 'buyer', id: String(buyer._id) }, { body: 'hello before archive' });
 
       await updateChannel(created.id, { archived: true });
 
       await expect(
-        MessageService.sendMessage(created.id, buyer, { body: 'hello after archive' })
+        MessageService.sendMessage(created.id, { type: 'buyer', id: String(buyer._id) }, { body: 'hello after archive' })
       ).rejects.toMatchObject({ statusCode: 403, message: 'This channel is archived' });
     });
   });

@@ -68,7 +68,7 @@ describe('REST write path broadcasts to gateway rooms', () => {
 
     const [live, sent] = await Promise.all([
       waitForEvent<any>(listener, 'message:new', 8000),
-      MessageService.sendMessage(String(general._id), sender, { body: 'hello from REST' }),
+      MessageService.sendMessage(String(general._id), { type: 'buyer', id: String(sender._id) }, { body: 'hello from REST' }),
     ]);
     expect(live.id).toBe(sent.id);
     expect(live.body).toBe('hello from REST');
@@ -76,7 +76,7 @@ describe('REST write path broadcasts to gateway rooms', () => {
 
     const [deleted] = await Promise.all([
       waitForEvent<any>(listener, 'message:deleted', 8000),
-      MessageService.deleteOwnMessage(sent.id, sender),
+      MessageService.deleteOwnMessage(sent.id, { type: 'buyer', id: String(sender._id) }),
     ]);
     expect(deleted).toEqual({ channelId: String(general._id), messageId: sent.id });
   }, 20000);
@@ -99,7 +99,7 @@ describe('REST write path broadcasts to gateway rooms', () => {
     );
     expect(ack.ok).toBe(true);
 
-    const sent = await MessageService.sendMessage(String(general._id), sender, { body: 'rule-breaking message' });
+    const sent = await MessageService.sendMessage(String(general._id), { type: 'buyer', id: String(sender._id) }, { body: 'rule-breaking message' });
 
     // Organizer moderation delete-any, NOT self-delete — ModerationService
     // takes the already-fetched, already ownership-checked doc the way

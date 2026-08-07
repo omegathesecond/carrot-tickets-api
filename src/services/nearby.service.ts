@@ -3,6 +3,7 @@ import { Buyer } from '@models/buyer.model';
 import { BlockService } from '@services/block.service';
 import { FollowService } from '@services/follow.service';
 import { onlineBuyerIds } from '@utils/buyerOnline.util';
+import type { SocialActor } from '@utils/socialActor.util';
 
 export const NEARBY_DEFAULT_RADIUS_KM = 25;
 export const NEARBY_MIN_RADIUS_KM = 1;
@@ -39,16 +40,21 @@ export class NearbyService {
    * because the 2dsphere index is sparse — buyers who never set a location.
    */
   static async nearbyPeople(
-    viewerId: string,
+    actor: SocialActor,
     lat: number,
     lng: number,
     radiusKm: number
   ): Promise<NearbyCandidate[]> {
+    // Block lists are keyed on the actor id in EITHER direction — for a vendor
+    // brand these resolve the buyers it has blocked (VendorSocialController.
+    // blockUser writes the vendorId as blockerId), so a blocked buyer never
+    // surfaces in a brand's nearby list either. The viewer-self exclusion is a
+    // no-op for a vendor (its id is never a Buyer), which is harmless.
     const [iBlocked, blockedMe] = await Promise.all([
-      BlockService.listBlockedIds(viewerId),
-      BlockService.listBlockerIds(viewerId),
+      BlockService.listBlockedIds(actor.id),
+      BlockService.listBlockerIds(actor.id),
     ]);
-    const excludedIds = [viewerId, ...iBlocked, ...blockedMe].map((id) => new Types.ObjectId(id));
+    const excludedIds = [actor.id, ...iBlocked, ...blockedMe].map((id) => new Types.ObjectId(id));
 
     const rows = await Buyer.aggregate([
       {
@@ -73,7 +79,7 @@ export class NearbyService {
     const ids = rows.map((r: any) => String(r._id));
     const [online, viewerFollowing] = await Promise.all([
       onlineBuyerIds(ids),
-      FollowService.followingIds(viewerId, 'buyer'),
+      FollowService.followingIds(actor.id, 'buyer', actor.type),
     ]);
     const onlineSet = new Set(online);
     const viewerFollowingSet = new Set(viewerFollowing);

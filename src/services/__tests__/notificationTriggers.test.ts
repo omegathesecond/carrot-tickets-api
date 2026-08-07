@@ -104,7 +104,7 @@ describe('notification triggers', () => {
 
     // mention: friend_two is a member (notified); outsider_three is not (ignored)
     resetBuckets();
-    const msg = await MessageService.sendMessage(String(general._id), sender, {
+    const msg = await MessageService.sendMessage(String(general._id), { type: 'buyer', id: String(sender._id) }, {
       body: 'yo @friend_two and @outsider_three check this',
     });
     await flushAsync();
@@ -117,7 +117,7 @@ describe('notification triggers', () => {
 
     // uppercase mention resolves; email fragments never do
     resetBuckets();
-    await MessageService.sendMessage(String(general._id), sender, {
+    await MessageService.sendMessage(String(general._id), { type: 'buyer', id: String(sender._id) }, {
       body: 'ping @FRIEND_TWO — and mail me at contact@friendmail.com',
     });
     await flushAsync();
