@@ -312,6 +312,12 @@ export class ResellerController {
       const event = await Event.findById(value.eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
       if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+      // Lifecycle guard: only a live (PUBLISHED) event can take top-ups, mirroring
+      // ResellerSaleService.createSale. Blocks loading a band at a cancelled or
+      // not-yet-live event.
+      if (event.status !== EventStatus.PUBLISHED) {
+        return ApiResponseUtil.error(res, 'Event is not published', 400);
+      }
 
       const wallet = value.bandUid
         ? await Wallet.findOne({ eventId: value.eventId, bandUid: value.bandUid })

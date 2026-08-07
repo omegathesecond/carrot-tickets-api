@@ -832,6 +832,14 @@ export class TicketsController {
         if (!event.cashless) {
           return ApiResponseUtil.error(res, 'Event is not cashless', 400);
         }
+        // Vendor-ownership guard BEFORE any band/wallet lookup: an operator may
+        // only resolve bands at their OWN event. ScanService.checkInTicket also
+        // enforces the vendor check, but doing it here first closes a
+        // cross-tenant existence leak (whether a uid is bound at another vendor's
+        // event). Mirrors ScanService.bindBandToTicket's vendor check.
+        if (!ticketsUser.isSuperAdmin && String(event.vendorId) !== ticketsUser.vendorId) {
+          return ApiResponseUtil.error(res, 'Event belongs to a different vendor', 403);
+        }
 
         const wallet = await Wallet.findOne({ eventId, bandUid: normalizeBandUid(value.bandUid) });
         if (!wallet) {
@@ -947,10 +955,24 @@ export class TicketsController {
    */
   static async walletByBand(req: Request, res: Response): Promise<any> {
     try {
+      const ticketsUser = (req as any).ticketsUser;
       const uid = normalizeBandUid(req.params.uid as string);
       const eventId = String(req.query.eventId || '');
       if (!/^[0-9a-fA-F]{24}$/.test(eventId)) {
         return ApiResponseUtil.error(res, 'eventId is required', 400);
+      }
+
+      // Vendor-ownership guard: an operator may only read bands at their OWN
+      // event. Mirrors ScanService.bindBandToTicket's vendor check. Without this,
+      // any operator with SCAN_TICKETS could read another vendor's attendees'
+      // wallet balances by guessing a band uid + event id. 403 (not 404) so the
+      // rejection is honest rather than leaking existence.
+      const event = await Event.findById(eventId).lean();
+      if (!event) {
+        return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 404);
+      }
+      if (!ticketsUser.isSuperAdmin && String(event.vendorId) !== ticketsUser.vendorId) {
+        return ApiResponseUtil.forbidden(res, 'This event belongs to a different vendor');
       }
 
       const view = await WalletService.getWalletViewByBand(uid, eventId);

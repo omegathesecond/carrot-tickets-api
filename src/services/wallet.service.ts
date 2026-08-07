@@ -6,6 +6,15 @@ import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
 
 /**
+ * Safety ceiling on a single cash top-up, in minor units (cents): R100,000.
+ * This is an adjustable defense-in-depth limit against ledger inflation from a
+ * fat-fingered or malicious amount — NOT a business rule. Enforced both in the
+ * reseller Joi schemas (cashTopupSchema.amount / sellBandSchema.cashAmount) and
+ * here in topUpCash, so a caller that bypasses validation still cannot inflate.
+ */
+export const MAX_TOPUP_CENTS = 10_000_000;
+
+/**
  * Wallet lifecycle for the per-event closed-loop cashless wallet (spec §4, §5.1).
  *
  * This service does NOT mutate `balance` — top-up (SP3) and tap-to-pay (SP5) do,
@@ -202,9 +211,16 @@ export class WalletService {
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new Error('amount must be a positive integer (cents)');
     }
+    // Defense in depth against ledger inflation: reject an absurd amount even if
+    // a caller reached this service without passing the Joi ceiling.
+    if (amount > MAX_TOPUP_CENTS) {
+      throw new Error('amount exceeds the maximum allowed top-up');
+    }
 
-    // Idempotency: if this clientTxnId already ran, return the existing outcome.
-    const existing = await WalletTopup.findOne({ clientTxnId });
+    // Idempotency: if this clientTxnId already ran FOR THIS WALLET, return the
+    // existing outcome. Scoped to walletId — the same clientTxnId on a different
+    // wallet is a different, legitimate top-up, not a duplicate of this one.
+    const existing = await WalletTopup.findOne({ walletId, clientTxnId });
     if (existing) {
       const w = await Wallet.findById(existing.walletId);
       if (!w) throw new Error('wallet not found');
@@ -253,9 +269,11 @@ export class WalletService {
       });
       return out;
     } catch (e) {
-      // Concurrent duplicate: unique clientTxnId lost the race — return the winner.
+      // Concurrent duplicate: the {walletId, clientTxnId} unique index lost the
+      // race — re-read the winner with the SAME scoped filter so we never return
+      // a different wallet's row.
       if ((e as { code?: number })?.code === 11000) {
-        const topup = await WalletTopup.findOne({ clientTxnId });
+        const topup = await WalletTopup.findOne({ walletId, clientTxnId });
         const wallet = topup ? await Wallet.findById(topup.walletId) : null;
         if (topup && wallet) return { wallet, topup };
       }

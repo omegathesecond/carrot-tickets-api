@@ -40,11 +40,24 @@ it('rejects band check-in when the event is not cashless', async () => {
   expect(res.body.message).toMatch(/cashless/i);
 });
 
-it('404s an unbound uid', async () => {
+it('rejects an unbound uid with 400', async () => {
   const { eventId, vendorId } = await seedBound(true);
   const res = await request(app).post('/api/tickets/scans/check-in')
     .set('Authorization', `Bearer ${gate(vendorId)}`)
     .send({ bandUid: 'bbbbbbbbbbbbbb', expectedEventId: eventId });
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/no wallet|not bound|no band/i);
+});
+
+// FIX 3 (cross-tenant check-in): an operator from a DIFFERENT vendor scanning a
+// band bound at this vendor's event is rejected with 403 BEFORE any band/wallet
+// lookup — so it never leaks whether the band/event exists. The message must be
+// the vendor-ownership rejection, not a band-existence hint.
+it('rejects cross-vendor band check-in with 403 before leaking existence', async () => {
+  const { eventId } = await seedBound(true); // band bound under the seeded (Vendor B) event
+  const res = await request(app).post('/api/tickets/scans/check-in')
+    .set('Authorization', `Bearer ${gate('vendor-a-different')}`)
+    .send({ bandUid: '04a22b1c3d4e5f', expectedEventId: eventId });
+  expect(res.status).toBe(403);
+  expect(res.body.message).toMatch(/different vendor/i);
 });

@@ -236,8 +236,23 @@ export class ResellerSaleService {
       });
     } catch (e: any) {
       if (e?.code !== 11000) throw e;
-      const existing = await ResellerBandSale.findOne({ clientTxnId: params.clientTxnId });
+      // Scope the recovery re-read to THIS reseller: idempotency is per-reseller
+      // (compound unique {resellerId, clientTxnId}), so the same clientTxnId from
+      // a different reseller is a different sale, never a duplicate of this one.
+      const existing = await ResellerBandSale.findOne({
+        resellerId: params.resellerId,
+        clientTxnId: params.clientTxnId,
+      });
       if (!existing) throw e; // lost the race AND the row is already gone — surface the original error
+
+      // Defense in depth: the lookup is already reseller-scoped, but assert the
+      // ownership match loudly so a returned record can NEVER belong to another
+      // reseller (no cross-tenant idempotency leak).
+      if (existing.resellerId !== params.resellerId) {
+        throw new Error(
+          `sell-band idempotency record for clientTxnId ${params.clientTxnId} belongs to a different reseller`,
+        );
+      }
 
       if (existing.status === 'completed') {
         // Idempotent hit: this exact request already finished. Replay it.

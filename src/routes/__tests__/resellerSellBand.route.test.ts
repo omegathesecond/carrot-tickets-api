@@ -164,3 +164,50 @@ it('resumes after a mid-flow failure without double-issuing a ticket (same clien
   expect(wallets[0]!.balance).toBe(500);
   expect(wallets[0]!.bandUid).toBe('04a22b1c3d4e5f');
 });
+
+/**
+ * FIX 1 (idempotency scoped to owner): clientTxnId used to be GLOBALLY unique
+ * on ResellerBandSale, so two DIFFERENT resellers reusing the same clientTxnId
+ * collided — the loser's E11000-recovery found and could replay the FIRST
+ * reseller's sale, leaking that reseller's ticket+wallet (and its cash top-up
+ * via the shared `${clientTxnId}:topup` id). With the compound unique
+ * {resellerId, clientTxnId} (+ the wallet-scoped WalletTopup index) each
+ * reseller mints its OWN ticket+wallet and neither receives the other's.
+ */
+it('two resellers reusing the same clientTxnId each mint their OWN ticket+wallet (no leak)', async () => {
+  const { eventId, ticketTypeId, token: tokenA } = await setup();
+
+  // Second reseller on the SAME cashless event, with its own token.
+  const { resellerId: resellerB, hubId: hubB } = await seedReseller();
+  const tokenB = jwt.sign(
+    {
+      scope: 'reseller', resellerId: resellerB, hubId: hubB, operatorId: OPERATOR_ID,
+      role: ResellerRole.OPERATOR,
+      permissions: [ResellerPermission.SELL_TICKETS, ResellerPermission.CASH_TOPUP],
+    },
+    JWT_SECRET,
+  );
+  const shared = 'shared-sb-ctx';
+
+  const resA = await request(app).post('/api/reseller/sales/sell-band')
+    .set('Authorization', `Bearer ${tokenA}`)
+    .send({ eventId, ticketTypeId, bandUid: '04a22b1c3d4e5f', cashAmount: 500, clientTxnId: shared });
+  expect(resA.status).toBe(201);
+  expect(resA.body.data.wallet.bandUid).toBe('04a22b1c3d4e5f');
+  expect(resA.body.data.wallet.balance).toBe(500);
+
+  const resB = await request(app).post('/api/reseller/sales/sell-band')
+    .set('Authorization', `Bearer ${tokenB}`)
+    .send({ eventId, ticketTypeId, bandUid: '04b33c2d4e5f60', cashAmount: 700, clientTxnId: shared });
+  expect(resB.status).toBe(201);
+  // Reseller B's OWN band + balance — NOT reseller A's sale replayed back.
+  expect(resB.body.data.wallet.bandUid).toBe('04b33c2d4e5f60');
+  expect(resB.body.data.wallet.balance).toBe(700);
+  expect(resB.body.data.ticket._id).not.toBe(resA.body.data.ticket._id);
+
+  // Two distinct tickets + wallets on the event — neither reseller got the other's.
+  expect(await Ticket.countDocuments({ eventId })).toBe(2);
+  const wallets = await Wallet.find({ eventId }).lean();
+  expect(wallets.length).toBe(2);
+  expect(wallets.map((w) => w.bandUid).sort()).toEqual(['04a22b1c3d4e5f', '04b33c2d4e5f60']);
+});

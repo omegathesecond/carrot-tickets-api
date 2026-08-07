@@ -57,7 +57,7 @@ export interface IResellerBandSale extends Document {
 
 const resellerBandSaleSchema = new Schema<IResellerBandSale>(
   {
-    clientTxnId: { type: String, required: true, unique: true, trim: true },
+    clientTxnId: { type: String, required: true, trim: true },
     status: { type: String, enum: ['pending', 'completed'], required: true, default: 'pending' },
     eventId: { type: Schema.Types.ObjectId, required: true, index: true },
     ticketTypeId: { type: String, required: true },
@@ -73,5 +73,13 @@ const resellerBandSaleSchema = new Schema<IResellerBandSale>(
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
+
+// Idempotency is scoped to the OWNING reseller, NOT global. A globally-unique
+// clientTxnId let one reseller's id collide with another's: the loser's
+// E11000-recovery would find (and could replay) the FIRST reseller's sale row,
+// leaking that reseller's ticket+wallet. Scoping uniqueness to
+// {resellerId, clientTxnId} means the same id from a DIFFERENT reseller mints
+// its own sale, while a genuine retry by the SAME reseller still dedups.
+resellerBandSaleSchema.index({ resellerId: 1, clientTxnId: 1 }, { unique: true });
 
 export const ResellerBandSale = model<IResellerBandSale>('ResellerBandSale', resellerBandSaleSchema);
