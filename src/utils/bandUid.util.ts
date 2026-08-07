@@ -7,11 +7,14 @@ export function normalizeBandUid(raw: string): string {
   return String(raw ?? '').replace(/[\s:]/g, '').toLowerCase();
 }
 
-// 14 hex chars = 7 bytes, the minimum real NFC UID length (4-byte UIDs exist
-// but are not what this system's bands use) — see task-3 brief.
+// 8 hex chars = 4 bytes, the minimum real NFC UID length in the wild —
+// common 4-byte tags (e.g. MIFARE Classic) are accepted. The unique-per-event
+// index on Wallet.bandUid already rejects a duplicate UID at bind time, and
+// cloning defense is server-side (spend cap, block-list) regardless of UID
+// length, so a 4-byte floor is acceptable here.
 export function assertValidBandUid(raw: string): string {
   const uid = normalizeBandUid(raw);
   if (!/^[0-9a-f]+$/.test(uid)) throw new Error('invalid band uid: must be hex');
-  if (uid.length < 14) throw new Error('invalid band uid: must be at least 7 bytes (14 hex chars)');
+  if (uid.length < 8) throw new Error('invalid band uid: must be at least 4 bytes (8 hex chars)');
   return uid;
 }
