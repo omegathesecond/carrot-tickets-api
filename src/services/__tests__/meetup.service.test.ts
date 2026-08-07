@@ -2,6 +2,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helper
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { MeetupRequest } from '@models/meetupRequest.model';
 import { BlockService } from '@services/block.service';
+import { NotificationDispatcher } from '@services/notificationDispatcher.service';
 import { MeetupService } from '@services/meetup.service';
 
 const mk = (phone: string, username: string) =>
@@ -76,5 +77,31 @@ describe('MeetupService', () => {
     const map = await MeetupService.outgoingStatusMap(String(me._id), [String(t1._id), String(t2._id)]);
     expect(map.get(String(t1._id))?.status).toBe('pending');
     expect(map.has(String(t2._id))).toBe(false);
+  });
+
+  it('decline sends no notification', async () => {
+    const spy = jest.spyOn(NotificationDispatcher, 'dispatchAsync');
+    const me = (await mk('+26878422613', 'me_one')) as IBuyer;
+    const target = (await mk('+26878000001', 'target_a')) as IBuyer;
+    const { id } = await MeetupService.request(me, String(target._id));
+    spy.mockClear(); // drop the meetup_request call from request()
+    await MeetupService.decline(target, id);
+    const acceptedCalls = spy.mock.calls.filter((call) => call[1] === 'meetup_accepted');
+    expect(acceptedCalls).toHaveLength(0);
+    spy.mockRestore();
+  });
+
+  it('rejects terminal-state transitions with 409', async () => {
+    const me = (await mk('+26878422613', 'me_one')) as IBuyer;
+    const declinedTarget = (await mk('+26878000001', 'target_a')) as IBuyer;
+    const { id: declinedId } = await MeetupService.request(me, String(declinedTarget._id));
+    await MeetupService.decline(declinedTarget, declinedId);
+    await expect(MeetupService.accept(declinedTarget, declinedId)).rejects.toMatchObject({ statusCode: 409 });
+
+    const acceptedTarget = (await mk('+26878000002', 'target_b')) as IBuyer;
+    const { id: acceptedId } = await MeetupService.request(me, String(acceptedTarget._id));
+    await MeetupService.accept(acceptedTarget, acceptedId);
+    await expect(MeetupService.decline(acceptedTarget, acceptedId)).rejects.toMatchObject({ statusCode: 409 });
+    await expect(MeetupService.cancel(me, acceptedId)).rejects.toMatchObject({ statusCode: 409 });
   });
 });

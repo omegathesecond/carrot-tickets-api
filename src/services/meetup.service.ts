@@ -42,7 +42,16 @@ export class MeetupService {
       row.respondedAt = undefined;
       await row.save();
     } else {
-      row = await MeetupRequest.create({ requesterId, targetId });
+      try {
+        row = await MeetupRequest.create({ requesterId, targetId });
+      } catch (err: any) {
+        if (err?.code !== 11000) throw err;
+        // Lost a create race to a concurrent request for the same pair — the
+        // winner already notified, so just return its row, no re-notify.
+        const winner = await MeetupRequest.findOne({ requesterId, targetId });
+        if (!winner) throw err; // shouldn't happen, but don't swallow silently
+        return { id: String(winner._id), status: winner.status };
+      }
     }
 
     NotificationDispatcher.dispatchAsync(
@@ -70,11 +79,16 @@ export class MeetupService {
     const row = await MeetupService.loadFor(id, String(target._id), 'target');
     if (row.status === 'accepted') return; // idempotent
     if (row.status !== 'pending') throw new HttpError(409, 'This request is no longer pending');
-    row.status = 'accepted';
-    row.respondedAt = new Date();
-    await row.save();
+    // Atomic pending->accepted transition: if two accept() calls race, only
+    // the one that actually flips the row proceeds to notify.
+    const updated = await MeetupRequest.findOneAndUpdate(
+      { _id: row._id, status: 'pending' },
+      { $set: { status: 'accepted', respondedAt: new Date() } },
+      { new: true }
+    );
+    if (!updated) return;
     NotificationDispatcher.dispatchAsync(
-      [String(row.requesterId)],
+      [String(updated.requesterId)],
       'meetup_accepted',
       displayName(target),
       'accepted your meetup',
@@ -87,10 +101,12 @@ export class MeetupService {
     const row = await MeetupService.loadFor(id, String(target._id), 'target');
     if (row.status === 'declined') return; // idempotent, silent
     if (row.status !== 'pending') throw new HttpError(409, 'This request is no longer pending');
-    row.status = 'declined';
-    row.respondedAt = new Date();
-    await row.save();
-    // No notification on decline (spec: silent).
+    // Atomic pending->declined transition (same race protection as accept()).
+    // No notification either way (spec: silent).
+    await MeetupRequest.findOneAndUpdate(
+      { _id: row._id, status: 'pending' },
+      { $set: { status: 'declined', respondedAt: new Date() } }
+    );
   }
 
   static async cancel(requester: IBuyer, id: string): Promise<void> {
