@@ -16,6 +16,8 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   // the closest existing pref bucket, kept only for Record<NotificationType,…>
   // exhaustiveness.
   follow: 'social',
+  meetup_request: 'social',
+  meetup_accepted: 'social',
 };
 
 const CHUNK = 50;
