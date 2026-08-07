@@ -436,9 +436,9 @@ export const checkInTicketSchema = Joi.object({
 });
 
 // Band binding is a dedicated band-desk action (cashless spec §5.1) — see
-// ScanService.bindBandToTicket. bandUid has a min length because a band's UID
-// is a physical NFC chip id, not free text; 4 chars is a floor against typos,
-// not a real-world format check (the client owns the actual UID shape).
+// ScanService.bindBandToTicket. bandUid must be a real NFC chip id: 14 hex
+// chars = 7 bytes, the minimum real-world UID length (see @utils/bandUid.util
+// for the shared normalize/validate logic consumed elsewhere in the system).
 export const bindBandSchema = Joi.object({
   ticketId: Joi.string()
     .required()
@@ -449,11 +449,12 @@ export const bindBandSchema = Joi.object({
     }),
   bandUid: Joi.string()
     .trim()
-    .min(4)
+    .lowercase()
+    .pattern(/^[0-9a-f]{14,}$/)
     .required()
     .messages({
       'string.empty': 'Band UID is required',
-      'string.min': 'Band UID must be at least 4 characters',
+      'string.pattern.base': 'Band UID must be at least 7 bytes (14 hex chars)',
       'any.required': 'Band UID is required'
     }),
   expectedEventId: Joi.string()
@@ -465,6 +466,7 @@ export const bindBandSchema = Joi.object({
 // Reissue is the lost-band path (cashless spec §5.1) — see
 // ScanService.reissueBandForTicket. `reason` is required so the audit trail
 // (BandBinding.unboundReason) always has a true explanation, never a blank.
+// newBandUid uses the same 14-hex (7-byte) requirement as bindBandSchema.bandUid.
 export const reissueBandSchema = Joi.object({
   ticketId: Joi.string()
     .required()
@@ -475,11 +477,12 @@ export const reissueBandSchema = Joi.object({
     }),
   newBandUid: Joi.string()
     .trim()
-    .min(4)
+    .lowercase()
+    .pattern(/^[0-9a-f]{14,}$/)
     .required()
     .messages({
       'string.empty': 'New band UID is required',
-      'string.min': 'New band UID must be at least 4 characters',
+      'string.pattern.base': 'New band UID must be at least 7 bytes (14 hex chars)',
       'any.required': 'New band UID is required'
     }),
   reason: Joi.string()
