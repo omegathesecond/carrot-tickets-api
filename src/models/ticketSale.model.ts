@@ -183,7 +183,9 @@ ticketSaleSchema.index({ vendorId: 1, soldAt: -1 });
 ticketSaleSchema.index({ eventId: 1, soldAt: -1 });
 ticketSaleSchema.index({ paymentStatus: 1, paymentMethod: 1 });
 ticketSaleSchema.index({ soldBy: 1, soldByType: 1 });
-ticketSaleSchema.index({ customerUserId: 1 });
+// customerUserId's index is declared on the field (sparse: true); re-declaring
+// it here produced a conflicting non-sparse "customerUserId_1" that MongoDB
+// rejected silently.
 ticketSaleSchema.index({ channel: 1, soldAt: -1 });
 
 export const TicketSale = mongoose.model<ITicketSale>('TicketSale', ticketSaleSchema);

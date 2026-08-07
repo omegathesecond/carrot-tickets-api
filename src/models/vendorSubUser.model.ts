@@ -165,7 +165,8 @@ vendorSubUserSchema.methods.hasPermission = function(this: IVendorSubUser, permi
 
 // Indexes
 vendorSubUserSchema.index({ vendorId: 1, isActive: 1 });
-vendorSubUserSchema.index({ email: 1 });
-vendorSubUserSchema.index({ phoneNumber: 1 });
+// email / phoneNumber declare their own single-field indexes on the field
+// (unique + sparse); re-declaring them here produced conflicting non-unique
+// duplicates that MongoDB rejected silently.
 
 export const VendorSubUser = mongoose.model<IVendorSubUser>('VendorSubUser', vendorSubUserSchema);

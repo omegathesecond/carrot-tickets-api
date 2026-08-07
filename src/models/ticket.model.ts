@@ -119,14 +119,18 @@ ticketSchema.methods.isValidForEntry = function(): boolean {
   return this.status === TicketStatus.SOLD;
 };
 
-// Indexes
+// Indexes.
+// NOTE: ticketId / saleId / purchasedBy already declare their single-field
+// indexes on the field itself (unique / index / sparse respectively). Declaring
+// them again here generated a second "<field>_1" with DIFFERENT options, which
+// MongoDB rejects — silently, because Mongoose builds indexes in the background
+// and only emits the error on the connection. Keep single-field index intent on
+// the field; only compound indexes belong down here.
 ticketSchema.index({ eventId: 1, status: 1 });
 ticketSchema.index({ vendorId: 1, status: 1 });
-ticketSchema.index({ saleId: 1 });
-ticketSchema.index({ purchasedBy: 1 });
-ticketSchema.index({ ticketId: 1 }, { unique: true });
 // Activity feed: global newest-first scan of live tickets (the "is going"
-// source). Every other Ticket index is a point lookup — none serves recency.
+// source). Every other single-field Ticket index is a point lookup — none
+// serves recency. Compound, so it belongs here (not on a field).
 ticketSchema.index({ status: 1, createdAt: -1 });
 // Activity feed, Following tab: goingCandidates() filters live tickets by
 // `customerPhone: { $in: [...followed actors' phones] }` sorted newest-first

@@ -435,6 +435,66 @@ export const checkInTicketSchema = Joi.object({
     })
 });
 
+// Band binding is a dedicated band-desk action (cashless spec §5.1) — see
+// ScanService.bindBandToTicket. bandUid has a min length because a band's UID
+// is a physical NFC chip id, not free text; 4 chars is a floor against typos,
+// not a real-world format check (the client owns the actual UID shape).
+export const bindBandSchema = Joi.object({
+  ticketId: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Ticket ID is required',
+      'any.required': 'Ticket ID is required'
+    }),
+  bandUid: Joi.string()
+    .trim()
+    .min(4)
+    .required()
+    .messages({
+      'string.empty': 'Band UID is required',
+      'string.min': 'Band UID must be at least 4 characters',
+      'any.required': 'Band UID is required'
+    }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
+});
+
+// Reissue is the lost-band path (cashless spec §5.1) — see
+// ScanService.reissueBandForTicket. `reason` is required so the audit trail
+// (BandBinding.unboundReason) always has a true explanation, never a blank.
+export const reissueBandSchema = Joi.object({
+  ticketId: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Ticket ID is required',
+      'any.required': 'Ticket ID is required'
+    }),
+  newBandUid: Joi.string()
+    .trim()
+    .min(4)
+    .required()
+    .messages({
+      'string.empty': 'New band UID is required',
+      'string.min': 'New band UID must be at least 4 characters',
+      'any.required': 'New band UID is required'
+    }),
+  reason: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Reason is required',
+      'any.required': 'Reason is required'
+    }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
+});
+
 export const scanQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(20),
