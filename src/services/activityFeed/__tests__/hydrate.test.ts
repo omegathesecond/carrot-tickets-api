@@ -131,4 +131,30 @@ describe('hydrate', () => {
     const items = await hydrate([mk(String(b2._id), 's2'), mk(String(b1._id), 's1')]);
     expect(items.map((i) => i.id)).toEqual(['follow:s2', 'follow:s1']);
   });
+
+  it('keeps a join row (actor only) and emits target: null', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878200020', password: 'password123', name: 'New User', username: 'newbie',
+    });
+    const [item] = await hydrate([{
+      type: 'join', sourceId: String(buyer._id), sortAt: at,
+      actor: { kind: 'buyer', id: String(buyer._id) },
+      // no target
+    }]);
+    expect(item!.type).toBe('join');
+    expect(item!.target).toBeNull();
+    expect(item!.actor.name).toBe('New User');
+    expect(item!.actor.href).toBe('/u/newbie');
+  });
+
+  it('drops a join whose buyer is socially suspended', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878200021', password: 'password123', username: 'susp', socialSuspendedAt: new Date(),
+    });
+    const items = await hydrate([{
+      type: 'join', sourceId: String(buyer._id), sortAt: at,
+      actor: { kind: 'buyer', id: String(buyer._id) },
+    }]);
+    expect(items).toHaveLength(0);
+  });
 });
