@@ -537,7 +537,7 @@ export class PublicController {
   /**
    * GET /api/public/activity-feed
    * The Activity page: real social activity across the platform — likes,
-   * follows, going, posts and event announcements — newest first.
+   * follows, going, posts, event announcements and new signups — newest first.
    *
    * NOT to be confused with getActivity above, which powers the homepage
    * ticker and deliberately blends synthetic purchases. This endpoint is

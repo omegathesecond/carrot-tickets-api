@@ -38,7 +38,7 @@ export async function hydrate(candidates: ActivityCandidate[]): Promise<Activity
     if (c.target.kind === 'post') postIds.add(c.target.id);
   }
 
-  // Suspended actors are excluded HERE, once, for all six sources. A suspended
+  // Suspended actors are excluded HERE, once, for all seven sources. A suspended
   // buyer can still be a follow TARGET (they are not erased), but never an actor.
   const validBuyerIds = onlyValidIds(buyerIds);
   const validVendorIds = onlyValidIds(vendorIds);

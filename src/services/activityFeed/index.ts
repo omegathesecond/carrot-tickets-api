@@ -43,7 +43,7 @@ const watermark = (cursor: ActivityCursor, type: ActivityType): Date | undefined
 };
 
 /**
- * The activity feed: six sources merged newest-first, with one cursor
+ * The activity feed: seven sources merged newest-first, with one cursor
  * watermark per source so heterogeneous collections page without an offset.
  *
  * There is NO time cutoff — paging continues until every source is exhausted,
@@ -85,7 +85,7 @@ export async function getActivityFeed(
     joinCandidates(per('join')),
   ]);
 
-  // All six sources share ONE shape: `{ candidates, nextBefore }`.
+  // All seven sources share ONE shape: `{ candidates, nextBefore }`.
   // `nextBefore` is the SCAN floor — how far the underlying query actually
   // looked — not the SURVIVOR floor. `likeEventCandidates` / `likePostCandidates`
   // filter fetched rows by published/live status AFTER the DB `.limit()`, so
@@ -112,7 +112,7 @@ export async function getActivityFeed(
   const items = await hydrate(page);
 
   // The next cursor records the last consumed position PER SOURCE, with one
-  // rule applied uniformly to all six (this generalises what `going` already
+  // rule applied uniformly to all seven (this generalises what `going` already
   // did — see going.ts's own doc comment for why it needs a floor at all):
   //   1. If the page consumed at least one candidate from a source, its key
   //      becomes that consumed row's (oldest, since `page` is newest-first)
