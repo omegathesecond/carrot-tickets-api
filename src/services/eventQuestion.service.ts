@@ -88,6 +88,20 @@ export async function listQuestions(eventId: string, actor: SocialActor | null):
 }
 
 /**
+ * One question by id, hydrated exactly like the feed rows (author, replies
+ * oldest-first, viewerHasLiked) PLUS its owning event {id, name} — powers the
+ * standalone topic-detail conversation page (/topic/:id). Returns null when the
+ * id doesn't resolve so the controller can 404 rather than 500.
+ */
+export async function getQuestion(questionId: string, actor: SocialActor | null): Promise<any | null> {
+  const question = await EventQuestion.findById(questionId).lean();
+  if (!question) return null;
+  const [hydrated] = await hydrateQuestions([question], actor);
+  const event = await Event.findById(question.eventId).select('name').lean();
+  return { ...hydrated, event: { id: String(question.eventId), name: (event as any)?.name ?? null } };
+}
+
+/**
  * The most recent questions ACROSS ALL events, newest first — powers the
  * TopicsPage's cross-event discussion list (listQuestions is scoped to one
  * event's Q&A thread). Reuses hydrateQuestions for author/reply/like

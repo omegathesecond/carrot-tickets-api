@@ -44,6 +44,9 @@ router.post('/reports', authenticateBuyer, ReportController.file);
 // before the /questions/:questionId writes: 'mine' is a literal 2-segment GET
 // that must never be captured as a :questionId. Both 401 without an actor.
 router.get('/questions/mine', optionalTicketsAuth, TopicsMineController.listMine);
+// Single topic (conversation page). After /questions/mine so the literal wins;
+// a 2-segment GET that never collides with the 3-segment POSTs below.
+router.get('/questions/:questionId', optionalTicketsAuth, EventQuestionController.get);
 router.post('/questions/:questionId/read', optionalTicketsAuth, TopicsMineController.markRead);
 
 router.post('/questions/:questionId/replies', optionalTicketsAuth, EventQuestionController.reply);
