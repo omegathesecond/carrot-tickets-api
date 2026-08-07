@@ -5,6 +5,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
@@ -50,7 +51,7 @@ it('charges a wallet by band uid and credits the merchant', async () => {
     .send({ bandUid, amount: 300, clientTxnId: 'c1' });
 
   expect(res.status).toBe(200);
-  expect(res.body.data.ok).toBe(true);
+  expect(res.body.success).toBe(true);
   expect(res.body.data.newBalance).toBe(700);
   expect(res.body.data.amount).toBe(300);
   expect(res.body.data.fee).toBe(0);
@@ -68,16 +69,19 @@ it('splits the fee when the merchant has a commissionPercent', async () => {
   expect(res.body.data.merchantNet).toBe(270);
 });
 
-it('declines with 402 on insufficient balance, leaving the wallet unchanged', async () => {
+it('declines with 402 on insufficient balance, leaving the wallet unchanged (standard ApiResponseUtil envelope)', async () => {
   const { eventId, bandUid, merchantId, walletId } = await seedMerchantAndFundedBand({ balance: 100 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
     .send({ bandUid, amount: 500, clientTxnId: 'c-decline' });
 
   expect(res.status).toBe(402);
-  expect(res.body.ok).toBe(false);
-  expect(res.body.reason).toBe('insufficient_balance');
-  expect(res.body.currentBalance).toBe(100);
+  // Standard { success, message, error } envelope — NOT a bespoke shape.
+  expect(res.body.success).toBe(false);
+  expect(res.body.message).toMatch(/insufficient balance/i);
+  const errorPayload = JSON.parse(res.body.error);
+  expect(errorPayload.reason).toBe('insufficient_balance');
+  expect(errorPayload.currentBalance).toBe(100); // the balance is conveyed
 
   const w = await Wallet.findById(walletId).lean();
   expect(w!.balance).toBe(100); // UNCHANGED
@@ -91,6 +95,25 @@ it('rejects a non-cashless event with 400', async () => {
 
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/cashless/i);
+});
+
+// FIX 1: a merchant token must not be able to drain wallets at a cancelled
+// (non-published) event, mirroring ResellerController.cashTopup's lifecycle
+// guard. Without this, a merchant whose event got cancelled after their JWT
+// was issued could keep charging.
+it('rejects a charge against a cancelled (non-published) cashless event with 400, wallet unchanged', async () => {
+  const { eventId, bandUid, merchantId, walletId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  await Event.updateOne({ _id: eventId }, { $set: { status: EventStatus.CANCELLED } });
+
+  const res = await request(app).post('/api/merchant/charge')
+    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .send({ bandUid, amount: 300, clientTxnId: 'c-cancelled' });
+
+  expect(res.status).toBe(400);
+  expect(res.body.message).toMatch(/published/i);
+
+  const w = await Wallet.findById(walletId).lean();
+  expect(w!.balance).toBe(1000); // UNCHANGED
 });
 
 it('rejects a token missing merchant:charge with 403', async () => {

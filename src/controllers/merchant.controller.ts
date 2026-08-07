@@ -2,11 +2,19 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
 import { Wallet } from '@models/wallet.model';
 import { MerchantService, WalletDeclinedError } from '@services/merchant.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
 import { MerchantToken } from '@interfaces/merchant.interface';
+
+/** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
+const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
+  insufficient_balance: 'Insufficient balance',
+  wallet_not_active: 'Wallet is not active',
+  wallet_not_found: 'Wallet not found',
+};
 
 export class MerchantController {
   /**
@@ -27,6 +35,12 @@ export class MerchantController {
       const event = await Event.findById(eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
       if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+      // Lifecycle guard, mirroring ResellerController.cashTopup: a merchant
+      // token must not be able to drain wallets at a cancelled or
+      // not-yet-live event.
+      if (event.status !== EventStatus.PUBLISHED) {
+        return ApiResponseUtil.error(res, 'Event is not published', 400);
+      }
 
       const bandUid = normalizeBandUid(value.bandUid);
       const wallet = await Wallet.findOne({ eventId, bandUid });
@@ -42,7 +56,6 @@ export class MerchantController {
       });
 
       return ApiResponseUtil.success(res, {
-        ok: true,
         newBalance: result.wallet.balance,
         amount: result.charge.amount,
         fee: result.charge.fee,
@@ -51,10 +64,13 @@ export class MerchantController {
     } catch (e: any) {
       // DECLINE: insufficient balance / inactive wallet — 402, never 4xx/5xx,
       // so a POS client can distinguish "try a different card/band" from a
-      // genuine request error.
+      // genuine request error. Goes through the standard ApiResponseUtil
+      // envelope (success:false, message, error) like every other endpoint —
+      // reason + currentBalance ride in the `error` payload, the same way
+      // tickets.controller.ts's checkInTicket/reissueBand pass a structured
+      // result object as ApiResponseUtil.error's 4th argument.
       if (e instanceof WalletDeclinedError) {
-        return res.status(402).json({
-          ok: false,
+        return ApiResponseUtil.error(res, DECLINE_MESSAGE[e.reason], 402, {
           reason: e.reason,
           currentBalance: e.currentBalance,
         });
