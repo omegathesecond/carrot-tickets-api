@@ -3,6 +3,7 @@ import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.
 import { SocialProfileController } from '@controllers/socialProfile.controller';
 import { ConsumerReadsController } from '@controllers/consumerReads.controller';
 import { StoryController } from '@controllers/story.controller';
+import { MeetupController } from '@controllers/meetup.controller';
 
 const router = Router();
 
@@ -36,6 +37,11 @@ router.get('/suggestions/people', authenticateBuyer, ConsumerReadsController.sug
 router.get('/suggestions/organizers', authenticateBuyer, ConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recommendations);
 router.get('/nearby/people', authenticateBuyer, ConsumerReadsController.nearbyPeople);
+router.post('/meetups', authenticateBuyer, MeetupController.request);
+router.get('/meetups/incoming', authenticateBuyer, MeetupController.incoming);
+router.post('/meetups/:id/accept', authenticateBuyer, MeetupController.accept);
+router.post('/meetups/:id/decline', authenticateBuyer, MeetupController.decline);
+router.delete('/meetups/:id', authenticateBuyer, MeetupController.cancel);
 // Ephemeral 24h Stories — registered above '/users/:username' alongside the
 // rest of the fixed-segment routes, same reasoning as '/users/search' below.
 router.post('/stories', authenticateBuyer, StoryController.create);
