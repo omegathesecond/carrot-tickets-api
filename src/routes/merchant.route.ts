@@ -15,4 +15,10 @@ router.post(
   MerchantController.charge,
 );
 
+router.get(
+  '/transactions',
+  requireMerchantPermission(MerchantPermission.CHARGE),
+  MerchantController.listTransactions,
+);
+
 export default router;

@@ -80,4 +80,25 @@ export class MerchantController {
       return ApiResponseUtil.error(res, msg, status);
     }
   }
+
+  /**
+   * GET /api/merchant/transactions — this merchant's takings: a recent-first
+   * page of their charges plus a summary over ALL of them. merchantId comes
+   * ONLY from the verified merchant JWT (authenticateMerchant), never a query
+   * param, so a merchant can never see another merchant's charges.
+   */
+  static async listTransactions(req: Request, res: Response): Promise<any> {
+    try {
+      const merchant = (req as any).merchant as MerchantToken;
+      const { merchantId } = merchant;
+
+      const rawLimit = Number(req.query.limit);
+      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 50;
+
+      const result = await MerchantService.listTransactions({ merchantId, limit });
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e?.message || 'Failed to load transactions', 500);
+    }
+  }
 }

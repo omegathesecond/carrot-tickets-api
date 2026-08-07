@@ -167,4 +167,65 @@ export class MerchantService {
       await session.endSession();
     }
   }
+
+  /**
+   * A merchant's takings (cashless spec) — GET /api/merchant/transactions.
+   * `transactions` is the most-recent-first PAGE (bounded by `limit`);
+   * `summary` is aggregated over ALL of the merchant's charges regardless of
+   * `limit`, via a separate $group aggregation, so truncating the list never
+   * truncates the totals.
+   */
+  static async listTransactions(params: {
+    merchantId: string;
+    limit?: number;
+  }): Promise<{
+    transactions: Array<{
+      id: string;
+      amount: number;
+      fee: number;
+      netAmount: number;
+      bandUid: string;
+      status: 'completed';
+      createdAt: Date;
+    }>;
+    summary: { totalCharged: number; totalNet: number; totalFee: number; count: number };
+  }> {
+    const { merchantId, limit = 50 } = params;
+
+    const [rows, aggResult] = await Promise.all([
+      MerchantCharge.find({ merchantId }).sort({ createdAt: -1 }).limit(limit).lean(),
+      MerchantCharge.aggregate([
+        { $match: { merchantId: new mongoose.Types.ObjectId(merchantId) } },
+        {
+          $group: {
+            _id: null,
+            totalCharged: { $sum: '$amount' },
+            totalNet: { $sum: '$netAmount' },
+            totalFee: { $sum: '$fee' },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const transactions = rows.map((c) => ({
+      id: String(c._id),
+      amount: c.amount,
+      fee: c.fee,
+      netAmount: c.netAmount,
+      bandUid: c.bandUid,
+      status: c.status,
+      createdAt: c.createdAt,
+    }));
+
+    const agg = aggResult[0];
+    const summary = {
+      totalCharged: agg?.totalCharged ?? 0,
+      totalNet: agg?.totalNet ?? 0,
+      totalFee: agg?.totalFee ?? 0,
+      count: agg?.count ?? 0,
+    };
+
+    return { transactions, summary };
+  }
 }
