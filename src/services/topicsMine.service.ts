@@ -3,43 +3,9 @@ import { EventQuestion } from '@models/eventQuestion.model';
 import { EventQuestionReply } from '@models/eventQuestionReply.model';
 import { EventQuestionReaction } from '@models/eventQuestionReaction.model';
 import { EventQuestionRead } from '@models/eventQuestionRead.model';
-import { Vendor } from '@models/vendor.model';
-import { Buyer } from '@models/buyer.model';
 import { HttpError } from '@utils/httpError.util';
-import type { SocialActor, SocialActorType } from '@utils/socialActor.util';
-
-/**
- * Author hydration, inlined. It mirrors the private loadAuthorMaps/authorDto in
- * eventQuestion.service (extracted to socialAuthor.service on a later branch
- * that hasn't reached main yet). Kept local so this module builds on the
- * deployable base; fold into the shared helper once it lands.
- */
-interface AuthorMaps {
-  vendors: Map<string, any>;
-  buyers: Map<string, any>;
-}
-
-async function loadAuthorMaps(items: { authorType: SocialActorType; authorId: unknown }[]): Promise<AuthorMaps> {
-  const vendorIds = [...new Set(items.filter((i) => i.authorType === 'vendor').map((i) => String(i.authorId)))];
-  const buyerIds = [...new Set(items.filter((i) => i.authorType === 'buyer').map((i) => String(i.authorId)))];
-  const [vendors, buyers] = await Promise.all([
-    vendorIds.length ? Vendor.find({ _id: { $in: vendorIds } }).select('businessName logoUrl').lean() : Promise.resolve([]),
-    buyerIds.length ? Buyer.find({ _id: { $in: buyerIds } }).select('name username avatarUrl').lean() : Promise.resolve([]),
-  ]);
-  return {
-    vendors: new Map(vendors.map((v: any) => [String(v._id), v])),
-    buyers: new Map(buyers.map((b: any) => [String(b._id), b])),
-  };
-}
-
-function authorDto(authorType: SocialActorType, authorId: unknown, maps: AuthorMaps) {
-  if (authorType === 'vendor') {
-    const v = maps.vendors.get(String(authorId));
-    return { type: 'organizer', id: String(authorId), name: v?.businessName ?? 'Organizer', avatarUrl: v?.logoUrl ?? null };
-  }
-  const b = maps.buyers.get(String(authorId));
-  return { type: 'buyer', id: String(authorId), name: b?.name ?? null, username: b?.username ?? null, avatarUrl: b?.avatarUrl ?? null };
-}
+import { loadAuthorMaps, authorDto } from '@services/socialAuthor.service';
+import type { SocialActor } from '@utils/socialActor.util';
 
 /**
  * "YOUR TOPICS" — the topics (event Q&A questions) an actor started OR replied
