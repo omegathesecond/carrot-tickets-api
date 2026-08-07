@@ -162,6 +162,14 @@ export const createEventSchema = Joi.object({
     .messages({
       'boolean.base': 'isMultiDay must be a boolean value'
     }),
+  // Whether NFC tap-and-go wallet/POS is enabled for this event (cashless
+  // spec §11). Optional — omitting it lets the Event model default (false)
+  // apply, same as isMultiDay above.
+  cashless: Joi.boolean()
+    .optional()
+    .messages({
+      'boolean.base': 'cashless must be a boolean value'
+    }),
   category: Joi.string().valid(...EVENT_CATEGORIES).default('Other').messages({
     'any.only': 'Invalid event category'
   }),
@@ -237,6 +245,12 @@ export const updateEventSchema = Joi.object({
   startTime: Joi.date().optional(),
   endTime: Joi.date().optional(),
   isMultiDay: Joi.boolean().optional(),
+  // See createEventSchema.cashless — optional, false unsets it.
+  cashless: Joi.boolean()
+    .optional()
+    .messages({
+      'boolean.base': 'cashless must be a boolean value'
+    }),
   category: Joi.string().valid(...EVENT_CATEGORIES).messages({
     'any.only': 'Invalid event category'
   }),
