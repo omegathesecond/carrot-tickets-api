@@ -116,6 +116,8 @@ describe('GET /api/social/nearby/people', () => {
       online: true,
       mutualCount: 1,
       currentEvent: null,
+      meetupStatus: 'none',
+      meetupRequestId: null,
     });
   });
 

@@ -11,6 +11,7 @@ import { FollowService } from '@services/follow.service';
 import { SuggestionsService } from '@services/suggestions.service';
 import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
+import { MeetupService } from '@services/meetup.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { notEndedFilter } from '@utils/eventVisibility.util';
@@ -155,18 +156,27 @@ export class ConsumerReadsController {
       const radiusKm = NearbyService.resolveRadiusKm(req.query['radiusKm']);
 
       const rows = await NearbyService.nearbyPeople({ type: 'buyer', id: String(buyer._id) }, lat, lng, radiusKm);
-      const people = rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        username: r.username,
-        avatarUrl: r.avatarUrl,
-        bio: r.bio,
-        city: null,
-        distanceKm: Math.round((r.distanceMeters / 1000) * 10) / 10,
-        online: r.online,
-        mutualCount: r.mutualCount,
-        currentEvent: null,
-      }));
+      const statusMap = await MeetupService.outgoingStatusMap(
+        String(buyer._id),
+        rows.map((r) => r.id)
+      );
+      const people = rows.map((r) => {
+        const m = statusMap.get(r.id);
+        return {
+          id: r.id,
+          name: r.name,
+          username: r.username,
+          avatarUrl: r.avatarUrl,
+          bio: r.bio,
+          city: null,
+          distanceKm: Math.round((r.distanceMeters / 1000) * 10) / 10,
+          online: r.online,
+          mutualCount: r.mutualCount,
+          currentEvent: null,
+          meetupStatus: m ? m.status : 'none',
+          meetupRequestId: m ? m.id : null,
+        };
+      });
       return ApiResponseUtil.success(res, { people });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load nearby people');

@@ -118,6 +118,8 @@ export class VendorConsumerReadsController {
         online: r.online,
         mutualCount: r.mutualCount,
         currentEvent: null,
+        meetupStatus: 'none',
+        meetupRequestId: null,
       }));
       return ApiResponseUtil.success(res, { people });
     } catch (error: any) {
