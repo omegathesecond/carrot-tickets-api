@@ -14,6 +14,7 @@ export enum ResellerPermission {
   VIEW_HUB_SALES = 'reseller:view_hub_sales',
   VIEW_REPORTS = 'reseller:view_reports',
   REQUEST_PAYOUT = 'reseller:request_payout',
+  CASH_TOPUP = 'reseller:cash_topup',
 }
 
 export enum ResellerRole {
@@ -32,12 +33,14 @@ export const RESELLER_ROLE_PERMISSIONS: Record<ResellerRole, ResellerPermission[
     ResellerPermission.VIEW_HUB_SALES,
     ResellerPermission.MANAGE_OPERATORS,
     ResellerPermission.VIEW_REPORTS,
+    ResellerPermission.CASH_TOPUP,
   ],
 
   [ResellerRole.OPERATOR]: [
     ResellerPermission.VIEW_EVENTS,
     ResellerPermission.SELL_TICKETS,
     ResellerPermission.VIEW_OWN_SALES,
+    ResellerPermission.CASH_TOPUP,
   ],
 };
 
