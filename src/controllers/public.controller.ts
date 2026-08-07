@@ -616,10 +616,37 @@ export class PublicController {
         { $limit: TRENDING_LIMIT },
       ]);
 
+      // A representative thumbnail per tag: the newest visible post carrying
+      // it, so the vertical trending list shows a real image (image url, or a
+      // video's poster) rather than a bare hashtag. Same visibility window and
+      // filters as the count aggregation — a tag with no ready media just gets
+      // image:null, never a fabricated one.
+      const topTags = agg.map((row: any) => row._id as string);
+      const thumbAgg = topTags.length
+        ? await Update.aggregate([
+            {
+              $match: {
+                status: 'active',
+                'media.status': 'ready',
+                createdAt: { $gte: since },
+                hashtags: { $in: topTags },
+              },
+            },
+            { $sort: { createdAt: -1 } },
+            { $unwind: '$hashtags' },
+            { $match: { hashtags: { $in: topTags } } },
+            { $group: { _id: '$hashtags', media: { $first: '$media' } } },
+          ])
+        : [];
+      const thumbByTag = new Map<string, string | null>(
+        thumbAgg.map((row: any) => [row._id as string, row.media?.image?.url ?? row.media?.video?.poster ?? null]),
+      );
+
       const trending = agg.map((row: any, index: number) => ({
         tag: row._id as string,
         posts: row.posts as number,
         hot: index < TRENDING_HOT_COUNT,
+        image: thumbByTag.get(row._id as string) ?? null,
       }));
 
       return ApiResponseUtil.success(res, { trending });

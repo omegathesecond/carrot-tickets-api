@@ -4,6 +4,7 @@ import { CommunityController } from '@controllers/community.controller';
 import { MessageController } from '@controllers/message.controller';
 import { ReportController } from '@controllers/report.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
+import { TopicsMineController } from '@controllers/topicsMine.controller';
 
 const router = Router();
 
@@ -39,6 +40,12 @@ router.post('/reports', authenticateBuyer, ReportController.file);
  * the controller resolves the SocialActor and 401s writes itself when one
  * doesn't resolve, so anonymous callers can still GET the thread.
  */
+// "YOUR TOPICS" — the actor's own topics + per-topic read cursor. Registered
+// before the /questions/:questionId writes: 'mine' is a literal 2-segment GET
+// that must never be captured as a :questionId. Both 401 without an actor.
+router.get('/questions/mine', optionalTicketsAuth, TopicsMineController.listMine);
+router.post('/questions/:questionId/read', optionalTicketsAuth, TopicsMineController.markRead);
+
 router.post('/questions/:questionId/replies', optionalTicketsAuth, EventQuestionController.reply);
 router.post('/questions/:questionId/like', optionalTicketsAuth, EventQuestionController.like);
 
