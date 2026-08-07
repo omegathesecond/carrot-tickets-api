@@ -37,9 +37,9 @@ describe('hydrate', () => {
     expect(item!.actor).toEqual({
       kind: 'buyer', id: String(buyer._id), name: 'Sipho', username: 'sipho', avatarUrl: null, href: '/u/sipho',
     });
-    expect(item!.target.name).toBe('Winter Fest');
-    expect(item!.target.imageUrl).toBe('https://cdn/p.jpg');
-    expect(item!.target.href).toBe(`/event/winter-fest-${String(event._id)}`);
+    expect(item!.target!.name).toBe('Winter Fest');
+    expect(item!.target!.imageUrl).toBe('https://cdn/p.jpg');
+    expect(item!.target!.href).toBe(`/event/winter-fest-${String(event._id)}`);
   });
 
   it('hydrates an organizer actor', async () => {
@@ -58,8 +58,8 @@ describe('hydrate', () => {
       kind: 'organizer', id: String(vendor._id), name: 'King Derby', username: 'king-derby',
       avatarUrl: 'https://cdn/l.png', href: `/o/${String(vendor._id)}`,
     });
-    expect(item!.target.imageUrl).toBe('https://cdn/i.jpg');
-    expect(item!.target.href).toBe(`/post/${String(post._id)}`);
+    expect(item!.target!.imageUrl).toBe('https://cdn/i.jpg');
+    expect(item!.target!.href).toBe(`/post/${String(post._id)}`);
   });
 
   it('drops a row whose actor is socially suspended', async () => {

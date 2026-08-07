@@ -1,6 +1,6 @@
 import { Follow } from '@models/follow.model';
 import { goingCandidates } from './going';
-import { likeEventCandidates, likePostCandidates, followCandidates, postCandidates, eventCandidates } from './sources';
+import { likeEventCandidates, likePostCandidates, followCandidates, postCandidates, eventCandidates, joinCandidates } from './sources';
 import type { SourceResult } from './sources';
 import { hydrate } from './hydrate';
 import { SOURCE_KEYS } from './types';
@@ -75,13 +75,14 @@ export async function getActivityFeed(
 
   const per = (type: ActivityType) => ({ before: watermark(cursor, type), limit, actorIds });
 
-  const [likeEvents, likePosts, follows, going, posts, events] = await Promise.all([
+  const [likeEvents, likePosts, follows, going, posts, events, joins] = await Promise.all([
     likeEventCandidates(per('like_event')),
     likePostCandidates(per('like_post')),
     followCandidates(per('follow')),
     goingCandidates(per('going')),
     postCandidates(per('post')),
     eventCandidates(per('event')),
+    joinCandidates(per('join')),
   ]);
 
   // All six sources share ONE shape: `{ candidates, nextBefore }`.
@@ -100,6 +101,7 @@ export async function getActivityFeed(
     going,
     post: posts,
     event: events,
+    join: joins,
   };
 
   const all: ActivityCandidate[] = Object.values(results)

@@ -8,7 +8,8 @@ export type ActivityType =
   | 'follow'
   | 'going'
   | 'post'
-  | 'event';
+  | 'event'
+  | 'join';
 
 /** Cursor keys, one watermark per source. Short to keep the base64 small. */
 export const SOURCE_KEYS = {
@@ -18,6 +19,7 @@ export const SOURCE_KEYS = {
   going: 'g',
   post: 'p',
   event: 'e',
+  join: 'j',
 } as const;
 
 export interface ActivityActor {
@@ -44,7 +46,7 @@ export interface ActivityItem {
   id: string;
   sortAt: string; // ISO
   actor: ActivityActor;
-  target: ActivityTarget;
+  target: ActivityTarget | null;
 }
 
 /** A pre-hydration row: identifiers only, no names or images yet. */
@@ -53,7 +55,8 @@ export interface ActivityCandidate {
   sourceId: string;
   sortAt: Date;
   actor: { kind: 'buyer' | 'organizer'; id: string };
-  target: { kind: 'event' | 'post' | 'buyer' | 'organizer'; id: string };
+  // Optional: a join is actor-only and carries no target.
+  target?: { kind: 'event' | 'post' | 'buyer' | 'organizer'; id: string };
 }
 
 /** One ISO watermark per source key. Absent key = start from newest. */
@@ -64,6 +67,7 @@ export interface ActivityCursor {
   g?: string;
   p?: string;
   e?: string;
+  j?: string;
 }
 
 export type ActivityTab = 'everyone' | 'following';

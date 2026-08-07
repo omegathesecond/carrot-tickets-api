@@ -142,7 +142,7 @@ describe('goingCandidates', () => {
     }
 
     const { candidates: rows } = await goingCandidates({ limit: LIMIT });
-    const forPair = rows.filter((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    const forPair = rows.filter((r) => r.actor.id === String(buyer._id) && r.target!.id === String(event._id));
     expect(forPair).toHaveLength(0);
   });
 
@@ -190,7 +190,7 @@ describe('goingCandidates', () => {
     // A caller that never sets `before` below the guaranteed boundary can
     // still reach both withheld rows on a later call — deferred, not lost.
     const page2 = await goingCandidates({ limit: LIMIT, before: new Date(boundary + 1) });
-    const recovered = page2.candidates.find((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    const recovered = page2.candidates.find((r) => r.actor.id === String(buyer._id) && r.target!.id === String(event._id));
     expect(recovered).toBeDefined();
     expect(recovered!.sortAt.getTime()).toBe(ticketTime.getTime());
     const bystanderRow = page2.candidates.find((r) => r.actor.id === String(bystander._id));
@@ -220,7 +220,7 @@ describe('goingCandidates', () => {
     const { candidates: rows } = await goingCandidates({ limit: LIMIT, actorIds: [String(followed._id)] });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actor.id).toBe(String(followed._id));
-    expect(rows[0]!.target.id).toBe(String(event._id));
+    expect(rows[0]!.target!.id).toBe(String(event._id));
     expect(rows[0]!.sortAt.getTime()).toBe(ticketTime.getTime());
   });
 
@@ -252,7 +252,7 @@ describe('goingCandidates', () => {
     expect(page1.nextBefore!.getTime()).toBe(boundary);
 
     const page2 = await goingCandidates({ limit: LIMIT, before: page1.nextBefore! });
-    const recovered = page2.candidates.find((r) => r.actor.id === String(buyer._id) && r.target.id === String(event._id));
+    const recovered = page2.candidates.find((r) => r.actor.id === String(buyer._id) && r.target!.id === String(event._id));
     expect(recovered).toBeDefined();
     expect(recovered!.sortAt.getTime()).toBe(joinTime.getTime());
   });
@@ -291,7 +291,7 @@ describe('goingCandidates', () => {
 
     const { candidates: rows } = await goingCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(ended.event._id));
+    expect(rows[0]!.target!.id).toBe(String(ended.event._id));
   });
 
   it('restricts to actorIds when the following tab passes them', async () => {
@@ -314,6 +314,6 @@ describe('goingCandidates', () => {
     await joinAt(buyer._id, b.community._id, new Date(Date.now() - 1 * DAY));
 
     const { candidates: rows } = await goingCandidates({ limit: 20 });
-    expect(rows.map((r) => r.target.id)).toEqual([String(b.event._id), String(a.event._id)]);
+    expect(rows.map((r) => r.target!.id)).toEqual([String(b.event._id), String(a.event._id)]);
   });
 });

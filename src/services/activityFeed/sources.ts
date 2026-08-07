@@ -202,3 +202,9 @@ export async function eventCandidates(opts: SourceOpts): Promise<SourceResult> {
     .filter((c): c is NonNullable<typeof c> => c !== null);
   return { candidates, nextBefore };
 }
+
+export async function joinCandidates(opts: SourceOpts): Promise<SourceResult> {
+  // Filled in Cycle B.
+  void opts;
+  return { candidates: [], nextBefore: null };
+}

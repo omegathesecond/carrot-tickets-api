@@ -57,7 +57,7 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await likeEventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(ended.event._id));
+    expect(rows[0]!.target!.id).toBe(String(ended.event._id));
   });
 
   it('likePostCandidates maps a vendor actor and drops removed posts', async () => {
@@ -84,7 +84,7 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await followCandidates({ limit: 20 });
     expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.target.kind).sort()).toEqual(['buyer', 'organizer']);
+    expect(rows.map((r) => r.target!.kind).sort()).toEqual(['buyer', 'organizer']);
     expect(rows.every((r) => r.type === 'follow')).toBe(true);
   });
 
@@ -99,8 +99,8 @@ describe('activity feed sources', () => {
     const { candidates: rows } = await postCandidates({ limit: 20 });
     // The processing post is excluded: its media is not ready, so it would
     // render as a broken thumbnail in the feed.
-    expect(rows.map((r) => r.target.id)).toEqual([String(ok._id)]);
-    expect(rows.map((r) => r.target.id)).not.toContain(String(pending._id));
+    expect(rows.map((r) => r.target!.id)).toEqual([String(ok._id)]);
+    expect(rows.map((r) => r.target!.id)).not.toContain(String(pending._id));
     expect(rows[0]!.actor).toEqual({ kind: 'organizer', id: String(vendor._id) });
   });
 
@@ -133,7 +133,7 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await eventCandidates({ limit: 1 });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(undated._id));
+    expect(rows[0]!.target!.id).toBe(String(undated._id));
   });
 
   it('eventCandidates attributes a self-listed event to its buyer author', async () => {
@@ -150,7 +150,7 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await eventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(selfListed._id));
+    expect(rows[0]!.target!.id).toBe(String(selfListed._id));
     expect(rows[0]!.actor).toEqual({ kind: 'buyer', id: String(buyer._id) });
   });
 
@@ -158,7 +158,7 @@ describe('activity feed sources', () => {
     const { vendor, event } = await seedEvent('E12b');
     const { candidates: rows } = await eventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(event._id));
+    expect(rows[0]!.target!.id).toBe(String(event._id));
     expect(rows[0]!.actor).toEqual({ kind: 'organizer', id: String(vendor._id) });
   });
 
@@ -170,8 +170,8 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await eventCandidates({ limit: 20 });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(withVendor._id));
-    expect(rows.some((r) => r.target.id === String(orphaned._id))).toBe(false);
+    expect(rows[0]!.target!.id).toBe(String(withVendor._id));
+    expect(rows.some((r) => r.target!.id === String(orphaned._id))).toBe(false);
   });
 
   it('following tab: a viewer following the self-listing buyer sees that event row', async () => {
@@ -190,7 +190,7 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await eventCandidates({ limit: 20, actorIds: [String(buyer._id)] });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(byBuyer._id));
+    expect(rows[0]!.target!.id).toBe(String(byBuyer._id));
     expect(rows[0]!.actor).toEqual({ kind: 'buyer', id: String(buyer._id) });
   });
 
@@ -207,7 +207,7 @@ describe('activity feed sources', () => {
 
     const { candidates: rows } = await followCandidates({ limit: 20, before: newer.createdAt as Date });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.target.id).toBe(String(a._id));
+    expect(rows[0]!.target!.id).toBe(String(a._id));
   });
 
   it('restricts to actorIds for the following tab', async () => {

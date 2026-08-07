@@ -31,6 +31,7 @@ export async function hydrate(candidates: ActivityCandidate[]): Promise<Activity
   const postIds = new Set<string>();
   for (const c of candidates) {
     (c.actor.kind === 'buyer' ? buyerIds : vendorIds).add(c.actor.id);
+    if (!c.target) continue; // join rows are actor-only
     if (c.target.kind === 'buyer') buyerIds.add(c.target.id);
     if (c.target.kind === 'organizer') vendorIds.add(c.target.id);
     if (c.target.kind === 'event') eventIds.add(c.target.id);
@@ -79,7 +80,7 @@ export async function hydrate(candidates: ActivityCandidate[]): Promise<Activity
     };
   };
 
-  const buildTarget = (ref: ActivityCandidate['target']): ActivityTarget | null => {
+  const buildTarget = (ref: NonNullable<ActivityCandidate['target']>): ActivityTarget | null => {
     switch (ref.kind) {
       case 'event': {
         const e = eventById.get(ref.id);
@@ -123,8 +124,13 @@ export async function hydrate(candidates: ActivityCandidate[]): Promise<Activity
   for (const c of candidates) {
     const actor = buildActor(c.actor);
     if (!actor) continue;
-    const target = buildTarget(c.target);
-    if (!target) continue;
+    // A candidate MAY legitimately have no target (a join is actor-only). Only
+    // drop the row when a target IS expected but fails to resolve.
+    let target: ActivityTarget | null = null;
+    if (c.target) {
+      target = buildTarget(c.target);
+      if (!target) continue;
+    }
     items.push({ type: c.type, id: `${c.type}:${c.sourceId}`, sortAt: c.sortAt.toISOString(), actor, target });
   }
   return items;
