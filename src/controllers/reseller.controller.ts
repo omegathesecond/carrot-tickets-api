@@ -6,6 +6,10 @@ import { ResellerSaleService } from '@services/resellerSale.service';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { EventService } from '@services/event.service';
 import { EventStatus } from '@interfaces/event.interface';
+import { cashTopupSchema } from '@validators/reseller.validator';
+import { Event } from '@models/event.model';
+import { Wallet } from '@models/wallet.model';
+import { WalletService } from '@services/wallet.service';
 
 export class ResellerController {
   /**
@@ -290,6 +294,38 @@ export class ResellerController {
     } catch (err: any) {
       console.error('Reseller get sales error:', err);
       return ApiResponseUtil.error(res, err.message || 'Failed to fetch sales');
+    }
+  }
+
+  /**
+   * Wallets: Cash top-up at a desk (spec §5.2). Resolves the wallet by bandUid
+   * OR ticketId (xor'd in the schema), gates on Event.cashless, and delegates
+   * the atomic credit + ledger posting to WalletService.topUpCash. recordedBy
+   * comes ONLY from the verified JWT (req.reseller.operatorId), never the body.
+   */
+  static async cashTopup(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = cashTopupSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const event = await Event.findById(value.eventId).lean();
+      if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
+      if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+
+      const wallet = value.bandUid
+        ? await Wallet.findOne({ eventId: value.eventId, bandUid: value.bandUid })
+        : await Wallet.findOne({ ticketId: value.ticketId, eventId: value.eventId });
+      if (!wallet) return ApiResponseUtil.error(res, 'No wallet for that band/ticket', 404);
+
+      const result = await WalletService.topUpCash({
+        walletId: String(wallet._id), eventId: value.eventId,
+        amount: value.amount, recordedBy: (req as any).reseller.operatorId, clientTxnId: value.clientTxnId,
+      });
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      const msg = e?.message || 'Top-up failed';
+      const status = /not active|not found|cashless|amount/i.test(msg) ? 400 : 500;
+      return ApiResponseUtil.error(res, msg, status);
     }
   }
 }
