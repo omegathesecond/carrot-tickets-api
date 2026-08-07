@@ -359,7 +359,19 @@ export class ResellerController {
       return ApiResponseUtil.created(res, result, 'Band sold');
     } catch (e: any) {
       const msg = e?.message || 'Sell-band failed';
-      const status = /already bound|cashless|not active|invalid band|did not complete|not found|not available|suspended/i.test(msg)
+      // A prior attempt for this clientTxnId is stuck mid-flight (crashed
+      // inside createSale, unresolved) — a distinct conflict, not a plain
+      // validation error: the caller must reconcile or use a new clientTxnId.
+      if (/incomplete.*reconcile/i.test(msg)) {
+        return ApiResponseUtil.error(res, msg, 409);
+      }
+      // Business/validation failures from createSale/sellTickets (sold out,
+      // externally-ticketed event, disabled payment method, suspended
+      // reseller, etc.) and from the band/wallet guards below — 4xx. Anything
+      // else (a genuinely unexpected fault) falls through to 500.
+      const status = /already bound|band bound|cashless|not active|invalid band|did not complete|not found|available|suspended|externally|capacity|sold out/i.test(
+        msg,
+      )
         ? 400
         : 500;
       return ApiResponseUtil.error(res, msg, status);

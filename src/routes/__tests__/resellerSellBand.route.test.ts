@@ -8,6 +8,7 @@ import { ResellerPermission, ResellerRole } from '@interfaces/resellerPermission
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { Ticket } from '@models/ticket.model';
+import { WalletService } from '@services/wallet.service';
 
 beforeAll(connectLedgerTestDb, 60000); afterEach(clearTestDb); afterAll(disconnectTestDb);
 
@@ -18,15 +19,13 @@ beforeAll(connectLedgerTestDb, 60000); afterEach(clearTestDb); afterAll(disconne
 // return an operatorId (see fixtures.ts), unlike the brief's sketch.
 const OPERATOR_ID = '64b000000000000000000001';
 
-async function setup(cashless = true) {
-  const { eventId, ticketTypeId } = await seedPublishedEvent({});
+async function setup(opts: { cashless?: boolean; capacity?: number; permissions?: ResellerPermission[] } = {}) {
+  const { cashless = true, capacity, permissions = [ResellerPermission.SELL_TICKETS, ResellerPermission.CASH_TOPUP] } = opts;
+  const { eventId, ticketTypeId } = await seedPublishedEvent(capacity !== undefined ? { capacity } : {});
   await Event.updateOne({ _id: eventId }, { $set: { cashless } });
   const { resellerId, hubId } = await seedReseller();
   const token = jwt.sign(
-    {
-      scope: 'reseller', resellerId, hubId, operatorId: OPERATOR_ID, role: ResellerRole.OPERATOR,
-      permissions: [ResellerPermission.SELL_TICKETS, ResellerPermission.CASH_TOPUP],
-    },
+    { scope: 'reseller', resellerId, hubId, operatorId: OPERATOR_ID, role: ResellerRole.OPERATOR, permissions },
     JWT_SECRET,
   );
   return { eventId, ticketTypeId, resellerId, hubId, token };
@@ -99,10 +98,69 @@ it('404s for a non-cashless-flagged event (event not found for the wrong id)', a
 });
 
 it('400s when the event is not cashless', async () => {
-  const { eventId, ticketTypeId, token } = await setup(false);
+  const { eventId, ticketTypeId, token } = await setup({ cashless: false });
   const res = await request(app).post('/api/reseller/sales/sell-band')
     .set('Authorization', `Bearer ${token}`)
     .send({ eventId, ticketTypeId, bandUid: '04a22b1c3d4e5f', cashAmount: 0, clientTxnId: 'sb-400' });
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/cashless/i);
+});
+
+it('maps a sold-out ticket type to 400, not 500 (createSale business error)', async () => {
+  const { eventId, ticketTypeId, token } = await setup({ capacity: 1 });
+  // Directly mark the sole ticket as already sold, so checkTicketAvailability
+  // reports 0 remaining without going through a full purchase flow.
+  await Event.updateOne({ _id: eventId }, { $set: { 'ticketTypes.0.sold': 1 } });
+  const res = await request(app).post('/api/reseller/sales/sell-band')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ eventId, ticketTypeId, bandUid: '04a22b1c3d4e5f', cashAmount: 0, clientTxnId: 'sb-soldout' });
+  expect(res.status).toBe(400);
+  expect(res.body.message).toMatch(/available/i);
+  // Nothing was minted for a rejected sale.
+  expect(await Ticket.countDocuments({ eventId })).toBe(0);
+});
+
+it('403s when cashAmount > 0 but the token lacks CASH_TOPUP', async () => {
+  const { eventId, ticketTypeId, token } = await setup({ permissions: [ResellerPermission.SELL_TICKETS] });
+  const res = await request(app).post('/api/reseller/sales/sell-band')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ eventId, ticketTypeId, bandUid: '04a22b1c3d4e5f', cashAmount: 500, clientTxnId: 'sb-403' });
+  expect(res.status).toBe(403);
+  // Nothing was minted — the permission gate runs before createBandSale.
+  expect(await Ticket.countDocuments({ eventId })).toBe(0);
+});
+
+/**
+ * Fix round 1 (review finding 1, critical): the idempotency record used to be
+ * written only AFTER the whole orchestration succeeded, so a failure between
+ * minting the ticket and finishing (bindBand/topUpCash throwing) left nothing
+ * to resume from — a retry with the SAME clientTxnId re-ran createSale and
+ * minted a SECOND ticket+wallet. This mirrors the reviewer's exact repro:
+ * force topUpCash to fail once, retry with the same clientTxnId, and assert
+ * exactly one Ticket/Wallet exist and the retry completes the sale.
+ */
+it('resumes after a mid-flow failure without double-issuing a ticket (same clientTxnId retry)', async () => {
+  const { eventId, ticketTypeId, token } = await setup();
+  const body = { eventId, ticketTypeId, bandUid: '04a22b1c3d4e5f', cashAmount: 500, clientTxnId: 'sb-resume' };
+
+  const topUpSpy = jest.spyOn(WalletService, 'topUpCash').mockRejectedValueOnce(new Error('simulated topUpCash failure'));
+  try {
+    const first = await request(app).post('/api/reseller/sales/sell-band').set('Authorization', `Bearer ${token}`).send(body);
+    expect(first.status).toBe(500); // the mocked failure is an unexpected fault, not a business error
+
+    // The ticket + wallet + band bind already happened before the mocked
+    // topUpCash threw — confirm the retry does NOT mint a second of either.
+    const second = await request(app).post('/api/reseller/sales/sell-band').set('Authorization', `Bearer ${token}`).send(body);
+    expect(second.status).toBe(201);
+    expect(second.body.data.wallet.bandUid).toBe('04a22b1c3d4e5f');
+    expect(second.body.data.wallet.balance).toBe(500);
+  } finally {
+    topUpSpy.mockRestore();
+  }
+
+  expect(await Ticket.countDocuments({ eventId })).toBe(1);
+  const wallets = await Wallet.find({ eventId }).lean();
+  expect(wallets.length).toBe(1);
+  expect(wallets[0]!.balance).toBe(500);
+  expect(wallets[0]!.bandUid).toBe('04a22b1c3d4e5f');
 });
