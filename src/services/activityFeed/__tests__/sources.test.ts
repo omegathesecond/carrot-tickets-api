@@ -1,5 +1,5 @@
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../../__tests__/helpers/mongo';
-import { likeEventCandidates, likePostCandidates, followCandidates, postCandidates, eventCandidates } from '../sources';
+import { likeEventCandidates, likePostCandidates, followCandidates, postCandidates, eventCandidates, joinCandidates } from '../sources';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
@@ -221,5 +221,37 @@ describe('activity feed sources', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actor.id).toBe(String(followed._id));
     expect(mongoose.isValidObjectId(rows[0]!.actor.id)).toBe(true);
+  });
+
+  it('joinCandidates returns recent buyers newest-first as actor-only rows', async () => {
+    const older = await Buyer.create({ phone: '+26878100020', password: 'password123', name: 'Older' });
+    // Backdate via the raw driver (timestamps: true strips createdAt from $set).
+    await Buyer.collection.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } });
+    const newer = await Buyer.create({ phone: '+26878100021', password: 'password123', name: 'Newer' });
+
+    const { candidates: rows } = await joinCandidates({ limit: 20 });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.type).toBe('join');
+    expect(rows[0]!.actor).toEqual({ kind: 'buyer', id: String(newer._id) });
+    expect(rows[0]!.target).toBeUndefined();
+    expect(rows.map((r) => r.actor.id)).toEqual([String(newer._id), String(older._id)]);
+  });
+
+  it('joinCandidates honours the before watermark', async () => {
+    const older = await Buyer.create({ phone: '+26878100022', password: 'password123' });
+    await Buyer.collection.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } });
+    const newer = await Buyer.create({ phone: '+26878100023', password: 'password123' });
+
+    const { candidates: rows } = await joinCandidates({ limit: 20, before: newer.createdAt as Date });
+    expect(rows.map((r) => r.actor.id)).toEqual([String(older._id)]);
+  });
+
+  it('joinCandidates contributes nothing on the following tab (actorIds set)', async () => {
+    await Buyer.create({ phone: '+26878100024', password: 'password123' });
+    const { candidates, nextBefore } = await joinCandidates({
+      limit: 20, actorIds: [String(new mongoose.Types.ObjectId())],
+    });
+    expect(candidates).toHaveLength(0);
+    expect(nextBefore).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { UpdateReaction } from '@models/updateReaction.model';
 import { Follow } from '@models/follow.model';
 import { Update } from '@models/update.model';
 import { Event } from '@models/event.model';
+import { Buyer } from '@models/buyer.model';
 import { EventStatus } from '@interfaces/event.interface';
 import type { ActivityCandidate } from './types';
 
@@ -204,7 +205,22 @@ export async function eventCandidates(opts: SourceOpts): Promise<SourceResult> {
 }
 
 export async function joinCandidates(opts: SourceOpts): Promise<SourceResult> {
-  // Filled in Cycle B.
-  void opts;
-  return { candidates: [], nextBefore: null };
+  // A join has no follow relationship, so it belongs only to the "everyone"
+  // tab. On the "following" tab (actorIds set) this source is simply empty.
+  if (opts.actorIds) return { candidates: [], nextBefore: null };
+
+  const rows = await Buyer.find(windowed({}, opts))
+    .sort({ createdAt: -1 })
+    .limit(opts.limit)
+    .select('createdAt')
+    .lean();
+  const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);
+  const candidates = rows.map((r) => ({
+    type: 'join' as const,
+    sourceId: String(r._id),
+    sortAt: r.createdAt as Date,
+    actor: { kind: 'buyer' as const, id: String(r._id) },
+    // no target — a join is actor-only
+  }));
+  return { candidates, nextBefore };
 }
