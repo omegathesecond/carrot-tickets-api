@@ -244,9 +244,15 @@ describe('getActivityFeed', () => {
     }
 
     const page1 = await getActivityFeed({ tab: 'everyone', limit: LIMIT });
-    // Page 1 is legitimately all five likes — the follows are older and
-    // correctly lose the ranking, not the bug being tested here.
-    expect(page1.items.every((i) => i.type === 'like_event')).toBe(true);
+    // Page 1 legitimately contains no follow rows — the follows are older
+    // and correctly lose the ranking, not the bug being tested here. (Now
+    // that a "join" row is emitted for every buyer created above — the five
+    // likers, the follower, and the five follow targets — page 1 is no
+    // longer guaranteed to be ALL like_event; some of those very-recent
+    // signups legitimately outrank the likes too. That's expected: it's the
+    // same "outranked, not drained" behavior this test exists to check,
+    // just now also true of the join source.)
+    expect(page1.items.some((i) => i.type === 'follow')).toBe(false);
 
     // The bug: `follow`'s cursor key used to jump straight to its scan floor
     // (the OLDEST of the five follows) after page 1, even though none of the
@@ -361,5 +367,44 @@ describe('getActivityFeed', () => {
     const goingActorIds = page2.items.filter((i) => i.type === 'going').map((i) => i.actor.id);
     expect(goingActorIds).toContain(String(buyer._id));
     expect(goingActorIds).toContain(String(bystander._id));
+  });
+
+  it('surfaces a new buyer signup as a join row on the everyone tab', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878300001', password: 'password123', name: 'Fresh', username: 'fresh',
+    });
+    const { items } = await getActivityFeed({ tab: 'everyone', limit: 30 });
+    const join = items.find((i) => i.type === 'join');
+    expect(join).toBeDefined();
+    expect(join!.actor.id).toBe(String(buyer._id));
+    expect(join!.target).toBeNull();
+  });
+
+  it('omits join rows from the following tab', async () => {
+    const viewer = await Buyer.create({ phone: '+26878300002', password: 'password123', username: 'viewer' });
+    const followed = await Buyer.create({ phone: '+26878300003', password: 'password123', username: 'followed' });
+    await Follow.create({ followerType: 'buyer', followerId: viewer._id, targetType: 'buyer', targetId: followed._id });
+    const { items } = await getActivityFeed({
+      tab: 'following', limit: 30, viewer: { type: 'buyer', id: String(viewer._id) } as any,
+    });
+    expect(items.some((i) => i.type === 'join')).toBe(false);
+  });
+
+  it('paginates join rows without loss or duplication', async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const b = await Buyer.create({ phone: `+2687840100${i}`, password: 'password123', username: `jb${i}` });
+      await Buyer.collection.updateOne({ _id: b._id }, { $set: { createdAt: new Date(Date.now() - i * DAY) } });
+      ids.push(String(b._id));
+    }
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let guard = 0; guard < 10; guard++) {
+      const page = await getActivityFeed({ tab: 'everyone', limit: 2, cursor });
+      page.items.filter((i) => i.type === 'join').forEach((i) => seen.add(i.actor.id));
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    expect([...seen].sort()).toEqual([...ids].sort());
   });
 });
