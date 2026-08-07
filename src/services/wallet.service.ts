@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
+import { WalletTopup, IWalletTopup } from '@models/walletTopup.model';
+import { LedgerService } from '@services/ledger.service';
+import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
 
 /**
  * Wallet lifecycle for the per-event closed-loop cashless wallet (spec §4, §5.1).
@@ -170,5 +173,95 @@ export class WalletService {
     );
 
     return released;
+  }
+
+  /**
+   * Cash top-up at a desk (spec §5.2): credit `balance` and `cashFundedBalance`
+   * together, and post the matching balanced ledger transaction (cash desk
+   * float goes up; the wallet liability goes up), all inside one multi-document
+   * transaction so the wallet mutation and its ledger legs can never diverge.
+   *
+   * Idempotent on `clientTxnId` (a client-generated id, e.g. offline-safe POS
+   * retry): a repeat call with the same id returns the ORIGINAL outcome rather
+   * than crediting twice. Two layers enforce this:
+   *  1. A pre-check read, to short-circuit the common case cheaply.
+   *  2. The unique index on WalletTopup.clientTxnId, to close the race when two
+   *     concurrent calls both pass the pre-check — the loser's insert throws
+   *     E11000 inside the transaction (which aborts it, undoing its wallet
+   *     credit and ledger legs), and we then re-read and return the winner's
+   *     row instead of the loser's failure.
+   */
+  static async topUpCash(params: {
+    walletId: string;
+    eventId: string;
+    amount: number;
+    recordedBy: string;
+    clientTxnId: string;
+  }): Promise<{ wallet: IWallet; topup: IWalletTopup }> {
+    const { walletId, eventId, amount, recordedBy, clientTxnId } = params;
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new Error('amount must be a positive integer (cents)');
+    }
+
+    // Idempotency: if this clientTxnId already ran, return the existing outcome.
+    const existing = await WalletTopup.findOne({ clientTxnId });
+    if (existing) {
+      const w = await Wallet.findById(existing.walletId);
+      if (!w) throw new Error('wallet not found');
+      return { wallet: w, topup: existing };
+    }
+
+    const session = await mongoose.startSession();
+    try {
+      let out!: { wallet: IWallet; topup: IWalletTopup };
+      await session.withTransaction(async () => {
+        // Atomic credit; pipeline update keeps balance & cashFundedBalance
+        // consistent (the model's cashFundedBalance<=balance pre('validate')
+        // hook does NOT fire on updates — see wallet.model.ts).
+        const wallet = await Wallet.findOneAndUpdate(
+          { _id: walletId, status: 'active' },
+          [
+            {
+              $set: {
+                balance: { $add: ['$balance', amount] },
+                cashFundedBalance: { $add: ['$cashFundedBalance', amount] },
+              },
+            },
+          ],
+          { new: true, session },
+        );
+        if (!wallet) throw new Error('wallet not found or not active');
+
+        await LedgerService.post({
+          eventId,
+          postings: [
+            { account: { type: LedgerAccountType.FLOAT }, delta: amount, tag: FloatTag.CASH_DESK },
+            { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: -amount },
+          ],
+          refType: 'wallet_topup',
+          refId: clientTxnId,
+          session,
+        });
+
+        const [topup] = await WalletTopup.create(
+          [{ walletId, eventId, amount, method: 'cash', status: 'completed', recordedBy, clientTxnId }],
+          { session },
+        );
+        if (!topup) throw new Error('wallet topup insert failed');
+
+        out = { wallet, topup };
+      });
+      return out;
+    } catch (e) {
+      // Concurrent duplicate: unique clientTxnId lost the race — return the winner.
+      if ((e as { code?: number })?.code === 11000) {
+        const topup = await WalletTopup.findOne({ clientTxnId });
+        const wallet = topup ? await Wallet.findById(topup.walletId) : null;
+        if (topup && wallet) return { wallet, topup };
+      }
+      throw e;
+    } finally {
+      await session.endSession();
+    }
   }
 }
