@@ -251,7 +251,7 @@ export class MessageService {
         'mention',
         senderLabel,
         MessageService.trunc(input.body),
-        { eventId: String(community.eventId), channelId: String(channel._id), messageId: view.id },
+        { eventId: String(community.eventId), channelId: String(channel._id), messageId: view.id, actorId: actor.id, actorType: actor.type },
         actor.id
       );
     }
@@ -341,16 +341,16 @@ export class MessageService {
       const title = sender?.username ?? sender?.name ?? 'New message';
       const otherBuyers = thread.participants.map(String).filter((id) => id !== actor.id);
       if (otherBuyers.length) {
-        NotificationDispatcher.dispatchAsync(otherBuyers, 'dm', title, preview, { threadId: String(thread._id), messageId }, actor.id);
+        NotificationDispatcher.dispatchAsync(otherBuyers, 'dm', title, preview, { threadId: String(thread._id), messageId, actorId: actor.id, actorType: 'buyer' }, actor.id);
       }
       if (thread.vendorParticipantId) {
-        await NotificationService.create('vendor', String(thread.vendorParticipantId), 'dm', 'New message', `${title}: ${preview}`, { threadId: String(thread._id), messageId }).catch(() => undefined);
+        await NotificationService.create('vendor', String(thread.vendorParticipantId), 'dm', 'New message', `${title}: ${preview}`, { threadId: String(thread._id), messageId, actorId: actor.id, actorType: 'buyer' }).catch(() => undefined);
       }
     } else {
       const vendor = await Vendor.findById(actor.id).select('businessName');
       const buyers = thread.participants.map(String);
       if (buyers.length) {
-        NotificationDispatcher.dispatchAsync(buyers, 'dm', vendor?.businessName ?? 'A brand', preview, { threadId: String(thread._id), messageId }, actor.id);
+        NotificationDispatcher.dispatchAsync(buyers, 'dm', vendor?.businessName ?? 'A brand', preview, { threadId: String(thread._id), messageId, actorId: actor.id, actorType: 'vendor' }, actor.id);
       }
     }
   }
@@ -528,7 +528,7 @@ export class MessageService {
       'announcement',
       view.sender?.name ?? 'Announcement',
       MessageService.trunc(body),
-      { eventId, channelId: String(channel._id), messageId: view.id }
+      { eventId, channelId: String(channel._id), messageId: view.id, actorId: String(vendorId), actorType: 'vendor' }
     );
     return view;
   }

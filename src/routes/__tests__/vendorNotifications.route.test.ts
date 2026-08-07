@@ -20,6 +20,8 @@ describe('/api/tickets/social/notifications (vendor)', () => {
     const list = await request(app).get('/api/tickets/social/notifications').set('Authorization', brandToken).expect(200);
     expect(list.body.data.unreadCount).toBe(1);
     expect(list.body.data.items[0].type).toBe('follow');
+    // The follower is hydrated so the row can show their avatar + link to them.
+    expect(list.body.data.items[0].actor).toMatchObject({ type: 'buyer', name: 'Fan', username: 'fan_one' });
 
     await request(app).post('/api/tickets/social/notifications/read').set('Authorization', brandToken).send({}).expect(200);
     const after = await request(app).get('/api/tickets/social/notifications').set('Authorization', brandToken).expect(200);
