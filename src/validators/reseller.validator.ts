@@ -16,8 +16,8 @@ export const cashTopupSchema = Joi.object({
 }).xor('ticketId', 'bandUid');
 
 /**
- * POST /api/reseller/wallets/sell-band — Task 7 (band sale at the door):
- * mints the wallet, binds the band, and optionally cash-tops-up in one call.
+ * POST /api/reseller/sales/sell-band — Task 7 (band sale at the door):
+ * mints the ticket+wallet, binds the band, and optionally cash-tops-up in one call.
  */
 export const sellBandSchema = Joi.object({
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),

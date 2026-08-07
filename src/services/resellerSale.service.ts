@@ -2,10 +2,14 @@ import { Reseller } from '@models/reseller.model';
 import { Event } from '@models/event.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Ticket } from '@models/ticket.model';
+import { Wallet } from '@models/wallet.model';
+import { ResellerBandSale } from '@models/resellerBandSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { TicketService } from '@services/ticket.service';
 import { SmsService } from '@services/sms.service';
+import { WalletService } from '@services/wallet.service';
+import { assertValidBandUid } from '@utils/bandUid.util';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 
 type ResellerPaymentMethod = 'cash' | 'mtn_momo' | 'keshless_wallet';
@@ -157,6 +161,101 @@ export class ResellerSaleService {
       tickets,
       ...(paymentMessage ? { message: paymentMessage } : {}),
     };
+  }
+
+  /**
+   * Sell a blank NFC band as a ticket at the door (Task 7, cashless spec §5.1):
+   * mints one cash ticket via the proven `createSale` path, mints+binds its
+   * wallet to the band, and optionally loads cash — one idempotent call.
+   *
+   * Idempotency: `createSale`/`TicketSale` have no `clientTxnId` field (see
+   * resellerBandSale.model.ts for why), so a naive retry would mint a second
+   * ticket. `ResellerBandSale` is a small, sell-band-local collection keyed
+   * uniquely on `clientTxnId`, consulted first and written only after the full
+   * orchestration succeeds. It is NOT keyed on bandUid alone, so a genuinely
+   * DIFFERENT request reusing an already-claimed band is never silently
+   * treated as a success — it falls through to WalletService.bindBand, whose
+   * own {eventId,bandUid} uniqueness guard rejects it loudly.
+   *
+   * Partial failure (spec §5.1): if bindBand fails AFTER the ticket+wallet
+   * exist (e.g. the uid is already bound), the error is left to propagate —
+   * the resulting SOLD-but-bandless ticket is acceptable/recoverable, so it is
+   * deliberately NOT rolled back.
+   */
+  static async createBandSale(params: {
+    operatorId: string; resellerId: string; hubId: string | null;
+    eventId: string; ticketTypeId: string; bandUid: string; cashAmount: number;
+    customerName?: string; customerPhone?: string; clientTxnId: string;
+  }): Promise<{ sale: CreateSaleResult; ticket: any; wallet: any; binding: { bandUid: string; walletId: string } }> {
+    const uid = assertValidBandUid(params.bandUid);
+
+    // Idempotent retry: this exact clientTxnId already completed — reconstruct
+    // and return the original result instead of minting again.
+    const existing = await ResellerBandSale.findOne({ clientTxnId: params.clientTxnId });
+    if (existing) {
+      const [wallet, ticket] = await Promise.all([
+        Wallet.findById(existing.walletId),
+        Ticket.findById(existing.ticketId),
+      ]);
+      if (!wallet || !ticket) {
+        throw new Error(
+          `sell-band idempotency record found for clientTxnId ${params.clientTxnId} but its wallet/ticket is missing`,
+        );
+      }
+      return {
+        sale: { saleId: String(existing.saleId), status: 'completed', tickets: [ticket] },
+        ticket,
+        wallet,
+        binding: { bandUid: existing.bandUid, walletId: String(existing.walletId) },
+      };
+    }
+
+    // 1. Sell one cash ticket via the proven path.
+    const sale = await ResellerSaleService.createSale({
+      operatorId: params.operatorId, resellerId: params.resellerId, hubId: params.hubId ?? '',
+      eventId: params.eventId, ticketTypeId: params.ticketTypeId, quantity: 1,
+      paymentMethod: 'cash', customerName: params.customerName, customerPhone: params.customerPhone,
+    });
+    if (sale.status !== 'completed' || !('tickets' in sale) || !sale.tickets?.length) {
+      throw new Error((sale as { message?: string }).message || 'ticket sale did not complete');
+    }
+    const ticket: any = sale.tickets[0];
+
+    // 2. Wallet + band (mirrors ScanService.bindBandToTicket).
+    const wallet = await WalletService.ensureWalletForTicket({
+      ticketId: String(ticket._id), eventId: params.eventId,
+      ...(ticket.purchasedBy ? { buyerId: String(ticket.purchasedBy) } : {}),
+    });
+    const bound = await WalletService.bindBand(String(wallet._id), uid, params.operatorId);
+
+    // 3. Optional initial cash load.
+    let finalWallet = bound;
+    if (params.cashAmount > 0) {
+      const { wallet: w } = await WalletService.topUpCash({
+        walletId: String(bound._id), eventId: params.eventId, amount: params.cashAmount,
+        recordedBy: params.operatorId, clientTxnId: `${params.clientTxnId}:topup`,
+      });
+      finalWallet = w;
+    }
+
+    // Persist the idempotency record only now that everything above succeeded
+    // — a thrown error (e.g. bindBand's "already bound") never reaches this
+    // line, so a failed attempt never poisons the collection with a false hit.
+    try {
+      await ResellerBandSale.create({
+        clientTxnId: params.clientTxnId, eventId: params.eventId, bandUid: uid,
+        resellerId: params.resellerId, operatorId: params.operatorId,
+        saleId: sale.saleId, ticketId: ticket._id, walletId: bound._id,
+      });
+    } catch (e: any) {
+      // Concurrent duplicate: unique clientTxnId lost the race. The ticket and
+      // band we just created still stand as issued (§5.1 — not rolled back);
+      // surface this loudly rather than silently swallow it, same as every
+      // other idempotency-record write in this codebase (WalletService.topUpCash).
+      if (e?.code !== 11000) throw e;
+    }
+
+    return { sale, ticket, wallet: finalWallet, binding: { bandUid: uid, walletId: String(bound._id) } };
   }
 
   /**

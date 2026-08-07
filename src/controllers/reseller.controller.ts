@@ -6,10 +6,11 @@ import { ResellerSaleService } from '@services/resellerSale.service';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { EventService } from '@services/event.service';
 import { EventStatus } from '@interfaces/event.interface';
-import { cashTopupSchema } from '@validators/reseller.validator';
+import { cashTopupSchema, sellBandSchema } from '@validators/reseller.validator';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { WalletService } from '@services/wallet.service';
+import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
 export class ResellerController {
   /**
@@ -325,6 +326,42 @@ export class ResellerController {
     } catch (e: any) {
       const msg = e?.message || 'Top-up failed';
       const status = /not active|not found|cashless|amount/i.test(msg) ? 400 : 500;
+      return ApiResponseUtil.error(res, msg, status);
+    }
+  }
+
+  /**
+   * Wallets: sell a blank NFC band as a ticket at the door (spec §5.1) — mints
+   * a cash ticket, creates+binds its wallet, and optionally loads cash, all in
+   * one idempotent orchestration (ResellerSaleService.createBandSale).
+   * operatorId/resellerId/hubId come ONLY from the verified JWT.
+   */
+  static async sellBand(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = sellBandSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const reseller = (req as any).reseller;
+      if (value.cashAmount > 0 && !(reseller.permissions || []).includes(ResellerPermission.CASH_TOPUP)) {
+        return ApiResponseUtil.forbidden(res, `Permission required: ${ResellerPermission.CASH_TOPUP}`);
+      }
+
+      const event = await Event.findById(value.eventId).lean();
+      if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
+      if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+
+      const result = await ResellerSaleService.createBandSale({
+        operatorId: reseller.operatorId, resellerId: reseller.resellerId, hubId: reseller.hubId ?? null,
+        eventId: value.eventId, ticketTypeId: value.ticketTypeId, bandUid: value.bandUid,
+        cashAmount: value.cashAmount, customerName: value.customerName, customerPhone: value.customerPhone,
+        clientTxnId: value.clientTxnId,
+      });
+      return ApiResponseUtil.created(res, result, 'Band sold');
+    } catch (e: any) {
+      const msg = e?.message || 'Sell-band failed';
+      const status = /already bound|cashless|not active|invalid band|did not complete|not found|not available|suspended/i.test(msg)
+        ? 400
+        : 500;
       return ApiResponseUtil.error(res, msg, status);
     }
   }

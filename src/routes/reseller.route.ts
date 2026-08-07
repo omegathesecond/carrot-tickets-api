@@ -49,6 +49,12 @@ router.post(
 );
 
 router.post(
+  '/sales/sell-band',
+  requireResellerPermission(ResellerPermission.SELL_TICKETS),
+  ResellerController.sellBand
+);
+
+router.post(
   '/sales/:referenceId/finalize',
   requireResellerPermission(ResellerPermission.SELL_TICKETS),
   ResellerController.finalizeSale
