@@ -309,7 +309,13 @@ export class SocialProfileController {
     }
   }
 
-  /** GET /api/social/users/search?q= — username prefix; excludes self + blocked either way. */
+  /**
+   * GET /api/social/users/search?q= — matches display name (contains) OR
+   * username (prefix), case-insensitive; excludes self + blocked either way.
+   * Name matching is what lets you find the majority of people who have no
+   * username yet (it's auto-generated only on a buyer's first social touch, so
+   * pure ticket-buyers have none) — a username-only query left them invisible.
+   */
   static async searchUsers(req: Request, res: Response): Promise<any> {
     try {
       const buyer = await resolveBuyerFromRequest(req);
@@ -328,8 +334,11 @@ export class SocialProfileController {
       const excluded = [myId, ...iBlocked, ...blockedMe];
 
       const buyers = await Buyer.find({
-        username: { $regex: `^${escaped}` },
         _id: { $nin: excluded },
+        $or: [
+          { name: { $regex: escaped, $options: 'i' } },
+          { username: { $regex: `^${escaped}`, $options: 'i' } },
+        ],
       }).limit(20);
       return ApiResponseUtil.success(res, buyers.map(toBuyerSummary));
     } catch (error: any) {

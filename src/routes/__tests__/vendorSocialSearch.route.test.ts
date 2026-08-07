@@ -23,6 +23,17 @@ describe('GET /api/tickets/social/users/search (vendor)', () => {
     expect(orgIds).not.toContain(String(me._id)); // self excluded
   });
 
+  it('finds a usernameless buyer by display name', async () => {
+    const me = await Vendor.create({ businessName: 'Name Search Co', email: 'ns@example.com', phoneNumber: '+26878000705', password: 'secret123' });
+    await Buyer.create({ phone: '+26878000706', password: 'secret1', name: 'Sipho Dlamini' }); // no username (no social touch yet)
+    const token = `Bearer ${signVendorToken(String(me._id))}`;
+
+    const res = await request(app).get('/api/tickets/social/users/search?q=sipho').set('Authorization', token).expect(200);
+    expect(res.body.data.buyers).toHaveLength(1);
+    expect(res.body.data.buyers[0].name).toBe('Sipho Dlamini');
+    expect(res.body.data.buyers[0].username).toBeNull();
+  });
+
   it('400s a too-short query', async () => {
     const me = await Vendor.create({ businessName: 'Solo Brand', email: 'solo@example.com', phoneNumber: '+26878000704', password: 'secret123' });
     await request(app).get('/api/tickets/social/users/search?q=b').set('Authorization', `Bearer ${signVendorToken(String(me._id))}`).expect(400);
