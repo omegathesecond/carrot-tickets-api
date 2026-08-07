@@ -18,6 +18,7 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { computeServiceFee, round2 } from '@utils/serviceFee.util';
 import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
+import { FollowService } from '@services/follow.service';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -156,6 +157,23 @@ export class TicketService {
       resellerCommissionPercent: p.resellerCommissionPercent ?? 0,
       platformFeePercent: cfg.platformFeePercent,
     });
+  }
+
+  /**
+   * A completed ticket sale auto-follows its organizer for the buyer — the
+   * same buyer→organizer edge a manual "Follow" creates. Delegates to
+   * FollowService.autoFollowOrganizer, which is best-effort (never throws into
+   * the sale path), registered-buyers-only (no-op without buyerId, e.g. guest /
+   * POS walk-up checkout), and organizer-aware (no-op without vendorId, e.g.
+   * self-listed community events). Gated on COMPLETED so a PENDING online sale
+   * follows only once its finalize* mints it — not while awaiting payment.
+   */
+  private static async autoFollowOrganizerForSale(sale: ITicketSale): Promise<void> {
+    if (sale.paymentStatus !== PaymentStatus.COMPLETED) return;
+    await FollowService.autoFollowOrganizer(
+      sale.buyerId ? String(sale.buyerId) : undefined,
+      sale.vendorId ? String(sale.vendorId) : undefined
+    );
   }
 
   /**
@@ -391,6 +409,8 @@ export class TicketService {
               totalAmount
             );
 
+            await this.autoFollowOrganizerForSale(saleWithoutSession);
+
             return {
               sale: saleWithoutSession,
               tickets: ticketsWithoutSession,
@@ -445,6 +465,8 @@ export class TicketService {
       if (session) {
         await session.commitTransaction();
       }
+
+      await this.autoFollowOrganizerForSale(sale);
 
       return {
         sale,
@@ -1610,6 +1632,8 @@ export class TicketService {
       }
     }
 
+    await this.autoFollowOrganizerForSale(claimed);
+
     console.log('[momo finalize] ✓ completed — tickets minted', {
       referenceId,
       saleId: sale._id.toString(),
@@ -1736,6 +1760,8 @@ export class TicketService {
           .catch(err => console.error('[Email] card confirmation threw', err));
       }
     }
+
+    await this.autoFollowOrganizerForSale(claimed);
 
     return { status: 'completed' };
   }
@@ -1893,6 +1919,8 @@ export class TicketService {
           .catch(err => console.error('[Email] deltapay confirmation threw', err));
       }
     }
+
+    await this.autoFollowOrganizerForSale(claimed);
 
     return { status: 'completed' };
   }

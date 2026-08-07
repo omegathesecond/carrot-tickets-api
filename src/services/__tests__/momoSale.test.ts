@@ -9,6 +9,10 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { Event } from '@models/event.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Ticket } from '@models/ticket.model';
+import { Vendor } from '@models/vendor.model';
+import { Buyer } from '@models/buyer.model';
+import { Follow } from '@models/follow.model';
+import { FollowService } from '@services/follow.service';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 
@@ -197,6 +201,54 @@ describe('TicketService.finalizeMomoSale', () => {
     // Verify no duplicate tickets were minted
     const ticketCount = await Ticket.countDocuments({ eventId });
     expect(ticketCount).toBe(2);
+  });
+
+  it('a registered buyer auto-follows the organizer once the MoMo sale is finalized', async () => {
+    await Follow.init(); // unique index must exist before the follow edge is written
+    const organizer = await Vendor.create({
+      businessName: 'MoMo Organizer',
+      email: 'momo-organizer@example.com',
+      phoneNumber: '+26878199999',
+      password: 'secret123',
+    });
+    const buyer = await Buyer.create({ phone: '+26878199001', password: 'secret1', name: 'MoMo Buyer' });
+
+    const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const event = await Event.create({
+      vendorId: organizer._id,
+      name: 'MoMo Follow Concert',
+      venue: 'Test Venue',
+      eventDate: futureDate,
+      startTime: futureDate,
+      endTime: new Date(futureDate.getTime() + 2 * 60 * 60 * 1000),
+      status: EventStatus.PUBLISHED,
+      ticketTypes: [{ name: 'General', price: 100, quantity: 10, sold: 0, reserved: 0 }],
+    });
+    const ticketTypeId = event.ticketTypes[0]!._id!.toString();
+
+    mockMomoInstance.isConfigured.mockReturnValue(true);
+    mockMomoInstance.requestToPay.mockResolvedValue({ referenceId: 'R_FOLLOW' });
+    mockMomoInstance.getStatus.mockResolvedValue({ status: 'SUCCESSFUL', raw: { amount: '100', currency: 'SZL' } });
+
+    await TicketService.initiateMomoPurchase({
+      eventId: event._id.toString(),
+      ticketTypeId,
+      quantity: 1,
+      customerPhone: '+26878199001',
+      momoPhone: '26878199001',
+      buyerId: String(buyer._id),
+    });
+
+    // No follow while the sale is still PENDING — only a completed mint follows.
+    expect(await FollowService.followerCount('organizer', String(organizer._id))).toBe(0);
+
+    const result = await TicketService.finalizeMomoSale('R_FOLLOW');
+    expect(result.status).toBe('completed');
+
+    expect(await FollowService.followerCount('organizer', String(organizer._id))).toBe(1);
+    expect(await FollowService.followingIds(String(buyer._id), 'organizer')).toEqual([
+      String(organizer._id),
+    ]);
   });
 
   it('releases reservation + fails the sale when MTN status is FAILED', async () => {

@@ -112,6 +112,31 @@ export class FollowService {
     await Follow.deleteOne({ followerType: 'buyer', followerId: buyer._id, targetType, targetId });
   }
 
+  /**
+   * A completed ticket purchase auto-follows the event's organizer — the same
+   * buyer→organizer edge a manual "Follow" tap creates (notification included),
+   * reusing createEdge + notifyOrganizerFollowed so there is one follow path.
+   *
+   * Registered buyers only: no-ops when `buyerId` is absent (guest / POS
+   * walk-up checkout has no Buyer account to attach) or `vendorId` is absent
+   * (self-listed community events carry no organizer brand to follow). Unlike
+   * the manual follow it does not gate on suspension — this is a system side
+   * effect of a purchase, not a social action, and only the id is in hand here.
+   *
+   * Best-effort: any failure is swallowed and logged so a follow hiccup can
+   * never break ticket issuance (the vital path). Idempotent via the follow
+   * unique index, so webhook + reconcile both re-finalizing a sale is safe.
+   */
+  static async autoFollowOrganizer(buyerId?: string | null, vendorId?: string | null): Promise<void> {
+    if (!buyerId || !vendorId) return;
+    try {
+      const created = await FollowService.createEdge('buyer', String(buyerId), 'organizer', String(vendorId));
+      if (created) await FollowService.notifyOrganizerFollowed(String(vendorId), 'buyer', String(buyerId));
+    } catch (err: any) {
+      console.error(`[follow] auto-follow organizer ${vendorId} for buyer ${buyerId} failed:`, err?.message);
+    }
+  }
+
   /** The brand follows a buyer or another organizer. No suspension, no friend concept. */
   static async followAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
     const created = await FollowService.createEdge('vendor', String(vendorId), targetType, targetId);

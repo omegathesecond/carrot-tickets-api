@@ -164,4 +164,62 @@ describe('FollowService', () => {
     expect(inbox.items).toHaveLength(1);
     expect(inbox.items[0]!.body).toContain(String(follower.businessName));
   });
+
+  describe('autoFollowOrganizer (ticket purchase → auto-follow)', () => {
+    it('follows the organizer for a registered buyer and notifies the brand', async () => {
+      const brand = await makeVendor();
+      const buyer = await seedBuyer('+26878001001');
+
+      await FollowService.autoFollowOrganizer(String(buyer._id), String(brand._id));
+
+      expect(await FollowService.followerCount('organizer', String(brand._id))).toBe(1);
+      expect(await FollowService.followingIds(String(buyer._id), 'organizer')).toEqual([String(brand._id)]);
+
+      const { NotificationService } = await import('@services/notification.service');
+      const inbox = await NotificationService.list('vendor', String(brand._id), {});
+      expect(inbox.items).toHaveLength(1);
+      expect(inbox.items[0]!.type).toBe('follow');
+    });
+
+    it('is idempotent across repeated purchases', async () => {
+      const brand = await makeVendor();
+      const buyer = await seedBuyer('+26878001002');
+
+      await FollowService.autoFollowOrganizer(String(buyer._id), String(brand._id));
+      await FollowService.autoFollowOrganizer(String(buyer._id), String(brand._id));
+
+      expect(await FollowService.followerCount('organizer', String(brand._id))).toBe(1);
+    });
+
+    it('no-ops for a guest buyer with no buyerId (registered buyers only)', async () => {
+      const brand = await makeVendor();
+
+      await FollowService.autoFollowOrganizer(undefined, String(brand._id));
+      await FollowService.autoFollowOrganizer('', String(brand._id));
+
+      expect(await FollowService.followerCount('organizer', String(brand._id))).toBe(0);
+    });
+
+    it('no-ops for a self-listed event with no organizer brand (no vendorId)', async () => {
+      const buyer = await seedBuyer('+26878001003');
+
+      await FollowService.autoFollowOrganizer(String(buyer._id), undefined);
+      await FollowService.autoFollowOrganizer(String(buyer._id), '');
+
+      expect(await FollowService.followingCount(String(buyer._id))).toBe(0);
+    });
+
+    it('never throws into the purchase path when the organizer is unknown', async () => {
+      const buyer = await seedBuyer('+26878001004');
+      const ghostVendorId = String(new mongoose.Types.ObjectId());
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      await expect(
+        FollowService.autoFollowOrganizer(String(buyer._id), ghostVendorId)
+      ).resolves.toBeUndefined();
+
+      expect(await FollowService.followingCount(String(buyer._id))).toBe(0);
+      errSpy.mockRestore();
+    });
+  });
 });
