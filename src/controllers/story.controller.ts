@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
-import { createStory, finalizeStory, listForViewer, markSeen } from '@services/story.service';
+import { createStory, finalizeStory, listForViewer, listViewers, markSeen } from '@services/story.service';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { Story } from '@models/story.model';
 import type { StoryKind } from '@interfaces/story.interface';
@@ -80,6 +80,24 @@ export class StoryController {
       return ApiResponseUtil.success(res, { ok: true });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to mark story seen');
+    }
+  }
+
+  /**
+   * WhatsApp-style "viewed by" list for one story. Author-only — the service
+   * throws 403 for anyone else, so a nosy viewer gets a refusal rather than
+   * an empty list that would read as "nobody has seen this".
+   */
+  static async viewers(req: Request, res: Response): Promise<any> {
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    const id = req.params['id'] as string;
+    if (!HEX24.test(id)) return ApiResponseUtil.validationError(res, 'Invalid story id');
+    try {
+      const viewers = await listViewers(id, { type: 'buyer', id: String(buyer._id) });
+      return ApiResponseUtil.success(res, { viewers, count: viewers.length });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load story viewers');
     }
   }
 }
