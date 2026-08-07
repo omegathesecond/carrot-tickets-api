@@ -60,3 +60,11 @@ it('is idempotent on clientTxnId', async () => {
   expect(res.status).toBe(200);
   expect(res.body.data.wallet.balance).toBe(500);
 });
+
+it('rejects a malformed ticketId with 400 (not a 500 from an unhandled CastError)', async () => {
+  const { eventId } = await seedBoundBand();
+  const res = await request(app).post('/api/reseller/wallets/cash-topup')
+    .set('Authorization', `Bearer ${token()}`)
+    .send({ ticketId: 'not-a-valid-object-id', eventId, amount: 500, clientTxnId: 'bad' });
+  expect(res.status).toBe(400);
+});

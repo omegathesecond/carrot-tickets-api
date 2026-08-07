@@ -8,7 +8,7 @@ const uid = Joi.string().trim().lowercase().pattern(/^[0-9a-f]{14,}$/);
  * clientTxnId makes the top-up idempotent (WalletService.topUpCash).
  */
 export const cashTopupSchema = Joi.object({
-  ticketId: Joi.string().trim(),
+  ticketId: Joi.string().trim().regex(/^[0-9a-fA-F]{24}$/),
   bandUid: uid,
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
   amount: Joi.number().integer().min(1).required(),
