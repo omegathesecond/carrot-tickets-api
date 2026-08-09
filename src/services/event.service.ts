@@ -586,6 +586,20 @@ export class EventService {
         return { available: false, message: 'Ticket type not found' };
       }
 
+      // Organizer's manual "mark sold out" override. This is the single gate
+      // every async payment path (MoMo, Peach card, DeltaPay) funnels through,
+      // so enforcing the flag here — not just in the count check — is what
+      // makes "sold out" actually stop a sale. A manually sold-out tier keeps a
+      // positive computeAvailable() (the dashboard only flips the flag), so
+      // relying on the count alone would let it keep selling.
+      if (ticketTypeObj.isSoldOut) {
+        return {
+          available: false,
+          message: 'This ticket type is sold out',
+          ticketTypeData: ticketTypeObj
+        };
+      }
+
       if (computeAvailable(ticketTypeObj) < quantity) {
         return {
           available: false,
