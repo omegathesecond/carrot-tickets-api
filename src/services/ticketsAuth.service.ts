@@ -6,9 +6,11 @@ import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
 import { HandoffToken } from '@models/handoffToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
-import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { OperatorType, VerificationStatus, IVendor } from '@interfaces/vendor.interface';
 import { scopePermissionsToType } from '@utils/permissions.util';
 import { phoneLoginCandidates } from '@utils/phone.util';
+import { classifyIdentifier, Identifier } from '@utils/identifier.util';
+import { OtpService } from '@services/otp.service';
 import { JWT_SECRET } from '@config/jwt.config';
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
@@ -97,6 +99,119 @@ export class TicketsAuthService {
         permissions: ownerPerms,
         operatorType: vendor.operatorType,
         isSuperAdmin: false,
+        verificationStatus: vendor.verificationStatus,
+        isVerified: vendor.isVerified
+      }
+    };
+  }
+
+  /**
+   * Resolve the Vendor a reset identifier belongs to. Channel-precise: an email
+   * matches the (lowercased) email field; a phone matches phoneNumber in any of
+   * its stored formats (numbers are persisted verbatim — see phoneLoginCandidates).
+   */
+  private static findVendorForReset(id: Identifier, rawIdentifier: string, withPassword = false) {
+    const query = id.channel === 'email'
+      ? { email: id.value }
+      : { phoneNumber: { $in: phoneLoginCandidates(rawIdentifier) } };
+    const q = Vendor.findOne(query);
+    return withPassword ? q.select('+password') : q;
+  }
+
+  /**
+   * Same gate login() applies, so a reset can never revive a suspended account
+   * or hand out a session for a vendor whose Tickets access is switched off.
+   */
+  private static assertVendorLoginable(vendor: IVendor): void {
+    if (!vendor.isActive) {
+      throw new Error('This organizer account is inactive. Please contact support.');
+    }
+    if (!vendor.apps?.tickets?.enabled) {
+      throw new Error('Keshless Tickets access is not enabled for this account. Please contact support.');
+    }
+  }
+
+  /**
+   * Step 1 of organizer (Vendor) password reset: send a one-time code to an
+   * identifier that HAS an organizer account. Mirrors the buyer reset flow via
+   * the shared OtpService with audience 'vendor', so a buyer's codes for the
+   * same phone/email are never touched.
+   *
+   * Throws if no organizer matches the identifier, if the account can't sign in
+   * (inactive / Tickets disabled), or if the send gateway rejects the send
+   * (caller must surface the failure — no silent fallback).
+   */
+  static async requestPasswordResetOtp(rawIdentifier: string): Promise<{ channel: 'sms' | 'email'; identifier: string }> {
+    const id = classifyIdentifier(rawIdentifier);
+
+    const vendor = await this.findVendorForReset(id, rawIdentifier);
+    if (!vendor) {
+      throw new Error("We couldn't find an organizer account for this email or phone. Please sign up instead.");
+    }
+    this.assertVendorLoginable(vendor);
+
+    await OtpService.issue('vendor', id, 'We could not send your reset code right now. Please try again.');
+    return { channel: id.channel, identifier: id.value };
+  }
+
+  /**
+   * Step 2 of organizer password reset: verify the code, set the new password
+   * (the Vendor pre-save hook re-hashes it), revoke every existing refresh
+   * token for the account (a reset invalidates other sessions), and sign the
+   * organizer straight in with the SAME token + user shape login/register
+   * return. Proving identifier ownership via the OTP authorises the change.
+   */
+  static async resetPassword(rawIdentifier: string, code: string, newPassword: string) {
+    const id = classifyIdentifier(rawIdentifier);
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('New password must be at least 6 characters long');
+    }
+
+    const vendor = await this.findVendorForReset(id, rawIdentifier, true);
+    if (!vendor) {
+      throw new Error("We couldn't find an organizer account for this email or phone. Please sign up instead.");
+    }
+    this.assertVendorLoginable(vendor);
+
+    // Verify first, apply the new password inside the guarded action, and only
+    // consume the code once the save has landed. If the save throws, the code
+    // stays valid so the organizer can retry the same code (see OtpService).
+    await OtpService.withVerified('vendor', id, code, async () => {
+      vendor.password = newPassword;
+      await vendor.save();
+    });
+
+    // A password reset invalidates other sessions: revoke existing refresh
+    // tokens BEFORE minting the fresh pair below (so the new one survives).
+    await this.revokeAllUserTokens(undefined, vendor._id.toString());
+
+    const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
+    const payload = {
+      vendorId: vendor._id.toString(),
+      userType: 'vendor',
+      app: 'tickets',
+      role: TicketsRole.OWNER,
+      permissions: ownerPerms,
+      isSuperAdmin: vendor.isSuperAdmin || false
+    };
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+    const refreshToken = this.generateRefreshToken();
+    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        _id: vendor._id,
+        email: vendor.email,
+        phoneNumber: vendor.phoneNumber,
+        businessName: vendor.businessName,
+        slug: vendor.slug,
+        userType: 'vendor',
+        role: TicketsRole.OWNER,
+        permissions: ownerPerms,
+        operatorType: vendor.operatorType,
+        isSuperAdmin: vendor.isSuperAdmin || false,
         verificationStatus: vendor.verificationStatus,
         isVerified: vendor.isVerified
       }

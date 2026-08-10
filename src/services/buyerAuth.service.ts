@@ -1,9 +1,6 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
-import crypto from 'crypto';
-import { BuyerOtp } from '@models/buyerOtp.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
-import { SmsService } from '@services/sms.service';
-import { EmailService } from '@services/email.service';
+import { OtpService } from '@services/otp.service';
 import { classifyIdentifier, Identifier } from '@utils/identifier.util';
 import { JWT_SECRET } from '@config/jwt.config';
 
@@ -35,12 +32,6 @@ import { JWT_SECRET } from '@config/jwt.config';
  * still key off phone (e.g. "My Tickets" / purchase lookups).
  */
 const BUYER_JWT_EXPIRY: string = process.env['BUYER_JWT_EXPIRY'] || '30d';
-const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const MAX_ATTEMPTS = 5;
-// Minimum gap between OTP requests to the SAME destination. Blocks someone
-// hammering request-otp / forgot-password to spam a phone or email inbox (and
-// burn SMS/email gateway credits). 60s matches a typical "resend code" cadence.
-const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const MIN_PASSWORD_LENGTH = 6;
 
 export type BuyerIdentity = { phone?: string; email?: string };
@@ -76,12 +67,6 @@ export class BuyerAuthService {
     return id.channel === 'email'
       ? Buyer.findOne({ email: id.value })
       : Buyer.findOne({ phone: id.value });
-  }
-
-  private static async sendOtpFor(id: Identifier, code: string): Promise<boolean> {
-    return id.channel === 'email'
-      ? EmailService.sendOtp(id.value, code)
-      : SmsService.sendOtp(id.value, code);
   }
 
   /**
@@ -134,52 +119,8 @@ export class BuyerAuthService {
       throw new Error('This account already exists. Please sign in with your password.');
     }
 
-    await this.issueOtp(id, 'We could not send your verification code right now. Please try again.');
+    await OtpService.issue('buyer', id, 'We could not send your verification code right now. Please try again.');
     return { channel: id.channel, identifier: id.value };
-  }
-
-  /**
-   * Issue a fresh OTP for an identifier: enforce the resend cooldown, invalidate
-   * any outstanding codes, then create + send the new one. Shared by the
-   * registration and password-reset request paths so the anti-spam cooldown and
-   * the create/send plumbing can never drift between them.
-   *
-   * Throws a user-facing Error if the caller is inside the cooldown window, or
-   * if the send gateway rejects the send (`sendFailMsg` — no silent fallback).
-   */
-  private static async issueOtp(id: Identifier, sendFailMsg: string): Promise<void> {
-    // Cooldown gate: reject if a code was sent to this destination very
-    // recently. Keyed on destination and the newest row regardless of consumed
-    // state, so an attacker requesting codes without ever consuming them is
-    // still throttled.
-    const recent = await BuyerOtp.findOne({ destination: id.value }).sort({ createdAt: -1 });
-    if (recent) {
-      const elapsedMs = Date.now() - recent.createdAt.getTime();
-      if (elapsedMs < OTP_RESEND_COOLDOWN_MS) {
-        const wait = Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsedMs) / 1000);
-        throw new Error(`Please wait ${wait} second${wait === 1 ? '' : 's'} before requesting another code.`);
-      }
-    }
-
-    // Invalidate any outstanding codes for this identifier so only the newest works.
-    await BuyerOtp.updateMany({ destination: id.value, consumed: false }, { consumed: true });
-
-    const code = crypto.randomInt(100000, 1000000).toString(); // 6 digits
-    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
-
-    await BuyerOtp.create({
-      channel: id.channel,
-      destination: id.value,
-      codeHash,
-      expiresAt: new Date(Date.now() + OTP_TTL_MS),
-      attempts: 0,
-      consumed: false
-    });
-
-    const sent = await this.sendOtpFor(id, code);
-    if (!sent) {
-      throw new Error(sendFailMsg);
-    }
   }
 
   /**
@@ -210,7 +151,7 @@ export class BuyerAuthService {
     // account actually exists. If Buyer.create throws (e.g. a duplicate-key
     // race), the code stays valid so the buyer can simply retry rather than
     // being told it "expired".
-    const buyer = await this.withVerifiedOtp(id, code, () =>
+    const buyer = await OtpService.withVerified('buyer', id, code, () =>
       Buyer.create({
         ...(id.channel === 'sms' ? { phone: id.value, phoneVerifiedAt: new Date() } : { email: id.value, emailVerifiedAt: new Date() }),
         password,
@@ -226,7 +167,7 @@ export class BuyerAuthService {
    * Step 1 of password reset: send a one-time code to an identifier that
    * DOES have an account. The mirror image of requestRegistrationOtp — that
    * one rejects existing accounts, this one requires one. Reuses the same
-   * BuyerOtp plumbing.
+   * shared OtpService plumbing (audience 'buyer').
    *
    * Throws if the identifier has no account (consistent with how login
    * already surfaces account existence via requiresRegistration) or if the
@@ -241,7 +182,7 @@ export class BuyerAuthService {
       throw new Error("We couldn't find an account for this identifier. Please sign up instead.");
     }
 
-    await this.issueOtp(id, 'We could not send your reset code right now. Please try again.');
+    await OtpService.issue('buyer', id, 'We could not send your reset code right now. Please try again.');
     return { channel: id.channel, identifier: id.value };
   }
 
@@ -267,66 +208,13 @@ export class BuyerAuthService {
     }
 
     // Verify first, apply the new password inside the guarded action, and only
-    // consume the code once the save has landed (see withVerifiedOtp).
-    await this.withVerifiedOtp(id, code, async () => {
+    // consume the code once the save has landed (see OtpService.withVerified).
+    await OtpService.withVerified('buyer', id, code, async () => {
       buyer.password = newPassword;
       buyer.lastLoginAt = new Date();
       await buyer.save();
     });
 
     return { accessToken: this.signToken(buyer), identity: this.identityOf(buyer) };
-  }
-
-  /**
-   * Verify the newest unconsumed OTP for an identifier, run the caller's
-   * side-effect (`action`), and only then mark the code consumed. Throws a
-   * user-facing Error on any verification failure (expired, too many attempts,
-   * mismatch); wrong guesses still burn an attempt.
-   *
-   * The action runs AFTER verification but BEFORE the code is consumed on
-   * purpose: if the action throws (a duplicate-key race on account creation, a
-   * failed password save), the code is left valid so the buyer can retry the
-   * same code — instead of being stranded on a bogus "that code has expired"
-   * because a create failure had already burned it. No token is minted here —
-   * the caller decides what proving ownership grants.
-   */
-  private static async withVerifiedOtp<T>(id: Identifier, code: string, action: () => Promise<T>): Promise<T> {
-    if (!code || !/^\d{6}$/.test(code)) {
-      throw new Error('Enter the 6-digit code we sent you');
-    }
-
-    const otp = await BuyerOtp.findOne({
-      channel: id.channel,
-      destination: id.value,
-      consumed: false,
-      expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
-
-    if (!otp) {
-      throw new Error('That code has expired. Request a new one.');
-    }
-
-    if (otp.attempts >= MAX_ATTEMPTS) {
-      otp.consumed = true;
-      await otp.save();
-      throw new Error('Too many attempts. Request a new code.');
-    }
-
-    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
-    // Constant-time compare to avoid leaking match progress via timing.
-    const matches = otp.codeHash.length === codeHash.length &&
-      crypto.timingSafeEqual(Buffer.from(otp.codeHash), Buffer.from(codeHash));
-
-    if (!matches) {
-      otp.attempts += 1;
-      await otp.save();
-      throw new Error('That code is incorrect. Please try again.');
-    }
-
-    const result = await action();
-
-    otp.consumed = true;
-    await otp.save();
-    return result;
   }
 }

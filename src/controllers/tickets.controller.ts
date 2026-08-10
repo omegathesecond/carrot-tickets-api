@@ -11,6 +11,8 @@ import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
   registerSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   updateProfileSchema,
   changePasswordSchema,
   createEventSchema,
@@ -98,6 +100,51 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Register error:', error);
       ApiResponseUtil.error(res, error.message || 'Registration failed', 400);
+    }
+  }
+
+  /**
+   * Authentication: Step 1 of organizer password reset — request a code.
+   * POST /api/tickets/auth/forgot-password { identifier }
+   */
+  static async forgotPassword(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = forgotPasswordSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await TicketsAuthService.requestPasswordResetOtp(value.identifier);
+
+      // Echo the channel + identifier so the dashboard can tell the organizer
+      // where the code went ("We texted your phone" / "Check your email").
+      ApiResponseUtil.success(res, result, 'If that account exists, a reset code is on its way.');
+    } catch (error: any) {
+      console.error('Forgot password error:', error);
+      ApiResponseUtil.error(res, error.message || 'Could not send reset code', 400);
+    }
+  }
+
+  /**
+   * Authentication: Step 2 of organizer password reset — verify + set password.
+   * On success the organizer is signed straight in (same shape as login).
+   * POST /api/tickets/auth/reset-password { identifier, code, newPassword }
+   */
+  static async resetPassword(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = resetPasswordSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await TicketsAuthService.resetPassword(value.identifier, value.code, value.newPassword);
+
+      ApiResponseUtil.success(res, result, 'Password updated. You are signed in.');
+    } catch (error: any) {
+      console.error('Reset password error:', error);
+      ApiResponseUtil.error(res, error.message || 'Could not reset password', 400);
     }
   }
 

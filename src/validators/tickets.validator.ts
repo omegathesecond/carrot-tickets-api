@@ -110,6 +110,48 @@ export const changePasswordSchema = Joi.object({
 });
 
 /**
+ * Self-service organizer password reset (no auth). Step 1 asks for the email
+ * or phone the account was created with; step 2 supplies the 6-digit code plus
+ * the new password. Kept separate from changePasswordSchema, which requires the
+ * CURRENT password (an authenticated change, not an ownership-proof reset).
+ */
+export const forgotPasswordSchema = Joi.object({
+  identifier: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Enter the email or phone number for your account',
+      'any.required': 'Enter the email or phone number for your account'
+    })
+});
+
+export const resetPasswordSchema = Joi.object({
+  identifier: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Enter the email or phone number for your account',
+      'any.required': 'Enter the email or phone number for your account'
+    }),
+  code: Joi.string()
+    .required()
+    .pattern(/^\d{6}$/)
+    .messages({
+      'string.empty': 'Enter the 6-digit code we sent you',
+      'any.required': 'Enter the 6-digit code we sent you',
+      'string.pattern.base': 'Enter the 6-digit code we sent you'
+    }),
+  newPassword: Joi.string()
+    .required()
+    .min(6)
+    .messages({
+      'string.empty': 'New password is required',
+      'any.required': 'New password is required',
+      'string.min': 'New password must be at least 6 characters'
+    })
+});
+
+/**
  * Event Validators
  */
 export const createEventSchema = Joi.object({

@@ -30,6 +30,9 @@ const router = Router();
  */
 router.post('/auth/login', TicketsController.login);
 router.post('/auth/register', TicketsController.register);
+// Self-service organizer password reset (public): request a code, then verify + set.
+router.post('/auth/forgot-password', TicketsController.forgotPassword);
+router.post('/auth/reset-password', TicketsController.resetPassword);
 router.post('/auth/refresh', TicketsController.refresh);
 // Social SSO handoff: mint (dashboard, authed) → exchange (social site, public).
 router.post('/auth/handoff', authenticateTickets, TicketsController.socialHandoff);
