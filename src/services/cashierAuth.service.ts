@@ -55,9 +55,12 @@ export class CashierAuthService {
 
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 
+    // Return the actor under `operator` to match the rest of the codebase's
+    // /operator/login contract (gate/reseller/merchant all do), so the POS
+    // client's `data['operator']` extraction works uniformly for cashiers too.
     return {
       accessToken,
-      cashier: {
+      operator: {
         id: (cashier._id as any).toString(),
         fullName: cashier.fullName,
         scope: cashier.scope,
