@@ -551,9 +551,14 @@ export class EventService {
         ticketTypeObj.available = computeAvailable({ quantity: ticketTypeObj.quantity, sold: ticketTypeObj.sold, reserved: ticketTypeObj.reserved });
       }
 
-      // Update event totals
+      // Update event totals. Attendance/inventory always counts these seats,
+      // but an allocation tier's proceeds belong to the reseller (held for
+      // their settlement) — the organizer was already paid off-platform — so
+      // they must NOT land on the organizer's revenue line.
       event.totalTicketsSold += quantity;
-      event.totalRevenue += revenue;
+      if (!ticketTypeObj?.isAllocation) {
+        event.totalRevenue += revenue;
+      }
 
       await event.save();
     } catch (error: any) {
