@@ -3,6 +3,7 @@ import { randomInt } from 'crypto';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
+import { Merchant } from '@models/merchant.model';
 
 /** Random 6-digit PIN string (leading zeros allowed). */
 export function generatePin(): string {
@@ -13,12 +14,13 @@ export function generatePin(): string {
 export async function generateUniqueLoginCode(): Promise<string> {
   for (let attempt = 0; attempt < 20; attempt++) {
     const code = String(randomInt(100000, 1_000_000));
-    const [r, g, c] = await Promise.all([
+    const [r, g, c, m] = await Promise.all([
       ResellerOperator.exists({ loginCode: code }),
       GateOperator.exists({ loginCode: code }),
       Cashier.exists({ loginCode: code }),
+      Merchant.exists({ loginCode: code }),
     ]);
-    if (!r && !g && !c) return code;
+    if (!r && !g && !c && !m) return code;
   }
   throw new Error('Could not generate a unique login code');
 }

@@ -1,6 +1,7 @@
 // api/src/controllers/cashierAdmin.controller.ts
 import { NextFunction, Request, Response } from 'express';
 import { Cashier } from '@models/cashier.model';
+import { CashierService } from '@services/cashier.service';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
@@ -78,6 +79,23 @@ export class CashierAdminController {
       if ('isActive' in req.body) cashier.isActive = !!req.body.isActive;
       await cashier.save();
       ApiResponseUtil.success(res, cashier);
+    } catch (err) { next(err); }
+  }
+
+  /**
+   * GET /api/tickets/cashiers/:id/transactions?eventId= — the cashier detail
+   * page: the cashier's record + every top-up/cash-out SHE recorded + running
+   * totals. Scoped to the organizer via the same scopeFilter as list/update.
+   */
+  static async transactions(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const cashier = await Cashier.findOne({ _id: req.params['id'], ...scopeFilter(req) });
+      if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
+      const eventId = req.query['eventId'] ? String(req.query['eventId']) : undefined;
+      const rawLimit = Number(req.query['limit']);
+      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+      const result = await CashierService.listTransactions({ cashierId: String(cashier._id), eventId, limit });
+      ApiResponseUtil.success(res, { cashier, ...result });
     } catch (err) { next(err); }
   }
 }

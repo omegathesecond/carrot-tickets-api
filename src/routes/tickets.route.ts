@@ -12,6 +12,7 @@ import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { CashierAdminController } from '@controllers/cashierAdmin.controller';
+import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
@@ -488,8 +489,21 @@ router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPer
  */
 router.get('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.list);
 router.post('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.create);
+router.get('/cashiers/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.transactions);
 router.patch('/cashiers/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.update);
 router.post('/cashiers/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.resetPin);
+
+/**
+ * Vendor (in-event merchant) Admin Routes — an organizer sets up the stalls
+ * that charge bands at their cashless event, each with a commission cut. A
+ * merchant is scoped to ONE event; ownership of that event is enforced in the
+ * controller. Same MANAGE_ACCESS gate as gate operators + cashiers.
+ */
+router.get('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.list);
+router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
+router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
+router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
+router.post('/merchants/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.resetPin);
 
 /**
  * Organizer Cashless Reporting — the "you're in charge" view of one event:
