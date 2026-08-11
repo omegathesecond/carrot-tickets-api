@@ -1,5 +1,6 @@
 import { Document, Types } from 'mongoose';
 import type { EventCategory } from '@/constants/eventCategories';
+import type { PaymentMethod } from './ticket.interface';
 
 export enum EventStatus {
   DRAFT = 'draft',
@@ -25,6 +26,17 @@ export interface ITicketType {
   reserved: number;  // tickets held by in-flight (PENDING) async payments
   available: number; // quantity - sold - reserved
   isSoldOut?: boolean; // Manual sold-out flag
+
+  // Reseller allocation: a block of this tier pre-purchased off-platform by a
+  // reseller (e.g. DeltaPay) and resold on their behalf. Sales of an allocation
+  // tier are attributed to `resellerId` — held for their settlement and kept
+  // OFF the organizer's revenue (see updateTicketsSold / analytics) — while the
+  // seats still count toward attendance/capacity.
+  resellerId?: Types.ObjectId;
+  isAllocation?: boolean;
+  allocationUnitCost?: number; // what the reseller paid the organizer per seat
+  restrictToMethod?: PaymentMethod; // only this payment method may buy the tier
+  waiveServiceFee?: boolean; // no buyer service fee on this tier
 }
 
 export interface IEvent extends Document {

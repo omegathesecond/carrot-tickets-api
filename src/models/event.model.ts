@@ -1,5 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 import { IEvent, EventStatus, ITicketType } from '@interfaces/event.interface';
+import { PaymentMethod } from '@interfaces/ticket.interface';
 import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 
 const ticketTypeSchema = new Schema<ITicketType>({
@@ -37,7 +38,14 @@ const ticketTypeSchema = new Schema<ITicketType>({
   isSoldOut: {
     type: Boolean,
     default: false
-  }
+  },
+  // Reseller allocation (pre-purchased block resold on the reseller's behalf).
+  // All optional → absent on ordinary tiers, which keep today's behavior.
+  resellerId:        { type: Schema.Types.ObjectId, ref: 'Reseller' },
+  isAllocation:      { type: Boolean },
+  allocationUnitCost:{ type: Number, min: 0 },
+  restrictToMethod:  { type: String, enum: Object.values(PaymentMethod) },
+  waiveServiceFee:   { type: Boolean }
 }, { _id: true });
 
 const eventSchema = new Schema<IEvent>({
