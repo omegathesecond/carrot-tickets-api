@@ -1,5 +1,6 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { ResellerOperator } from '@models/resellerOperator.model';
+import { Reseller } from '@models/reseller.model';
 import { ResellerRole, RESELLER_ROLE_PERMISSIONS, ResellerToken } from '@interfaces/resellerPermission.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 
@@ -51,6 +52,46 @@ export class ResellerAuthService {
         role,
         resellerId: payload.resellerId,
         hubId: payload.hubId!,
+        permissions: payload.permissions,
+      },
+    };
+  }
+
+  /**
+   * Owner login by email + password — for a reseller partner (e.g. DeltaPay)
+   * to sign in to the allocation portal without a till-operator loginCode/PIN.
+   * Issues a reseller-scoped token as a `reseller_admin` (full view of their
+   * own blocks), with no operator/hub. Generic error on any failure so it
+   * never reveals whether an email exists.
+   */
+  static async ownerLogin(email: string, password: string) {
+    const reseller = await Reseller.findOne({ email: email.toLowerCase().trim(), isActive: true }).select('+password');
+    if (!reseller || !reseller.password) throw new Error('Invalid credentials');
+
+    const ok = await reseller.comparePassword(password);
+    if (!ok) throw new Error('Invalid credentials');
+
+    const role: ResellerRole = 'reseller_admin' as ResellerRole;
+    const payload: ResellerToken = {
+      scope: 'reseller',
+      resellerId: (reseller._id as any).toString(),
+      hubId: null,
+      // Owner acts as themselves; no operator row. Scoping that matters
+      // (reports, allocation) keys off resellerId, not operatorId.
+      operatorId: (reseller._id as any).toString(),
+      role,
+      permissions: RESELLER_ROLE_PERMISSIONS[role],
+    };
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+
+    return {
+      accessToken,
+      reseller: {
+        id: payload.resellerId,
+        resellerId: payload.resellerId,
+        businessName: reseller.businessName,
+        email: reseller.email,
+        role,
         permissions: payload.permissions,
       },
     };

@@ -10,6 +10,22 @@ import { EventStatus } from '@interfaces/event.interface';
 
 export class ResellerController {
   /**
+   * Owner login by email + password (allocation-portal partners like DeltaPay).
+   */
+  static async ownerLogin(req: Request, res: Response): Promise<any> {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return ApiResponseUtil.error(res, 'Email and password are required', 400);
+      }
+      const result = await ResellerAuthService.ownerLogin(email, password);
+      return ApiResponseUtil.success(res, result, 'Signed in successfully');
+    } catch (error: any) {
+      return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
+    }
+  }
+
+  /**
    * Allocation: this reseller's pre-bought blocks (sold / remaining / collected).
    * Scoped strictly to the authenticated reseller — never the organizer's data.
    */

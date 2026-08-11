@@ -3,9 +3,14 @@ export interface IReseller {
   slug?: string;
   email?: string;
   phoneNumber?: string;
+  // Optional owner password — lets a reseller partner (e.g. DeltaPay) sign in to
+  // the allocation portal with email + password, instead of the till-operator
+  // loginCode + PIN. Hashed at rest; never serialized.
+  password?: string;
   commissionPercent: number | null;
   status: 'active' | 'suspended';
   isActive: boolean;
+  comparePassword(candidate: string): Promise<boolean>;
 }
 
 export interface IResellerHub {

@@ -13,6 +13,8 @@ const router = Router();
  * Authentication — public (no auth required)
  */
 router.post('/auth/login', ResellerController.login);
+// Owner email+password login (allocation-portal partners like DeltaPay).
+router.post('/auth/owner-login', ResellerController.ownerLogin);
 
 /**
  * All routes below require a valid reseller JWT.
