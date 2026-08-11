@@ -269,7 +269,8 @@ export class TicketService {
       const availabilityCheck = await EventService.checkTicketAvailability(
         eventId,
         ticketTypeId,
-        quantity
+        quantity,
+        paymentMethod
       );
 
       if (!availabilityCheck.available) {
@@ -828,6 +829,12 @@ export class TicketService {
       throw new Error(`Only ${ticketType.available} tickets available`);
     }
 
+    // This buyer path pays with the Keshless wallet/card; a tier restricted to
+    // another method (e.g. a DeltaPay-exclusive block) must not be sold here.
+    if (ticketType.restrictToMethod && ticketType.restrictToMethod !== PaymentMethod.KESHLESS_WALLET) {
+      throw new Error(`This ticket can only be bought with ${ticketType.restrictToMethod}`);
+    }
+
     const totalAmount = ticketType.price * quantity;
 
     // PIN threshold keys off the FACE subtotal (the service fee must not shift
@@ -1016,7 +1023,7 @@ export class TicketService {
   }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
     if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
 
-    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.MTN_MOMO);
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 
     const tt = avail.ticketTypeData!;
@@ -1166,7 +1173,7 @@ export class TicketService {
     const cardCfg = await PaymentConfigService.get();
     if (!cardCfg.peachCardEnabled) throw new Error('Card payments are not available');
 
-    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.PEACH_CARD);
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 
     const tt = avail.ticketTypeData!;
@@ -1305,7 +1312,7 @@ export class TicketService {
     const cfg = await PaymentConfigService.get();
     if (!cfg.deltapayEnabled) throw new Error('DeltaPay is not available');
 
-    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity);
+    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.DELTAPAY);
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 
     const tt = avail.ticketTypeData!;

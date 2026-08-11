@@ -1,6 +1,7 @@
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
+import { PaymentMethod } from '@interfaces/ticket.interface';
 import type { EventCategory } from '@/constants/eventCategories';
 import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
@@ -573,7 +574,8 @@ export class EventService {
   static async checkTicketAvailability(
     eventId: string,
     ticketTypeId: string,
-    quantity: number
+    quantity: number,
+    method?: PaymentMethod
   ): Promise<{ available: boolean; message?: string; ticketTypeData?: ITicketType }> {
     try {
       const event = await Event.findById(eventId);
@@ -589,6 +591,18 @@ export class EventService {
       const ticketTypeObj = event.ticketTypes.find(tt => tt._id?.toString() === ticketTypeId);
       if (!ticketTypeObj) {
         return { available: false, message: 'Ticket type not found' };
+      }
+
+      // Per-tier payment-method restriction (e.g. a reseller's DeltaPay-exclusive
+      // block). Only enforced when a method is supplied AND the tier is
+      // restricted, so unrestricted tiers and callers that don't pass a method
+      // behave exactly as before.
+      if (ticketTypeObj.restrictToMethod && method && method !== ticketTypeObj.restrictToMethod) {
+        return {
+          available: false,
+          message: `This ticket can only be bought with ${ticketTypeObj.restrictToMethod}`,
+          ticketTypeData: ticketTypeObj
+        };
       }
 
       // Organizer's manual "mark sold out" override. This is the single gate
