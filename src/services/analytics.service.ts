@@ -6,6 +6,12 @@ import { TicketScan } from '@models/ticketScan.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
+// Revenue that belongs to the ORGANIZER. A reseller allocation-block sale
+// (isAllocation) is money held for the reseller's settlement — never the
+// organizer's — so it's summed as 0 here. Counts/attendance ($quantity) are
+// deliberately left untouched, so the organizer still sees those seats as sold.
+const ORGANIZER_REVENUE_SUM = { $sum: { $cond: [{ $ne: ['$isAllocation', true] }, '$totalAmount', 0] } };
+
 export interface AnalyticsQuery {
   vendorId: string;
   startDate?: Date;
@@ -169,7 +175,7 @@ export class AnalyticsService {
         ]),
         TicketSale.aggregate([
           { $match: salesFilter },
-          { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+          { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ]),
         Ticket.countDocuments(ticketFilter)
       ]);
@@ -192,7 +198,7 @@ export class AnalyticsService {
           $group: {
             _id: '$paymentMethod',
             count: { $sum: 1 },
-            revenue: { $sum: '$totalAmount' }
+            revenue: ORGANIZER_REVENUE_SUM
           }
         }
       ]);
@@ -312,7 +318,7 @@ export class AnalyticsService {
           $group: {
             _id: null,
             totalSales: { $sum: 1 },
-            totalRevenue: { $sum: '$totalAmount' },
+            totalRevenue: ORGANIZER_REVENUE_SUM,
             ticketsSold: { $sum: '$quantity' }
           }
         }
@@ -328,7 +334,7 @@ export class AnalyticsService {
           $group: {
             _id: '$paymentMethod',
             count: { $sum: 1 },
-            revenue: { $sum: '$totalAmount' }
+            revenue: ORGANIZER_REVENUE_SUM
           }
         }
       ]);
@@ -356,7 +362,7 @@ export class AnalyticsService {
           $group: {
             _id: '$eventId',
             ticketsSold: { $sum: '$quantity' },
-            revenue: { $sum: '$totalAmount' }
+            revenue: ORGANIZER_REVENUE_SUM
           }
         },
         { $sort: { revenue: -1 } },
@@ -427,7 +433,7 @@ export class AnalyticsService {
         {
           $group: {
             _id: '$paymentMethod',
-            revenue: { $sum: '$totalAmount' }
+            revenue: ORGANIZER_REVENUE_SUM
           }
         }
       ]);
@@ -449,7 +455,7 @@ export class AnalyticsService {
         {
           $group: {
             _id: dateGrouping,
-            revenue: { $sum: '$totalAmount' },
+            revenue: ORGANIZER_REVENUE_SUM,
             ticketsSold: { $sum: '$quantity' }
           }
         },
@@ -468,7 +474,7 @@ export class AnalyticsService {
         {
           $group: {
             _id: '$eventId',
-            revenue: { $sum: '$totalAmount' },
+            revenue: ORGANIZER_REVENUE_SUM,
             ticketsSold: { $sum: '$quantity' }
           }
         },
@@ -512,7 +518,7 @@ export class AnalyticsService {
         {
           $group: {
             _id: '$paymentMethod',
-            amount: { $sum: '$totalAmount' },
+            amount: ORGANIZER_REVENUE_SUM,
             count: { $sum: 1 }
           }
         }
@@ -612,7 +618,7 @@ export class AnalyticsService {
               paymentStatus: PaymentStatus.COMPLETED
             }
           },
-          { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+          { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ]),
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.SOLD }),
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.CHECKED_IN }),

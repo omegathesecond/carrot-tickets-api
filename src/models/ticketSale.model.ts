@@ -139,6 +139,9 @@ const ticketSaleSchema = new Schema<ITicketSale>({
   // Reseller Attribution
   resellerId: { type: Schema.Types.ObjectId, ref: 'Reseller', index: true, sparse: true },
   hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', index: true, sparse: true },
+  // Allocation-block sale (see ITicketSale.isAllocation). Sparse-indexed so the
+  // analytics revenue filter `isAllocation: { $ne: true }` stays cheap.
+  isAllocation: { type: Boolean, index: true, sparse: true },
 
   // Economic snapshot — immutable, written at sale time
   faceAmount: { type: Number },

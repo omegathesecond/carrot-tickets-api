@@ -108,6 +108,11 @@ export interface ITicketSale extends Document {
   // Reseller Attribution
   resellerId?: Types.ObjectId;
   hubId?: Types.ObjectId;
+  // Denormalized from the ticket tier: this sale is for a reseller ALLOCATION
+  // block (pre-bought off-platform, resold on the reseller's behalf). Its money
+  // is never the organizer's, so organizer revenue analytics exclude it — while
+  // its seats still count toward attendance. Absent on ordinary sales.
+  isAllocation?: boolean;
 
   // Economic Snapshot — immutable, written at sale time
   faceAmount?: number;

@@ -245,7 +245,10 @@ export class ExportService {
           $group: {
             _id: '$eventId',
             totalSales: { $sum: 1 },
-            totalRevenue: { $sum: '$totalAmount' },
+            // Organizer revenue: exclude reseller allocation-block sales (their
+            // money is held for the reseller, not the organizer). Seats still
+            // count via ticketsSold below.
+            totalRevenue: { $sum: { $cond: [{ $ne: ['$isAllocation', true] }, '$totalAmount', 0] } },
             ticketsSold: { $sum: '$quantity' },
             cashRevenue: {
               $sum: {
@@ -346,8 +349,9 @@ export class ExportService {
         TicketScan.find({ eventId, vendorId }).lean()
       ]);
 
-      // Calculate stats
-      const totalRevenue = sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+      // Calculate stats. Organizer revenue excludes reseller allocation-block
+      // sales (held for the reseller, never the organizer's).
+      const totalRevenue = sales.reduce((sum, sale) => sum + (sale.isAllocation ? 0 : sale.totalAmount), 0);
       const cashRevenue = sales
         .filter(s => s.paymentMethod === 'cash')
         .reduce((sum, sale) => sum + sale.totalAmount, 0);

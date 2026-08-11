@@ -333,6 +333,7 @@ export class TicketService {
       const resellerAttribution = {
         ...(saleResellerId ? { resellerId: saleResellerId } : {}),
         ...(params.hubId ? { hubId: params.hubId } : {}),
+        ...(ticketTypeData.isAllocation ? { isAllocation: true } : {}),
       };
 
       // Create tickets
@@ -1063,6 +1064,7 @@ export class TicketService {
     const resellerAttribution = {
       ...(saleResellerId ? { resellerId: saleResellerId } : {}),
       ...(p.hubId ? { hubId: p.hubId } : {}),
+      ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
 
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
@@ -1212,6 +1214,7 @@ export class TicketService {
     const resellerAttribution = {
       ...(saleResellerId ? { resellerId: saleResellerId } : {}),
       ...(p.hubId ? { hubId: p.hubId } : {}),
+      ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
 
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
@@ -1355,6 +1358,7 @@ export class TicketService {
     const resellerAttribution = {
       ...(saleResellerId ? { resellerId: saleResellerId } : {}),
       ...(p.hubId ? { hubId: p.hubId } : {}),
+      ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
 
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
