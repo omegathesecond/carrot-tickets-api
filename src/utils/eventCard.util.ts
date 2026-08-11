@@ -32,6 +32,10 @@ export function buildEventCardFields(event: any) {
     ticketTypes: tts.map((tt) => ({
       _id: tt._id, name: tt.name, description: tt.description, price: tt.price,
       available: tt.available, isSoldOut: tt.isSoldOut || tt.available === 0,
+      // Reseller allocation tiers restrict checkout to one method and waive the
+      // buyer service fee. Emitted only when set, so ordinary tiers are unchanged.
+      ...(tt.restrictToMethod ? { restrictToMethod: tt.restrictToMethod } : {}),
+      ...(tt.waiveServiceFee ? { waiveServiceFee: true } : {}),
     })),
     // An event with no ticket types yet has nothing to be sold out OF —
     // `.every()` on an empty array is vacuously true, which would wrongly
