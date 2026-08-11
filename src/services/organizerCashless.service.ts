@@ -5,6 +5,7 @@ import { WalletWithdrawal } from '@models/walletWithdrawal.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { Merchant } from '@models/merchant.model';
 import { Cashier } from '@models/cashier.model';
+import { ResellerOperator } from '@models/resellerOperator.model';
 import { Wallet } from '@models/wallet.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
@@ -127,14 +128,38 @@ export class OrganizerCashlessService {
     ]);
 
     const merged = [
-      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, at: t.createdAt, actorType: t.recordedByType })),
-      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, at: w.createdAt, actorType: w.recordedByType })),
-      ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, bandUid: c.bandUid, fee: c.fee })),
-    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, at: t.createdAt, actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
+      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, at: w.createdAt, actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
+      ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, bandUid: c.bandUid, fee: c.fee, netAmount: c.netAmount, actorType: 'Merchant', actorId: c.merchantId ? String(c.merchantId) : null })),
+    ].sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
     const start = (page - 1) * limit;
-    const pageRows = merged.slice(start, start + limit);
+    const pageRows: any[] = merged.slice(start, start + limit);
+
+    // Resolve WHO for just this page — the vendor name on a purchase, the
+    // cashier/reseller name on a top-up or cash-out. Batched per population so a
+    // page costs at most 3 extra look-ups regardless of row count.
+    const idsOfType = (t: string) =>
+      [...new Set(pageRows.filter((r) => r.actorType === t && r.actorId && /^[0-9a-fA-F]{24}$/.test(r.actorId)).map((r) => r.actorId))];
+    const [merchants, cashiers, resellers] = await Promise.all([
+      Merchant.find({ _id: { $in: idsOfType('Merchant').map(oid) } }).select('name').lean(),
+      Cashier.find({ _id: { $in: idsOfType('Cashier').map(oid) } }).select('fullName').lean(),
+      ResellerOperator.find({ _id: { $in: idsOfType('ResellerOperator').map(oid) } }).select('fullName').lean(),
+    ]);
+    const nameOf = new Map<string, string>();
+    merchants.forEach((m: any) => nameOf.set(String(m._id), m.name));
+    cashiers.forEach((c: any) => nameOf.set(String(c._id), c.fullName));
+    resellers.forEach((r: any) => nameOf.set(String(r._id), r.fullName));
+
+    const fallback: Record<string, string> = {
+      Merchant: 'Vendor', Cashier: 'Cashier', ResellerOperator: 'Reseller', Platform: 'Platform',
+    };
+    const withActor = pageRows.map((r) => ({
+      ...r,
+      actorName: (r.actorId && nameOf.get(r.actorId)) || fallback[r.actorType] || 'Unknown',
+    }));
+
     const hasMore = merged.length > start + limit;
-    return { transactions: pageRows, page, limit, hasMore };
+    return { transactions: withActor, page, limit, hasMore };
   }
 }
