@@ -16,6 +16,7 @@ import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { computeServiceFee, round2 } from '@utils/serviceFee.util';
+import { resolveSaleResellerId } from '@utils/allocationAttribution.util';
 import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
 import { FollowService } from '@services/follow.service';
@@ -326,8 +327,11 @@ export class TicketService {
         mappedSoldByType,
         resellerCommissionPercent: params.resellerCommissionPercent,
       });
+      // Allocation tiers are attributed to the tier's owning reseller regardless
+      // of who rang the sale (same rule as the online buyer paths).
+      const saleResellerId = resolveSaleResellerId(ticketTypeData, params.resellerId ? String(params.resellerId) : undefined);
       const resellerAttribution = {
-        ...(params.resellerId ? { resellerId: params.resellerId } : {}),
+        ...(saleResellerId ? { resellerId: saleResellerId } : {}),
         ...(params.hubId ? { hubId: params.hubId } : {}),
       };
 
@@ -1052,8 +1056,12 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
     });
+    // An allocation tier's sale is always attributed to the tier's owning
+    // reseller (kept off the organizer's revenue, held for their settlement),
+    // even for an online buyer who carries no reseller context.
+    const saleResellerId = resolveSaleResellerId(tt, p.resellerId ? String(p.resellerId) : undefined);
     const resellerAttribution = {
-      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(saleResellerId ? { resellerId: saleResellerId } : {}),
       ...(p.hubId ? { hubId: p.hubId } : {}),
     };
 
@@ -1197,8 +1205,12 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
     });
+    // An allocation tier's sale is always attributed to the tier's owning
+    // reseller (kept off the organizer's revenue, held for their settlement),
+    // even for an online buyer who carries no reseller context.
+    const saleResellerId = resolveSaleResellerId(tt, p.resellerId ? String(p.resellerId) : undefined);
     const resellerAttribution = {
-      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(saleResellerId ? { resellerId: saleResellerId } : {}),
       ...(p.hubId ? { hubId: p.hubId } : {}),
     };
 
@@ -1336,8 +1348,12 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
     });
+    // An allocation tier's sale is always attributed to the tier's owning
+    // reseller (kept off the organizer's revenue, held for their settlement),
+    // even for an online buyer who carries no reseller context.
+    const saleResellerId = resolveSaleResellerId(tt, p.resellerId ? String(p.resellerId) : undefined);
     const resellerAttribution = {
-      ...(p.resellerId ? { resellerId: p.resellerId } : {}),
+      ...(saleResellerId ? { resellerId: saleResellerId } : {}),
       ...(p.hubId ? { hubId: p.hubId } : {}),
     };
 
