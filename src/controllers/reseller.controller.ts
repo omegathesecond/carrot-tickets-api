@@ -5,9 +5,25 @@ import { ResellerAuthService } from '@services/resellerAuth.service';
 import { ResellerSaleService } from '@services/resellerSale.service';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { EventService } from '@services/event.service';
+import { AllocationService } from '@services/allocation.service';
 import { EventStatus } from '@interfaces/event.interface';
 
 export class ResellerController {
+  /**
+   * Allocation: this reseller's pre-bought blocks (sold / remaining / collected).
+   * Scoped strictly to the authenticated reseller — never the organizer's data.
+   */
+  static async getMyAllocation(req: Request, res: Response): Promise<any> {
+    try {
+      const reseller = (req as any).reseller;
+      const data = await AllocationService.getForReseller(reseller.resellerId);
+      return ApiResponseUtil.success(res, data);
+    } catch (error: any) {
+      console.error('Get allocation error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to load allocation');
+    }
+  }
+
   /**
    * Authentication: Login with login code + PIN
    */

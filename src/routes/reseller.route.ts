@@ -20,6 +20,12 @@ router.post('/auth/login', ResellerController.login);
 router.use(authenticateReseller);
 
 /**
+ * Allocation — this reseller's pre-bought blocks (sold / remaining / collected).
+ * Any authenticated reseller may read their own; strictly scoped by resellerId.
+ */
+router.get('/allocation/me', ResellerController.getMyAllocation);
+
+/**
  * Events
  */
 router.get(
