@@ -11,6 +11,8 @@ import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
+import { CashierAdminController } from '@controllers/cashierAdmin.controller';
+import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { AdminFeesController } from '@controllers/adminFees.controller';
@@ -478,5 +480,24 @@ router.get('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_
 router.post('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
 router.patch('/gate-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
 router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
+
+/**
+ * Cashier Admin Routes — an organizer creates/deactivates the in-venue money
+ * desk staff who top up + cash out attendee wallets. Same MANAGE_ACCESS gate +
+ * organizer-scoping as gate operators; a cashier is NOT a reseller.
+ */
+router.get('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.list);
+router.post('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.create);
+router.patch('/cashiers/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.update);
+router.post('/cashiers/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.resetPin);
+
+/**
+ * Organizer Cashless Reporting — the "you're in charge" view of one event:
+ * circulated / spent / withdrawn / left-behind, per-vendor takings, per-cashier
+ * activity, and the full transaction log. Money data → VIEW_REVENUE; ownership
+ * (own event only) is enforced in the controller.
+ */
+router.get('/events/:eventId/cashless/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.summary);
+router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.transactions);
 
 export default router;

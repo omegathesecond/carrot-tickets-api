@@ -62,6 +62,7 @@ import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
 import merchantRoutes from '@routes/merchant.route';
+import cashierRoutes from '@routes/cashier.route';
 import communityRoutes from '@routes/community.route';
 import socialRoutes from '@routes/social.route';
 import dmRoutes from '@routes/dm.route';
@@ -174,6 +175,7 @@ app.use('/api/public/purchase/deltapay', deltapayRoutes);    // DeltaPay return 
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 app.use('/api/merchant', merchantRoutes);          // Merchant tap-to-pay (cashless spec)
+app.use('/api/cashier', cashierRoutes);            // Cashier desk — in-venue top-up + cash-out (cashless spec)
 app.use('/api/community', communityRoutes);          // Event communities (buyer social)
 app.use('/api/social', socialRoutes);                // Buyer social profiles
 app.use('/api/dm', dmRoutes);                        // Direct & group messages
