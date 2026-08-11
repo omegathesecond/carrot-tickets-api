@@ -842,6 +842,7 @@ export class TicketService {
       quantity,
       PaymentMethod.KESHLESS_WALLET,
       feeCfg,
+      { waiveServiceFee: ticketType.waiveServiceFee },
     );
 
     // sellTickets debits the wallet (face + service fee) and mints tickets.
@@ -1053,7 +1054,7 @@ export class TicketService {
     const feeCfg = await PaymentConfigService.get();
     const { serviceFeeAmount, amountCharged } =
       channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.MTN_MOMO, feeCfg)
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.MTN_MOMO, feeCfg, { waiveServiceFee: tt.waiveServiceFee })
         : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
@@ -1197,7 +1198,7 @@ export class TicketService {
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
     const { serviceFeeAmount, amountCharged } =
       channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.PEACH_CARD, cardCfg)
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.PEACH_CARD, cardCfg, { waiveServiceFee: tt.waiveServiceFee })
         : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
@@ -1336,7 +1337,7 @@ export class TicketService {
     // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
     const { serviceFeeAmount, amountCharged } =
       channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.DELTAPAY, cfg)
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.DELTAPAY, cfg, { waiveServiceFee: tt.waiveServiceFee })
         : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet

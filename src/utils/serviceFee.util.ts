@@ -46,13 +46,16 @@ export interface ServiceFeeBreakdown {
   amountCharged: number; // subtotal + serviceFeeAmount — what the gateway charges
 }
 
-/** Compute the fee + total charged for a subtotal + method + ticket quantity. */
+/** Compute the fee + total charged for a subtotal + method + ticket quantity.
+ *  `opts.waiveServiceFee` (allocation tiers) forces a zero fee so the buyer
+ *  pays exactly face — the promo the reseller runs on their pre-bought block. */
 export function computeServiceFee(
   subtotal: number,
   quantity: number,
   method: PaymentMethod,
-  cfg: ServiceFeeConfig
+  cfg: ServiceFeeConfig,
+  opts: { waiveServiceFee?: boolean } = {}
 ): ServiceFeeBreakdown {
-  const serviceFeeAmount = round2(serviceFeeFor(method, cfg) * quantity);
+  const serviceFeeAmount = opts.waiveServiceFee ? 0 : round2(serviceFeeFor(method, cfg) * quantity);
   return { serviceFeeAmount, amountCharged: round2(subtotal + serviceFeeAmount) };
 }
