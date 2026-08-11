@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
+import { PaymentMethod } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { EventService } from '@services/event.service';
@@ -553,7 +554,13 @@ export class TicketsController {
         name: Joi.string().required().trim().max(100),
         description: Joi.string().optional().max(500),
         price: Joi.number().required().min(0),
-        quantity: Joi.number().required().min(1)
+        quantity: Joi.number().required().min(1),
+        // Reseller allocation block (super-admin only — enforced in the service).
+        isAllocation: Joi.boolean().optional(),
+        resellerId: Joi.string().hex().length(24).optional(),
+        allocationUnitCost: Joi.number().min(0).optional(),
+        restrictToMethod: Joi.string().valid(...Object.values(PaymentMethod)).optional(),
+        waiveServiceFee: Joi.boolean().optional(),
       }).validate(req.body);
 
       if (error) {

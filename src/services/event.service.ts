@@ -648,10 +648,28 @@ export class EventService {
       description?: string;
       price: number;
       quantity: number;
+      // Reseller allocation (super-admin only): a block a reseller pre-bought.
+      resellerId?: string;
+      isAllocation?: boolean;
+      allocationUnitCost?: number;
+      restrictToMethod?: PaymentMethod;
+      waiveServiceFee?: boolean;
     },
     isSuperAdmin: boolean = false
   ): Promise<IEvent> {
     try {
+      // An allocation tier reroutes money to a reseller and off the organizer's
+      // books — only Carrot (super-admin) sets those up, and it MUST name the
+      // reseller. Fail loudly rather than silently create a mis-attributed tier.
+      if (ticketType.isAllocation) {
+        if (!isSuperAdmin) {
+          throw new Error('Only a super-admin can create an allocation tier');
+        }
+        if (!ticketType.resellerId) {
+          throw new Error('An allocation tier requires a reseller');
+        }
+      }
+
       const query: any = { _id: eventId };
       if (!isSuperAdmin) {
         query.vendorId = vendorId;
@@ -677,8 +695,18 @@ export class EventService {
         sold: 0,
         reserved: 0,
         available: ticketType.quantity,
-        isSoldOut: false
-      });
+        isSoldOut: false,
+        // Allocation metadata is applied only for a super-admin-created block.
+        ...(ticketType.isAllocation
+          ? {
+              resellerId: new mongoose.Types.ObjectId(ticketType.resellerId),
+              isAllocation: true,
+              ...(ticketType.allocationUnitCost != null ? { allocationUnitCost: ticketType.allocationUnitCost } : {}),
+              ...(ticketType.restrictToMethod ? { restrictToMethod: ticketType.restrictToMethod } : {}),
+              ...(ticketType.waiveServiceFee ? { waiveServiceFee: true } : {}),
+            }
+          : {}),
+      } as any);
 
       await event.save();
       return event;
