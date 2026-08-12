@@ -63,6 +63,12 @@ export interface IEvent extends Document {
   // Capacity & Tickets
   capacity: number; // Total event capacity
   ticketTypes: ITicketType[]; // Different ticket types
+  // Max ACTIVE tickets a single buyer identity may hold for this event, summed
+  // across all ticket types. Undefined/absent = unlimited (default). Set to 1
+  // for strict "one ticket per person". Enforced in
+  // EventService.checkTicketAvailability against buyerId OR normalized
+  // customerPhone. No dashboard UI — set via src/scripts/setPerAccountLimit.ts.
+  maxTicketsPerAccount?: number;
 
   // Status
   status: EventStatus;

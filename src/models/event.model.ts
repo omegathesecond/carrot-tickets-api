@@ -124,6 +124,12 @@ const eventSchema = new Schema<IEvent>({
     type: [ticketTypeSchema],
     default: []
   },
+  // See IEvent.maxTicketsPerAccount. No `default` — absent means unlimited, so
+  // every existing event is unaffected. `min: 1` so a stored cap is meaningful.
+  maxTicketsPerAccount: {
+    type: Number,
+    min: [1, 'maxTicketsPerAccount must be at least 1'],
+  },
 
   // Status
   status: {
