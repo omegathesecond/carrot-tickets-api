@@ -900,7 +900,7 @@ export class TicketService {
    * and the free-claim path so both notify identically.
    */
   private static sendTicketConfirmations(
-    event: { name: string; eventDate: Date; venue: string },
+    event: { name: string; eventDate: Date; startTime?: Date; venue: string },
     tickets: ITicket[],
     customerPhone?: string,
     customerEmail?: string,
@@ -909,6 +909,7 @@ export class TicketService {
       ticketId: t.ticketId,
       eventName: event.name,
       eventDate: event.eventDate.toISOString(),
+      startTime: event.startTime?.toISOString(),
       venue: event.venue,
     }));
     if (customerPhone) {
@@ -1756,6 +1757,7 @@ export class TicketService {
         ticketId: t.ticketId,
         eventName: event.name,
         eventDate: event.eventDate.toISOString(),
+        startTime: event.startTime?.toISOString(),
         venue: event.venue,
       }));
       if (sale.customerPhone) {
@@ -1885,6 +1887,7 @@ export class TicketService {
         ticketId: t.ticketId,
         eventName: event.name,
         eventDate: event.eventDate.toISOString(),
+        startTime: event.startTime?.toISOString(),
         venue: event.venue,
       }));
       if (sale.customerPhone) {
@@ -2044,6 +2047,7 @@ export class TicketService {
         ticketId: t.ticketId,
         eventName: event.name,
         eventDate: event.eventDate.toISOString(),
+        startTime: event.startTime?.toISOString(),
         venue: event.venue,
       }));
       if (sale.customerPhone) {

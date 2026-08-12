@@ -16,6 +16,7 @@
  */
 import { groupTicketCode } from '@utils/ticketCode.util';
 import { TicketSummary } from './sms.service';
+import { formatEventDateTime } from '@utils/eventTime.util';
 import { YeboLinkClient } from './yebolink.client';
 
 const FROM_NAME = 'Carrot Tickets';
@@ -52,7 +53,7 @@ export class EmailService {
     const first = tickets[0];
     if (!first) return false;
 
-    const dateFull = new Date(first.eventDate).toLocaleString('en-GB', {
+    const dateFull = formatEventDateTime(first.startTime, first.eventDate, {
       weekday: 'short',
       day: '2-digit',
       month: 'short',

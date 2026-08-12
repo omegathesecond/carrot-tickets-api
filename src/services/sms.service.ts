@@ -18,6 +18,7 @@
 import { groupTicketCode } from '@utils/ticketCode.util';
 import { normalizePhone } from '@utils/phone.util';
 import { shouldSendSms } from '@utils/smsPolicy.util';
+import { formatEventDateTime } from '@utils/eventTime.util';
 import { YeboLinkClient } from './yebolink.client';
 
 const KESHLESS_API_URL = process.env['KESHLESS_API_URL'] || 'http://localhost:3000/api';
@@ -32,7 +33,8 @@ const SMS_SENDER_ID = process.env['SMS_SENDER_ID'] || 'CarrotTix';
 export interface TicketSummary {
   ticketId: string;       // TKT-...
   eventName: string;
-  eventDate: string;      // ISO
+  eventDate: string;      // ISO (date-only marker, midnight UTC)
+  startTime?: string;     // ISO instant — the real start; preferred for display
   venue: string;
 }
 
@@ -116,7 +118,7 @@ export class SmsService {
     const first = tickets[0];
     if (!first) return false;
 
-    const dateShort = new Date(first.eventDate).toLocaleString('en-GB', {
+    const dateShort = formatEventDateTime(first.startTime, first.eventDate, {
       day: '2-digit',
       month: 'short',
       hour: '2-digit',
