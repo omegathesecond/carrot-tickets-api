@@ -1,7 +1,9 @@
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
-import { PaymentMethod } from '@interfaces/ticket.interface';
+import { PaymentMethod, TicketStatus } from '@interfaces/ticket.interface';
+import { Ticket } from '@models/ticket.model';
+import { normalizePhone } from '@utils/phone.util';
 import type { EventCategory } from '@/constants/eventCategories';
 import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
@@ -589,7 +591,8 @@ export class EventService {
     eventId: string,
     ticketTypeId: string,
     quantity: number,
-    method?: PaymentMethod
+    method?: PaymentMethod,
+    buyer?: { buyerId?: string | mongoose.Types.ObjectId | null; phone?: string | null }
   ): Promise<{ available: boolean; message?: string; ticketTypeData?: ITicketType }> {
     try {
       const event = await Event.findById(eventId);
@@ -639,6 +642,39 @@ export class EventService {
           message: `Only ${computeAvailable(ticketTypeObj)} tickets available`,
           ticketTypeData: ticketTypeObj
         };
+      }
+
+      // Per-account cap ("one ticket per person"). Enforced only when the
+      // organizer set a positive maxTicketsPerAccount AND we can identify the
+      // buyer (buyerId or a phone). Counts the buyer's ACTIVE tickets for THIS
+      // event across all tiers (refunded/cancelled excluded) and rejects if
+      // this order would push them over the cap. A caller with no identity
+      // (POS walk-up, wristband, reseller allocation) is skipped — an account
+      // rule can't bind someone with no account and no phone.
+      const cap = event.maxTicketsPerAccount;
+      if (typeof cap === 'number' && cap > 0 && buyer) {
+        const identityClauses: Array<Record<string, unknown>> = [];
+        if (buyer.buyerId) identityClauses.push({ buyerId: buyer.buyerId });
+        const normPhone = buyer.phone ? normalizePhone(buyer.phone) : '';
+        if (normPhone) identityClauses.push({ customerPhone: normPhone });
+
+        if (identityClauses.length > 0) {
+          const held = await Ticket.countDocuments({
+            eventId,
+            status: { $nin: [TicketStatus.REFUNDED, TicketStatus.CANCELLED] },
+            $or: identityClauses,
+          });
+          if (held + quantity > cap) {
+            return {
+              available: false,
+              message:
+                cap === 1
+                  ? "You already have your ticket for this event — it's limited to one per person."
+                  : `This event is limited to ${cap} tickets per person; you already have ${held}.`,
+              ticketTypeData: ticketTypeObj,
+            };
+          }
+        }
       }
 
       return {
