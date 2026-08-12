@@ -4,6 +4,7 @@ import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
 import type { EventCategory } from '@/constants/eventCategories';
 import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
+import { HttpError } from '@utils/httpError.util';
 
 export interface CreateEventParams {
   vendorId?: string;
@@ -285,6 +286,16 @@ export class EventService {
         throw new Error('Cannot update completed event');
       }
 
+      // Renaming is ADMIN-ONLY, enforced here — not just hidden in the UI.
+      // An organizer silently changing the name of an approved/sold event is a
+      // bait-and-switch fraud vector, so even a direct API call from the event
+      // owner is rejected. Organizers set the name at creation and ask an admin
+      // to correct genuine mistakes. Comparing to the current value means an
+      // unchanged name echoed back by a client is a harmless no-op, not a 403.
+      if (updates.name !== undefined && updates.name !== event.name && !isSuperAdmin) {
+        throw new HttpError(403, 'Only an administrator can rename an event');
+      }
+
       // Update fields
       if (updates.name) event.name = updates.name;
       if (updates.description !== undefined) event.description = updates.description;
@@ -324,6 +335,9 @@ export class EventService {
       await event.save();
       return event;
     } catch (error: any) {
+      // Preserve intentional HttpErrors (e.g. the 403 rename guard) — wrapping
+      // them in a plain Error here would strip the status and surface as a 500.
+      if (error instanceof HttpError) throw error;
       console.error('Update event error:', error);
       throw new Error(error.message || 'Failed to update event');
     }

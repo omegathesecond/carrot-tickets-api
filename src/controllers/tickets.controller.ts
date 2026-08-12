@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { EventService } from '@services/event.service';
 import { TicketService } from '@services/ticket.service';
@@ -421,8 +422,9 @@ export class TicketsController {
 
       ApiResponseUtil.success(res, event, 'Event updated successfully');
     } catch (error: any) {
-      console.error('Update event error:', error);
-      ApiResponseUtil.error(res, error.message || 'Failed to update event');
+      // Preserve the rename guard's 403 (and any other HttpError status);
+      // anything else logs loudly and becomes a 500.
+      return failWithHttpError(res, error, 'Failed to update event');
     }
   }
 
