@@ -796,6 +796,7 @@ export class TicketService {
       eventName: string;
       ticketType: string;
       eventDate: Date;
+      startTime?: Date;
       venue: string;
     }>;
     transactionId?: string;
@@ -884,6 +885,7 @@ export class TicketService {
         eventName: event.name,
         ticketType: ticketType.name,
         eventDate: event.eventDate,
+        startTime: event.startTime,
         venue: event.venue,
       })),
       transactionId: result.sale.walletTransactionId,
@@ -949,6 +951,7 @@ export class TicketService {
       eventName: string;
       ticketType: string;
       eventDate: Date;
+      startTime?: Date;
       venue: string;
     }>;
     totalAmount: number;
@@ -1008,6 +1011,7 @@ export class TicketService {
         eventName: event.name,
         ticketType: ticketType.name,
         eventDate: event.eventDate,
+        startTime: event.startTime,
         venue: event.venue,
       })),
       totalAmount: 0,
