@@ -214,6 +214,16 @@ router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
 router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 
 /**
+ * @route   POST /api/public/purchase/free
+ * @desc    Claim a FREE ticket (a tier priced at 0). No payment method — the
+ *          server re-verifies the tier is genuinely free, so a paid tier can
+ *          never be obtained through this endpoint.
+ * @access  Buyer (Bearer buyer token). Identity from the token, never the body.
+ * @body    eventId, ticketTypeId, quantity, customerName?
+ */
+router.post('/purchase/free', authenticateBuyer, PublicController.claimFreeTicket);
+
+/**
  * Buyer (ticket-holder) authentication.
  *
  * Returning buyers sign in with identifier + password (/auth/login), where

@@ -174,6 +174,17 @@ const momoInitiateSchema = Joi.object({
   momoPhone: Joi.string().pattern(/^[0-9]{8,15}$/).required(),
 });
 
+// Free-ticket claim — no payment fields at all (a free tier has nothing to
+// charge). The tier being genuinely free is enforced SERVER-SIDE in
+// TicketService.claimFreeTicket, never from this body; the quantity cap here
+// is just defence-in-depth parity with the paid paths.
+const freeClaimSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
+  customerName: Joi.string().max(100).optional().allow(''),
+});
+
 // Validation schemas
 // Exported so it's independently unit-testable (see
 // __tests__/eventQuery.validator.test.ts) without spinning up the DB harness.
@@ -789,6 +800,44 @@ export class PublicController {
     } catch (error: any) {
       console.error('Purchase tickets error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to purchase tickets');
+    }
+  }
+
+  /**
+   * Claim a FREE ticket — the checkout path for a tier priced at 0. No payment
+   * method is involved (the client never even shows one), so there's nothing to
+   * charge. The service re-verifies the tier is actually free against the DB,
+   * so this endpoint can never be used to obtain a paid ticket for free.
+   */
+  static async claimFreeTicket(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = freeClaimSchema.validate(req.body);
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      // Identity comes from the OTP-verified buyer token (buyerId-primary,
+      // phone fallback) — never the body — so the free ticket is bound to the
+      // account they proved they own and surfaces under their "My Tickets".
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to get a ticket');
+      }
+
+      const result = await TicketService.claimFreeTicket({
+        eventId: value.eventId,
+        ticketTypeId: value.ticketTypeId,
+        quantity: value.quantity,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
+        customerName: value.customerName as string | undefined,
+      });
+
+      return ApiResponseUtil.created(res, result, 'Your free ticket is confirmed!');
+    } catch (error: any) {
+      console.error('Claim free ticket error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to get your ticket');
     }
   }
 

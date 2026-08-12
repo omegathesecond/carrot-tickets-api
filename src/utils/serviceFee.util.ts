@@ -56,6 +56,12 @@ export function computeServiceFee(
   cfg: ServiceFeeConfig,
   opts: { waiveServiceFee?: boolean } = {}
 ): ServiceFeeBreakdown {
+  // A free ticket (subtotal 0) carries NO service fee, on any method — there's
+  // nothing to book, so there's nothing to surcharge. Charging a fee would turn
+  // a "Free" ticket into a paid one, which is exactly what we don't want.
+  if (subtotal <= 0) {
+    return { serviceFeeAmount: 0, amountCharged: round2(subtotal) };
+  }
   const serviceFeeAmount = opts.waiveServiceFee ? 0 : round2(serviceFeeFor(method, cfg) * quantity);
   return { serviceFeeAmount, amountCharged: round2(subtotal + serviceFeeAmount) };
 }

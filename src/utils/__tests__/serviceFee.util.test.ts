@@ -30,6 +30,12 @@ describe('computeServiceFee — per ticket', () => {
     expect(computeServiceFee(50, 4, PaymentMethod.KESHLESS_WALLET, cfg)).toEqual({ serviceFeeAmount: 0, amountCharged: 50 });
   });
 
+  it('charges NO fee for a free ticket (subtotal 0) on any paid method', () => {
+    expect(computeServiceFee(0, 1, PaymentMethod.MTN_MOMO, cfg)).toEqual({ serviceFeeAmount: 0, amountCharged: 0 });
+    expect(computeServiceFee(0, 3, PaymentMethod.PEACH_CARD, cfg)).toEqual({ serviceFeeAmount: 0, amountCharged: 0 });
+    expect(computeServiceFee(0, 2, PaymentMethod.DELTAPAY, cfg)).toEqual({ serviceFeeAmount: 0, amountCharged: 0 });
+  });
+
   it('rounds the multiplied fee to 2 decimals', () => {
     const frac = { keshlessServiceFee: 0, momoServiceFee: 0.1, cardServiceFee: 0, deltapayServiceFee: 0 };
     // 0.1 * 3 = 0.30000000000000004 in float — must round to 0.3

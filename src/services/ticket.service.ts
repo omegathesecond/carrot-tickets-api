@@ -876,8 +876,36 @@ export class TicketService {
       serviceFeeAmount,
     });
 
-    // Best-effort confirmation — never roll back the purchase on send failure.
-    const summaries = result.tickets.map((t) => ({
+    this.sendTicketConfirmations(event, result.tickets, customerPhone, customerEmail);
+
+    return {
+      tickets: result.tickets.map(ticket => ({
+        ticketId: ticket.ticketId,
+        eventName: event.name,
+        ticketType: ticketType.name,
+        eventDate: event.eventDate,
+        venue: event.venue,
+      })),
+      transactionId: result.sale.walletTransactionId,
+      totalAmount,
+      quantity,
+      event: { name: event.name, date: event.eventDate, venue: event.venue },
+    };
+  }
+
+  /**
+   * Best-effort ticket confirmation (SMS + email) for a completed online
+   * issue. Fire-and-forget: a send failure is logged but never rolls back the
+   * purchase — the buyer already has the ticket. Shared by the wallet purchase
+   * and the free-claim path so both notify identically.
+   */
+  private static sendTicketConfirmations(
+    event: { name: string; eventDate: Date; venue: string },
+    tickets: ITicket[],
+    customerPhone?: string,
+    customerEmail?: string,
+  ): void {
+    const summaries = tickets.map((t) => ({
       ticketId: t.ticketId,
       eventName: event.name,
       eventDate: event.eventDate.toISOString(),
@@ -891,6 +919,87 @@ export class TicketService {
       EmailService.sendTicketConfirmation(customerEmail, summaries)
         .catch((err) => console.error('[Email] confirmation send threw', err));
     }
+  }
+
+  /**
+   * Claim a FREE ticket — the buyer-checkout path for a tier priced at 0.
+   * No payment method, no gateway: a free ticket has nothing to charge, so the
+   * buyer never sees a payment picker (see PurchaseModal). Mints through the
+   * same choke point as every other sale (sellTickets → CashProcessor, which
+   * moves no money) so the ticket, ledger snapshot and auto-follow behave
+   * exactly like a paid online sale, just at amount 0.
+   *
+   * SERVER-AUTHORITATIVE: the tier's price MUST be 0. The client saying "this
+   * is free" is never trusted — a paid tier rejected here has to go through a
+   * real payment method, so this endpoint can't be used to mint paid tickets
+   * for free.
+   */
+  static async claimFreeTicket(params: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone?: string;
+    customerName?: string;
+    customerEmail?: string;
+    buyerId?: string;
+  }): Promise<{
+    tickets: Array<{
+      ticketId: string;
+      eventName: string;
+      ticketType: string;
+      eventDate: Date;
+      venue: string;
+    }>;
+    totalAmount: number;
+    quantity: number;
+    event: { name: string; date: Date; venue: string };
+  }> {
+    const { eventId, ticketTypeId, quantity, customerEmail, buyerId } = params;
+
+    const customerPhone = params.customerPhone ? normalizePhone(params.customerPhone) : undefined;
+    // Name only personalises the printed ticket; fall back to phone, then
+    // email, so an email-only buyer's ticket is never nameless.
+    const customerName = params.customerName?.trim() || customerPhone || params.customerEmail || 'Guest';
+
+    // Only published events are buyable.
+    const event = await Event.findOne({ _id: eventId, status: EventStatus.PUBLISHED });
+    if (!event) {
+      throw new Error('Event not found or not available');
+    }
+    assertCarrotTicketing(event);
+
+    const ticketType = event.ticketTypes.find(tt => tt._id?.toString() === ticketTypeId);
+    if (!ticketType) {
+      throw new Error('Ticket type not found');
+    }
+
+    // The whole point of this path: reject anything that actually costs money.
+    if (ticketType.price > 0) {
+      throw new Error('This ticket is not free — please choose a payment method');
+    }
+
+    if (ticketType.isSoldOut || ticketType.available < quantity) {
+      throw new Error(`Only ${ticketType.available} tickets available`);
+    }
+
+    // sellTickets mints via the CashProcessor (no money moves) at face 0.
+    const result = await TicketService.sellTickets({
+      vendorId: event.vendorId!.toString(),
+      eventId,
+      ticketTypeId,
+      quantity,
+      customerName,
+      customerPhone,
+      customerEmail,
+      buyerId,
+      paymentMethod: PaymentMethod.CASH,
+      soldBy: event.vendorId!.toString(),
+      soldByType: 'vendor',
+      channel: SalesChannel.ONLINE,
+      serviceFeeAmount: 0,
+    });
+
+    this.sendTicketConfirmations(event, result.tickets, customerPhone, customerEmail);
 
     return {
       tickets: result.tickets.map(ticket => ({
@@ -900,8 +1009,7 @@ export class TicketService {
         eventDate: event.eventDate,
         venue: event.venue,
       })),
-      transactionId: result.sale.walletTransactionId,
-      totalAmount,
+      totalAmount: 0,
       quantity,
       event: { name: event.name, date: event.eventDate, venue: event.venue },
     };
