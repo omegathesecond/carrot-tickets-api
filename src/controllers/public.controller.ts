@@ -743,6 +743,12 @@ export class PublicController {
         ...toPublicEventCard(event, { organizer }),
         isMultiDay: event.isMultiDay,
         galleryImages: event.galleryImages,
+        // Per-account ticket cap ("one ticket per person"). Exposed only on the
+        // detail payload (not list cards) so the buyer UI can show the limit and
+        // cap the quantity selector. Absent/unset = unlimited. Enforcement is
+        // still server-authoritative in checkTicketAvailability — this is purely
+        // to inform the buyer up front.
+        maxTicketsPerAccount: event.maxTicketsPerAccount,
       };
 
       return ApiResponseUtil.success(res, publicEvent);
