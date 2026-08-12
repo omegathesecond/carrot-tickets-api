@@ -271,7 +271,8 @@ export class TicketService {
         eventId,
         ticketTypeId,
         quantity,
-        paymentMethod
+        paymentMethod,
+        { buyerId: params.buyerId, phone: params.customerPhone }
       );
 
       if (!availabilityCheck.available) {
@@ -1141,7 +1142,10 @@ export class TicketService {
   }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
     if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
 
-    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.MTN_MOMO);
+    const avail = await EventService.checkTicketAvailability(
+      p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.MTN_MOMO,
+      { buyerId: p.buyerId, phone: p.customerPhone }
+    );
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 
     const tt = avail.ticketTypeData!;
@@ -1296,7 +1300,10 @@ export class TicketService {
     const cardCfg = await PaymentConfigService.get();
     if (!cardCfg.peachCardEnabled) throw new Error('Card payments are not available');
 
-    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.PEACH_CARD);
+    const avail = await EventService.checkTicketAvailability(
+      p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.PEACH_CARD,
+      { buyerId: p.buyerId, phone: p.customerPhone }
+    );
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 
     const tt = avail.ticketTypeData!;
@@ -1440,7 +1447,10 @@ export class TicketService {
     const cfg = await PaymentConfigService.get();
     if (!cfg.deltapayEnabled) throw new Error('DeltaPay is not available');
 
-    const avail = await EventService.checkTicketAvailability(p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.DELTAPAY);
+    const avail = await EventService.checkTicketAvailability(
+      p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.DELTAPAY,
+      { buyerId: p.buyerId, phone: p.customerPhone }
+    );
     if (!avail.available) throw new Error(avail.message || 'Tickets not available');
 
     const tt = avail.ticketTypeData!;
