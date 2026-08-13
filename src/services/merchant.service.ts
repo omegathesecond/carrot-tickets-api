@@ -5,6 +5,13 @@ import { Merchant } from '@models/merchant.model';
 import { MerchantCharge, IMerchantCharge } from '@models/merchantCharge.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
+import { Product } from '@models/product.model';
+import { StockService, StockDeclinedError } from '@services/stock.service';
+import { StockMovementReason } from '@interfaces/stock.interface';
+
+// Re-exported so the controller can import both declines from
+// @services/merchant.service if convenient.
+export { StockDeclinedError };
 
 /**
  * Safety ceiling on a single tap-to-pay charge, in minor units (cents):
@@ -59,29 +66,51 @@ export class MerchantService {
    * only runs once that CAS has already succeeded.
    */
   static async charge(params: {
-    merchantId: string;
-    eventId: string;
-    walletId: string;
-    bandUid: string;
-    amount: number;
+    merchantId: string; eventId: string; walletId: string; bandUid: string;
     clientTxnId: string;
+    amount?: number;
+    items?: Array<{ productId: string; qty: number }>;
+    staffName?: string;
   }): Promise<{ wallet: IWallet; charge: IMerchantCharge }> {
-    const { merchantId, eventId, walletId, bandUid, amount, clientTxnId } = params;
-    if (!Number.isInteger(amount) || amount <= 0) {
-      throw new Error('amount must be a positive integer (cents)');
-    }
-    if (amount > MAX_CHARGE_CENTS) {
-      throw new Error('amount exceeds the maximum allowed charge');
-    }
+    const { merchantId, eventId, walletId, bandUid, clientTxnId, staffName } = params;
 
-    // Idempotency: if this clientTxnId already ran FOR THIS MERCHANT, return
-    // the existing outcome.
+    const hasItems = Array.isArray(params.items) && params.items.length > 0;
+    const hasAmount = params.amount != null;
+    if (hasItems === hasAmount) throw new Error('provide exactly one of amount or items');
+
+    // Idempotency: if this clientTxnId already ran FOR THIS MERCHANT, return it.
     const existing = await MerchantCharge.findOne({ merchantId, clientTxnId });
     if (existing) {
       const w = await Wallet.findById(existing.walletId);
       if (!w) throw new Error('wallet not found');
       return { wallet: w, charge: existing };
     }
+
+    // Resolve amount + item snapshots BEFORE the transaction (prices are stable;
+    // the atomic guard is the per-product stock CAS inside the txn).
+    let amount: number;
+    let itemSnapshots: Array<{ productId: mongoose.Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }> | undefined;
+    if (hasItems) {
+      const merged = new Map<string, number>();
+      for (const { productId, qty } of params.items!) {
+        if (!Number.isInteger(qty) || qty <= 0) throw new Error('qty must be a positive integer');
+        merged.set(String(productId), (merged.get(String(productId)) ?? 0) + qty);
+      }
+      const ids = [...merged.keys()];
+      const products = await Product.find({ _id: { $in: ids }, eventId, active: true }).lean();
+      if (products.length !== ids.length) throw new Error('one or more products not found for this event');
+      const byId = new Map(products.map((p) => [String(p._id), p]));
+      itemSnapshots = ids.map((pid) => {
+        const p = byId.get(pid)!;
+        const qty = merged.get(pid)!;
+        return { productId: p._id as mongoose.Types.ObjectId, name: p.name, unitPrice: p.price, qty, lineTotal: p.price * qty };
+      });
+      amount = itemSnapshots.reduce((s, l) => s + l.lineTotal, 0);
+    } else {
+      amount = params.amount!;
+    }
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error('amount must be a positive integer (cents)');
+    if (amount > MAX_CHARGE_CENTS) throw new Error('amount exceeds the maximum allowed charge');
 
     const session = await mongoose.startSession();
     try {
@@ -128,6 +157,18 @@ export class MerchantService {
           throw new WalletDeclinedError('insufficient_balance', 'insufficient balance', fresh.balance);
         }
 
+        // Decrement stock per line inside the SAME transaction. A
+        // StockDeclinedError aborts the txn → the wallet debit above rolls back.
+        if (itemSnapshots) {
+          for (const line of itemSnapshots) {
+            await StockService.applyMovement({
+              eventId, merchantId, productId: String(line.productId), delta: -line.qty,
+              reason: StockMovementReason.SALE, refType: 'merchant_charge', refId: clientTxnId,
+              byType: 'Merchant', by: merchantId, session,
+            });
+          }
+        }
+
         const commissionPercent = merchant.commissionPercent || 0;
         const fee = Math.floor((amount * commissionPercent) / 100);
         const net = amount - fee;
@@ -145,7 +186,11 @@ export class MerchantService {
         });
 
         const [charge] = await MerchantCharge.create(
-          [{ merchantId, eventId, walletId, bandUid, amount, fee, netAmount: net, clientTxnId, status: 'completed' }],
+          [{
+            merchantId, eventId, walletId, bandUid, amount, fee, netAmount: net, clientTxnId, status: 'completed',
+            ...(itemSnapshots ? { items: itemSnapshots } : {}),
+            ...(staffName ? { staffName } : {}),
+          }],
           { session },
         );
         if (!charge) throw new Error('merchant charge insert failed');
@@ -162,7 +207,7 @@ export class MerchantService {
         const wallet = charge ? await Wallet.findById(charge.walletId) : null;
         if (charge && wallet) return { wallet, charge };
       }
-      throw e;
+      throw e; // WalletDeclinedError / StockDeclinedError / resolution errors propagate
     } finally {
       await session.endSession();
     }
