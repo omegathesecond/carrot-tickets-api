@@ -69,4 +69,40 @@ describe('StockService.applyMovement', () => {
     expect(results.filter((r) => r === 'ok')).toHaveLength(5);
     expect((await ProductStock.findOne({ merchantId, productId }))!.onHand).toBe(0);
   });
+
+  it('rejects a caller session that is not already in a transaction, writing nothing', async () => {
+    const s = await mongoose.startSession();
+    try {
+      // Deliberately NOT calling s.startTransaction() — applyMovement must refuse
+      // to treat a bare session as a transaction it can silently join.
+      await expect(
+        StockService.applyMovement({ ...base, delta: 5, reason: StockMovementReason.RECEIVE, session: s }),
+      ).rejects.toThrow(/transaction/);
+    } finally {
+      await s.endSession();
+    }
+    expect(await ProductStock.findOne({ merchantId, productId })).toBeNull();
+    expect(await StockMovement.countDocuments({ merchantId, productId })).toBe(0);
+  });
+
+  it('joins a valid in-transaction caller session and persists on commit', async () => {
+    const s = await mongoose.startSession();
+    try {
+      await s.withTransaction(async () => {
+        await StockService.applyMovement({ ...base, delta: 40, reason: StockMovementReason.RECEIVE, session: s });
+      });
+    } finally {
+      await s.endSession();
+    }
+    const stock = await ProductStock.findOne({ merchantId, productId });
+    expect(stock!.onHand).toBe(40);
+    const movements = await StockMovement.find({ merchantId, productId, delta: 40 });
+    expect(movements).toHaveLength(1);
+  });
+
+  it('getOnHand returns 0 when no row exists, then the current balance after a receive', async () => {
+    expect(await StockService.getOnHand(merchantId, productId)).toBe(0);
+    await StockService.applyMovement({ ...base, delta: 12, reason: StockMovementReason.RECEIVE });
+    expect(await StockService.getOnHand(merchantId, productId)).toBe(12);
+  });
 });
