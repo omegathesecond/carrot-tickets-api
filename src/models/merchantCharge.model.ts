@@ -21,6 +21,8 @@ export interface IMerchantCharge extends Document {
   netAmount: number;
   clientTxnId: string;
   status: 'completed';
+  items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }>;
+  staffName?: string;
   createdAt: Date;
 }
 
@@ -34,6 +36,18 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
   netAmount: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'netAmount must be integer cents' } },
   clientTxnId: { type: String, required: true },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
+  items: {
+    type: [new Schema({
+      productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+      name: { type: String, required: true },
+      unitPrice: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'unitPrice must be integer cents' } },
+      qty: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'qty must be a whole number' } },
+      lineTotal: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'lineTotal must be integer cents' } },
+    }, { _id: false })],
+    required: false,
+    get: (val: any) => val && val.length > 0 ? val : undefined,
+  },
+  staffName: { type: String, trim: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
 // Idempotency scoped to the OWNING merchant, NOT global — mirrors
