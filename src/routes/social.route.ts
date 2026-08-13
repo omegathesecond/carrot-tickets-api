@@ -39,6 +39,7 @@ router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recomm
 router.get('/nearby/people', authenticateBuyer, ConsumerReadsController.nearbyPeople);
 router.post('/meetups', authenticateBuyer, MeetupController.request);
 router.get('/meetups/incoming', authenticateBuyer, MeetupController.incoming);
+router.get('/meetups/accepted', authenticateBuyer, MeetupController.accepted);
 router.post('/meetups/:id/accept', authenticateBuyer, MeetupController.accept);
 router.post('/meetups/:id/decline', authenticateBuyer, MeetupController.decline);
 router.delete('/meetups/:id', authenticateBuyer, MeetupController.cancel);

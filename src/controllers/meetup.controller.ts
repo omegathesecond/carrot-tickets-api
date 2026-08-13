@@ -35,6 +35,18 @@ export class MeetupController {
     }
   }
 
+  /** GET /api/social/meetups/accepted — accepted meetups in both directions. */
+  static async accepted(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const meetups = await MeetupService.listAccepted(buyer);
+      return ApiResponseUtil.success(res, { meetups });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load accepted meetups');
+    }
+  }
+
   /** POST /api/social/meetups/:id/accept */
   static async accept(req: Request, res: Response): Promise<any> {
     try {

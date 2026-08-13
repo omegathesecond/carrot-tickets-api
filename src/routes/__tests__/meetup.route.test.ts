@@ -60,4 +60,25 @@ describe('meetup routes', () => {
     await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
     await request(app).get('/api/social/meetups/incoming?status=bogus').set(auth(ME)).expect(400);
   });
+
+  it('GET /meetups/accepted returns accepted meetups in both directions', async () => {
+    const me = await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
+    const A = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'A', username: 'user_a' });
+    const B = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'B', username: 'user_b' });
+
+    // Direction 1: viewer (ME) is the requester, A accepts.
+    const req1 = await request(app).post('/api/social/meetups').set(auth(ME)).send({ targetId: String(A._id) });
+    await request(app).post(`/api/social/meetups/${req1.body.data.id}/accept`).set(auth(OTHER)).expect(200);
+
+    // Direction 2: viewer (ME) is the target, B requests and ME accepts.
+    const req2 = await request(app)
+      .post('/api/social/meetups')
+      .set(auth('+26878000002'))
+      .send({ targetId: String(me._id) });
+    await request(app).post(`/api/social/meetups/${req2.body.data.id}/accept`).set(auth(ME)).expect(200);
+
+    const res = await request(app).get('/api/social/meetups/accepted').set(auth(ME)).expect(200);
+    const ids = res.body.data.meetups.map((m: any) => m.user.id).sort();
+    expect(ids).toEqual([String(A._id), String(B._id)].sort());
+  });
 });
