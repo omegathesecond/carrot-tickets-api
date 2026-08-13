@@ -3,10 +3,11 @@ import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
-import { StockService } from '@services/stock.service';
+import { StockService, StockDeclinedError } from '@services/stock.service';
+import { StockTransferService } from '@services/stockTransfer.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema } from '@validators/stock.validator';
+import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema, transferStockSchema } from '@validators/stock.validator';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -133,6 +134,31 @@ export class StockAdminController {
         { new: true, upsert: true },
       );
       ApiResponseUtil.success(res, { merchantId: value.merchantId, productId: value.productId, lowStockThreshold: row.lowStockThreshold });
+    } catch (err) { next(err); }
+  }
+
+  /** POST /api/tickets/events/:eventId/stock/transfer */
+  static async transferStock(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const event = await loadOwnedEvent(req, res, String(req.params['eventId'] || ''));
+      if (!event) return;
+      const { error, value } = transferStockSchema.validate(req.body || {});
+      if (error) { ApiResponseUtil.badRequest(res, error.message); return; }
+      if (value.fromMerchantId === value.toMerchantId) { ApiResponseUtil.badRequest(res, 'cannot transfer to the same bar'); return; }
+      for (const mid of [value.fromMerchantId, value.toMerchantId]) {
+        const m = await Merchant.findById(mid).lean();
+        if (!m || String(m.eventId) !== String(event._id)) { ApiResponseUtil.badRequest(res, 'a merchant does not belong to this event'); return; }
+      }
+      const product = await Product.findById(value.productId).lean();
+      if (!product || String(product.eventId) !== String(event._id)) { ApiResponseUtil.badRequest(res, 'product does not belong to this event'); return; }
+      const actor = actorOf(req);
+      try {
+        const result = await StockTransferService.transfer({ eventId: String(event._id), productId: value.productId, fromMerchantId: value.fromMerchantId, toMerchantId: value.toMerchantId, qty: value.qty, byType: 'Organizer', by: actor.vendorId ?? 'platform', note: value.note });
+        ApiResponseUtil.success(res, { transferId: String(result.transfer._id), fromOnHand: result.fromOnHand, toOnHand: result.toOnHand });
+      } catch (e: any) {
+        if (e instanceof StockDeclinedError) { ApiResponseUtil.error(res, 'Insufficient stock at source', 409, { reason: e.reason, productId: e.productId, available: e.available }); return; }
+        throw e;
+      }
     } catch (err) { next(err); }
   }
 }

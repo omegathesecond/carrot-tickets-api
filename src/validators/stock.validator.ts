@@ -41,3 +41,11 @@ export const thresholdSchema = Joi.object({
   productId: Joi.string().trim().required(),
   lowStockThreshold: Joi.number().integer().min(0).allow(null).required(),
 });
+
+export const transferStockSchema = Joi.object({
+  productId: Joi.string().trim().required(),
+  fromMerchantId: Joi.string().trim().required(),
+  toMerchantId: Joi.string().trim().required(),
+  qty: Joi.number().integer().min(1).max(MAX_QTY).required(),
+  note: Joi.string().trim().optional(),
+});
