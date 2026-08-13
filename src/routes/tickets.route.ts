@@ -14,6 +14,7 @@ import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.cont
 import { CashierAdminController } from '@controllers/cashierAdmin.controller';
 import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
+import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { AdminFeesController } from '@controllers/adminFees.controller';
@@ -513,5 +514,15 @@ router.post('/merchants/:id/reset-pin', requireTicketsPermission(TicketsPermissi
  */
 router.get('/events/:eventId/cashless/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.summary);
 router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.transactions);
+
+/**
+ * Cashless Stock/Inventory — organiser manages the product catalogue and
+ * loads per-bar stock (design 2026-08-12, Slice 1). MANAGE_STOCK gate +
+ * event-ownership enforced in the controller.
+ */
+router.post('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.createProduct);
+router.get('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listProducts);
+router.patch('/products/:id', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.updateProduct);
+router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.receiveStock);
 
 export default router;
