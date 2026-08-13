@@ -1,9 +1,11 @@
 import mongoose from 'mongoose';
 import { Event } from '@models/event.model';
+import type { EventCurrency } from '@utils/currency.util';
 
 export interface AllocationBlock {
   eventId: string;
   eventName: string;
+  currency: EventCurrency;
   tierName: string;
   price: number;
   quantity: number;
@@ -25,7 +27,7 @@ export class AllocationService {
   static async getForReseller(resellerId: string): Promise<{ blocks: AllocationBlock[] }> {
     const rid = new mongoose.Types.ObjectId(resellerId);
     const events = await Event.find({ 'ticketTypes.resellerId': rid })
-      .select('name ticketTypes')
+      .select('name currency ticketTypes')
       .lean();
 
     const blocks: AllocationBlock[] = [];
@@ -36,6 +38,7 @@ export class AllocationService {
           blocks.push({
             eventId: String(ev._id),
             eventName: ev.name,
+            currency: (ev.currency ?? 'SZL') as EventCurrency,
             tierName: tt.name,
             price: tt.price,
             quantity: tt.quantity,

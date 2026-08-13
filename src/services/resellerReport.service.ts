@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
 import { TicketSale } from '@models/ticketSale.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { ResellerHub } from '@models/resellerHub.model';
+import type { EventCurrency } from '@utils/currency.util';
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
@@ -17,6 +18,7 @@ export interface ManagerSaleRow {
   id: string;
   saleId: string;
   eventName: string;
+  currency: EventCurrency;
   operatorName: string;
   hubName: string;
   quantity: number;
@@ -93,6 +95,7 @@ export class ResellerReportService {
       id: String(s._id),
       saleId: s.saleId ?? '',
       eventName: s.eventId?.name ?? '',
+      currency: (s.currency ?? 'SZL') as EventCurrency,
       operatorName: s.soldBy?.fullName ?? '',
       hubName: s.hubId?.name ?? '',
       quantity: s.quantity ?? 0,
