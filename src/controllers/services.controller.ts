@@ -1,7 +1,15 @@
 import { Request, Response } from 'express';
+import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { ServicesService } from '@services/services.service';
-import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { ReviewService } from '@services/review.service';
+import { failWithHttpError, HEX24, parseMessageCursorParams } from '@utils/controllerHelpers.util';
+import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+
+const serviceReviewSchema = Joi.object({
+  rating: Joi.number().integer().min(1).max(5).required(),
+  text: Joi.string().trim().max(1000).allow('').optional(),
+});
 
 export class ServicesController {
   /** GET /api/public/services — services directory (verified vendors only). */
@@ -26,6 +34,42 @@ export class ServicesController {
       return ApiResponseUtil.success(res, data, 'Business profile');
     } catch (e: any) {
       return failWithHttpError(res, e, 'Not found');
+    }
+  }
+
+  /** GET /api/public/services/:businessId/reviews — PUBLIC. */
+  static async listReviews(req: Request, res: Response): Promise<any> {
+    try {
+      const businessId = String(req.params['businessId'] || '');
+      if (!HEX24.test(businessId)) return ApiResponseUtil.error(res, 'businessId must be a business id', 400);
+      const params = parseMessageCursorParams(req, res);
+      if (!params) return;
+      if (params.after) return ApiResponseUtil.error(res, 'after is not supported for reviews', 400);
+      const reviews = await ReviewService.listBusinessReviews(businessId, { before: params.before, limit: params.limit });
+      return ApiResponseUtil.success(res, { reviews }, 'Reviews');
+    } catch (e: any) {
+      return failWithHttpError(res, e, 'Failed to load reviews');
+    }
+  }
+
+  /** POST /api/public/services/:businessId/reviews — buyer-auth, enquiry-gated. */
+  static async submitReview(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+
+      const businessId = String(req.params['businessId'] || '');
+      if (!HEX24.test(businessId)) return ApiResponseUtil.error(res, 'businessId must be a business id', 400);
+
+      const { error, value } = serviceReviewSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const review = await ReviewService.submitServiceReview(businessId, buyer, value);
+      // By id — a "latest for business" read could echo a concurrent buyer's review.
+      const view = await ReviewService.getView(String(review._id));
+      return ApiResponseUtil.success(res, view, 'Review submitted', 201);
+    } catch (e: any) {
+      return failWithHttpError(res, e, 'Failed to submit review');
     }
   }
 }
