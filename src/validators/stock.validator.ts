@@ -49,3 +49,7 @@ export const transferStockSchema = Joi.object({
   qty: Joi.number().integer().min(1).max(MAX_QTY).required(),
   note: Joi.string().trim().optional(),
 });
+
+const phase = Joi.string().valid('opening', 'interim', 'closing');
+export const stockCountSchema = Joi.object({ merchantId: Joi.string().trim().required(), productId: Joi.string().trim().required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });
+export const posCountSchema = Joi.object({ productId: Joi.string().trim().required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });

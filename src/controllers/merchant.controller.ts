@@ -4,10 +4,14 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { Wallet } from '@models/wallet.model';
+import { Product } from '@models/product.model';
+import { ProductStock } from '@models/productStock.model';
 import { MerchantService, WalletDeclinedError } from '@services/merchant.service';
 import { StockDeclinedError } from '@services/stock.service';
+import { StockCountService } from '@services/stockCount.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
+import { posCountSchema } from '@validators/stock.validator';
 import { MerchantToken } from '@interfaces/merchant.interface';
 
 /** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
@@ -111,5 +115,33 @@ export class MerchantController {
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load transactions', 500);
     }
+  }
+
+  /** GET /api/merchant/stock — this bar's products + onHand for the stock-take screen. */
+  static async stock(req: Request, res: Response): Promise<any> {
+    try {
+      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const products = await Product.find({ eventId, active: true }).sort({ name: 1 }).lean();
+      const rows = await ProductStock.find({ merchantId }).lean();
+      const byProduct = new Map(rows.map((r) => [String(r.productId), r]));
+      const stock = products.map((p) => {
+        const r = byProduct.get(String(p._id));
+        return { productId: String(p._id), name: p.name, unitLabel: p.unitLabel, onHand: r?.onHand ?? 0, lowStockThreshold: r?.lowStockThreshold ?? null };
+      });
+      return ApiResponseUtil.success(res, { stock });
+    } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Failed to load stock', 500); }
+  }
+
+  /** POST /api/merchant/stock/count — a stock-take by this bar (merchantId from JWT). */
+  static async recordCount(req: Request, res: Response): Promise<any> {
+    try {
+      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const { error, value } = posCountSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+      const product = await Product.findById(value.productId).lean();
+      if (!product || String(product.eventId) !== String(eventId)) return ApiResponseUtil.badRequest(res, 'product does not belong to this event');
+      const { count, onHand } = await StockCountService.recordCount({ eventId, merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantId });
+      return ApiResponseUtil.success(res, { countId: String(count._id), expectedOnHand: count.expectedOnHand, countedOnHand: count.countedOnHand, variance: count.variance, onHand });
+    } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Count failed', 500); }
   }
 }

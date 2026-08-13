@@ -5,9 +5,10 @@ import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
 import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockTransferService } from '@services/stockTransfer.service';
+import { StockCountService } from '@services/stockCount.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema, transferStockSchema } from '@validators/stock.validator';
+import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema, transferStockSchema, stockCountSchema } from '@validators/stock.validator';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -159,6 +160,26 @@ export class StockAdminController {
         if (e instanceof StockDeclinedError) { ApiResponseUtil.error(res, 'Insufficient stock at source', 409, { reason: e.reason, productId: e.productId, available: e.available }); return; }
         throw e;
       }
+    } catch (err) { next(err); }
+  }
+
+  /** POST /api/tickets/events/:eventId/stock/count */
+  static async recordCount(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const event = await loadOwnedEvent(req, res, String(req.params['eventId'] || ''));
+      if (!event) return;
+      const { error, value } = stockCountSchema.validate(req.body || {});
+      if (error) { ApiResponseUtil.badRequest(res, error.message); return; }
+      const merchant = await Merchant.findById(value.merchantId).lean();
+      if (!merchant || String(merchant.eventId) !== String(event._id)) { ApiResponseUtil.badRequest(res, 'merchant does not belong to this event'); return; }
+      const product = await Product.findById(value.productId).lean();
+      if (!product || String(product.eventId) !== String(event._id)) { ApiResponseUtil.badRequest(res, 'product does not belong to this event'); return; }
+      const actor = actorOf(req);
+      const { count, onHand } = await StockCountService.recordCount({
+        eventId: String(event._id), merchantId: value.merchantId, productId: value.productId,
+        countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Organizer', by: actor.vendorId ?? 'platform',
+      });
+      ApiResponseUtil.success(res, { countId: String(count._id), expectedOnHand: count.expectedOnHand, countedOnHand: count.countedOnHand, variance: count.variance, onHand });
     } catch (err) { next(err); }
   }
 }

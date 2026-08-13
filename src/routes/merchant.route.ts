@@ -21,4 +21,16 @@ router.get(
   MerchantController.listTransactions,
 );
 
+router.get(
+  '/stock',
+  requireMerchantPermission(MerchantPermission.CHARGE),
+  MerchantController.stock,
+);
+
+router.post(
+  '/stock/count',
+  requireMerchantPermission(MerchantPermission.CHARGE),
+  MerchantController.recordCount,
+);
+
 export default router;
