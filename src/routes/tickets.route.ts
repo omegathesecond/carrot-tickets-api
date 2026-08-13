@@ -22,6 +22,7 @@ import { ChannelAdminController } from '@controllers/channelAdmin.controller';
 import { ModerationController } from '@controllers/moderation.controller';
 import { ReportController } from '@controllers/report.controller';
 import { UpdateController } from '@controllers/update.controller';
+import { EnquiryController } from '@controllers/enquiry.controller';
 
 const router = Router();
 
@@ -480,5 +481,12 @@ router.get('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_
 router.post('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
 router.patch('/gate-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
 router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
+
+/**
+ * Services business enquiry inbox — leads submitted via
+ * POST /api/public/services/:businessId/enquiries.
+ */
+router.get('/services/enquiries', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.list);
+router.patch('/services/enquiries/:id/status', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.setStatus);
 
 export default router;
