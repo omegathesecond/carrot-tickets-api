@@ -20,7 +20,7 @@ export interface IProductStock extends Document {
 
 const productStockSchema = new Schema<IProductStock>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
     productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
     onHand: {

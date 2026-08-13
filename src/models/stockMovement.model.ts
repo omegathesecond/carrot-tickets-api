@@ -12,7 +12,7 @@ export interface IStockMovement extends Document {
   eventId: mongoose.Types.ObjectId;
   merchantId: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId;
-  delta: number; // signed integer base units, non-zero
+  delta: number; // signed integer base units; non-zero enforced by StockService.applyMovement (sole writer), not this schema
   reason: StockMovementReason;
   balanceAfter: number;
   refType?: string;
@@ -25,7 +25,7 @@ export interface IStockMovement extends Document {
 
 const stockMovementSchema = new Schema<IStockMovement>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
     productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
     delta: {
@@ -42,7 +42,7 @@ const stockMovementSchema = new Schema<IStockMovement>(
     byType: { type: String, enum: ['Organizer', 'Merchant', 'Platform'], required: true },
     by: { type: String, required: true },
     note: { type: String, trim: true },
-    at: { type: Date, default: Date.now, index: true },
+    at: { type: Date, default: Date.now },
   },
   { timestamps: false },
 );

@@ -24,7 +24,7 @@ export interface IProduct extends Document {
 
 const productSchema = new Schema<IProduct>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     name: { type: String, required: true, trim: true },
     barcode: { type: String, trim: true },
     category: { type: String, enum: Object.values(ProductCategory), required: true },
