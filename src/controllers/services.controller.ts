@@ -1,15 +1,10 @@
 import { Request, Response } from 'express';
-import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { ServicesService } from '@services/services.service';
 import { ReviewService } from '@services/review.service';
 import { failWithHttpError, HEX24, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
-
-const serviceReviewSchema = Joi.object({
-  rating: Joi.number().integer().min(1).max(5).required(),
-  text: Joi.string().trim().max(1000).allow('').optional(),
-});
+import { reviewSchema } from '@validators/community.validator';
 
 export class ServicesController {
   /** GET /api/public/services — services directory (verified vendors only). */
@@ -61,7 +56,7 @@ export class ServicesController {
       const businessId = String(req.params['businessId'] || '');
       if (!HEX24.test(businessId)) return ApiResponseUtil.error(res, 'businessId must be a business id', 400);
 
-      const { error, value } = serviceReviewSchema.validate(req.body);
+      const { error, value } = reviewSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const review = await ReviewService.submitServiceReview(businessId, buyer, value);
