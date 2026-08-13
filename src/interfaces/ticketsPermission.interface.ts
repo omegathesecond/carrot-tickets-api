@@ -58,7 +58,11 @@ export enum TicketsPermission {
   // both groups is what makes scopePermissionsToType never strip it,
   // regardless of OperatorType. Granted only to brand-owner roles
   // (OWNER/MANAGER) — SALES/SCANNER must not overwrite brand identity.
-  EDIT_BRAND = 'tickets:edit_brand'
+  EDIT_BRAND = 'tickets:edit_brand',
+
+  // Service-business leads — a services vendor reads/updates its own enquiry
+  // inbox. Vertical (SERVICES) so scoping strips it from events/transport.
+  MANAGE_ENQUIRIES = 'tickets:manage_enquiries'
 }
 
 export enum TicketsRole {
@@ -125,6 +129,10 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
 export const TRANSPORT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.VIEW_TRANSPORT,
   TicketsPermission.MANAGE_TRANSPORT,
+];
+
+export const SERVICES_PERMISSIONS: TicketsPermission[] = [
+  TicketsPermission.MANAGE_ENQUIRIES,
 ];
 
 // Cross-cutting — granted to every type. Empty in v1 (no cross-vertical
