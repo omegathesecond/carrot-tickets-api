@@ -76,7 +76,10 @@ const vendorSchema = new Schema<IVendor>({
   },
   startingPrice: {
     type: new Schema(
-      { amountCents: { type: Number, min: 0, required: true },
+      { amountCents: {
+          type: Number, min: 0, required: true,
+          validate: { validator: Number.isInteger, message: 'amountCents must be a whole number of cents' },
+        },
         unit: { type: String, enum: STARTING_PRICE_UNITS, default: 'day' } },
       { _id: false },
     ),
