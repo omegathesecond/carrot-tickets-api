@@ -6,6 +6,7 @@ import { ProductStock } from '@models/productStock.model';
 import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockTransferService } from '@services/stockTransfer.service';
 import { StockCountService } from '@services/stockCount.service';
+import { StockAlertService } from '@services/stockAlert.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema, transferStockSchema, stockCountSchema } from '@validators/stock.validator';
@@ -113,6 +114,10 @@ export class StockAdminController {
         by: actor.vendorId ?? 'platform',
         note: value.note,
       });
+      // Fire-and-forget: a receive that pushes onHand back above threshold
+      // re-arms the alert so the next downward crossing fires again. Never
+      // await — a rearm failure must not turn a successful receive into a 500.
+      StockAlertService.rearm(String(value.merchantId), String(value.productId)).catch(() => {});
       ApiResponseUtil.success(res, { onHand, movementId: String(movement._id) });
     } catch (err) { next(err); }
   }

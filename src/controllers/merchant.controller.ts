@@ -9,6 +9,7 @@ import { ProductStock } from '@models/productStock.model';
 import { MerchantService, WalletDeclinedError } from '@services/merchant.service';
 import { StockDeclinedError } from '@services/stock.service';
 import { StockCountService } from '@services/stockCount.service';
+import { StockAlertService } from '@services/stockAlert.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
 import { posCountSchema } from '@validators/stock.validator';
@@ -58,6 +59,14 @@ export class MerchantController {
         ...(value.items ? { items: value.items } : {}),
         ...(value.staffName ? { staffName: value.staffName } : {}),
       });
+
+      if (result.charge.items?.length) {
+        // Best-effort, off the money path: a notification failure logs loudly but never affects the sale.
+        StockAlertService.evaluateAfterSale({
+          eventId, merchantId, vendorId: String(event.vendorId),
+          productIds: result.charge.items.map((i) => String(i.productId)),
+        }).catch((err) => console.error('[low-stock] evaluateAfterSale failed', err));
+      }
 
       return ApiResponseUtil.success(res, {
         newBalance: result.wallet.balance,
