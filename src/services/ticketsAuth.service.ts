@@ -6,7 +6,7 @@ import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
 import { RefreshToken } from '@models/refreshToken.model';
 import { HandoffToken } from '@models/handoffToken.model';
 import { TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
-import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { OperatorType, VerificationStatus, AccountKind } from '@interfaces/vendor.interface';
 import { scopePermissionsToType } from '@utils/permissions.util';
 import { phoneLoginCandidates } from '@utils/phone.util';
 import { JWT_SECRET } from '@config/jwt.config';
@@ -42,8 +42,14 @@ export class TicketsAuthService {
     password: string;
     businessType?: string;
     primaryContact?: string;
+    // BUSINESS accountKind (event-services suppliers, e.g. Catering, Sound
+    // Hire) is the self-service signup path from the public site's buyer
+    // screen — see @services/businessAuth.service. Defaults to ORGANIZER
+    // (the model default) so every other caller of register() is unaffected.
+    accountKind?: AccountKind;
+    serviceCategory?: string;
   }) {
-    const { businessName, email, phoneNumber, password, businessType, primaryContact } = params;
+    const { businessName, email, phoneNumber, password, businessType, primaryContact, accountKind, serviceCategory } = params;
 
     if (!email && !phoneNumber) {
       throw new Error('An email address or phone number is required');
@@ -65,6 +71,8 @@ export class TicketsAuthService {
       password,
       businessType,
       primaryContact,
+      ...(accountKind ? { accountKind } : {}),
+      ...(serviceCategory ? { serviceCategory } : {}),
       // verificationStatus, isActive, isVerified and apps.tickets.enabled all
       // fall back to the model defaults (PENDING / true / false / true).
     });
@@ -96,6 +104,8 @@ export class TicketsAuthService {
         role: TicketsRole.OWNER,
         permissions: ownerPerms,
         operatorType: vendor.operatorType,
+        accountKind: vendor.accountKind,
+        serviceCategory: vendor.serviceCategory ?? null,
         isSuperAdmin: false,
         verificationStatus: vendor.verificationStatus,
         isVerified: vendor.isVerified

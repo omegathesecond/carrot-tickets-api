@@ -4,6 +4,7 @@ import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
+import { BusinessController } from '@controllers/business.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
@@ -201,6 +202,54 @@ router.post('/events/:eventId/share', optionalTicketsAuth, EventReactionControll
  * @access  Public
  */
 router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
+
+/**
+ * @route   POST /api/public/businesses/register/request-otp
+ * @desc    Step 1 of business (event-services supplier) signup: send a code
+ *          to an identifier with no vendor account yet.
+ * @access  Public
+ * @body    identifier
+ */
+router.post('/businesses/register/request-otp', BusinessController.requestRegistrationOtp);
+
+/**
+ * @route   POST /api/public/businesses/register
+ * @desc    Step 2: verify the code and create the BUSINESS vendor account.
+ * @access  Public
+ * @body    identifier, code, password, businessName, serviceCategory
+ */
+router.post('/businesses/register', BusinessController.register);
+
+/**
+ * @route   GET /api/public/businesses
+ * @desc    Services directory — category filter + search + pagination.
+ * @access  Public
+ * @query   page, limit, search, category
+ */
+router.get('/businesses', BusinessController.list);
+
+/**
+ * @route   GET /api/public/businesses/:id
+ * @desc    Public business profile — bio, category, address, contact, rating.
+ * @access  Public
+ */
+router.get('/businesses/:id', BusinessController.publicProfile);
+
+/**
+ * @route   GET /api/public/businesses/:id/reviews
+ * @desc    Aggregate rating + paginated review list for a business profile.
+ * @access  Public
+ */
+router.get('/businesses/:id/reviews', BusinessController.listReviews);
+
+/**
+ * @route   POST /api/public/businesses/:id/reviews
+ * @desc    Submit a review of a business. Any signed-in buyer, one per
+ *          business — unlike event reviews this is NOT ticket-gated (a
+ *          business never sells tickets).
+ * @access  Buyer (Bearer buyer token)
+ */
+router.post('/businesses/:id/reviews', authenticateBuyer, BusinessController.submitReview);
 
 /**
  * @route   POST /api/public/purchase

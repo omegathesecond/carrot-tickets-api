@@ -42,7 +42,7 @@ export class VendorSocialController {
     try {
       const vendorId = VendorSocialController.vendorId(req);
       if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
-      const vendor = await Vendor.findById(vendorId).select('businessName slug logoUrl bio');
+      const vendor = await Vendor.findById(vendorId).select('businessName slug logoUrl bio accountKind serviceCategory');
       if (!vendor) return ApiResponseUtil.notFound(res, 'Organizer not found');
       const [followerCount, followingCount] = await Promise.all([
         FollowService.followerCount('organizer', vendorId),
@@ -54,6 +54,8 @@ export class VendorSocialController {
         slug: (vendor as any).slug ?? null,
         logoUrl: vendor.logoUrl ?? null,
         bio: vendor.bio ?? null,
+        accountKind: vendor.accountKind,
+        serviceCategory: vendor.serviceCategory ?? null,
         followerCount,
         followingCount,
         canEditBrand: VendorSocialController.canEditBrand(req),

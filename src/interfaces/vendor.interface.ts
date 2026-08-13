@@ -13,6 +13,20 @@ export enum OperatorType {
   BOTH = 'both',
 }
 
+/**
+ * What kind of brand this Vendor document represents. ORGANIZER is the
+ * original/default meaning (runs ticketed events, self-service signup lives
+ * in the dashboard app). BUSINESS is an event-services supplier (sound hire,
+ * catering, decor, ...) who never sells tickets — self-service signup lives
+ * on the public site's buyer-facing "Tickets" screen instead. The two share
+ * the Vendor account/auth/social plumbing; serviceCategory only applies to
+ * BUSINESS.
+ */
+export enum AccountKind {
+  ORGANIZER = 'organizer',
+  BUSINESS = 'business',
+}
+
 export interface IVendor extends Document {
   _id: Types.ObjectId;
 
@@ -26,6 +40,10 @@ export interface IVendor extends Document {
   slug: string;
   businessType?: string;
   operatorType: OperatorType;
+  accountKind: AccountKind;
+  // Event-services category (Sound Hire, Catering, ...) — set only when
+  // accountKind is BUSINESS. See @constants/businessCategories.
+  serviceCategory?: string;
   primaryContact?: string;
   logoUrl?: string;
   bio?: string;
