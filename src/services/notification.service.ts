@@ -45,6 +45,8 @@ function actorRef(type: NotificationType, data: Record<string, unknown>): ActorR
   // requester on meetup_request, the accepter on meetup_accepted).
   if ((type === 'friend' || type === 'meetup_request' || type === 'meetup_accepted') && isObjectId(data.buyerId))
     return { kind: 'buyer', id: data.buyerId };
+  // enquiry_received carries the enquiring buyer the same way.
+  if (type === 'enquiry_received' && isObjectId(data.buyerId)) return { kind: 'buyer', id: data.buyerId };
   return null;
 }
 
