@@ -17,8 +17,18 @@ import { Cashier } from '../models/cashier.model';
 import { ResellerOperator } from '../models/resellerOperator.model';
 import { GateOperator } from '../models/gateOperator.model';
 import { Merchant } from '../models/merchant.model';
+import { Product } from '../models/product.model';
+import { ProductStock } from '../models/productStock.model';
+import { StockMovement } from '../models/stockMovement.model';
+import { StockTransfer } from '../models/stockTransfer.model';
+import { StockCount } from '../models/stockCount.model';
 import { WalletService } from '../services/wallet.service';
+import { MerchantService } from '../services/merchant.service';
+import { StockService } from '../services/stock.service';
+import { StockTransferService } from '../services/stockTransfer.service';
+import { StockCountService } from '../services/stockCount.service';
 import { EventStatus } from '../interfaces/event.interface';
+import { ProductCategory, StockMovementReason } from '../interfaces/stock.interface';
 
 const DEMO_EVENT_NAME = /Cashless NFC Tap Test Fest/i;
 const DEMO_CASHIER_NAME = 'Demo Cashier';
@@ -33,6 +43,140 @@ async function codeTakenElsewhere(code: string): Promise<boolean> {
     Merchant.exists({ loginCode: code }),
   ]);
   return !!(r || g || m);
+}
+
+/**
+ * Enrich the demo event with a realistic STOCK story (Slice 7): a product
+ * catalogue, per-bar opening stock, a transfer, a few itemised + one amount-only
+ * sale (with staffName), and opening/closing counts (one short → visible
+ * shrinkage). Everything goes through the real services so every invariant holds
+ * (onHand == Σ deltas, money ledger, itemised charges deduct stock). Idempotent:
+ * find-or-create products; existence-guarded receive/transfer/count; charges +
+ * top-ups keyed by fixed clientTxnIds. Sales are best-effort — with no funded
+ * band it warns and skips them rather than fabricating a wallet balance.
+ */
+export async function seedStock(event: any, opts: { vendorId: string | null; cashierId: string }) {
+  const eventId = String(event._id);
+  const by = opts.vendorId ?? 'platform';
+  const doorsOpen = event.startTime ? new Date(event.startTime) : new Date();
+  const preDoors = new Date(doorsOpen.getTime() - 60 * 60 * 1000); // 1h before doors → reads as Opening
+
+  // ── bars (≥2) ──────────────────────────────────────────────────────────────
+  const wantBars = [
+    { name: 'Main Bar', loginCode: '701001' },
+    { name: 'VIP Bar', loginCode: '701002' },
+  ];
+  for (const b of wantBars) {
+    const exists = await Merchant.exists({ eventId: event._id, name: b.name });
+    if (!exists) {
+      const code = (await codeTakenElsewhere(b.loginCode))
+        ? String(700000 + Math.floor(Math.random() * 9000))
+        : b.loginCode;
+      await Merchant.create({ name: b.name, eventId: event._id, loginCode: code, pin: '000000' });
+      console.log(`🏪 Created bar "${b.name}" (login ${code})`);
+    }
+  }
+  const bars = await Merchant.find({ eventId: event._id }).lean();
+  if (bars.length < 2) { console.warn('⚠️  need ≥2 bars for the stock demo; skipping stock seed'); return; }
+  const mainBar = bars.find((b) => b.name === 'Main Bar') ?? bars[0]!;
+  const vipBar = bars.find((b) => b.name === 'VIP Bar') ?? bars[1]!;
+
+  // ── catalogue (find-or-create) ─────────────────────────────────────────────
+  const CATALOGUE: Array<{ name: string; category: ProductCategory; price: number; barcode?: string; unitsPerPack?: number; packLabel?: string }> = [
+    { name: 'Castle Lite 330ml', category: ProductCategory.BEER, price: 2500, barcode: '6001240100015', unitsPerPack: 24, packLabel: 'case' },
+    { name: 'Heineken 330ml', category: ProductCategory.BEER, price: 3000, barcode: '8712000023005', unitsPerPack: 24, packLabel: 'case' },
+    { name: 'Savanna Dry 330ml', category: ProductCategory.WINE, price: 3500, barcode: '6001495000018', unitsPerPack: 24, packLabel: 'case' },
+    { name: 'Coca-Cola 300ml', category: ProductCategory.SOFT_DRINK, price: 1800, barcode: '5449000000996', unitsPerPack: 24, packLabel: 'case' },
+    { name: 'Still Water 500ml', category: ProductCategory.WATER, price: 1500, unitsPerPack: 24, packLabel: 'case' },
+    { name: 'Red Bull 250ml', category: ProductCategory.SOFT_DRINK, price: 2800, barcode: '9002490100084', unitsPerPack: 24, packLabel: 'case' },
+    { name: 'Ice 2kg', category: ProductCategory.OTHER, price: 2000 },
+  ];
+  const products: Record<string, any> = {};
+  for (const p of CATALOGUE) {
+    products[p.name] = (await Product.findOne({ eventId: event._id, name: p.name }))
+      ?? (await Product.create({ eventId: event._id, ...p }));
+  }
+  console.log(`📦 catalogue: ${CATALOGUE.length} products`);
+
+  // ── opening stock per bar (guarded; backdated so it reads as Opening) ──────
+  const OPENING: Array<{ bar: any; loads: Array<[string, number]> }> = [
+    { bar: mainBar, loads: [['Castle Lite 330ml', 120], ['Heineken 330ml', 96], ['Savanna Dry 330ml', 72], ['Coca-Cola 300ml', 48], ['Still Water 500ml', 60], ['Red Bull 250ml', 36], ['Ice 2kg', 40]] },
+    { bar: vipBar, loads: [['Castle Lite 330ml', 60], ['Heineken 330ml', 48], ['Savanna Dry 330ml', 48], ['Red Bull 250ml', 24]] },
+  ];
+  for (const { bar, loads } of OPENING) {
+    for (const [name, qty] of loads) {
+      const prod = products[name];
+      if (await ProductStock.exists({ merchantId: bar._id, productId: prod._id })) continue; // already loaded
+      const { movement } = await StockService.applyMovement({
+        eventId, merchantId: String(bar._id), productId: String(prod._id),
+        delta: qty, reason: StockMovementReason.RECEIVE,
+        refType: 'seed', refId: `seed-open-${bar._id}-${prod._id}`, byType: 'Organizer', by,
+      });
+      await StockMovement.updateOne({ _id: movement._id }, { $set: { at: preDoors } });
+    }
+  }
+  console.log('📥 opening stock received');
+
+  // ── low-stock thresholds ───────────────────────────────────────────────────
+  await ProductStock.updateOne({ merchantId: mainBar._id, productId: products['Red Bull 250ml']._id }, { $set: { lowStockThreshold: 40 } });
+  await ProductStock.updateOne({ merchantId: vipBar._id, productId: products['Savanna Dry 330ml']._id }, { $set: { lowStockThreshold: 50 } });
+
+  // ── one bar→bar transfer (guarded) ─────────────────────────────────────────
+  const castle = products['Castle Lite 330ml'];
+  if (!(await StockTransfer.exists({ eventId: event._id, productId: castle._id, fromMerchantId: mainBar._id, toMerchantId: vipBar._id }))) {
+    await StockTransferService.transfer({
+      eventId, productId: String(castle._id), fromMerchantId: String(mainBar._id), toMerchantId: String(vipBar._id),
+      qty: 24, byType: 'Organizer', by, note: 'seed demo transfer',
+    });
+    console.log('🔁 transferred 24 Castle Lite: Main Bar → VIP Bar');
+  }
+
+  // ── sales (best-effort — needs a funded band) ──────────────────────────────
+  const wallets = await Wallet.find({ eventId: event._id, bandUid: { $ne: null } }).limit(2).lean();
+  if (wallets.length === 0) {
+    console.warn('⚠️  no band-wallet on the demo event — skipping demo sales. Top up a band for the revenue/best-sellers/peak-time demo.');
+  } else {
+    for (const w of wallets) {
+      try {
+        await WalletService.topUpCash({ walletId: String(w._id), eventId, amount: 50000, recordedBy: opts.cashierId, recordedByType: 'Cashier', clientTxnId: `seed-topup-${w._id}` });
+      } catch (e: any) { console.warn(`   top-up skipped for band ${w.bandUid}: ${e.message}`); }
+    }
+    const w0 = wallets[0]!;
+    const SALES: Array<{ items?: Array<{ productId: string; qty: number }>; amount?: number; staffName: string; txn: string }> = [
+      { items: [{ productId: String(castle._id), qty: 2 }], staffName: 'Thandi', txn: 'seed-sale-1' },
+      { items: [{ productId: String(products['Heineken 330ml']._id), qty: 1 }, { productId: String(products['Coca-Cola 300ml']._id), qty: 1 }], staffName: 'Thandi', txn: 'seed-sale-2' },
+      { items: [{ productId: String(products['Red Bull 250ml']._id), qty: 3 }], staffName: 'Sipho', txn: 'seed-sale-3' },
+      { amount: 1500, staffName: 'Sipho', txn: 'seed-sale-amt' }, // un-itemised
+    ];
+    let sold = 0;
+    for (const s of SALES) {
+      try {
+        await MerchantService.charge({
+          merchantId: String(mainBar._id), eventId, walletId: String(w0._id), bandUid: w0.bandUid!,
+          clientTxnId: s.txn, staffName: s.staffName,
+          ...(s.items ? { items: s.items } : { amount: s.amount }),
+        });
+        sold++;
+      } catch (e: any) { console.warn(`   sale ${s.txn} skipped: ${e.message}`); }
+    }
+    console.log(`🛒 ${sold} demo sale(s) rung up on Main Bar`);
+  }
+
+  // ── closing count a few units short → visible shrinkage in reconciliation ──
+  // (Opening is derived from the backdated opening receives, so we deliberately
+  // do NOT record an `opening` count — that would OVERRIDE Opening with a
+  // post-sales on-hand and misreport the reconciliation baseline.)
+  const shrinkProd = products['Savanna Dry 330ml'];
+  if (!(await StockCount.exists({ eventId: event._id, merchantId: vipBar._id, productId: shrinkProd._id, phase: 'closing' }))) {
+    const ps = await ProductStock.findOne({ merchantId: vipBar._id, productId: shrinkProd._id }).lean();
+    if (ps) {
+      const counted = Math.max(0, ps.onHand - 5);
+      await StockCountService.recordCount({ eventId, merchantId: String(vipBar._id), productId: String(shrinkProd._id), countedOnHand: counted, phase: 'closing', byType: 'Organizer', by });
+      console.log(`🔢 closing count VIP Bar Savanna: counted ${counted} (−5 shrinkage)`);
+    }
+  }
+
+  console.log('✅ Stock demo seeded (catalogue · stock · transfer · sales · counts).');
 }
 
 async function main() {
@@ -95,12 +239,19 @@ async function main() {
   }
   if (samples.length === 0) console.warn('⚠️  No funded band found to cash out — top up a band first for a richer demo.');
 
+  // ── Stock story (Slice 7): catalogue, per-bar stock, transfer, sales, counts ──
+  await seedStock(event, { vendorId, cashierId });
+
   console.log('\n✅ Cashless demo enriched.');
   console.log('   Cashier login (POS): code %s · PIN %s', cashier.loginCode, DEMO_PIN);
   process.exit(0);
 }
 
-main().catch((e) => {
-  console.error('❌ seedCashlessDemo failed:', e);
-  process.exit(1);
-});
+// Only auto-run when invoked as a script (`npm run seed:cashless`), so the
+// module can be imported (e.g. by a smoke test) without running main().
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('❌ seedCashlessDemo failed:', e);
+    process.exit(1);
+  });
+}
