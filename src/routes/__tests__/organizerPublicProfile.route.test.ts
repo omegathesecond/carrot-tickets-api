@@ -27,11 +27,20 @@ describe('organizer public profile', () => {
     const follower = await Buyer.create({ phone: '+26878422613', password: 'secret1' });
     await FollowService.follow(follower, 'organizer', String(vendor._id));
 
+    // This brand also FOLLOWS one other brand (actor = vendor), so
+    // followingCount is a distinct axis from followerCount above.
+    const otherBrand = await Vendor.create({
+      businessName: 'Another Org', email: 'other@example.com', password: 'secret123',
+      phoneNumber: '+26878000097',
+    });
+    await FollowService.followAsVendor(String(vendor._id), 'organizer', String(otherBrand._id));
+
     const res = await request(app).get(`/api/public/organizers/${String(vendor._id)}`).expect(200);
     const p = res.body.data;
     expect(p.businessName).toBe('Piano Republic Events');
     expect(p.logoUrl).toBe('https://cdn.example.com/logo.png');
     expect(p.followerCount).toBe(1);
+    expect(p.followingCount).toBe(1);
     expect(p.rating).toEqual({ average: null, count: 0 });
     expect(p.upcomingEvents.map((e: any) => e.id)).toEqual([upcoming.eventId]);
     expect(p.pastEvents.map((e: any) => e.id)).toEqual([past.eventId]);

@@ -82,8 +82,13 @@ export class OrganizerProfileController {
 
       const now = new Date();
       const eventFields = '_id name eventDate venue';
-      const [followerCount, rating, upcoming, past] = await Promise.all([
+      // Two axes on the follow graph: this brand's FOLLOWERS are counted by
+      // targetType 'organizer' (it's a follow target), while the brands/people
+      // this brand FOLLOWS are counted by followerType 'vendor' (it's the
+      // actor) — same split /brand/me uses (vendorSocial.controller.ts).
+      const [followerCount, followingCount, rating, upcoming, past] = await Promise.all([
         FollowService.followerCount('organizer', vendorId),
+        FollowService.followingCount(vendorId, 'vendor'),
         ReviewService.vendorAggregate(vendorId),
         Event.find({ vendorId, status: EventStatus.PUBLISHED, ...notEndedFilter(now) })
           .select(eventFields).sort({ eventDate: 1 }).limit(20),
@@ -108,6 +113,7 @@ export class OrganizerProfileController {
         logoUrl: vendor.logoUrl ?? null,
         bio: vendor.bio ?? null,
         followerCount,
+        followingCount,
         rating,
         upcomingEvents: upcoming.map(toSummary),
         pastEvents: past.map(toSummary),
