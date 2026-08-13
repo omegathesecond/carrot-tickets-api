@@ -9,7 +9,7 @@ import { OrganizerCashlessService } from '@services/organizerCashless.service';
  * the vendor-ownership guard in TicketsController.checkInTicket — an organizer
  * may only see their OWN event's cashless activity, never another vendor's.
  */
-async function loadOwnedCashlessEvent(req: Request, res: Response, eventId: string): Promise<any | null> {
+export async function loadOwnedCashlessEvent(req: Request, res: Response, eventId: string): Promise<any | null> {
   const ticketsUser = (req as any).ticketsUser;
   const event = await Event.findById(eventId).lean();
   if (!event) { ApiResponseUtil.error(res, 'Event not found', 404); return null; }
