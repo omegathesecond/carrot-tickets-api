@@ -10,6 +10,9 @@ export interface MeetupRow {
   id: string;
   status: MeetupStatus;
   createdAt: Date;
+  // Relative to the viewer: 'incoming' = they requested you (you can accept/deny),
+  // 'outgoing' = you requested them (you can cancel while pending).
+  direction: 'incoming' | 'outgoing';
   user: { id: string; name: string | null; username: string | null; avatarUrl: string | null };
 }
 
@@ -115,20 +118,32 @@ export class MeetupService {
     await MeetupRequest.deleteOne({ _id: row._id });
   }
 
-  static async listIncoming(target: IBuyer, status: MeetupStatus): Promise<MeetupRow[]> {
-    const rows = await MeetupRequest.find({ targetId: target._id, status }).sort({ _id: -1 }).limit(50);
+  /** All meetups the viewer is part of at `status`, in BOTH directions (sent OR
+   *  received), newest first, each mapped to the OTHER party and tagged with the
+   *  viewer-relative `direction`. Powers every Meetups sub-tab. */
+  static async listByStatus(buyer: IBuyer, status: MeetupStatus): Promise<MeetupRow[]> {
+    const me = String(buyer._id);
+    const rows = await MeetupRequest.find({
+      status,
+      $or: [{ requesterId: me }, { targetId: me }],
+    })
+      .sort({ _id: -1 })
+      .limit(50);
     if (rows.length === 0) return [];
-    const requesterIds = rows.map((r) => String(r.requesterId));
-    const buyers = await Buyer.find({ _id: { $in: requesterIds } }).select('name username avatarUrl');
+    const otherIds = rows.map((r) => (String(r.targetId) === me ? String(r.requesterId) : String(r.targetId)));
+    const buyers = await Buyer.find({ _id: { $in: otherIds } }).select('name username avatarUrl');
     const byId = new Map(buyers.map((b: any) => [String(b._id), b]));
     const out: MeetupRow[] = [];
     for (const r of rows) {
-      const b: any = byId.get(String(r.requesterId));
-      if (!b) continue; // requester account gone — drop silently, same as follow lists
+      const incoming = String(r.targetId) === me;
+      const otherId = incoming ? String(r.requesterId) : String(r.targetId);
+      const b: any = byId.get(otherId);
+      if (!b) continue; // other account gone — drop silently, same as follow lists
       out.push({
         id: String(r._id),
         status: r.status,
         createdAt: r.createdAt,
+        direction: incoming ? 'incoming' : 'outgoing',
         user: { id: String(b._id), name: b.name ?? null, username: b.username ?? null, avatarUrl: b.avatarUrl ?? null },
       });
     }
@@ -175,34 +190,5 @@ export class MeetupService {
       partners.add(other);
     }
     return partners;
-  }
-
-  /** All accepted meetups the buyer is part of (sent OR received), newest first,
-   *  each mapped to the OTHER party. Powers the Accepted sub-tab (both directions). */
-  static async listAccepted(buyer: IBuyer): Promise<MeetupRow[]> {
-    const me = String(buyer._id);
-    const rows = await MeetupRequest.find({
-      status: 'accepted',
-      $or: [{ requesterId: me }, { targetId: me }],
-    })
-      .sort({ _id: -1 })
-      .limit(50);
-    if (rows.length === 0) return [];
-    const otherIds = rows.map((r) => (String(r.requesterId) === me ? String(r.targetId) : String(r.requesterId)));
-    const buyers = await Buyer.find({ _id: { $in: otherIds } }).select('name username avatarUrl');
-    const byId = new Map(buyers.map((b: any) => [String(b._id), b]));
-    const out: MeetupRow[] = [];
-    for (const r of rows) {
-      const otherId = String(r.requesterId) === me ? String(r.targetId) : String(r.requesterId);
-      const b: any = byId.get(otherId);
-      if (!b) continue; // account gone — drop silently, same as listIncoming
-      out.push({
-        id: String(r._id),
-        status: r.status,
-        createdAt: r.createdAt,
-        user: { id: String(b._id), name: b.name ?? null, username: b.username ?? null, avatarUrl: b.avatarUrl ?? null },
-      });
-    }
-    return out;
   }
 }
