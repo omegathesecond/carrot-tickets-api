@@ -270,10 +270,13 @@ Reuse the shared `OtpService` audience `'vendor'`.
 
 ### 6.5 Session + routing
 - `SessionContext`: the vendor bootstrap (`getBrandProfile`) exposes
-  `operatorType`. `HomeRoute` routes a **services** vendor to its **Enquiries
-  inbox** (`EnquiriesPage`, its primary job) rather than `/events`, with a link
-  to view/edit its public profile. Event organizers are unchanged.
-- New `EnquiriesPage` for the business owner (inbox list + status controls).
+  `operatorType`. `HomeRoute` routes a **services** vendor to its **own public
+  business profile** (`BusinessProfilePage` for its own id) rather than
+  `/events`, so the first thing it sees is what customers see, with an owner-only
+  affordance to edit the profile and a prominent link to the **Enquiries inbox**.
+  Event organizers are unchanged.
+- New `EnquiriesPage` for the business owner (inbox list + status controls),
+  reached from the profile and the nav.
 
 ## 7. Migration & ops
 
@@ -296,7 +299,7 @@ Each slice is independently shippable and TDD'd.
    `startingPrice` on Vendor, `serviceCategories` constant, permission partition
    (`SERVICES_PERMISSIONS` + `MANAGE_ENQUIRIES`), `POST /auth/business/register`,
    and the `BuyerAuthPanel` User|Business toggle + `signInVendor`. **End-to-end:
-   create a business, land on its area.**
+   create a business, land on its own public profile.**
 2. **Services directory** — `GET /api/public/services`, `ServicesPage`, sidebar +
    bottom-nav item.
 3. **Business profile** — `GET /api/public/services/:id`, `BusinessProfilePage`
