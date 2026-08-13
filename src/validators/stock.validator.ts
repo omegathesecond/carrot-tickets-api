@@ -3,6 +3,7 @@ import { ProductCategory } from '@interfaces/stock.interface';
 
 const MAX_PRICE_CENTS = 100_000_00; // R100,000/unit ceiling, defense-in-depth
 const MAX_QTY = 1_000_000;
+const MAX_UNITS_PER_PACK = 100_000; // defense-in-depth: quantity * unitsPerPack must stay well under MAX_SAFE_INTEGER
 
 export const createProductSchema = Joi.object({
   name: Joi.string().trim().min(1).required(),
@@ -10,7 +11,7 @@ export const createProductSchema = Joi.object({
   price: Joi.number().integer().min(0).max(MAX_PRICE_CENTS).required(),
   barcode: Joi.string().trim().min(3).optional(),
   unitLabel: Joi.string().trim().optional(),
-  unitsPerPack: Joi.number().integer().min(1).optional(),
+  unitsPerPack: Joi.number().integer().min(1).max(MAX_UNITS_PER_PACK).optional(),
   packLabel: Joi.string().trim().optional(),
   imageUrl: Joi.string().trim().uri().optional(),
 });
@@ -21,7 +22,7 @@ export const updateProductSchema = Joi.object({
   price: Joi.number().integer().min(0).max(MAX_PRICE_CENTS),
   barcode: Joi.string().trim().min(3).allow(null),
   unitLabel: Joi.string().trim(),
-  unitsPerPack: Joi.number().integer().min(1).allow(null),
+  unitsPerPack: Joi.number().integer().min(1).max(MAX_UNITS_PER_PACK).allow(null),
   packLabel: Joi.string().trim().allow(null),
   imageUrl: Joi.string().trim().uri().allow(null),
   active: Joi.boolean(),

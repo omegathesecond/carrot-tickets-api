@@ -56,7 +56,7 @@ export class StockService {
       const stock = (await ProductStock.findOneAndUpdate(
         filter,
         // $ifNull covers the upsert-insert case where onHand doesn't exist yet.
-        [{ $set: { onHand: { $add: [{ $ifNull: ['$onHand', 0] }, delta] }, eventId } }],
+        [{ $set: { onHand: { $add: [{ $ifNull: ['$onHand', 0] }, delta] }, eventId: { $ifNull: ['$eventId', eventId] } } }],
         { new: true, upsert: !decrement, setDefaultsOnInsert: true, session },
       )) as IProductStock | null;
 

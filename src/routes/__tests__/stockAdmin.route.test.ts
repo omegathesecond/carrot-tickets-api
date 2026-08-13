@@ -142,6 +142,15 @@ describe('stock admin routes', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects creating a product with an absurd unitsPerPack (400, not 500)', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const res = await request(app)
+      .post(`/api/tickets/events/${eventId}/products`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Bulk Item', category: 'other', price: 100, unitsPerPack: 200000 });
+    expect(res.status).toBe(400);
+  });
+
   it('rejects creating a product with a duplicate barcode in the same event (400, not 500)', async () => {
     const { eventId, token } = await ownedCashlessEvent();
     const first = await request(app)

@@ -100,6 +100,16 @@ describe('StockService.applyMovement', () => {
     expect(movements).toHaveLength(1);
   });
 
+  it('preserves the row eventId set on insert; a later movement with a different eventId never relabels it', async () => {
+    const eventA = new mongoose.Types.ObjectId();
+    const eventB = new mongoose.Types.ObjectId();
+    await StockService.applyMovement({ ...base, eventId: eventA, delta: 10, reason: StockMovementReason.RECEIVE });
+    await StockService.applyMovement({ ...base, eventId: eventB, delta: 5, reason: StockMovementReason.RECEIVE });
+    const stock = await ProductStock.findOne({ merchantId, productId });
+    expect(stock!.onHand).toBe(15);
+    expect(String(stock!.eventId)).toBe(String(eventA));
+  });
+
   it('getOnHand returns 0 when no row exists, then the current balance after a receive', async () => {
     expect(await StockService.getOnHand(merchantId, productId)).toBe(0);
     await StockService.applyMovement({ ...base, delta: 12, reason: StockMovementReason.RECEIVE });
