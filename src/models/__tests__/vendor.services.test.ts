@@ -32,4 +32,12 @@ describe('Vendor — services fields', () => {
       operatorType: OperatorType.SERVICES,
     })).rejects.toThrow();
   });
+
+  it('rejects a non-integer amountCents', async () => {
+    await expect(Vendor.create({
+      businessName: 'FloatyCents', phoneNumber: '+26876000004', password: 'secret1',
+      operatorType: OperatorType.SERVICES, serviceCategory: 'catering',
+      startingPrice: { amountCents: 180.5, unit: 'day' },
+    })).rejects.toThrow();
+  });
 });
