@@ -56,13 +56,23 @@ export class StockReportController {
       const eventId = String(req.params['eventId']);
       const event = await loadOwnedCashlessEvent(req, res, eventId);
       if (!event) return;
-      const data = await StockReportService.movements({
-        eventId,
-        productId: req.query.productId ? String(req.query.productId) : undefined,
-        merchantId: req.query.merchantId ? String(req.query.merchantId) : undefined,
-        cursor: req.query.cursor ? String(req.query.cursor) : undefined,
-        limit: req.query.limit ? Number(req.query.limit) : undefined,
-      });
+
+      // Reject malformed query params with a clean 400 rather than letting them
+      // reach the aggregation as NaN / an invalid ObjectId and surface as a 500.
+      const hex24 = /^[0-9a-fA-F]{24}$/;
+      const productId = req.query.productId ? String(req.query.productId) : undefined;
+      const merchantId = req.query.merchantId ? String(req.query.merchantId) : undefined;
+      const cursor = req.query.cursor ? String(req.query.cursor) : undefined;
+      if (productId && !hex24.test(productId)) { ApiResponseUtil.badRequest(res, 'invalid productId'); return; }
+      if (merchantId && !hex24.test(merchantId)) { ApiResponseUtil.badRequest(res, 'invalid merchantId'); return; }
+      if (cursor && !hex24.test(cursor)) { ApiResponseUtil.badRequest(res, 'invalid cursor'); return; }
+      let limit: number | undefined;
+      if (req.query.limit !== undefined) {
+        limit = Number(req.query.limit);
+        if (!Number.isFinite(limit) || limit < 1) { ApiResponseUtil.badRequest(res, 'invalid limit'); return; }
+      }
+
+      const data = await StockReportService.movements({ eventId, productId, merchantId, cursor, limit });
       return ApiResponseUtil.success(res, data);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load stock movements', 500);

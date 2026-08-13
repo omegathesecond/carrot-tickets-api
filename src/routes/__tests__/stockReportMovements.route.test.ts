@@ -29,3 +29,14 @@ it('lists the journal newest-first for the owner', async () => {
   expect(res.status).toBe(200);
   expect(res.body.data.movements[0]).toMatchObject({ reason: 'receive', delta: 20, productName: 'Castle Lite' });
 });
+
+it('400s malformed query params instead of 500ing', async () => {
+  const { eventId, vendorId } = await seedPublishedEvent({});
+  await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
+  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+
+  const badLimit = await request(app).get(`/api/tickets/events/${eventId}/stock/movements?limit=abc`).set('Authorization', `Bearer ${token}`);
+  expect(badLimit.status).toBe(400);
+  const badProduct = await request(app).get(`/api/tickets/events/${eventId}/stock/movements?productId=not-an-id`).set('Authorization', `Bearer ${token}`);
+  expect(badProduct.status).toBe(400);
+});

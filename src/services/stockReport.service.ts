@@ -153,13 +153,16 @@ export class StockReportService {
 
     const NUM = ['opening', 'added', 'transferIn', 'transferOut', 'sold', 'countAdjust', 'spoilage', 'manual', 'expectedClosing'] as const;
     const blank = () => Object.fromEntries(NUM.map((k) => [k, 0])) as Record<typeof NUM[number], number>;
+    // physicalCount/variance stay null in a rollup until at least one contributing
+    // bar has a CLOSING count — a rollup of "0" would read as "counted zero units"
+    // rather than "not yet counted", which is a materially different signal.
     const byProdMap = new Map<string, any>();
-    const total: any = { ...blank(), physicalCount: 0, variance: 0 };
+    const total: any = { ...blank(), physicalCount: null, variance: null };
     for (const r of perBar) {
-      const agg = byProdMap.get(r.productId) || { productId: r.productId, productName: r.productName, ...blank(), physicalCount: 0, variance: 0 };
+      const agg = byProdMap.get(r.productId) || { productId: r.productId, productName: r.productName, ...blank(), physicalCount: null, variance: null };
       for (const k of NUM) { agg[k] += r[k]; total[k] += r[k]; }
-      if (r.physicalCount != null) { agg.physicalCount += r.physicalCount; total.physicalCount += r.physicalCount; }
-      if (r.variance != null) { agg.variance += r.variance; total.variance += r.variance; }
+      if (r.physicalCount != null) { agg.physicalCount = (agg.physicalCount ?? 0) + r.physicalCount; total.physicalCount = (total.physicalCount ?? 0) + r.physicalCount; }
+      if (r.variance != null) { agg.variance = (agg.variance ?? 0) + r.variance; total.variance = (total.variance ?? 0) + r.variance; }
       byProdMap.set(r.productId, agg);
     }
     const byProduct = [...byProdMap.values()].sort((a, b) => a.productName.localeCompare(b.productName));
@@ -192,7 +195,7 @@ export class StockReportService {
         { $group: { _id: { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] }, gross: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
       StockMovement.aggregate([
-        { $match: { eventId: eid, reason: 'sale' } },
+        { $match: { eventId: eid, reason: StockMovementReason.SALE } },
         { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: { $abs: '$delta' } } } },
       ]),
       StockCount.aggregate([
@@ -201,7 +204,7 @@ export class StockReportService {
       ]),
       ProductStock.find({ eventId: eid }).lean(),
       StockMovement.aggregate([
-        { $match: { eventId: eid, reason: 'sale', at: { $gte: windowStart } } },
+        { $match: { eventId: eid, reason: StockMovementReason.SALE, at: { $gte: windowStart } } },
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, units: { $sum: { $abs: '$delta' } } } },
       ]),
       Product.find({ eventId: eid }).select('name').lean(),
@@ -269,11 +272,16 @@ export class StockReportService {
    *  filters. Product + bar names joined per page. */
   static async movements(params: { eventId: string; productId?: string; merchantId?: string; cursor?: string; limit?: number }) {
     const { eventId, productId, merchantId, cursor } = params;
-    const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
+    const hex24 = /^[0-9a-fA-F]{24}$/;
+    // NaN (from a non-numeric ?limit) is not caught by ?? — guard it explicitly so
+    // a malformed param defaults cleanly instead of reaching .limit(NaN).
+    const limit = Math.min(Math.max(Number.isFinite(params.limit as number) ? (params.limit as number) : 50, 1), 200);
     const q: any = { eventId: oid(eventId) };
-    if (productId) q.productId = oid(productId);
-    if (merchantId) q.merchantId = oid(merchantId);
-    if (cursor && /^[0-9a-fA-F]{24}$/.test(cursor)) q._id = { $lt: oid(cursor) };
+    // Ignore malformed id filters rather than letting oid() throw a 500 (defensive;
+    // the controller also rejects them with a 400).
+    if (productId && hex24.test(productId)) q.productId = oid(productId);
+    if (merchantId && hex24.test(merchantId)) q.merchantId = oid(merchantId);
+    if (cursor && hex24.test(cursor)) q._id = { $lt: oid(cursor) };
 
     const docs = await StockMovement.find(q).sort({ _id: -1 }).limit(limit + 1).lean();
     const hasMore = docs.length > limit;

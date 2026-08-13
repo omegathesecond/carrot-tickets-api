@@ -62,4 +62,33 @@ describe('StockReportService.reconciliation', () => {
     expect(row.countAdjust).toBe(-5);
     expect(row.expectedClosing).toBe(45);             // book reconciled to reality
   });
+
+  it('keeps rollup physical/variance null when NO bar has a closing count', async () => {
+    const b1 = await bar('Bar 1'); const b2 = await bar('Bar 2');
+    const p = await prod('Castle Lite');
+    await receive(b1._id, p._id, 60, new Date('2026-08-13T15:00:00Z'));
+    await receive(b2._id, p._id, 40, new Date('2026-08-13T15:00:00Z'));   // neither bar counted
+
+    const { perBar, byProduct, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    expect(perBar.every((r) => r.physicalCount === null && r.variance === null)).toBe(true);
+    expect(byProduct[0]!.physicalCount).toBeNull();   // NOT 0 — "not counted", not "counted zero"
+    expect(byProduct[0]!.variance).toBeNull();
+    expect(total.physicalCount).toBeNull();
+    expect(total.variance).toBeNull();
+    expect(byProduct[0]!.expectedClosing).toBe(100);  // 60 + 40 across both bars
+  });
+
+  it('rolls up physical/variance from the counted bars only', async () => {
+    const b1 = await bar('Bar 1'); const b2 = await bar('Bar 2');
+    const p = await prod('Savanna', 'wine');
+    await receive(b1._id, p._id, 50, new Date('2026-08-13T15:00:00Z'));
+    await receive(b2._id, p._id, 50, new Date('2026-08-13T15:00:00Z'));
+    await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b1._id), productId: String(p._id), countedOnHand: 45, phase: 'closing', byType: 'Organizer', by: 'v1' } as any);   // only b1 counted (5 short)
+
+    const { byProduct, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    expect(byProduct[0]!.physicalCount).toBe(45);     // only b1 contributes; b2 (uncounted) is excluded, not 0
+    expect(byProduct[0]!.variance).toBe(-5);
+    expect(total.physicalCount).toBe(45);
+    expect(total.variance).toBe(-5);
+  });
 });
