@@ -21,29 +21,19 @@ export class MeetupController {
     }
   }
 
-  /** GET /api/social/meetups/incoming?status= */
-  static async incoming(req: Request, res: Response): Promise<any> {
+  /** GET /api/social/meetups?status= — the viewer's meetups at `status`, in
+   *  BOTH directions (sent + received). Each row carries `direction` so the UI
+   *  can offer accept/deny (incoming) vs cancel (outgoing). */
+  static async list(req: Request, res: Response): Promise<any> {
     try {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const status = String(req.query['status'] || 'pending') as MeetupStatus;
       if (!STATUSES.includes(status)) return ApiResponseUtil.error(res, 'Invalid status', 400);
-      const meetups = await MeetupService.listIncoming(buyer, status);
+      const meetups = await MeetupService.listByStatus(buyer, status);
       return ApiResponseUtil.success(res, { meetups });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load meetups');
-    }
-  }
-
-  /** GET /api/social/meetups/accepted — accepted meetups in both directions. */
-  static async accepted(req: Request, res: Response): Promise<any> {
-    try {
-      const buyer = await resolveBuyerFromRequest(req);
-      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-      const meetups = await MeetupService.listAccepted(buyer);
-      return ApiResponseUtil.success(res, { meetups });
-    } catch (error: any) {
-      return failWithHttpError(res, error, 'Failed to load accepted meetups');
     }
   }
 

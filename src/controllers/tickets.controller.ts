@@ -13,6 +13,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
   registerSchema,
+  requestRegistrationOtpSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
   updateProfileSchema,
@@ -86,7 +87,32 @@ export class TicketsController {
   }
 
   /**
-   * Authentication: Self-service organizer signup
+   * Authentication: Step 1 of self-service organizer signup — request a code.
+   * POST /api/tickets/auth/register/request-otp { email?, phoneNumber? }
+   */
+  static async requestRegistrationOtp(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = requestRegistrationOtpSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await TicketsAuthService.requestRegistrationOtp(value);
+
+      // Echo the channel + identifier so the dashboard can tell the organizer
+      // where the code went ("We texted your phone" / "Check your email").
+      ApiResponseUtil.success(res, result, 'Verification code sent.');
+    } catch (error: any) {
+      console.error('Registration OTP error:', error);
+      ApiResponseUtil.error(res, error.message || 'Could not send verification code', 400);
+    }
+  }
+
+  /**
+   * Authentication: Step 2 of self-service organizer signup — verify + create.
+   * On success the organizer is signed straight in (same shape as login).
+   * POST /api/tickets/auth/register { businessName, email?, phoneNumber?, password, code }
    */
   static async register(req: Request, res: Response): Promise<any> {
     try {

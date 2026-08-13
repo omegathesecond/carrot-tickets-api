@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
-import { Buyer } from '@models/buyer.model';
 import { DmThreadService } from '@services/dmThread.service';
 import { HttpError } from '@utils/httpError.util';
+import type { SocialActor } from '@utils/socialActor.util';
 import { dmRoom } from './rooms';
 
 interface DmJoinAck {
@@ -19,9 +19,11 @@ export function registerDmHandlers(io: Server, socket: Socket): void {
   socket.on('dm:join', async (payload: { threadId?: string }, ack?: (a: DmJoinAck) => void) => {
     try {
       const threadId = String(payload?.threadId || '');
-      const buyer = await Buyer.findById(socket.data.buyerId);
-      if (!buyer) throw new HttpError(401, 'Account not found');
-      await DmThreadService.requireDmAccess(threadId, { type: 'buyer', id: String(buyer._id) }); // 404s hide existence
+      const actor = socket.data.actor as SocialActor | undefined;
+      if (!actor) throw new HttpError(401, 'Please sign in first');
+      // Actor-aware: a vendor joins its brand↔buyer + brand↔brand rooms, a buyer
+      // its own — requireDmAccess 404s a non-member (hides existence).
+      await DmThreadService.requireDmAccess(threadId, actor);
       await socket.join(dmRoom(threadId));
       ack?.({ ok: true });
     } catch (err: any) {

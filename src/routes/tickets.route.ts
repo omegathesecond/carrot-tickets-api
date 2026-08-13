@@ -29,6 +29,8 @@ const router = Router();
  * Public routes - no authentication required
  */
 router.post('/auth/login', TicketsController.login);
+// Self-service organizer signup (public): request a code, then verify + create.
+router.post('/auth/register/request-otp', TicketsController.requestRegistrationOtp);
 router.post('/auth/register', TicketsController.register);
 // Self-service organizer password reset (public): request a code, then verify + set.
 router.post('/auth/forgot-password', TicketsController.forgotPassword);

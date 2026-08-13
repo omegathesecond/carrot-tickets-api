@@ -1,5 +1,6 @@
+import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signSuperAdminToken } from '../../__tests__/helpers/auth';
+import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { startTestRealtime, connectClient, TestRealtime } from './helpers';
 
@@ -22,8 +23,15 @@ describe('socketAuthMiddleware', () => {
     await expect(connectClient(rt.port)).rejects.toThrow(/sign in/i);
   });
 
-  it('rejects a vendor token (userType mismatch)', async () => {
-    await expect(connectClient(rt.port, signSuperAdminToken())).rejects.toThrow(/invalid buyer token/i);
+  it('accepts a vendor token and attaches a vendor actor (no presence identity)', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toString();
+    const client = await connectClient(rt.port, signVendorToken(vendorId));
+
+    const serverSocket = rt.io.sockets.sockets.get(client.id!)!;
+    expect(serverSocket.data.actor).toEqual({ type: 'vendor', id: vendorId });
+    expect(serverSocket.data.buyerId).toBeUndefined(); // presence stays buyer-only
+
+    client.close();
   });
 
   it('rejects a buyer token whose account does not exist', async () => {
@@ -38,6 +46,7 @@ describe('socketAuthMiddleware', () => {
     expect(serverSocket.data.phone).toBe(PHONE);
     expect(typeof serverSocket.data.buyerId).toBe('string');
     expect(serverSocket.data.username).toMatch(/^[a-z0-9_]{3,20}$/);
+    expect(serverSocket.data.actor).toEqual({ type: 'buyer', id: serverSocket.data.buyerId });
 
     client.close();
   });

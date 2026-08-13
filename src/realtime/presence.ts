@@ -8,6 +8,10 @@ const HEARTBEAT_MS = 45_000;
 /** Presence writes are best-effort: a failure must never take down a socket
  *  or the process - offline-only push then just errs toward pushing. */
 export function trackConnection(socket: Socket): void {
+  // Presence is buyer-only. A vendor (brand) socket has no buyerId — skip it
+  // rather than let BuyerPresence.create fail its required-buyerId validation
+  // on every brand connection.
+  if (!socket.data.buyerId) return;
   const socketId = socket.id;
   BuyerPresence.create({
     buyerId: socket.data.buyerId,

@@ -242,7 +242,7 @@ export class EventService {
     }
 
     const events = await Event.find({ vendorId: creatorId })
-      .select('name status eventDate venue totalTicketsSold totalRevenue capacity posterUrl thumbnailUrl createdAt')
+      .select('name status eventDate venue totalTicketsSold totalRevenue capacity posterUrl thumbnailUrl currency createdAt')
       .sort({ eventDate: -1, createdAt: -1 })
       .lean();
 
@@ -256,7 +256,9 @@ export class EventService {
       { totalEvents: 0, totalTicketsSold: 0, totalRevenue: 0 }
     );
 
-    return { creator: vendor, stats, events };
+    const eventsWithCurrency = events.map((e) => ({ ...e, currency: e.currency ?? 'SZL' }));
+
+    return { creator: vendor, stats, events: eventsWithCurrency };
   }
 
   /**

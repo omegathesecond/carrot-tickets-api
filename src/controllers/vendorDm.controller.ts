@@ -36,6 +36,21 @@ export class VendorDmController {
     }
   }
 
+  /** POST /api/tickets/dm/brand-threads { vendorId } — open (or reuse) a 1:1 with another brand. */
+  static async openBrandThread(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = VendorDmController.actor(req);
+      if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const vendorId = String(req.body?.vendorId || '');
+      if (!HEX24.test(vendorId)) return ApiResponseUtil.error(res, 'vendorId is required', 400);
+      const thread = await DmThreadService.openBrandToBrandThread(actor.id, vendorId);
+      const view = await DmThreadService.buildThreadView(thread, actor);
+      return ApiResponseUtil.success(res, view, 'Conversation ready', 201);
+    } catch (error: any) {
+      return VendorDmController.fail(res, error, 'Failed to open conversation');
+    }
+  }
+
   /** GET /api/tickets/dm/threads */
   static async listThreads(req: Request, res: Response): Promise<any> {
     try {

@@ -35,9 +35,21 @@ export const loginSchema = Joi.object({
 });
 
 /**
- * Self-service organizer signup. At least one of email / phoneNumber is
- * required (mirrors the Vendor model, where both are sparse-unique and
- * either can be the login identifier).
+ * Step 1 of self-service organizer signup: request a verification code. At
+ * least one of email / phoneNumber is required — the code goes to the email if
+ * present, else the phone (see TicketsAuthService.signupIdentifier).
+ */
+export const requestRegistrationOtpSchema = Joi.object({
+  email: Joi.string().email().trim().lowercase().optional(),
+  phoneNumber: Joi.string().trim().max(20).optional()
+}).or('email', 'phoneNumber').messages({
+  'object.missing': 'An email address or phone number is required'
+});
+
+/**
+ * Step 2 of self-service organizer signup. At least one of email / phoneNumber
+ * is required (mirrors the Vendor model, where both are sparse-unique and
+ * either can be the login identifier), plus the 6-digit code from step 1.
  */
 export const registerSchema = Joi.object({
   businessName: Joi.string()
@@ -58,6 +70,14 @@ export const registerSchema = Joi.object({
       'string.empty': 'Password is required',
       'any.required': 'Password is required',
       'string.min': 'Password must be at least 6 characters'
+    }),
+  code: Joi.string()
+    .required()
+    .pattern(/^\d{6}$/)
+    .messages({
+      'string.empty': 'Enter the 6-digit code we sent you',
+      'any.required': 'Enter the 6-digit code we sent you',
+      'string.pattern.base': 'Enter the 6-digit code we sent you'
     }),
   businessType: Joi.string()
     .valid('event_organizer', 'venue', 'promoter', 'entertainment', 'sports', 'other')

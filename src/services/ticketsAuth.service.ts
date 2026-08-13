@@ -29,13 +29,57 @@ console.log('[TicketsAuth] JWT Configuration:', {
 
 export class TicketsAuthService {
   /**
-   * Self-service organizer signup.
+   * The single contact channel an organizer verifies at signup. Email wins when
+   * both are supplied — the other (if given) is still stored, just unverified.
+   * Both requestRegistrationOtp() and register() derive the OTP destination this
+   * way so a code issued in step 1 keys on the same value verified in step 2.
+   */
+  private static signupIdentifier(email?: string, phoneNumber?: string): Identifier {
+    if (!email && !phoneNumber) {
+      throw new Error('An email address or phone number is required');
+    }
+    return classifyIdentifier((email ?? phoneNumber)!);
+  }
+
+  /**
+   * Step 1 of self-service organizer signup: send a one-time code to the
+   * email/phone the organizer is signing up with. Rejects an identifier that
+   * already has an organizer account (they must sign in instead) BEFORE burning
+   * a gateway credit — the same duplicate guard register() applies.
    *
-   * Creates a Vendor in the PENDING verification state with Tickets access
-   * enabled (the model defaults). A pending organizer can log in and build
-   * DRAFT events immediately, but EventService.publishEvent refuses to go
-   * live until an admin verifies the account. Returns the same token + user
-   * shape as login() so the dashboard can sign the new owner straight in.
+   * Uses the shared OtpService with audience 'vendor', so a buyer's codes for
+   * the same phone/email are never touched. Throws if the send gateway rejects
+   * the send (caller must surface it — no silent fallback).
+   */
+  static async requestRegistrationOtp(params: {
+    email?: string;
+    phoneNumber?: string;
+  }): Promise<{ channel: 'sms' | 'email'; identifier: string }> {
+    const { email, phoneNumber } = params;
+    const id = this.signupIdentifier(email, phoneNumber);
+
+    if (email && await Vendor.findOne({ email })) {
+      throw new Error('An account with this email already exists. Please sign in instead.');
+    }
+    if (phoneNumber && await Vendor.findOne({ phoneNumber })) {
+      throw new Error('An account with this phone number already exists. Please sign in instead.');
+    }
+
+    await OtpService.issue('vendor', id, 'We could not send your verification code right now. Please try again.');
+    return { channel: id.channel, identifier: id.value };
+  }
+
+  /**
+   * Step 2 of self-service organizer signup: verify the code, then create a
+   * Vendor in the PENDING verification state with Tickets access enabled (the
+   * model defaults). A pending organizer can log in and build DRAFT events
+   * immediately, but EventService.publishEvent refuses to go live until an admin
+   * verifies the account. Returns the same token + user shape as login() so the
+   * dashboard can sign the new owner straight in.
+   *
+   * The OTP proves the organizer controls the contact channel they signed up
+   * with — no account is ever created without a verified code (verification is
+   * strictly required; there is no unverified fallback).
    */
   static async register(params: {
     businessName: string;
@@ -44,11 +88,13 @@ export class TicketsAuthService {
     password: string;
     businessType?: string;
     primaryContact?: string;
+    code: string;
   }) {
-    const { businessName, email, phoneNumber, password, businessType, primaryContact } = params;
+    const { businessName, email, phoneNumber, password, businessType, primaryContact, code } = params;
 
-    if (!email && !phoneNumber) {
-      throw new Error('An email address or phone number is required');
+    const id = this.signupIdentifier(email, phoneNumber);
+    if (!password || password.length < 6) {
+      throw new Error('Password must be at least 6 characters long');
     }
 
     // Reject duplicates up-front so the caller gets a clean message instead
@@ -60,17 +106,24 @@ export class TicketsAuthService {
       throw new Error('An account with this phone number already exists');
     }
 
-    const vendor = new Vendor({
-      businessName,
-      email,
-      phoneNumber,
-      password,
-      businessType,
-      primaryContact,
-      // verificationStatus, isActive, isVerified and apps.tickets.enabled all
-      // fall back to the model defaults (PENDING / true / false / true).
+    // Verify the code, create the Vendor inside the guarded action, and only
+    // consume the code once the save has landed. If save throws (a duplicate-key
+    // race), the code stays valid so the organizer can retry the SAME code
+    // rather than being told it "expired" (see OtpService.withVerified).
+    const vendor = await OtpService.withVerified('vendor', id, code, async () => {
+      const v = new Vendor({
+        businessName,
+        email,
+        phoneNumber,
+        password,
+        businessType,
+        primaryContact,
+        // verificationStatus, isActive, isVerified and apps.tickets.enabled all
+        // fall back to the model defaults (PENDING / true / false / true).
+      });
+      await v.save();
+      return v;
     });
-    await vendor.save();
 
     const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
     const payload = {

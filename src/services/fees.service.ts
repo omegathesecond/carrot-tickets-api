@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { TicketSale } from '@models/ticketSale.model';
 import { PaymentStatus } from '@interfaces/ticket.interface';
 import { round2 } from '@utils/serviceFee.util';
+import type { EventCurrency } from '@utils/currency.util';
 
 export interface FeeMethodBreakdown {
   method: string;
@@ -15,6 +16,7 @@ export interface FeeMethodBreakdown {
 export interface FeeByEventRow {
   eventId: string;
   eventName: string;
+  currency: EventCurrency;
   ticketsSold: number;
   faceValue: number;    // Σ totalAmount — the organizer's revenue
   bookingFees: number;  // Σ serviceFeeAmount — buyer-paid booking fee
@@ -112,7 +114,7 @@ export class FeesService {
       // 3) attach event name
       { $lookup: { from: 'events', localField: '_id', foreignField: '_id', as: 'event' } },
       { $unwind: '$event' },
-      { $addFields: { eventName: '$event.name' } },
+      { $addFields: { eventName: '$event.name', currency: { $ifNull: ['$event.currency', 'SZL'] } } },
       { $project: { event: 0 } },
       ...nameStage,
       // 4) one page of rows + grand totals over the whole filtered set
@@ -151,6 +153,7 @@ export class FeesService {
     const events: FeeByEventRow[] = (facet.rows as any[]).map((r) => ({
       eventId: String(r._id),
       eventName: r.eventName,
+      currency: (r.currency ?? 'SZL') as EventCurrency,
       ticketsSold: r.ticketsSold ?? 0,
       faceValue: round2(r.faceValue ?? 0),
       bookingFees: round2(r.bookingFees ?? 0),

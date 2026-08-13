@@ -284,6 +284,14 @@ export class MessageService {
       }
     }
 
+    // Brand↔brand block (either direction), re-checked at send time.
+    if (thread.vendorParticipantIds?.length) {
+      const otherVid = thread.vendorParticipantIds.map(String).find((id) => id !== actor.id);
+      if (otherVid && (await BlockService.isBlockedEitherWay(actor.id, otherVid))) {
+        throw new HttpError(403, 'You cannot message this organizer');
+      }
+    }
+
     // Suspension + buyer↔buyer block gates apply to buyer senders (a brand
     // isn't suspended). Buyer↔buyer blocks are re-checked at send time —
     // "server-refused DMs" must hold even for pre-block threads.
@@ -348,9 +356,17 @@ export class MessageService {
       }
     } else {
       const vendor = await Vendor.findById(actor.id).select('businessName');
+      const brandName = vendor?.businessName ?? 'A brand';
       const buyers = thread.participants.map(String);
       if (buyers.length) {
-        NotificationDispatcher.dispatchAsync(buyers, 'dm', vendor?.businessName ?? 'A brand', preview, { threadId: String(thread._id), messageId, actorId: actor.id, actorType: 'vendor' }, actor.id);
+        NotificationDispatcher.dispatchAsync(buyers, 'dm', brandName, preview, { threadId: String(thread._id), messageId, actorId: actor.id, actorType: 'vendor' }, actor.id);
+      }
+      // Brand↔brand: notify the OTHER brand (a vendor inbox row, no push).
+      if (thread.vendorParticipantIds?.length) {
+        const otherVid = thread.vendorParticipantIds.map(String).find((id) => id !== actor.id);
+        if (otherVid) {
+          await NotificationService.create('vendor', otherVid, 'dm', 'New message', `${brandName}: ${preview}`, { threadId: String(thread._id), messageId, actorId: actor.id, actorType: 'vendor' }).catch(() => undefined);
+        }
       }
     }
   }

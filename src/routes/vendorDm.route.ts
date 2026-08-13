@@ -7,6 +7,8 @@ import { VendorDmController } from '@controllers/vendorDm.controller';
 const router = Router();
 
 router.post('/threads', authenticateTickets, VendorDmController.openThread);
+// Brand → brand 1:1 (the organizer page's "Message" button, vendor viewer).
+router.post('/brand-threads', authenticateTickets, VendorDmController.openBrandThread);
 router.get('/threads', authenticateTickets, VendorDmController.listThreads);
 router.get('/threads/:threadId/messages', authenticateTickets, VendorDmController.listMessages);
 router.post('/threads/:threadId/messages', authenticateTickets, VendorDmController.sendMessage);

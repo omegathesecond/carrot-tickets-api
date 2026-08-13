@@ -57,12 +57,13 @@ describe('MeetupService', () => {
     expect(await MeetupRequest.countDocuments({})).toBe(1);
   });
 
-  it('listIncoming returns hydrated requester rows by status; cancel removes a pending row', async () => {
+  it('a pending request appears as an incoming row for the target; cancel removes it', async () => {
     const me = (await mk('+26878422613', 'me_one')) as IBuyer;
     const target = (await mk('+26878000001', 'target_a')) as IBuyer;
     const { id } = await MeetupService.request(me, String(target._id));
-    const pending = await MeetupService.listIncoming(target, 'pending');
+    const pending = await MeetupService.listByStatus(target, 'pending');
     expect(pending).toHaveLength(1);
+    expect(pending[0]!.direction).toBe('incoming');
     expect(pending[0]!.user.username).toBe('me_one');
     await expect(MeetupService.cancel(target, id)).rejects.toMatchObject({ statusCode: 403 }); // only requester cancels
     await MeetupService.cancel(me, id);
@@ -105,6 +106,49 @@ describe('MeetupService', () => {
     await expect(MeetupService.cancel(me, acceptedId)).rejects.toMatchObject({ statusCode: 409 });
   });
 
+  describe('MeetupService.listByStatus (both directions)', () => {
+    it('pending: returns incoming AND outgoing rows, tagged with direction and mapped to the OTHER party', async () => {
+      const me = (await mk('+26878422613', 'me_one')) as IBuyer;
+      const out = (await mk('+26878000001', 'target_out')) as IBuyer; // I requested them → outgoing
+      const inc = (await mk('+26878000002', 'user_inc')) as IBuyer; // they requested me → incoming
+      await MeetupService.request(me, String(out._id));
+      await MeetupService.request(inc, String(me._id));
+
+      const rows = await MeetupService.listByStatus(me, 'pending');
+      expect(rows).toHaveLength(2);
+      const byUser = new Map(rows.map((r) => [r.user.id, r]));
+      expect(byUser.get(String(out._id))!.direction).toBe('outgoing');
+      expect(byUser.get(String(inc._id))!.direction).toBe('incoming');
+      expect(byUser.get(String(inc._id))!.user.username).toBe('user_inc');
+    });
+
+    it('declined: surfaces outgoing-declined so the requester can see who denied them', async () => {
+      const me = (await mk('+26878422613', 'me_one')) as IBuyer;
+      const target = (await mk('+26878000001', 'target_out')) as IBuyer;
+      const { id } = await MeetupService.request(me, String(target._id));
+      await MeetupService.decline(target, id); // target denies my outgoing request
+
+      const rows = await MeetupService.listByStatus(me, 'declined');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.direction).toBe('outgoing');
+      expect(rows[0]!.user.id).toBe(String(target._id));
+    });
+
+    it('accepted: returns both directions, each mapped to the OTHER party', async () => {
+      const me = (await mk('+26878422613', 'me_one')) as IBuyer;
+      const out = (await mk('+26878000001', 'out_l')) as IBuyer;
+      const inc = (await mk('+26878000002', 'inc_l')) as IBuyer;
+      const r1 = await MeetupService.request(me, String(out._id));
+      await MeetupService.accept(out, r1.id);
+      const r2 = await MeetupService.request(inc, String(me._id));
+      await MeetupService.accept(me, r2.id);
+
+      const rows = await MeetupService.listByStatus(me, 'accepted');
+      expect(rows.map((r) => r.user.id).sort()).toEqual([String(out._id), String(inc._id)].sort());
+      expect(rows.every((r) => r.status === 'accepted' && r.direction)).toBe(true);
+    });
+  });
+
   describe('MeetupService acceptance lookups', () => {
     it('areMeetupAccepted is true for an accepted row in either direction', async () => {
       const a = await Buyer.create({ phone: '+26878010001', password: 'secret1', name: 'A', username: 'a_user' });
@@ -137,18 +181,6 @@ describe('MeetupService', () => {
       expect(set.has(String(out._id))).toBe(true);
       expect(set.has(String(inc._id))).toBe(true);
       expect(set.has(String(pen._id))).toBe(false);
-    });
-
-    it('listAccepted returns accepted meetups in both directions, mapping to the OTHER party', async () => {
-      const me = await Buyer.create({ phone: '+26878010010', password: 'secret1', name: 'Me', username: 'me_l' });
-      const out = await Buyer.create({ phone: '+26878010011', password: 'secret1', name: 'Out', username: 'out_l' });
-      const inc = await Buyer.create({ phone: '+26878010012', password: 'secret1', name: 'Inc', username: 'inc_l' });
-      await MeetupRequest.create({ requesterId: me._id, targetId: out._id, status: 'accepted' });
-      await MeetupRequest.create({ requesterId: inc._id, targetId: me._id, status: 'accepted' });
-      const rows = await MeetupService.listAccepted(me);
-      const ids = rows.map((r) => r.user.id).sort();
-      expect(ids).toEqual([String(inc._id), String(out._id)].sort());
-      expect(rows.every((r) => r.status === 'accepted')).toBe(true);
     });
   });
 });
