@@ -34,6 +34,11 @@ export enum TicketsPermission {
   // Access Management
   MANAGE_ACCESS = 'tickets:manage_access',
 
+  // Cashless stock/inventory management — organiser manages the product
+  // catalogue, per-bar stock, transfers and counts. Events-vertical (a bus
+  // operator has no bar stock), so it lives in EVENT_PERMISSIONS below.
+  MANAGE_STOCK = 'tickets:manage_stock',
+
   // Platform User Management (Carrot admins/team only) — see the platform-wide
   // list of registered buyers + signup analytics. Super-admins pass via
   // middleware; everyone else needs this assigned explicitly. NEVER part of any
@@ -94,6 +99,7 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
     TicketsPermission.MANAGE_TRANSPORT,
     TicketsPermission.VIEW_REVENUE,
     TicketsPermission.EXPORT_REPORTS,
+    TicketsPermission.MANAGE_STOCK,
     TicketsPermission.EDIT_BRAND
   ],
 
@@ -146,6 +152,7 @@ export const EVENT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.VIEW_REVENUE,
   TicketsPermission.EXPORT_REPORTS,
   TicketsPermission.MANAGE_ACCESS,
+  TicketsPermission.MANAGE_STOCK,
 ];
 
 export interface TicketsUserToken {
