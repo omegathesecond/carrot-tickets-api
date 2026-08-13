@@ -13,6 +13,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
   registerSchema,
+  businessRegisterSchema,
   requestRegistrationOtpSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
@@ -127,6 +128,23 @@ export class TicketsController {
       ApiResponseUtil.created(res, result, 'Account created. You can start building events now — publishing unlocks once your account is verified.');
     } catch (error: any) {
       console.error('Register error:', error);
+      ApiResponseUtil.error(res, error.message || 'Registration failed', 400);
+    }
+  }
+
+  /**
+   * POST /api/tickets/auth/business/register — create an event SERVICE business
+   * (operatorType 'services'): sells no tickets, appears in the Services
+   * directory once verified. OTP-gated (reuses /auth/register/request-otp).
+   */
+  static async registerBusiness(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = businessRegisterSchema.validate(req.body);
+      if (error) { ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400); return; }
+      const result = await TicketsAuthService.registerBusiness(value);
+      ApiResponseUtil.created(res, result, 'Business account created. Your profile goes live once verified.');
+    } catch (error: any) {
+      console.error('Business register error:', error);
       ApiResponseUtil.error(res, error.message || 'Registration failed', 400);
     }
   }
