@@ -15,13 +15,15 @@ interface CreateInput {
   kind: UpdateKind;
   caption: string;
   eventId?: string;
-  ext: string;
-  contentType: string;
+  items: { ext: string; contentType: string }[];
 }
 
-export async function createUpdate(input: CreateInput): Promise<{ update: IUpdate; uploadUrl: string }> {
-  const rawKey = updatesR2.rawKey(input.ext);
-  const uploadUrl = await updatesR2.presignPut(rawKey, input.contentType);
+export async function createUpdate(input: CreateInput): Promise<{ update: IUpdate; uploads: { index: number; uploadUrl: string }[] }> {
+  const prepared = await Promise.all(input.items.map(async (it, index) => {
+    const rawKey = updatesR2.rawKey(it.ext);
+    const uploadUrl = await updatesR2.presignPut(rawKey, it.contentType);
+    return { index, rawKey, uploadUrl };
+  }));
   const update = await Update.create({
     authorType: input.authorType,
     authorId: input.authorId,
@@ -29,9 +31,9 @@ export async function createUpdate(input: CreateInput): Promise<{ update: IUpdat
     caption: input.caption ?? '',
     hashtags: extractHashtags(input.caption),
     eventId: input.eventId,
-    media: [{ rawKey, status: 'processing' }],
+    media: prepared.map((p) => ({ rawKey: p.rawKey, status: 'processing' })),
   });
-  return { update, uploadUrl };
+  return { update, uploads: prepared.map((p) => ({ index: p.index, uploadUrl: p.uploadUrl })) };
 }
 
 export async function finalizeUpdate(id: string): Promise<IUpdate> {

@@ -28,10 +28,11 @@ describe('POST /api/tickets/updates (vendor)', () => {
     const res = await request(app)
       .post('/api/tickets/updates')
       .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
-      .send({ kind: 'image', caption: 'promo', ext: 'jpg', contentType: 'image/jpeg' })
+      .send({ kind: 'image', caption: 'promo', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(201);
     expect(res.body.data.updateId).toBeTruthy();
-    expect(res.body.data.uploadUrl).toContain('https://r2/put');
+    expect(res.body.data.uploads).toHaveLength(1);
+    expect(res.body.data.uploads[0].uploadUrl).toContain('https://r2/put');
 
     const saved = await Update.findById(res.body.data.updateId);
     expect(saved?.authorType).toBe('vendor');
@@ -42,7 +43,7 @@ describe('POST /api/tickets/updates (vendor)', () => {
     await request(app)
       .post('/api/tickets/updates')
       .set('Authorization', `Bearer ${signSuperAdminToken()}`)
-      .send({ kind: 'video', caption: '', ext: 'jpg', contentType: 'image/jpeg' })
+      .send({ kind: 'video', caption: '', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(400);
   });
 
@@ -56,14 +57,14 @@ describe('POST /api/tickets/updates (vendor)', () => {
     await request(app)
       .post('/api/tickets/updates')
       .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
-      .send({ kind: 'image', caption: 'promo', ext: 'jpg', contentType: 'image/jpeg' })
+      .send({ kind: 'image', caption: 'promo', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(401);
   });
 
   it('401s without a token', async () => {
     await request(app)
       .post('/api/tickets/updates')
-      .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
+      .send({ kind: 'image', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(401);
   });
 });

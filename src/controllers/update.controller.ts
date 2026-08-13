@@ -5,29 +5,26 @@ import { resolveActorFromRequest, isActorAuthorOf, type SocialActor } from '@uti
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { createUpdate, finalizeUpdate, getUpdate, toggleReaction, recordShare, recordView, getViewerReactions } from '@services/update.service';
 import { resolveUpdateAuthor } from '@services/updateAuthor';
+import { validateCreateItems } from '@utils/updateCreate.util';
 import { Update } from '@models/update.model';
 import type { UpdateAuthorType } from '@interfaces/update.interface';
 
 const AUTHOR_TYPES: UpdateAuthorType[] = ['buyer', 'vendor'];
 const PAGE_SIZE = 24;
 
-const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
-const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-
 export class UpdateController {
   static async create(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-    const { kind, caption = '', eventId, ext, contentType } = req.body || {};
-    if (kind !== 'video' && kind !== 'image') return ApiResponseUtil.validationError(res, 'kind must be video or image');
-    const allow = kind === 'video' ? VIDEO_TYPES : IMAGE_TYPES;
-    if (!allow.includes(contentType)) return ApiResponseUtil.validationError(res, `Invalid contentType for ${kind}`);
+    const { caption = '', eventId, items } = req.body || {};
     if (typeof caption === 'string' && caption.length > 500) return ApiResponseUtil.validationError(res, 'caption too long');
+    const v = validateCreateItems(req.body?.kind, items);
+    if (!v.ok) return ApiResponseUtil.validationError(res, v.message);
     try {
-      const { update, uploadUrl } = await createUpdate({
-        authorType: 'buyer', authorId: String(buyer._id), kind, caption, eventId, ext: String(ext || 'bin'), contentType,
+      const { update, uploads } = await createUpdate({
+        authorType: 'buyer', authorId: String(buyer._id), kind: v.kind, caption, eventId, items: v.items,
       });
-      return ApiResponseUtil.created(res, { updateId: update.id, uploadUrl });
+      return ApiResponseUtil.created(res, { updateId: update.id, uploads });
     } catch (err: any) {
       return ApiResponseUtil.error(res, err?.message || 'Failed to create update', 500);
     }
@@ -58,16 +55,15 @@ export class UpdateController {
   static async createAsVendor(req: Request, res: Response): Promise<any> {
     const vendorId = (req as any).ticketsUser?.vendorId;
     if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
-    const { kind, caption = '', eventId, ext, contentType } = req.body || {};
-    if (kind !== 'video' && kind !== 'image') return ApiResponseUtil.validationError(res, 'kind must be video or image');
-    const allow = kind === 'video' ? VIDEO_TYPES : IMAGE_TYPES;
-    if (!allow.includes(contentType)) return ApiResponseUtil.validationError(res, `Invalid contentType for ${kind}`);
+    const { caption = '', eventId, items } = req.body || {};
     if (typeof caption === 'string' && caption.length > 500) return ApiResponseUtil.validationError(res, 'caption too long');
+    const v = validateCreateItems(req.body?.kind, items);
+    if (!v.ok) return ApiResponseUtil.validationError(res, v.message);
     try {
-      const { update, uploadUrl } = await createUpdate({
-        authorType: 'vendor', authorId: String(vendorId), kind, caption, eventId, ext: String(ext || 'bin'), contentType,
+      const { update, uploads } = await createUpdate({
+        authorType: 'vendor', authorId: String(vendorId), kind: v.kind, caption, eventId, items: v.items,
       });
-      return ApiResponseUtil.created(res, { updateId: update.id, uploadUrl });
+      return ApiResponseUtil.created(res, { updateId: update.id, uploads });
     } catch (err: any) {
       return ApiResponseUtil.error(res, err?.message || 'Failed to create update', 500);
     }

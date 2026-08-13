@@ -27,9 +27,10 @@ describe('POST /api/public/updates', () => {
     const res = await request(app)
       .post('/api/public/updates')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
-      .send({ kind: 'video', caption: 'my clip', ext: 'mp4', contentType: 'video/mp4' })
+      .send({ kind: 'video', caption: 'my clip', items: [{ ext: 'mp4', contentType: 'video/mp4' }] })
       .expect(201);
-    expect(res.body.data.uploadUrl).toContain('https://r2.example/put');
+    expect(res.body.data.uploads).toHaveLength(1);
+    expect(res.body.data.uploads[0].uploadUrl).toContain('https://r2.example/put');
     expect(res.body.data.updateId).toBeTruthy();
   });
 
@@ -38,12 +39,31 @@ describe('POST /api/public/updates', () => {
     await request(app)
       .post('/api/public/updates')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
-      .send({ kind: 'video', caption: '', ext: 'jpg', contentType: 'image/jpeg' })
+      .send({ kind: 'video', caption: '', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(400);
   });
 
   it('401s without a token', async () => {
-    await request(app).post('/api/public/updates').send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' }).expect(401);
+    await request(app).post('/api/public/updates').send({ kind: 'image', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] }).expect(401);
+  });
+
+  it('201s with one upload per item for a 3-photo post', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+    const res = await request(app)
+      .post('/api/public/updates')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ kind: 'image', caption: 'trip', items: Array(3).fill({ ext: 'jpg', contentType: 'image/jpeg' }) });
+    expect(res.status).toBe(201);
+    expect(res.body.data.uploads).toHaveLength(3);
+  });
+
+  it('400s a 6-photo post', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+    const res = await request(app)
+      .post('/api/public/updates')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ kind: 'image', items: Array(6).fill({ ext: 'jpg', contentType: 'image/jpeg' }) });
+    expect(res.status).toBe(400);
   });
 });
 
