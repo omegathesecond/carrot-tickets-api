@@ -232,6 +232,26 @@ router.get('/services/:businessId', ServicesController.profile);
 router.post('/services/:businessId/enquiries', authenticateBuyer, EnquiryController.create);
 
 /**
+ * @route   GET /api/public/services/:businessId/reviews
+ * @desc    Paginated review list for a services business (eventId absent —
+ *          disjoint from GET /events/:eventId/reviews).
+ * @access  Public
+ * @query   before, limit
+ */
+router.get('/services/:businessId/reviews', ServicesController.listReviews);
+
+/**
+ * @route   POST /api/public/services/:businessId/reviews
+ * @desc    Submit a review of a services business. Gated on proof-of-contact:
+ *          only a buyer who has sent this business an enquiry (Task D1's
+ *          EnquiryService.hasEnquired) may post (403 otherwise), one review
+ *          per buyer per business.
+ * @access  Buyer (Bearer buyer token)
+ * @body    rating (1-5), text?
+ */
+router.post('/services/:businessId/reviews', authenticateBuyer, ServicesController.submitReview);
+
+/**
  * @route   POST /api/public/purchase
  * @desc    Buy tickets using a Keshless card. The buyer must first prove
  *          ownership of their phone via the OTP login below — the ticket is
