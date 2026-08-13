@@ -19,4 +19,10 @@ describe('scopePermissionsToType — SERVICES', () => {
     expect(scoped).not.toContain(TicketsPermission.MANAGE_ENQUIRIES);
     expect(scoped).toContain(TicketsPermission.SELL_TICKETS);
   });
+
+  it('keeps MANAGE_ENQUIRIES out of a transport owner', () => {
+    const scoped = scopePermissionsToType(owner, OperatorType.TRANSPORT);
+    expect(scoped).not.toContain(TicketsPermission.MANAGE_ENQUIRIES);
+    expect(scoped).toContain(TicketsPermission.MANAGE_TRANSPORT);
+  });
 });
