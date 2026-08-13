@@ -4,6 +4,7 @@ import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
+import { ServicesController } from '@controllers/services.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
@@ -202,6 +203,24 @@ router.post('/events/:eventId/share', optionalTicketsAuth, EventReactionControll
  * @access  Public
  */
 router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
+
+/**
+ * @route   GET /api/public/services
+ * @desc    Services directory — verified SERVICES-operatorType vendors as
+ *          cards, newest first. Query: category, search, before (cursor id),
+ *          limit (default 24, max 50).
+ * @access  Public
+ */
+router.get('/services', ServicesController.directory);
+
+/**
+ * @route   GET /api/public/services/:businessId
+ * @desc    Single services business profile. 404 for anything not a
+ *          verified SERVICES vendor. Registered AFTER the static
+ *          '/services' route above — order matters in Express.
+ * @access  Public
+ */
+router.get('/services/:businessId', ServicesController.profile);
 
 /**
  * @route   POST /api/public/purchase
