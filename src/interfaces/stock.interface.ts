@@ -15,3 +15,17 @@ export enum ProductCategory {
   CIGARETTES = 'cigarettes',
   OTHER = 'other',
 }
+
+/** Why a stock quantity changed. The append-only journal's reason codes. */
+export enum StockMovementReason {
+  RECEIVE = 'receive',
+  SALE = 'sale',
+  TRANSFER_IN = 'transfer_in',
+  TRANSFER_OUT = 'transfer_out',
+  COUNT_ADJUST = 'count_adjust',
+  SPOILAGE = 'spoilage',
+  MANUAL = 'manual',
+}
+
+/** Who initiated a movement (for the audit trail). */
+export type StockMovementByType = 'Organizer' | 'Merchant' | 'Platform';
