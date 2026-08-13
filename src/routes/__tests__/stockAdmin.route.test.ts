@@ -87,4 +87,73 @@ describe('stock admin routes', () => {
       .send({ merchantId: String(merchant._id), productId: String(foreignProduct._id), quantity: 10 });
     expect(res.status).toBe(400);
   });
+
+  it('updates a product (PATCH happy path)', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const create = await request(app)
+      .post(`/api/tickets/events/${eventId}/products`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Castle Lite 330ml', category: 'beer', price: 2500 });
+    expect(create.status).toBe(201);
+    const productId = create.body.data._id;
+
+    const patch = await request(app)
+      .patch(`/api/tickets/products/${productId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ price: 3000, name: 'Castle Lite 330ml (updated)' });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data.price).toBe(3000);
+    expect(patch.body.data.name).toBe('Castle Lite 330ml (updated)');
+  });
+
+  it("forbids PATCHing a product belonging to another vendor's event", async () => {
+    const { token } = await ownedCashlessEvent();        // token for vendor A
+    const other = await seedPublishedEvent({});           // event owned by vendor B
+    const foreignProduct = await Product.create({ eventId: other.eventId, name: 'Not Yours', category: 'beer', price: 100 });
+
+    const patch = await request(app)
+      .patch(`/api/tickets/products/${String(foreignProduct._id)}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ price: 200 });
+    expect(patch.status).toBe(403);
+  });
+
+  it('rejects a PATCH that collides on barcode with another product in the same event (400, not 500)', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const first = await Product.create({ eventId, name: 'Castle Lite', category: 'beer', price: 2500, barcode: '6001240100015' });
+    const second = await Product.create({ eventId, name: 'Black Label', category: 'beer', price: 2500, barcode: '6001240100022' });
+
+    const patch = await request(app)
+      .patch(`/api/tickets/products/${String(second._id)}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ barcode: String(first.barcode) });
+    expect(patch.status).toBe(400);
+  });
+
+  it('rejects receiving in packs when the product has no pack size', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const merchant = await Merchant.create({ name: 'Bar 4', eventId, loginCode: String(__loginSeq++), pin: '000000' });
+    const product = await Product.create({ eventId, name: 'Loose Ice', category: 'other', price: 50 }); // no unitsPerPack
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${eventId}/stock/receive`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ merchantId: String(merchant._id), productId: String(product._id), quantity: 5, unit: 'pack' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects creating a product with a duplicate barcode in the same event (400, not 500)', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const first = await request(app)
+      .post(`/api/tickets/events/${eventId}/products`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Castle Lite 330ml', category: 'beer', price: 2500, barcode: '6001240100015' });
+    expect(first.status).toBe(201);
+
+    const dupe = await request(app)
+      .post(`/api/tickets/events/${eventId}/products`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Castle Lite 330ml (again)', category: 'beer', price: 2500, barcode: '6001240100015' });
+    expect(dupe.status).toBe(400);
+  });
 });
