@@ -58,7 +58,7 @@ describe('scopePermissionsToType', () => {
   });
 
   it('never strips EDIT_BRAND — brand identity is vertical-neutral', () => {
-    for (const t of [OperatorType.EVENTS, OperatorType.TRANSPORT, OperatorType.BOTH]) {
+    for (const t of [OperatorType.EVENTS, OperatorType.TRANSPORT, OperatorType.BOTH, OperatorType.SERVICES]) {
       expect(scopePermissionsToType([TicketsPermission.EDIT_BRAND], t)).toContain(TicketsPermission.EDIT_BRAND);
     }
   });
