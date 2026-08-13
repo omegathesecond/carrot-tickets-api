@@ -42,6 +42,7 @@ function actorRef(type: NotificationType, data: Record<string, unknown>): ActorR
   if (type === 'follow' && isObjectId(data.followerId))
     return { kind: data.followerType === 'organizer' ? 'vendor' : 'buyer', id: data.followerId };
   if (type === 'friend' && isObjectId(data.buyerId)) return { kind: 'buyer', id: data.buyerId };
+  if (type === 'enquiry_received' && isObjectId(data.buyerId)) return { kind: 'buyer', id: data.buyerId };
   return null;
 }
 
