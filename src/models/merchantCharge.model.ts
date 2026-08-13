@@ -45,7 +45,7 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
       lineTotal: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'lineTotal must be integer cents' } },
     }, { _id: false })],
     required: false,
-    get: (val: any) => val && val.length > 0 ? val : undefined,
+    default: undefined,
   },
   staffName: { type: String, trim: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });

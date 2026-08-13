@@ -64,6 +64,11 @@ export class MerchantService {
    * because the CAS guard and the decrement are the SAME atomic operation
    * (wallet.model.ts's documented CAS-debit pattern) and every write below it
    * only runs once that CAS has already succeeded.
+   *
+   * The other decline path is StockDeclinedError — an out-of-stock line on
+   * an itemised sale — which likewise leaves the wallet, ledger, stock, and
+   * MerchantCharge collection completely untouched, because it aborts the
+   * same transaction before commit.
    */
   static async charge(params: {
     merchantId: string; eventId: string; walletId: string; bandUid: string;
