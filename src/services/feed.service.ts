@@ -3,31 +3,35 @@ import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
-import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { notEndedFilter } from '@utils/eventVisibility.util';
-import { PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import type { SocialActor } from '@utils/socialActor.util';
 import { buildEventCardFields } from '@utils/eventCard.util';
 
 export type FeedSlide =
   | { type: 'update'; id: string; sortAt: string; [k: string]: any }
-  | { type: 'event'; id: string; sortAt: string; [k: string]: any }
-  | { type: 'activity'; id: string; sortAt: string; [k: string]: any };
+  | { type: 'event'; id: string; sortAt: string; [k: string]: any };
 
 interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; actor?: SocialActor; limit?: number; category?: string; }
-interface Cursor { u?: string; e?: number; a?: string; }
+interface Cursor { u?: string; e?: number; }
 
 function decode(cursor?: string): Cursor { if (!cursor) return {}; try { return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { return {}; } }
 function encode(c: Cursor): string { return Buffer.from(JSON.stringify(c)).toString('base64url'); }
 
-// per-window slot pattern (8): u u u e u u a e
-const PATTERN: Array<'u' | 'e' | 'a'> = ['u', 'u', 'u', 'e', 'u', 'u', 'a', 'e'];
+// per-window slot pattern (7): u u u e u u e. Only the 'following' blend and
+// the 'events' tab surface event slots; 'for-you' (Discover) is posts-only, so
+// its empty event bucket makes this pattern fall through to all updates.
+const PATTERN: Array<'u' | 'e'> = ['u', 'u', 'u', 'e', 'u', 'u', 'e'];
 
 export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 12, 30);
   const cur = decode(opts.cursor);
-  const wantActivity = opts.tab === 'for-you';
+
+  // Discover ('for-you') is posts-only: no event cards, and no synthetic
+  // "activity" FOMO interstitials (those had no other home, so they're gone
+  // entirely). Events remain the substance of the 'events' tab and part of the
+  // 'following' blend — so only those two tabs fetch events.
+  const wantEvents = opts.tab !== 'for-you';
 
   // resolve follow sets for personalization/following
   let followedAuthorIds: any[] = [];
@@ -58,18 +62,13 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   if (categoryEventIds) updateQuery.eventId = { $in: categoryEventIds };
   const updates = opts.tab === 'events' ? [] : await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();
 
+  const eventSkip = cur.e ?? 0;
   const eventQuery: any = { status: EventStatus.PUBLISHED, ...notEndedFilter() };
   if (opts.tab === 'following') eventQuery.vendorId = { $in: followedOrgIds };
   if (opts.category && opts.category !== 'All') eventQuery.category = opts.category;
-  const eventSkip = cur.e ?? 0;
-  const events = await Event.find(eventQuery).sort({ eventDate: 1 }).skip(eventSkip).limit(limit).lean();
-
-  let activity: any[] = [];
-  if (wantActivity) {
-    const aq: any = { paymentStatus: PaymentStatus.COMPLETED, channel: { $ne: SalesChannel.WRISTBAND } };
-    if (cur.a) aq.soldAt = { $lt: new Date(cur.a) };
-    activity = await TicketSale.find(aq).sort({ soldAt: -1 }).limit(limit).lean();
-  }
+  const events = wantEvents
+    ? await Event.find(eventQuery).sort({ eventDate: 1 }).skip(eventSkip).limit(limit).lean()
+    : [];
 
   // ---- shape slides ----
   const vendorIds = [
@@ -108,37 +107,23 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     };
   });
 
-  const activityEventIds = activity.map((s) => s.eventId);
-  const publishedActivityEvents = wantActivity && activityEventIds.length
-    ? await Event.find({ _id: { $in: activityEventIds }, status: EventStatus.PUBLISHED }).select('name').lean()
-    : [];
-  const publishedActivityEventMap = new Map(publishedActivityEvents.map((e) => [String(e._id), e]));
-
-  const activitySlides: FeedSlide[] = activity
-    .filter((s) => publishedActivityEventMap.has(String(s.eventId)))
-    .map((s) => ({
-      type: 'activity', id: String(s._id), sortAt: new Date(s.soldAt).toISOString(),
-      quantity: s.quantity, eventId: String(s.eventId), eventName: publishedActivityEventMap.get(String(s.eventId))!.name,
-    }));
-
   // ---- interleave by PATTERN, dropping dry slots ----
-  const q = { u: updateSlides, e: eventSlides, a: activitySlides };
+  const q = { u: updateSlides, e: eventSlides };
   const items: FeedSlide[] = [];
   let pi = 0;
-  while (items.length < limit && (q.u.length || q.e.length || (wantActivity && q.a.length))) {
-    const slot = PATTERN[pi % PATTERN.length] as 'u' | 'e' | 'a';
+  while (items.length < limit && (q.u.length || q.e.length)) {
+    const slot = PATTERN[pi % PATTERN.length] as 'u' | 'e';
     pi++;
     const bucket = q[slot];
     if (bucket.length) { items.push(bucket.shift()!); continue; }
-    // slot dry: fall back to whichever has items (u > e > a), else break out of this pass
-    const fallback = q.u.length ? q.u : q.e.length ? q.e : (wantActivity && q.a.length ? q.a : null);
+    // slot dry: fall back to whichever has items (u > e), else break out of this pass
+    const fallback = q.u.length ? q.u : q.e.length ? q.e : null;
     if (!fallback) break;
     items.push(fallback.shift()!);
   }
 
   // ---- next cursor from the last consumed position of each source ----
   const consumedUpdateAt = items.filter((i) => i.type === 'update').slice(-1)[0]?.sortAt;
-  const consumedActivityAt = items.filter((i) => i.type === 'activity').slice(-1)[0]?.sortAt;
   const consumedEventCount = items.filter((i) => i.type === 'event').length;
 
   const next: Cursor = {};
@@ -146,8 +131,6 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   else if (cur.u) next.u = cur.u;
   if (consumedEventCount) next.e = eventSkip + consumedEventCount;
   else if (cur.e) next.e = cur.e;
-  if (consumedActivityAt) next.a = consumedActivityAt;
-  else if (cur.a) next.a = cur.a;
 
   const anyMore = items.length >= limit; // conservative: only advertise more if we filled a page
   return { items, nextCursor: anyMore ? encode(next) : null };

@@ -5,9 +5,7 @@ import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
-import { TicketSale } from '@models/ticketSale.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import mongoose from 'mongoose';
 
 async function seedReadyUpdate(caption: string) {
@@ -21,26 +19,20 @@ async function seedEvent(name: string, status: EventStatus = EventStatus.PUBLISH
     status, ticketTypes: [{ name: 'GA', price: 100, quantity: 50 }],
   });
 }
-async function seedCompletedSale(eventId: mongoose.Types.ObjectId, vendorId: mongoose.Types.ObjectId) {
-  return TicketSale.create({
-    eventId, vendorId, quantity: 1, totalAmount: 100,
-    paymentMethod: PaymentMethod.CASH, paymentStatus: PaymentStatus.COMPLETED,
-    channel: SalesChannel.BOX_OFFICE, soldBy: vendorId, soldByType: 'Vendor',
-  });
-}
-
 describe('feed.service getFeed', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
-  it('returns a blended for-you feed containing updates and events', async () => {
+  it('returns a posts-only for-you feed — events are never blended into Discover', async () => {
     await seedReadyUpdate('u1'); await seedReadyUpdate('u2'); await seedReadyUpdate('u3');
     await seedEvent('E1');
     const { items } = await getFeed({ tab: 'for-you', limit: 8 });
     const types = items.map((i) => i.type);
     expect(types).toContain('update');
-    expect(types).toContain('event');
+    // Discover is posts-only: the seeded event (and any synthetic activity
+    // slide) must never appear in 'for-you'.
+    expect(types.every((t) => t === 'update')).toBe(true);
     const updateSlide = items.find((i) => i.type === 'update');
     expect(updateSlide?.['viewCount']).toBe(0);
   });
@@ -73,23 +65,6 @@ describe('feed.service getFeed', () => {
     const p2 = await getFeed({ tab: 'events', limit: 4, cursor: p1.nextCursor! });
     const p1ids = new Set(p1.items.map((i) => i.id));
     expect(p2.items.every((i) => !p1ids.has(i.id))).toBe(true);
-  });
-
-  it('gates activity slides on published events and carries eventName', async () => {
-    const published = await seedEvent('Published Show');
-    await seedCompletedSale(published._id, published.vendorId!);
-
-    const cancelled = await seedEvent('Cancelled Show', EventStatus.CANCELLED);
-    await seedCompletedSale(cancelled._id, cancelled.vendorId!);
-
-    const { items } = await getFeed({ tab: 'for-you', limit: 30 });
-    const activitySlides = items.filter((i) => i.type === 'activity');
-
-    const publishedSlide = activitySlides.find((s) => s.eventId === String(published._id));
-    expect(publishedSlide).toBeDefined();
-    expect(publishedSlide!.eventName).toBe('Published Show');
-
-    expect(activitySlides.some((s) => s.eventId === String(cancelled._id))).toBe(false);
   });
 
   it('following tab includes updates authored by a followed organizer', async () => {
