@@ -20,7 +20,7 @@ describe('ServicesService.listDirectory', () => {
   it('lists only verified active services vendors', async () => {
     await mkBiz({ businessName: 'Verified Co' });
     await mkBiz({ businessName: 'Pending Co', verificationStatus: VerificationStatus.PENDING });
-    await Vendor.create({ businessName: 'Event Org', phoneNumber: '+26876999001', password: 'secret1', operatorType: OperatorType.EVENTS });
+    await Vendor.create({ businessName: 'Event Org', phoneNumber: '+26876999001', password: 'secret1', operatorType: OperatorType.EVENTS, verificationStatus: VerificationStatus.VERIFIED });
     const cards = await ServicesService.listDirectory({});
     const names = cards.map((c) => c.businessName);
     expect(names).toContain('Verified Co');
@@ -33,6 +33,12 @@ describe('ServicesService.listDirectory', () => {
     await mkBiz({ businessName: 'FoodFest', serviceCategory: 'food_stalls' });
     expect((await ServicesService.listDirectory({ category: 'sound_hire' })).map((c) => c.businessName)).toEqual(['SoundWave']);
     expect((await ServicesService.listDirectory({ search: 'food' })).map((c) => c.businessName)).toEqual(['FoodFest']);
+  });
+
+  it('does not throw on a regex-metacharacter search term, and matches it literally', async () => {
+    await mkBiz({ businessName: 'A(B) Events' });
+    const cards = await ServicesService.listDirectory({ search: 'a(' });
+    expect(cards.map((c) => c.businessName)).toEqual(['A(B) Events']);
   });
 });
 
@@ -48,7 +54,7 @@ describe('ServicesService.getBusinessProfile', () => {
   });
 
   it('404s for an events vendor', async () => {
-    const v = await Vendor.create({ businessName: 'Org', phoneNumber: '+26876999002', password: 'secret1', operatorType: OperatorType.EVENTS });
+    const v = await Vendor.create({ businessName: 'Org', phoneNumber: '+26876999002', password: 'secret1', operatorType: OperatorType.EVENTS, verificationStatus: VerificationStatus.VERIFIED });
     await expect(ServicesService.getBusinessProfile(String(v._id))).rejects.toMatchObject({ statusCode: 404 });
   });
 });
