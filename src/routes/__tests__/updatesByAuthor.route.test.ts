@@ -18,16 +18,16 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     const vendorId = new mongoose.Types.ObjectId();
     const older = await Update.create({
       authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'older',
-      media: readyImageMedia, createdAt: new Date('2026-07-01'),
+      media: [readyImageMedia], createdAt: new Date('2026-07-01'),
     });
     const newer = await Update.create({
       authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'newer',
-      media: readyImageMedia, createdAt: new Date('2026-07-10'),
+      media: [readyImageMedia], createdAt: new Date('2026-07-10'),
     });
     // noise: different author, unready media, and a removed post by the same author
-    await Update.create({ authorType: 'vendor', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'not-me', media: readyImageMedia });
-    await Update.create({ authorType: 'vendor', authorId: vendorId, kind: 'video', caption: 'still-processing', media: { rawKey: 'k2', status: 'processing' } });
-    const removed = await Update.create({ authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'removed', media: readyImageMedia });
+    await Update.create({ authorType: 'vendor', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'not-me', media: [readyImageMedia] });
+    await Update.create({ authorType: 'vendor', authorId: vendorId, kind: 'video', caption: 'still-processing', media: [{ rawKey: 'k2', status: 'processing' }] });
+    const removed = await Update.create({ authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'removed', media: [readyImageMedia] });
     removed.status = 'removed';
     await removed.save();
 
@@ -49,7 +49,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
       viewCount: 0,
       viewerReactions: null,
     });
-    expect(res.body.data.items[0].media.status).toBe('ready');
+    expect(res.body.data.items[0].media[0].status).toBe('ready');
     expect(res.body.data.nextCursor).toBeNull();
   });
 
@@ -69,7 +69,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     for (let i = 0; i < 25; i++) {
       await Update.create({
         authorType: 'vendor', authorId: vendorId, kind: 'image', caption: `p${i}`,
-        media: readyImageMedia, createdAt: new Date(base + i * 1000),
+        media: [readyImageMedia], createdAt: new Date(base + i * 1000),
       });
     }
 
@@ -92,7 +92,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
   it("includes the caller's viewerReactions when a vendor token is present", async () => {
     const authorId = new mongoose.Types.ObjectId();
     const viewerId = new mongoose.Types.ObjectId().toHexString();
-    const update = await Update.create({ authorType: 'vendor', authorId, kind: 'image', caption: 'x', media: readyImageMedia });
+    const update = await Update.create({ authorType: 'vendor', authorId, kind: 'image', caption: 'x', media: [readyImageMedia] });
     await request(app)
       .post(`/api/tickets/updates/${update.id}/like`)
       .set('Authorization', `Bearer ${signVendorToken(viewerId)}`)
@@ -117,7 +117,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     const vendorId = new mongoose.Types.ObjectId();
     await Update.create({
       authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'mine',
-      media: readyImageMedia,
+      media: [readyImageMedia],
     });
 
     const res = await request(app)
@@ -133,7 +133,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     const other = new mongoose.Types.ObjectId();
     await Update.create({
       authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
-      media: readyImageMedia,
+      media: [readyImageMedia],
     });
 
     const res = await request(app)
@@ -148,7 +148,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     const author = new mongoose.Types.ObjectId();
     await Update.create({
       authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
-      media: readyImageMedia,
+      media: [readyImageMedia],
     });
 
     const res = await request(app)

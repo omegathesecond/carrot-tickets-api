@@ -16,7 +16,7 @@ function makeUpdate(hashtags: string[], overrides: Record<string, any> = {}) {
     kind: 'image',
     caption: 'x',
     hashtags,
-    media: readyImageMedia,
+    media: [readyImageMedia],
     ...overrides,
   };
 }
@@ -68,7 +68,7 @@ describe('GET /api/public/trending', () => {
     const removed = await Update.create(makeUpdate(['removedtag']));
     removed.status = 'removed';
     await removed.save();
-    await Update.create(makeUpdate(['processingtag'], { media: processingMedia }));
+    await Update.create(makeUpdate(['processingtag'], { media: [processingMedia] }));
     await Update.create(makeUpdate(['visibletag']));
 
     const res = await request(app).get('/api/public/trending');
@@ -86,11 +86,11 @@ describe('GET /api/public/trending', () => {
   });
 
   it('attaches a representative thumbnail per tag (image url, or a video poster)', async () => {
-    await Update.create(makeUpdate(['gallery'], { media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn/pic.jpg', width: 1, height: 1 } } }));
+    await Update.create(makeUpdate(['gallery'], { media: [{ rawKey: 'k', status: 'ready', image: { url: 'https://cdn/pic.jpg', width: 1, height: 1 } }] }));
     await Update.create(
       makeUpdate(['reel'], {
         kind: 'video',
-        media: { rawKey: 'k', status: 'ready', video: { url: 'https://cdn/v.mp4', poster: 'https://cdn/poster.jpg', width: 1, height: 1, durationSec: 3 } },
+        media: [{ rawKey: 'k', status: 'ready', video: { url: 'https://cdn/v.mp4', poster: 'https://cdn/poster.jpg', width: 1, height: 1, durationSec: 3 } }],
       }),
     );
 

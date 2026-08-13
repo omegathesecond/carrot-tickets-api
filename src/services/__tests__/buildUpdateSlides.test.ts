@@ -8,7 +8,7 @@ describe('UpdateService.buildUpdateSlides', () => {
 
   it('hydrates buyer author + defaults viewer flags when no actor', async () => {
     const author = await Buyer.create({ phone: '+26878000001', password: 'secret1', name: 'Sipho', username: 'sipho' });
-    const u = await Update.create({ authorType: 'buyer', authorId: author._id, kind: 'image', caption: 'hi', media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn/i.jpg', width: 1, height: 1 } } });
+    const u = await Update.create({ authorType: 'buyer', authorId: author._id, kind: 'image', caption: 'hi', media: [{ rawKey: 'k', status: 'ready', image: { url: 'https://cdn/i.jpg', width: 1, height: 1 } }] });
     const [slide] = await UpdateService.buildUpdateSlides([u], null);
     expect(slide.type).toBe('update');
     expect(slide.author).toMatchObject({ type: 'buyer', name: 'Sipho', username: 'sipho' });

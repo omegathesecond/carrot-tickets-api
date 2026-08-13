@@ -11,21 +11,21 @@ describe('reconcileStuckUpdates', () => {
   it('marks a >30min-stuck processing video as failed (fail-loud)', async () => {
     const u = await Update.create({
       authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'video', caption: '',
-      media: { rawKey: 'k', status: 'processing', processingStartedAt: new Date(Date.now() - 31 * 60000) },
+      media: [{ rawKey: 'k', status: 'processing', processingStartedAt: new Date(Date.now() - 31 * 60000) }],
     });
     await reconcileStuckUpdates();
     const after = await Update.findById(u.id);
-    expect(after!.media.status).toBe('failed');
-    expect(after!.media.error).toBeTruthy();
+    expect(after!.media[0]!.status).toBe('failed');
+    expect(after!.media[0]!.error).toBeTruthy();
   });
 
   it('leaves a fresh processing update alone', async () => {
     const u = await Update.create({
       authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'video', caption: '',
-      media: { rawKey: 'k', status: 'processing', processingStartedAt: new Date() },
+      media: [{ rawKey: 'k', status: 'processing', processingStartedAt: new Date() }],
     });
     await reconcileStuckUpdates();
     const after = await Update.findById(u.id);
-    expect(after!.media.status).toBe('processing');
+    expect(after!.media[0]!.status).toBe('processing');
   });
 });

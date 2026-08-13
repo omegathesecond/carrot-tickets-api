@@ -59,7 +59,7 @@ describe('POST /api/public/updates/:id/view', () => {
       authorId: author._id,
       kind: 'image',
       caption: 'x',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
     const res = await request(app)
@@ -80,7 +80,7 @@ describe('DELETE /api/public/updates/:id', () => {
       authorId,
       kind: 'image',
       caption: 'x',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
   const seedVendorUpdate = async (vendorId: string) =>
@@ -89,7 +89,7 @@ describe('DELETE /api/public/updates/:id', () => {
       authorId: vendorId,
       kind: 'image',
       caption: 'brand post',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
   // THE REPORTED GAP: remove() resolved only a buyer, so an organizer got 403

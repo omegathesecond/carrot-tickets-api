@@ -12,7 +12,7 @@ describe('backfillUpdateHashtags', () => {
     authorType: 'buyer' as const,
     authorId: new mongoose.Types.ObjectId(),
     kind: 'image' as const,
-    media: { rawKey: 'updates/raw/1.jpg', status: 'ready' as const },
+    media: [{ rawKey: 'updates/raw/1.jpg', status: 'ready' as const }],
   };
 
   it('derives hashtags per-doc from caption for updates missing/empty hashtags', async () => {

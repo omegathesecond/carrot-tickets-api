@@ -9,7 +9,7 @@ export interface IUpdate extends Document {
   caption: string;
   hashtags: string[];
   eventId?: Types.ObjectId;
-  media: UpdateMedia;
+  media: UpdateMedia[];
   likeCount: number;
   saveCount: number;
   shareCount: number;
@@ -29,7 +29,14 @@ const updateSchema = new Schema<IUpdate>({
   caption: { type: String, default: '', maxlength: 500 },
   hashtags: { type: [String], default: [], index: true },
   eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
-  media: { type: mediaSchema, required: true },
+  media: {
+    type: [mediaSchema],
+    required: true,
+    validate: {
+      validator: (v: unknown[]) => Array.isArray(v) && v.length >= 1 && v.length <= 5,
+      message: 'media must have between 1 and 5 items',
+    },
+  },
   likeCount: { type: Number, default: 0 },
   saveCount: { type: Number, default: 0 },
   shareCount: { type: Number, default: 0 },

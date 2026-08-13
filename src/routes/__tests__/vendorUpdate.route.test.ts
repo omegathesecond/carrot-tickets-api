@@ -79,7 +79,7 @@ describe('POST /api/tickets/updates/:id/finalize (vendor)', () => {
       authorId,
       kind: 'image',
       caption: 'x',
-      media: { rawKey: 'updates/raw/1-a.jpg', status: 'processing' },
+      media: [{ rawKey: 'updates/raw/1-a.jpg', status: 'processing' }],
     });
 
   it('finalizes the vendor own update', async () => {
@@ -89,7 +89,7 @@ describe('POST /api/tickets/updates/:id/finalize (vendor)', () => {
       .post(`/api/tickets/updates/${update.id}/finalize`)
       .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
       .expect(200);
-    expect(res.body.data.media.status).toBe('ready');
+    expect(res.body.data.media[0].status).toBe('ready');
   });
 
   it('forbids finalizing another vendor\'s update', async () => {

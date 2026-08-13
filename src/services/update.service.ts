@@ -29,7 +29,7 @@ export async function createUpdate(input: CreateInput): Promise<{ update: IUpdat
     caption: input.caption ?? '',
     hashtags: extractHashtags(input.caption),
     eventId: input.eventId,
-    media: { rawKey, status: 'processing' },
+    media: [{ rawKey, status: 'processing' }],
   });
   return { update, uploadUrl };
 }
@@ -38,13 +38,17 @@ export async function finalizeUpdate(id: string): Promise<IUpdate> {
   const update = await Update.findById(id);
   if (!update) throw new Error('Update not found');
   if (update.kind === 'image') {
-    update.media.image = { url: updatesR2.publicUrl(update.media.rawKey), width: 0, height: 0 };
-    update.media.status = 'ready';
+    for (const item of update.media) {
+      item.image = { url: updatesR2.publicUrl(item.rawKey), width: 0, height: 0 };
+      item.status = 'ready';
+    }
     await update.save();
     return update;
   }
-  update.media.processingStartedAt = new Date();
-  update.media.status = 'processing';
+  const video = update.media[0]; // videos are always a single item
+  if (!video) throw new Error('Update has no media');
+  video.processingStartedAt = new Date();
+  video.status = 'processing';
   await update.save();
   // fire-and-forget; durability comes from reconcileStuckUpdates (Task 8)
   triggerTranscode(update).catch((err) => console.error('triggerTranscode failed:', err?.message));

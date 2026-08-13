@@ -650,7 +650,7 @@ export class PublicController {
           ])
         : [];
       const thumbByTag = new Map<string, string | null>(
-        thumbAgg.map((row: any) => [row._id as string, row.media?.image?.url ?? row.media?.video?.poster ?? null]),
+        thumbAgg.map((row: any) => [row._id as string, row.media?.[0]?.image?.url ?? row.media?.[0]?.video?.poster ?? null]),
       );
 
       const trending = agg.map((row: any, index: number) => ({

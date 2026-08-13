@@ -38,9 +38,9 @@ describe('GET /api/public/feed?category=', () => {
     const techEvent = await Event.create({ ...common(), name: 'TechEvt', category: 'Tech' });
     const media = { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } };
 
-    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'music update', media, eventId: musicEvent._id });
-    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'tech update', media, eventId: techEvent._id });
-    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'no event update', media });
+    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'music update', media: [media], eventId: musicEvent._id });
+    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'tech update', media: [media], eventId: techEvent._id });
+    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'no event update', media: [media] });
 
     const res = await request(app).get('/api/public/feed?tab=for-you&category=Music').expect(200);
     const captions = res.body.data.items.filter((s: any) => s.type === 'update').map((s: any) => s.caption);

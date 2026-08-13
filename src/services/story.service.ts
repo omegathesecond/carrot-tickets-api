@@ -78,7 +78,10 @@ export async function finalizeStory(id: string): Promise<IStory> {
   await story.save();
   // fire-and-forget, same as finalizeUpdate — no reconcile sweep exists for
   // Stories yet (out of scope for this build; see report).
-  triggerTranscode(story).catch((err: any) => console.error('triggerTranscode (story) failed:', err?.message));
+  // Story.media stays a single embedded doc (unlike Update.media, now an
+  // array — see @models/update.model), so it's wrapped here to satisfy
+  // Transcodable's array shape without changing StoryMedia's cardinality.
+  triggerTranscode({ id: story.id, media: [{ rawKey: story.media.rawKey }] }).catch((err: any) => console.error('triggerTranscode (story) failed:', err?.message));
   return story;
 }
 

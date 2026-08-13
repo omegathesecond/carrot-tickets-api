@@ -25,8 +25,9 @@ describe('update.service', () => {
       authorType: 'buyer', authorId: buyerId, kind: 'video', caption: 'hi', ext: 'mp4', contentType: 'video/mp4',
     });
     expect(uploadUrl).toContain('https://r2.example/put');
-    expect(update.media.status).toBe('processing');
-    expect(update.media.rawKey).toBe('updates/raw/1-abc.mp4');
+    expect(update.media).toHaveLength(1);
+    expect(update.media[0]!.status).toBe('processing');
+    expect(update.media[0]!.rawKey).toBe('updates/raw/1-abc.mp4');
   });
 
   it('createUpdate extracts hashtags from the caption', async () => {
@@ -46,16 +47,27 @@ describe('update.service', () => {
   it('finalizeUpdate(video) sets processingStartedAt and triggers transcode', async () => {
     const { update } = await createUpdate({ authorType: 'buyer', authorId: buyerId, kind: 'video', caption: '', ext: 'mp4', contentType: 'video/mp4' });
     const out = await finalizeUpdate(update.id);
-    expect(out.media.status).toBe('processing');
-    expect(out.media.processingStartedAt).toBeInstanceOf(Date);
+    expect(out.media[0]!.status).toBe('processing');
+    expect(out.media[0]!.processingStartedAt).toBeInstanceOf(Date);
     expect(mockTriggerTranscode).toHaveBeenCalledTimes(1);
   });
 
   it('finalizeUpdate(image) marks ready immediately with an image url', async () => {
     const { update } = await createUpdate({ authorType: 'buyer', authorId: buyerId, kind: 'image', caption: '', ext: 'jpg', contentType: 'image/jpeg' });
     const out = await finalizeUpdate(update.id);
-    expect(out.media.status).toBe('ready');
-    expect(out.media.image?.url).toContain('https://cdn.carrottickets.com/updates/raw/1-abc.jpg');
+    expect(out.media[0]!.status).toBe('ready');
+    expect(out.media[0]!.image?.url).toContain('https://cdn.carrottickets.com/updates/raw/1-abc.jpg');
     expect(mockTriggerTranscode).not.toHaveBeenCalled();
+  });
+
+  it('finalize sets every photo item ready with a public url', async () => {
+    const { update } = await createUpdate({
+      authorType: 'buyer', authorId: buyerId,
+      kind: 'image', caption: 'hi', ext: 'jpg', contentType: 'image/jpeg',
+    });
+    const done = await finalizeUpdate(update.id);
+    expect(done.media).toHaveLength(1);
+    expect(done.media[0]!.status).toBe('ready');
+    expect(done.media[0]!.image?.url).toContain(done.media[0]!.rawKey);
   });
 });

@@ -11,7 +11,7 @@ import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.i
 import mongoose from 'mongoose';
 
 async function seedReadyUpdate(caption: string) {
-  return Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption, media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } } });
+  return Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption, media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }] });
 }
 async function seedEvent(name: string, status: EventStatus = EventStatus.PUBLISHED) {
   const vendor = await Vendor.create({ businessName: 'Org ' + name, password: 'password123', slug: 'org-' + name.toLowerCase() });
@@ -46,7 +46,7 @@ describe('feed.service getFeed', () => {
   });
 
   it('excludes non-ready updates from the feed', async () => {
-    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'video', caption: 'processing', media: { rawKey: 'k', status: 'processing' } });
+    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'video', caption: 'processing', media: [{ rawKey: 'k', status: 'processing' }] });
     const { items } = await getFeed({ tab: 'for-you', limit: 8 });
     expect(items.find((i) => i.type === 'update')).toBeUndefined();
   });
@@ -98,7 +98,7 @@ describe('feed.service getFeed', () => {
 
     const orgUpdate = await Update.create({
       authorType: 'vendor', authorId: vendor._id, kind: 'image', caption: 'org update',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
     // Without a follow, the following tab must NOT surface the organizer's update.
@@ -119,7 +119,7 @@ describe('feed.service getFeed', () => {
 
     const orgUpdate = await Update.create({
       authorType: 'vendor', authorId: followedOrg._id, kind: 'image', caption: 'org update for vendor actor',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
     // A buyer-typed edge that happens to reuse the viewer vendor's id value must NOT

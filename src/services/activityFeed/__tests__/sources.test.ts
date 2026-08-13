@@ -25,7 +25,7 @@ async function seedEvent(name: string, status: EventStatus = EventStatus.PUBLISH
 async function seedPost(authorId: any, authorType: 'buyer' | 'vendor' = 'vendor') {
   return Update.create({
     authorType, authorId, kind: 'image', caption: 'hi',
-    media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+    media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
   });
 }
 
@@ -93,7 +93,7 @@ describe('activity feed sources', () => {
     const ok = await seedPost(vendor._id);
     const pending = await Update.create({
       authorType: 'vendor', authorId: vendor._id, kind: 'video', caption: '',
-      media: { rawKey: 'k2', status: 'processing' },
+      media: [{ rawKey: 'k2', status: 'processing' }],
     });
 
     const { candidates: rows } = await postCandidates({ limit: 20 });

@@ -15,7 +15,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
     const u = await Update.create({
       authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),
-      kind: 'image', caption: 'x', media: { rawKey: 'k', status: 'ready' }, status: 'active',
+      kind: 'image', caption: 'x', media: [{ rawKey: 'k', status: 'ready' }], status: 'active',
     });
     await toggleReaction(u.id, { type: 'vendor', id: vendorId }, 'like');
 
@@ -36,7 +36,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
     const vendorId = new mongoose.Types.ObjectId().toHexString();
     const u = await Update.create({
       authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'mine',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
     const res = await request(app)
@@ -55,7 +55,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
     const viewer = new mongoose.Types.ObjectId().toHexString();
     const u = await Update.create({
       authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
     });
 
     const res = await request(app)

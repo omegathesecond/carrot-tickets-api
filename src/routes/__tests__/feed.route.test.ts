@@ -12,7 +12,7 @@ describe('GET /api/public/feed', () => {
   afterAll(disconnectTestDb);
 
   it('returns items array and nextCursor (no auth required)', async () => {
-    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'hi', media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } } });
+    await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'hi', media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }] });
     const res = await request(app).get('/api/public/feed?tab=for-you').expect(200);
     expect(Array.isArray(res.body.data.items)).toBe(true);
     expect(res.body.data).toHaveProperty('nextCursor');

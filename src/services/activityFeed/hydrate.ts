@@ -94,7 +94,7 @@ export async function hydrate(candidates: ActivityCandidate[]): Promise<Activity
       case 'post': {
         const p = postById.get(ref.id);
         if (!p) return null;
-        const media: any = (p as any).media ?? {};
+        const media: any = (p as any).media?.[0] ?? {};
         // image.url for photo posts; video.poster (the model's field name —
         // NOT thumbnailUrl) for video posts.
         return {

@@ -46,7 +46,7 @@ describe('hydrate', () => {
     const vendor = await Vendor.create({ businessName: 'King Derby', password: 'password123', slug: 'king-derby', logoUrl: 'https://cdn/l.png' });
     const post = await Update.create({
       authorType: 'vendor', authorId: vendor._id, kind: 'image', caption: '',
-      media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn/i.jpg', width: 1, height: 1 } },
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'https://cdn/i.jpg', width: 1, height: 1 } }],
     });
 
     const [item] = await hydrate([{

@@ -7,7 +7,7 @@ import { Update } from '@models/update.model';
 
 const seedReadyUpdate = () => Update.create({
   authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),
-  kind: 'image', caption: 'x', media: { rawKey: 'k', status: 'ready' }, status: 'active',
+  kind: 'image', caption: 'x', media: [{ rawKey: 'k', status: 'ready' }], status: 'active',
 });
 
 describe('POST /api/tickets/updates/:id/like|save (vendor)', () => {

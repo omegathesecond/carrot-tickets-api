@@ -7,7 +7,7 @@ import type { SocialActor } from '@utils/socialActor.util';
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn(), reconcileStuckUpdates: jest.fn() }));
 
 async function seedUpdate() {
-  return Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: '', media: { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } } });
+  return Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: '', media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }] });
 }
 
 describe('update reactions', () => {

@@ -15,7 +15,7 @@ describe('vendor reactions end-to-end via feed + getOne', () => {
     const token = `Bearer ${signVendorToken(vendorId)}`;
     const u = await Update.create({
       authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),
-      kind: 'image', caption: 'x', media: { rawKey: 'k', status: 'ready' }, status: 'active',
+      kind: 'image', caption: 'x', media: [{ rawKey: 'k', status: 'ready' }], status: 'active',
     });
 
     await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', token).expect(200);

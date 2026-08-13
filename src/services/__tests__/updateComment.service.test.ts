@@ -28,7 +28,7 @@ async function seedPost(author: SocialActor) {
     authorId: author.id,
     kind: 'image',
     caption: 'hello',
-    media: { rawKey: 'raw/x.jpg', status: 'ready', image: { url: 'https://cdn/x.jpg', width: 1, height: 1 } },
+    media: [{ rawKey: 'raw/x.jpg', status: 'ready', image: { url: 'https://cdn/x.jpg', width: 1, height: 1 } }],
   });
 }
 

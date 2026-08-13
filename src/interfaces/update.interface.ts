@@ -23,3 +23,6 @@ export interface UpdateMedia {
   error?: string;
   processingStartedAt?: Date;   // for the reconcile sweep
 }
+// Update.media is a 1..5 item carousel (photos-only; a video post is always
+// a length-1 array — see update.model.ts's validator). Story.media stays a
+// single embedded UpdateMedia — do not change StoryMedia's cardinality.

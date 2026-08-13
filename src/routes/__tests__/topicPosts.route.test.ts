@@ -17,7 +17,7 @@ function makeUpdate(hashtags: string[], overrides: Record<string, any> = {}) {
     kind: 'image',
     caption: 'x',
     hashtags,
-    media: readyImageMedia,
+    media: [readyImageMedia],
     ...overrides,
   };
 }
@@ -83,7 +83,7 @@ describe('GET /api/public/topics/:tag/posts', () => {
   });
 
   it('excludes a post whose media is not ready', async () => {
-    await Update.create(makeUpdate(['music'], { media: processingMedia }));
+    await Update.create(makeUpdate(['music'], { media: [processingMedia] }));
     await Update.create(makeUpdate(['music']));
 
     const res = await request(app).get('/api/public/topics/music/posts');

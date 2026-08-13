@@ -17,7 +17,7 @@ describe('GET /api/social/me/saved', () => {
   it('returns the buyer\'s saved updates and saved (bookmarked) events', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
     const author = await Buyer.create({ phone: '+26878000009', password: 'secret1', name: 'Author', username: 'author9' });
-    const u = await Update.create({ authorType: 'buyer', authorId: author._id, kind: 'image', caption: 'saved post', media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn/i.jpg', width: 1, height: 1 } } });
+    const u = await Update.create({ authorType: 'buyer', authorId: author._id, kind: 'image', caption: 'saved post', media: [{ rawKey: 'k', status: 'ready', image: { url: 'https://cdn/i.jpg', width: 1, height: 1 } }] });
     await UpdateReaction.create({ updateId: u._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     const e = await Event.create({ vendorId: new mongoose.Types.ObjectId(), name: 'Saved Event', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
     await EventReaction.create({ eventId: e._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });

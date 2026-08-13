@@ -35,11 +35,11 @@ async function transcode(updateId: string, rawKey: string): Promise<void> {
     await putObject(k480, await fs.readFile(p480), 'video/mp4');
     await putObject(kp, await fs.readFile(pj), 'image/jpeg');
     await Update.updateOne({ _id: updateId }, { $set: {
-      'media.status': 'ready',
-      'media.video': { url: publicUrl(k720), url480: publicUrl(k480), poster: publicUrl(kp), width, height, durationSec },
+      'media.0.status': 'ready',
+      'media.0.video': { url: publicUrl(k720), url480: publicUrl(k480), poster: publicUrl(kp), width, height, durationSec },
     } });
   } catch (err: any) {
-    await Update.updateOne({ _id: updateId }, { $set: { 'media.status': 'failed', 'media.error': err?.message?.slice(0, 400) || 'transcode failed' } });
+    await Update.updateOne({ _id: updateId }, { $set: { 'media.0.status': 'failed', 'media.0.error': err?.message?.slice(0, 400) || 'transcode failed' } });
     throw err;
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
