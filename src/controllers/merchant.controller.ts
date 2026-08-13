@@ -5,6 +5,7 @@ import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { Wallet } from '@models/wallet.model';
 import { MerchantService, WalletDeclinedError } from '@services/merchant.service';
+import { StockDeclinedError } from '@services/stock.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
 import { MerchantToken } from '@interfaces/merchant.interface';
@@ -47,12 +48,11 @@ export class MerchantController {
       if (!wallet) return ApiResponseUtil.notFound(res, 'No wallet for that band');
 
       const result = await MerchantService.charge({
-        merchantId,
-        eventId,
-        walletId: String(wallet._id),
-        bandUid,
-        amount: value.amount,
+        merchantId, eventId, walletId: String(wallet._id), bandUid,
         clientTxnId: value.clientTxnId,
+        ...(value.amount != null ? { amount: value.amount } : {}),
+        ...(value.items ? { items: value.items } : {}),
+        ...(value.staffName ? { staffName: value.staffName } : {}),
       });
 
       return ApiResponseUtil.success(res, {
@@ -60,8 +60,19 @@ export class MerchantController {
         amount: result.charge.amount,
         fee: result.charge.fee,
         merchantNet: result.charge.netAmount,
+        ...(result.charge.items ? { items: result.charge.items } : {}),
       });
     } catch (e: any) {
+      // DECLINE: an item line's stock couldn't cover the sale — 409, distinct
+      // from the 402 wallet decline below, so a POS client can tell "the
+      // customer's card is fine, we're out of this product" apart from "the
+      // customer can't pay." Checked before WalletDeclinedError only for
+      // readability — the two error classes never overlap on one throw.
+      if (e instanceof StockDeclinedError) {
+        return ApiResponseUtil.error(res, `Out of stock`, 409, {
+          reason: e.reason, productId: e.productId, available: e.available,
+        });
+      }
       // DECLINE: insufficient balance / inactive wallet — 402, never 4xx/5xx,
       // so a POS client can distinguish "try a different card/band" from a
       // genuine request error. Goes through the standard ApiResponseUtil
@@ -76,7 +87,7 @@ export class MerchantController {
         });
       }
       const msg = e?.message || 'Charge failed';
-      const status = /not found|cashless|amount|not active/i.test(msg) ? 400 : 500;
+      const status = /not found|cashless|amount|not active|exactly one|products? not found|positive integer/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);
     }
   }
