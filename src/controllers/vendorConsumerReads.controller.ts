@@ -5,8 +5,12 @@ import { resolveActorFromRequest, type SocialActor } from '@utils/socialActor.ut
 import { SuggestionsService } from '@services/suggestions.service';
 import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
+import { FollowService } from '@services/follow.service';
 import { buildEventCards } from '@services/eventCards.service';
 import { Vendor } from '@models/vendor.model';
+import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
+import { notEndedFilter } from '@utils/eventVisibility.util';
 import { locationSchema } from '@validators/community.validator';
 import { parseSeed } from '@utils/seededShuffle.util';
 
@@ -153,6 +157,32 @@ export class VendorConsumerReadsController {
       return ApiResponseUtil.success(res, { ok: true }, 'Location removed');
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to remove location');
+    }
+  }
+
+  /**
+   * GET /api/tickets/social/me/following/events — upcoming published events by
+   * organizers this brand follows. Vendor twin of
+   * ConsumerReadsController.myFollowingEvents, and the endpoint behind the
+   * "Following" tab on the organizer Home feed. Follow rows carry a
+   * followerType, so the same query serves a brand follower once it is passed
+   * ('vendor' instead of the default 'buyer').
+   */
+  static async followingEvents(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = await VendorConsumerReadsController.vendorActor(req);
+      if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+      const vendorIds = await FollowService.followingIds(actor.id, 'organizer', 'vendor');
+      let events: any[] = [];
+      if (vendorIds.length) {
+        const rows = await Event.find({ vendorId: { $in: vendorIds }, status: EventStatus.PUBLISHED, ...notEndedFilter() })
+          .sort({ eventDate: 1 })
+          .select('_id');
+        events = await buildEventCards(rows.map((e) => String(e._id)), actor);
+      }
+      return ApiResponseUtil.success(res, { events });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load followed events');
     }
   }
 }

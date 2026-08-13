@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
 import { VendorSocialController } from '@controllers/vendorSocial.controller';
 import { VendorConsumerReadsController } from '@controllers/vendorConsumerReads.controller';
+import { StoryController } from '@controllers/story.controller';
 
 // Vendor (organizer brand) social-graph endpoints. Mounted at
 // /api/tickets/social — see src/app.ts, placed before the broader
@@ -31,5 +32,20 @@ router.get('/suggestions/people', authenticateTickets, VendorConsumerReadsContro
 router.get('/suggestions/organizers', authenticateTickets, VendorConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateTickets, VendorConsumerReadsController.recommendations);
 router.get('/nearby/people', authenticateTickets, VendorConsumerReadsController.nearbyPeople);
+// The "Following" tab of the organizer Home feed — events by the organizers
+// this brand follows. No collision with the '/me/following' account list
+// above: that path is a literal with no param or wildcard, so it never
+// captures this longer one.
+router.get('/me/following/events', authenticateTickets, VendorConsumerReadsController.followingEvents);
+
+// Brand status/stories — the organizer Home rail. Same StoryController as the
+// buyer mount in @routes/social.route, entered through the vendor twins so the
+// actor is the brand (Story.authorType 'vendor'); story.service was
+// actor-shaped already, so nothing below the controller changed.
+router.post('/stories', authenticateTickets, StoryController.createAsVendor);
+router.post('/stories/:id/finalize', authenticateTickets, StoryController.finalizeAsVendor);
+router.get('/stories', authenticateTickets, StoryController.listAsVendor);
+router.post('/stories/:id/seen', authenticateTickets, StoryController.seenAsVendor);
+router.get('/stories/:id/viewers', authenticateTickets, StoryController.viewersAsVendor);
 
 export default router;

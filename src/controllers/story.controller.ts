@@ -4,6 +4,7 @@ import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { createStory, finalizeStory, listForViewer, listViewers, markSeen } from '@services/story.service';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
+import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import { Story } from '@models/story.model';
 import type { StoryKind } from '@interfaces/story.interface';
 
@@ -11,26 +12,59 @@ const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
- * Buyer-only ephemeral (24h) media posts. All routes mount behind
- * authenticateBuyer (see @routes/social.route), so the actor is always
- * `{ type: 'buyer', id }` — mirrors @controllers/update.controller's
- * buyer-post path.
+ * Ephemeral (24h) media posts, for BOTH actors: a buyer (behind
+ * authenticateBuyer at /api/social/stories) and an organizer brand (behind
+ * authenticateTickets at /api/tickets/social/stories) — see
+ * @routes/social.route and @routes/vendorSocial.route. The split lives only at
+ * the entry point, because the two mounts use different auth middleware; every
+ * body below is shared and takes a SocialActor, exactly like
+ * @controllers/update.controller's create/createAsVendor pair.
+ *
+ * story.service was actor-shaped from the start (Story.authorType enums
+ * 'buyer' | 'vendor'), so brand stories needed no service or model change —
+ * only these vendor entry points.
  */
 export class StoryController {
+  /** The vendor actor for a tickets session, or null for anything else.
+   *  authenticateTickets does NOT reject buyer tokens (only authenticateBuyer
+   *  checks userType) — a buyer token simply carries no vendorId, so it lands
+   *  here as null and 401s. Mirrors UpdateController.createAsVendor. */
+  private static vendorActor(req: Request): SocialActor | null {
+    const vendorId = (req as any).ticketsUser?.vendorId;
+    return vendorId ? { type: 'vendor', id: String(vendorId) } : null;
+  }
+
   static async create(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
     try {
       // A suspended buyer's community access is revoked platform-wide — a
       // Story is world-readable content, so it's gated the same as
-      // follow/review/message (see @utils/socialSuspension.util).
+      // follow/review/message (see @utils/socialSuspension.util). There is no
+      // vendor twin of this check because suspension is a buyer-only concept
+      // (same as vendor Updates, which carry no suspension gate either).
       assertNotSuspended(buyer);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to create story');
+    }
+    return StoryController.createFor({ type: 'buyer', id: String(buyer._id) }, req, res);
+  }
+
+  /** POST /api/tickets/social/stories — a brand posts a status. */
+  static async createAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.createFor(actor, req, res);
+  }
+
+  private static async createFor(actor: SocialActor, req: Request, res: Response): Promise<any> {
+    try {
       const { kind, ext, contentType } = req.body || {};
       if (kind !== 'video' && kind !== 'image') return ApiResponseUtil.validationError(res, 'kind must be video or image');
       const allow = kind === 'video' ? VIDEO_TYPES : IMAGE_TYPES;
       if (!allow.includes(contentType)) return ApiResponseUtil.validationError(res, `Invalid contentType for ${kind}`);
       const { story, uploadUrl } = await createStory({
-        actor: { type: 'buyer', id: String(buyer._id) },
+        actor,
         kind: kind as StoryKind,
         ext: String(ext || 'bin'),
         contentType,
@@ -44,11 +78,24 @@ export class StoryController {
   static async finalize(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.finalizeFor({ type: 'buyer', id: String(buyer._id) }, req, res);
+  }
+
+  /** POST /api/tickets/social/stories/:id/finalize */
+  static async finalizeAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.finalizeFor(actor, req, res);
+  }
+
+  private static async finalizeFor(actor: SocialActor, req: Request, res: Response): Promise<any> {
     const id = req.params['id'] as string;
     if (!HEX24.test(id)) return ApiResponseUtil.validationError(res, 'Invalid story id');
     const existing = await Story.findById(id).select('authorType authorId');
     if (!existing) return ApiResponseUtil.notFound(res, 'Story not found');
-    if (existing.authorType !== 'buyer' || String(existing.authorId) !== String(buyer._id)) {
+    // authorType is load-bearing, not cosmetic: an id-only comparison would let
+    // a buyer whose _id collided with a vendor's finalize that brand's story.
+    if (!isActorAuthorOf(existing.authorType, existing.authorId, actor)) {
       return ApiResponseUtil.forbidden(res, 'Not your story');
     }
     try {
@@ -62,8 +109,20 @@ export class StoryController {
   static async list(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.listFor({ type: 'buyer', id: String(buyer._id) }, res);
+  }
+
+  /** GET /api/tickets/social/stories — the brand's own status plus those of
+   *  the accounts it follows (the organizer Home rail). */
+  static async listAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.listFor(actor, res);
+  }
+
+  private static async listFor(actor: SocialActor, res: Response): Promise<any> {
     try {
-      const stories = await listForViewer({ type: 'buyer', id: String(buyer._id) });
+      const stories = await listForViewer(actor);
       return ApiResponseUtil.success(res, { stories });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load stories');
@@ -73,10 +132,21 @@ export class StoryController {
   static async seen(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.seenFor({ type: 'buyer', id: String(buyer._id) }, req, res);
+  }
+
+  /** POST /api/tickets/social/stories/:id/seen */
+  static async seenAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.seenFor(actor, req, res);
+  }
+
+  private static async seenFor(actor: SocialActor, req: Request, res: Response): Promise<any> {
     const id = req.params['id'] as string;
     if (!HEX24.test(id)) return ApiResponseUtil.validationError(res, 'Invalid story id');
     try {
-      await markSeen(id, { type: 'buyer', id: String(buyer._id) });
+      await markSeen(id, actor);
       return ApiResponseUtil.success(res, { ok: true });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to mark story seen');
@@ -91,10 +161,21 @@ export class StoryController {
   static async viewers(req: Request, res: Response): Promise<any> {
     const buyer = await resolveBuyerFromRequest(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.viewersFor({ type: 'buyer', id: String(buyer._id) }, req, res);
+  }
+
+  /** GET /api/tickets/social/stories/:id/viewers */
+  static async viewersAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.viewersFor(actor, req, res);
+  }
+
+  private static async viewersFor(actor: SocialActor, req: Request, res: Response): Promise<any> {
     const id = req.params['id'] as string;
     if (!HEX24.test(id)) return ApiResponseUtil.validationError(res, 'Invalid story id');
     try {
-      const viewers = await listViewers(id, { type: 'buyer', id: String(buyer._id) });
+      const viewers = await listViewers(id, actor);
       return ApiResponseUtil.success(res, { viewers, count: viewers.length });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load story viewers');
