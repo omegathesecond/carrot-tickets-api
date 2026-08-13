@@ -121,15 +121,24 @@ export class DmThreadService {
     if (!consumeToken(`msg:v:${vendorId}`)) {
       throw new HttpError(429, 'You are doing that too quickly — slow down');
     }
-    const vendorPairKey = `v:${vendorId}:${bid}`;
+    return DmThreadService.findOrCreateBrandBuyerThread(vendorId, bid);
+  }
+
+  /** The brand↔buyer thread shape, shared by BOTH open directions
+   *  (brand-initiated openVendorThread + buyer-initiated openBuyerBrandThread):
+   *  the buyer sits in `participants`, the brand in `vendorParticipantId`,
+   *  deduped by the SAME vendorPairKey so the two directions collapse to one
+   *  conversation rather than forking into two. */
+  private static async findOrCreateBrandBuyerThread(vendorId: string, buyerId: string): Promise<IDmThread> {
+    const vendorPairKey = `v:${vendorId}:${buyerId}`;
     const existing = await DmThread.findOne({ vendorPairKey });
     if (existing) return existing;
     try {
       return await DmThread.create({
-        participants: [buyer._id],
+        participants: [new mongoose.Types.ObjectId(buyerId)],
         vendorParticipantId: new mongoose.Types.ObjectId(vendorId),
         isGroup: false,
-        createdBy: buyer._id, // the buyer party (createdBy ref is Buyer)
+        createdBy: new mongoose.Types.ObjectId(buyerId), // createdBy ref is Buyer
         vendorPairKey,
       });
     } catch (err: any) {
@@ -139,6 +148,29 @@ export class DmThreadService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Buyer-initiated 1:1 with a brand — the mirror of openVendorThread, producing
+   * the identical thread shape and the SAME vendorPairKey so a buyer-initiated
+   * and a brand-initiated conversation dedupe to one thread. Block + suspension
+   * gated; deliberately NO friend/meetup gate — a brand isn't a buyer, and
+   * buyer→brand DMs are open (the public organizer page is the entry point).
+   */
+  static async openBuyerBrandThread(buyer: IBuyer, vendorId: string): Promise<IDmThread> {
+    assertNotSuspended(buyer);
+    const vid = String(vendorId).toLowerCase();
+    if (!HEX24.test(vid)) throw new HttpError(400, 'Invalid organizer id');
+    const buyerId = String(buyer._id);
+    const vendor = await Vendor.findById(vid).select('isActive');
+    if (!vendor || !vendor.isActive) throw new HttpError(404, 'Organizer not found');
+    if (await BlockService.isBlockedEitherWay(vid, buyerId)) {
+      throw new HttpError(403, 'You cannot message this organizer');
+    }
+    if (!consumeToken(`msg:${buyerId}`)) {
+      throw new HttpError(429, 'You are doing that too quickly — slow down');
+    }
+    return DmThreadService.findOrCreateBrandBuyerThread(vid, buyerId);
   }
 
   /** 404 on unknown/malformed/non-participant — never leak thread existence.

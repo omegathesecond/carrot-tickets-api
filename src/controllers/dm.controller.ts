@@ -4,7 +4,7 @@ import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { ensureUsername } from '@utils/username.util';
 import { DmThreadService } from '@services/dmThread.service';
 import { MessageService } from '@services/message.service';
-import { createThreadSchema, sendMessageSchema } from '@validators/community.validator';
+import { createThreadSchema, openBrandThreadSchema, sendMessageSchema } from '@validators/community.validator';
 import { failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 
 export class DmController {
@@ -29,6 +29,21 @@ export class DmController {
       const { error, value } = createThreadSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
       const thread = await DmThreadService.openThread(buyer, value.participantIds);
+      const view = await DmThreadService.buildThreadView(thread, { type: 'buyer', id: String(buyer._id) });
+      return ApiResponseUtil.success(res, view, 'Conversation ready', 201);
+    } catch (error: any) {
+      return DmController.fail(res, error, 'Failed to open conversation');
+    }
+  }
+
+  /** POST /api/dm/brand-threads — a buyer opens (or reuses) a 1:1 with a brand. */
+  static async openBrandThread(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await DmController.requireBuyer(req, res);
+      if (!buyer) return;
+      const { error, value } = openBrandThreadSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+      const thread = await DmThreadService.openBuyerBrandThread(buyer, value.vendorId);
       const view = await DmThreadService.buildThreadView(thread, { type: 'buyer', id: String(buyer._id) });
       return ApiResponseUtil.success(res, view, 'Conversation ready', 201);
     } catch (error: any) {

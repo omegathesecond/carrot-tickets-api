@@ -6,6 +6,9 @@ import { MessageController } from '@controllers/message.controller';
 const router = Router();
 
 router.post('/threads', authenticateBuyer, DmController.openThread);
+// Buyer → brand 1:1 (the public organizer page's "Message" button). Deduped
+// with any brand-initiated thread via the shared vendorPairKey.
+router.post('/brand-threads', authenticateBuyer, DmController.openBrandThread);
 router.get('/threads', authenticateBuyer, DmController.listThreads);
 router.get('/threads/:threadId/messages', authenticateBuyer, DmController.listMessages);
 router.post('/threads/:threadId/messages', authenticateBuyer, DmController.sendMessage);
