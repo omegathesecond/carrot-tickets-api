@@ -15,6 +15,7 @@ import { CashierAdminController } from '@controllers/cashierAdmin.controller';
 import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
 import { StockAdminController } from '@controllers/stockAdmin.controller';
+import { StockReportController } from '@controllers/stockReport.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { AdminFeesController } from '@controllers/adminFees.controller';
@@ -514,6 +515,17 @@ router.post('/merchants/:id/reset-pin', requireTicketsPermission(TicketsPermissi
  */
 router.get('/events/:eventId/cashless/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.summary);
 router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.transactions);
+
+/**
+ * Cashless Stock Reporting (design 2026-08-13, Slice 4) — organiser read-only
+ * views over the stock journal: live board, reconciliation, event dashboard,
+ * movements audit. Stock figures are revenue-adjacent → VIEW_REVENUE; ownership
+ * (own cashless event only) enforced by the shared guard in the controller.
+ */
+router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
+router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
+router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
+router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.movements);
 
 /**
  * Cashless Stock/Inventory — organiser manages the product catalogue and
