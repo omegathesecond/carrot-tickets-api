@@ -8,8 +8,9 @@ import {
   waitForEvent,
   TestRealtime,
 } from './helpers';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
 import { Buyer, IBuyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
 import { Membership } from '@models/membership.model';
 import { MeetupRequest } from '@models/meetupRequest.model';
 import { CommunityService } from '@services/community.service';
@@ -89,6 +90,25 @@ describe('dm handlers', () => {
     ]);
     expect(live.id).toBe(sent.id);
     expect(live.dmThreadId).toBe(threadId);
+  }, 20000);
+
+  it('a vendor joins a brand↔brand thread and receives message:new live', async () => {
+    const va = await Vendor.create({ businessName: 'Alpha Ev', email: 'va@example.com', phoneNumber: '+26878004001', password: 'secret123' });
+    const vb = await Vendor.create({ businessName: 'Beta Sh', email: 'vb@example.com', phoneNumber: '+26878004002', password: 'secret123' });
+    const thread = await DmThreadService.openBrandToBrandThread(String(va._id), String(vb._id));
+    const threadId = String(thread._id);
+
+    const bClient = await connectClient(rt.port, signVendorToken(String(vb._id)));
+    clients.push(bClient);
+    expect(await joinDm(bClient, threadId)).toEqual({ ok: true });
+
+    const [live, sent] = await Promise.all([
+      waitForEvent<any>(bClient, 'message:new', 8000),
+      MessageService.sendDmMessage(threadId, { type: 'vendor', id: String(va._id) }, { body: 'brand to brand live' }),
+    ]);
+    expect(live.id).toBe(sent.id);
+    expect(live.dmThreadId).toBe(threadId);
+    expect(live.sender.id).toBe(String(va._id)); // the OTHER brand, told apart by id
   }, 20000);
 
   it('dm:typing forwards to other room members; dropped when not in room', async () => {

@@ -173,6 +173,50 @@ export class DmThreadService {
     return DmThreadService.findOrCreateBrandBuyerThread(vid, buyerId);
   }
 
+  /**
+   * Brand↔brand 1:1 — a vendor opens (or reuses) a conversation with another
+   * brand. No buyer party: both vendors live in `vendorParticipantIds`, deduped
+   * order-independently by `brandPairKey`. Block-gated; a brand isn't suspended.
+   */
+  static async openBrandToBrandThread(actingVendorId: string, targetVendorId: string): Promise<IDmThread> {
+    const a = String(actingVendorId).toLowerCase();
+    const b = String(targetVendorId).toLowerCase();
+    if (!HEX24.test(b)) throw new HttpError(400, 'Invalid organizer id');
+    if (a === b) throw new HttpError(400, 'You cannot message yourself');
+    const target = await Vendor.findById(b).select('isActive');
+    if (!target || !target.isActive) throw new HttpError(404, 'Organizer not found');
+    if (await BlockService.isBlockedEitherWay(a, b)) {
+      throw new HttpError(403, 'You cannot message this organizer');
+    }
+    if (!consumeToken(`msg:v:${a}`)) {
+      throw new HttpError(429, 'You are doing that too quickly — slow down');
+    }
+    return DmThreadService.findOrCreateBrandBrandThread(a, b);
+  }
+
+  /** Order-independent brand↔brand thread: `brandPairKey = vv:<lo>:<hi>` dedupes
+   *  no matter which brand opened it. `participants` is empty (no buyer). */
+  private static async findOrCreateBrandBrandThread(vendorIdA: string, vendorIdB: string): Promise<IDmThread> {
+    const [lo, hi] = [vendorIdA, vendorIdB].sort();
+    const brandPairKey = `vv:${lo}:${hi}`;
+    const existing = await DmThread.findOne({ brandPairKey });
+    if (existing) return existing;
+    try {
+      return await DmThread.create({
+        participants: [],
+        vendorParticipantIds: [new mongoose.Types.ObjectId(lo!), new mongoose.Types.ObjectId(hi!)],
+        isGroup: false,
+        brandPairKey,
+      });
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        const winner = await DmThread.findOne({ brandPairKey });
+        if (winner) return winner;
+      }
+      throw err;
+    }
+  }
+
   /** 404 on unknown/malformed/non-participant — never leak thread existence.
    *  Actor-aware: a buyer must be in `participants`; a vendor must be the
    *  thread's `vendorParticipantId`. */
@@ -183,7 +227,8 @@ export class DmThreadService {
     const isMember =
       actor.type === 'buyer'
         ? thread.participants.some((p) => String(p) === actor.id)
-        : String(thread.vendorParticipantId ?? '') === actor.id;
+        : String(thread.vendorParticipantId ?? '') === actor.id ||
+          (thread.vendorParticipantIds ?? []).some((v) => String(v) === actor.id);
     if (!isMember) throw new HttpError(404, 'Conversation not found');
     return thread;
   }
@@ -198,6 +243,13 @@ export class DmThreadService {
     if (actor.type === 'buyer' && thread.vendorParticipantId) {
       const v = await Vendor.findById(thread.vendorParticipantId).select('businessName logoUrl');
       if (v) organizer = { id: String(v._id), businessName: v.businessName, logoUrl: v.logoUrl ?? null };
+    } else if (actor.type === 'vendor' && thread.vendorParticipantIds?.length) {
+      // Brand↔brand: the counterparty is the OTHER vendor in the pair.
+      const otherId = thread.vendorParticipantIds.map(String).find((id) => id !== actor.id);
+      if (otherId) {
+        const v = await Vendor.findById(otherId).select('businessName logoUrl');
+        if (v) organizer = { id: String(v._id), businessName: v.businessName, logoUrl: v.logoUrl ?? null };
+      }
     }
     const since = thread.readState.get(actor.id) ?? thread.createdAt;
     const notMine =
@@ -222,7 +274,14 @@ export class DmThreadService {
     const query =
       actor.type === 'buyer'
         ? { participants: new mongoose.Types.ObjectId(actor.id) }
-        : { vendorParticipantId: new mongoose.Types.ObjectId(actor.id) };
+        : {
+            // A brand's threads: brand↔buyer (vendorParticipantId) + brand↔brand
+            // (vendorParticipantIds contains this brand).
+            $or: [
+              { vendorParticipantId: new mongoose.Types.ObjectId(actor.id) },
+              { vendorParticipantIds: new mongoose.Types.ObjectId(actor.id) },
+            ],
+          };
     const threads = await DmThread.find(query).sort({ lastMessageAt: -1 }).limit(50);
     return Promise.all(threads.map((t) => DmThreadService.buildThreadView(t, actor)));
   }
