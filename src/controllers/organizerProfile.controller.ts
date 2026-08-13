@@ -81,7 +81,7 @@ export class OrganizerProfileController {
       if (!vendor || !vendor.isActive) return ApiResponseUtil.error(res, 'Organizer not found', 404);
 
       const now = new Date();
-      const eventFields = '_id name eventDate venue';
+      const eventFields = '_id name eventDate venue posterUrl thumbnailUrl';
       // Two axes on the follow graph: this brand's FOLLOWERS are counted by
       // targetType 'organizer' (it's a follow target), while the brands/people
       // this brand FOLLOWS are counted by followerType 'vendor' (it's the
@@ -104,6 +104,7 @@ export class OrganizerProfileController {
         name: e.name,
         eventDate: e.eventDate,
         venue: e.venue ?? null,
+        posterUrl: e.posterUrl ?? e.thumbnailUrl ?? null,
       });
 
       return ApiResponseUtil.success(res, {
