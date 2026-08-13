@@ -29,7 +29,7 @@ export class ServicesService {
     const limit = Math.min(Math.max(opts.limit ?? 24, 1), 50);
     const query: Record<string, unknown> = { ...DIRECTORY_FILTER };
     if (opts.category) query['serviceCategory'] = opts.category;
-    if (opts.search) query['businessName'] = { $regex: opts.search.trim(), $options: 'i' };
+    if (opts.search) query['businessName'] = { $regex: opts.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
     if (opts.before && HEX24.test(opts.before)) query['_id'] = { $lt: opts.before };
 
     const docs = await Vendor.find(query)
