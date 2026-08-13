@@ -5,6 +5,7 @@ import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { signBuyerToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
+import { MeetupRequest } from '@models/meetupRequest.model';
 import { CommunityService } from '@services/community.service';
 import { BlockService } from '@services/block.service';
 import { DmThread } from '@models/dmThread.model';
@@ -20,6 +21,12 @@ async function seedWorld() {
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   await Membership.create({ buyerId: a._id, communityId: community._id });
   await Membership.create({ buyerId: b._id, communityId: community._id });
+  // assertCanDm now gates on connection (friend or accepted meetup), not
+  // community membership — make a/b DM-eligible so every openThread(authA, b)
+  // success path in this file keeps working. The `stranger`/`outsider`
+  // buyers created inside individual tests stay unconnected on purpose, so
+  // their negative-case assertions (403/404) still hold.
+  await MeetupRequest.create({ requesterId: a._id, targetId: b._id, status: 'accepted' });
   return { a, b, authA: `Bearer ${signBuyerToken(PHONE_A)}`, authB: `Bearer ${signBuyerToken(PHONE_B)}` };
 }
 
