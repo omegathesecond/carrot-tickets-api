@@ -1,4 +1,5 @@
 import { Document, Types } from 'mongoose';
+import { EventCurrency } from '@utils/currency.util';
 
 export enum TicketStatus {
   AVAILABLE = 'available',
@@ -41,6 +42,8 @@ export interface ITicket extends Document {
   // Ticket Details
   ticketType: string; // VIP, Regular, etc.
   price: number;
+  // Snapshot of the event's DISPLAY currency at mint time — see ticket.model.ts.
+  currency?: EventCurrency;
 
   // Ownership
   purchasedBy?: Types.ObjectId; // User ID (if from Keshless app)
@@ -88,6 +91,11 @@ export interface ITicketSale extends Document {
 
   // Payment
   totalAmount: number;
+  // DISPLAY currency snapshot (from event.currency) — what buyer/organizer see.
+  currency?: EventCurrency;
+  // Rail-native SETTLEMENT currency actually used (card→ZAR, else→SZL). See
+  // ticketSale.model.ts for the full explanation.
+  settlementCurrency?: EventCurrency;
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   walletTransactionId?: string; // Keshless transaction ID

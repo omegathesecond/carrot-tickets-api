@@ -67,6 +67,19 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     required: [true, 'Total amount is required'],
     min: [0, 'Total amount cannot be negative']
   },
+  // DISPLAY currency snapshot (from event.currency) — what buyer/organizer see.
+  currency: {
+    type: String,
+    enum: ['SZL', 'ZAR'],
+    default: 'SZL'
+  },
+  // Rail-native SETTLEMENT currency actually used (card→ZAR, else→SZL). May
+  // differ from `currency` at par (e.g. a ZAR event paid via MoMo settles SZL).
+  // Recorded for honest reconciliation; the verify guards are unchanged.
+  settlementCurrency: {
+    type: String,
+    enum: ['SZL', 'ZAR']
+  },
   paymentMethod: {
     type: String,
     enum: Object.values(PaymentMethod),

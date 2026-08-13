@@ -33,6 +33,13 @@ const ticketSchema = new Schema<ITicket>({
     required: [true, 'Price is required'],
     min: [0, 'Price cannot be negative']
   },
+  // Snapshot of the event's DISPLAY currency at mint time, so a printed stub /
+  // receipt renders the right symbol even if the organizer later changes it.
+  currency: {
+    type: String,
+    enum: ['SZL', 'ZAR'],
+    default: 'SZL'
+  },
 
   // Ownership
   purchasedBy: {

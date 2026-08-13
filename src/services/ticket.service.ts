@@ -20,6 +20,7 @@ import { resolveSaleResellerId } from '@utils/allocationAttribution.util';
 import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
 import { FollowService } from '@services/follow.service';
+import { EventCurrency, settlementCurrencyForMethod } from '@utils/currency.util';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -118,6 +119,7 @@ export class TicketService {
     customerEmail?: string;
     buyerId?: any;
     saleId?: any;
+    currency?: EventCurrency;
   }) {
     return new Ticket({
       eventId: p.eventId,
@@ -130,6 +132,7 @@ export class TicketService {
       // matches a "My Tickets" login that normalizes to "+26878422613".
       customerPhone: p.customerPhone ? normalizePhone(p.customerPhone) : p.customerPhone,
       status: TicketStatus.SOLD,
+      currency: p.currency ?? 'SZL',
       ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
       ...(p.buyerId ? { buyerId: p.buyerId } : {}),
       ...(p.saleId ? { saleId: p.saleId } : {}),
@@ -149,15 +152,20 @@ export class TicketService {
     paymentMethod: PaymentMethod;
     mappedSoldByType: SaleSoldByType;
     resellerCommissionPercent?: number;
-  }): Promise<SaleEconomics> {
+    displayCurrency: EventCurrency;
+  }): Promise<SaleEconomics & { currency: EventCurrency; settlementCurrency: EventCurrency }> {
     const cfg = await PaymentConfigService.get();
-    return computeSaleEconomics({
-      faceAmount: p.totalAmount,
-      paymentMethod: p.paymentMethod,
-      soldByType: p.mappedSoldByType,
-      resellerCommissionPercent: p.resellerCommissionPercent ?? 0,
-      platformFeePercent: cfg.platformFeePercent,
-    });
+    return {
+      ...computeSaleEconomics({
+        faceAmount: p.totalAmount,
+        paymentMethod: p.paymentMethod,
+        soldByType: p.mappedSoldByType,
+        resellerCommissionPercent: p.resellerCommissionPercent ?? 0,
+        platformFeePercent: cfg.platformFeePercent,
+      }),
+      currency: p.displayCurrency,
+      settlementCurrency: settlementCurrencyForMethod(p.paymentMethod),
+    };
   }
 
   /**
@@ -263,8 +271,10 @@ export class TicketService {
       // event in scope, so this is the ONLY place those paths get checked.
       // A missing event is left for checkTicketAvailability below to report —
       // guarding only when the event is found keeps this a no-op for that case.
-      const eventForGuard = await Event.findById(eventId).select('ticketing');
+      const eventForGuard = await Event.findById(eventId).select('ticketing currency');
       if (eventForGuard) assertCarrotTicketing(eventForGuard);
+      // Legacy-doc default only — every current event carries `currency`.
+      const displayCurrency: EventCurrency = eventForGuard?.currency ?? 'SZL';
 
       // Check ticket availability
       const availabilityCheck = await EventService.checkTicketAvailability(
@@ -327,6 +337,7 @@ export class TicketService {
         paymentMethod,
         mappedSoldByType,
         resellerCommissionPercent: params.resellerCommissionPercent,
+        displayCurrency,
       });
       // Allocation tiers are attributed to the tier's owning reseller regardless
       // of who rang the sale (same rule as the online buyer paths).
@@ -349,6 +360,7 @@ export class TicketService {
           customerPhone,
           customerEmail,
           buyerId,
+          currency: displayCurrency,
         });
 
         // First save might fail with transaction error, catch and retry
@@ -373,6 +385,7 @@ export class TicketService {
                 customerPhone,
                 customerEmail,
                 buyerId,
+                currency: displayCurrency,
               });
               await t.save();
               ticketsWithoutSession.push(t);
@@ -718,7 +731,7 @@ export class TicketService {
     }
     const ticketTypeData = availabilityCheck.ticketTypeData!;
 
-    const event = await Event.findById(eventId).select('vendorId ticketing').lean();
+    const event = await Event.findById(eventId).select('vendorId ticketing currency').lean();
     if (!event) throw new Error('Event not found');
     // Guard: an externally-sold event shouldn't get Carrot-issued admission
     // either — this batch mints real, scannable tickets. Does NOT route
@@ -726,11 +739,14 @@ export class TicketService {
     assertCarrotTicketing(event as any);
     const vendorId = (event as any).vendorId;
     const soldBy = params.issuedBy ?? vendorId;
+    // Legacy-doc default only — every current event carries `currency`.
+    const displayCurrency: EventCurrency = (event as any).currency ?? 'SZL';
 
     const econ = await this.buildSaleSnapshot({
       totalAmount: 0,
       paymentMethod: PaymentMethod.CASH,
       mappedSoldByType: 'Vendor',
+      displayCurrency,
     });
 
     const tickets: ITicket[] = [];
@@ -740,6 +756,7 @@ export class TicketService {
         vendorId,
         ticketType: ticketTypeData.name,
         price: 0,
+        currency: displayCurrency,
       });
       await ticket.save();
       tickets.push(ticket);
@@ -1173,6 +1190,7 @@ export class TicketService {
       paymentMethod: PaymentMethod.MTN_MOMO,
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
+      displayCurrency: event.currency ?? 'SZL',
     });
     // An allocation tier's sale is always attributed to the tier's owning
     // reseller (kept off the organizer's revenue, held for their settlement),
@@ -1326,6 +1344,7 @@ export class TicketService {
       paymentMethod: PaymentMethod.PEACH_CARD,
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
+      displayCurrency: event.currency ?? 'SZL',
     });
     // An allocation tier's sale is always attributed to the tier's owning
     // reseller (kept off the organizer's revenue, held for their settlement),
@@ -1473,6 +1492,7 @@ export class TicketService {
       paymentMethod: PaymentMethod.DELTAPAY,
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
+      displayCurrency: event.currency ?? 'SZL',
     });
     // An allocation tier's sale is always attributed to the tier's owning
     // reseller (kept off the organizer's revenue, held for their settlement),
@@ -1748,6 +1768,9 @@ export class TicketService {
         customerEmail: sale.customerEmail,
         buyerId: sale.buyerId,
         saleId: sale._id,
+        // The sale already carries the currency stamped at initiate time
+        // (buildSaleSnapshot) — reuse it rather than re-deriving from event.
+        currency: sale.currency ?? 'SZL',
       });
       await t.save();
       tickets.push(t);
@@ -1878,6 +1901,9 @@ export class TicketService {
         customerEmail: sale.customerEmail,
         buyerId: sale.buyerId,
         saleId: sale._id,
+        // The sale already carries the currency stamped at initiate time
+        // (buildSaleSnapshot) — reuse it rather than re-deriving from event.
+        currency: sale.currency ?? 'SZL',
       });
       await t.save();
       tickets.push(t);
@@ -2038,6 +2064,9 @@ export class TicketService {
         customerEmail: sale.customerEmail,
         buyerId: sale.buyerId,
         saleId: sale._id,
+        // The sale already carries the currency stamped at initiate time
+        // (buildSaleSnapshot) — reuse it rather than re-deriving from event.
+        currency: sale.currency ?? 'SZL',
       });
       await t.save();
       tickets.push(t);
