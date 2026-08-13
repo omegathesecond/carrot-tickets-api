@@ -291,14 +291,32 @@ export class EventService {
         throw new Error('Cannot update completed event');
       }
 
-      // Renaming is ADMIN-ONLY, enforced here — not just hidden in the UI.
-      // An organizer silently changing the name of an approved/sold event is a
-      // bait-and-switch fraud vector, so even a direct API call from the event
-      // owner is rejected. Organizers set the name at creation and ask an admin
-      // to correct genuine mistakes. Comparing to the current value means an
-      // unchanged name echoed back by a client is a harmless no-op, not a 403.
-      if (updates.name !== undefined && updates.name !== event.name && !isSuperAdmin) {
-        throw new HttpError(403, 'Only an administrator can rename an event');
+      // Core "Event Information" (name, venue, date/time, description, category,
+      // capacity) is owner-editable ONLY before the event goes live. A DRAFT or
+      // PENDING_APPROVAL event has no sold tickets, so the organizer may freely
+      // fix these while getting the listing right. Once PUBLISHED/ONGOING,
+      // silently changing them is a bait-and-switch on people who already hold
+      // tickets — only an administrator may correct a live event. Enforced here,
+      // not just hidden in the dashboard UI. (CANCELLED/COMPLETED are already
+      // blocked above for everyone.) Ticketing/pricing settings are deliberately
+      // NOT core info — organizers legitimately tune those on a live event.
+      const isPrePublish =
+        event.status === EventStatus.DRAFT || event.status === EventStatus.PENDING_APPROVAL;
+      if (!isSuperAdmin && !isPrePublish) {
+        const sameInstant = (a: any, b: any) => new Date(a).getTime() === new Date(b).getTime();
+        const changesCoreInfo =
+          (updates.name !== undefined && updates.name !== event.name) ||
+          (updates.description !== undefined && updates.description !== event.description) ||
+          (updates.venue !== undefined && updates.venue !== event.venue) ||
+          (updates.eventDate !== undefined && !sameInstant(updates.eventDate, event.eventDate)) ||
+          (updates.startTime !== undefined && !sameInstant(updates.startTime, event.startTime)) ||
+          (updates.endTime !== undefined && !sameInstant(updates.endTime, event.endTime)) ||
+          (updates.isMultiDay !== undefined && updates.isMultiDay !== event.isMultiDay) ||
+          (updates.category !== undefined && updates.category !== event.category) ||
+          (updates.capacity !== undefined && updates.capacity !== event.capacity);
+        if (changesCoreInfo) {
+          throw new HttpError(403, 'Only an administrator can change event details once it is published');
+        }
       }
 
       // Update fields
@@ -308,6 +326,7 @@ export class EventService {
       if (updates.eventDate) event.eventDate = updates.eventDate;
       if (updates.startTime) event.startTime = updates.startTime;
       if (updates.endTime) event.endTime = updates.endTime;
+      if (updates.isMultiDay !== undefined) event.isMultiDay = updates.isMultiDay;
       if (updates.capacity) event.capacity = updates.capacity;
       if (updates.category) event.category = updates.category;
       if (updates.ticketing) event.ticketing = updates.ticketing;

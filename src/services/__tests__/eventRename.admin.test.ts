@@ -1,13 +1,22 @@
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { EventService } from '@services/event.service';
+import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
 import { HttpError } from '@utils/httpError.util';
 
 /**
- * Renaming an event is admin-only, enforced server-side (not just hidden in the
- * dashboard UI). An organizer silently changing the name of an approved/sold
- * event is a bait-and-switch fraud vector, so even the event owner is blocked.
+ * Renaming — and editing any core event detail — follows the "before publish"
+ * rule, enforced server-side (not just hidden in the dashboard UI):
+ *
+ *   • While the event is a DRAFT or PENDING_APPROVAL (no tickets sold yet), the
+ *     owning organizer may freely rename it — they're still getting it right.
+ *   • Once the event is PUBLISHED/ONGOING, the name is locked for organizers: an
+ *     organizer silently swapping the name of a live, sold event is a
+ *     bait-and-switch fraud vector. Only an administrator can correct it.
+ *
+ * See eventCoreInfoLock.test.ts for the same rule applied to venue/date/etc.
  */
-describe('EventService.updateEvent — rename is admin-only', () => {
+describe('EventService.updateEvent — rename follows the before-publish rule', () => {
   beforeAll(connectTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
 
   const VENDOR = '507f1f77bcf86cd799439011';
@@ -19,8 +28,21 @@ describe('EventService.updateEvent — rename is admin-only', () => {
       ticketTypes: [],
     } as any);
 
-  it('rejects a rename by a non-admin owner with a 403 and leaves the name unchanged', async () => {
+  const publish = (id: string) =>
+    Event.updateOne({ _id: id }, { status: EventStatus.PUBLISHED });
+
+  it('lets a non-admin owner rename a DRAFT event (before publish)', async () => {
+    const created = await makeEvent('Working Title');
+
+    const updated = await EventService.updateEvent(
+      String(created._id), VENDOR, { name: 'Final Title' } as any, false
+    );
+    expect(updated.name).toBe('Final Title');
+  });
+
+  it('rejects a non-admin owner rename once the event is PUBLISHED, leaving the name unchanged', async () => {
     const created = await makeEvent('Original Name');
+    await publish(String(created._id));
 
     let err: any;
     try {
@@ -35,8 +57,9 @@ describe('EventService.updateEvent — rename is admin-only', () => {
     expect(reloaded.name).toBe('Original Name');
   });
 
-  it('lets a super-admin rename', async () => {
+  it('lets a super-admin rename a PUBLISHED event', async () => {
     const created = await makeEvent('Original Name');
+    await publish(String(created._id));
 
     const updated = await EventService.updateEvent(
       String(created._id), VENDOR, { name: 'Corrected Name' } as any, true
@@ -44,25 +67,16 @@ describe('EventService.updateEvent — rename is admin-only', () => {
     expect(updated.name).toBe('Corrected Name');
   });
 
-  it('treats an unchanged name echoed by a non-admin as a harmless no-op', async () => {
+  it('treats an unchanged name echoed by a non-admin on a PUBLISHED event as a harmless no-op', async () => {
     const created = await makeEvent('Same Name');
+    await publish(String(created._id));
 
-    // Name equals the current value, so it must NOT trip the 403 — the update
-    // (here also touching venue) should still succeed.
+    // Name equals the current value, so it must NOT trip the 403 — a client
+    // echoing the whole event back while editing a ticketing field is fine.
     const updated = await EventService.updateEvent(
-      String(created._id), VENDOR, { name: 'Same Name', venue: 'New Venue' } as any, false
+      String(created._id), VENDOR, { name: 'Same Name', ticketing: 'external', externalTicketUrl: 'https://x.co/t' } as any, false
     );
     expect(updated.name).toBe('Same Name');
-    expect(updated.venue).toBe('New Venue');
-  });
-
-  it('still lets a non-admin owner update other fields', async () => {
-    const created = await makeEvent('Keep This Name');
-
-    const updated = await EventService.updateEvent(
-      String(created._id), VENDOR, { venue: 'Relocated' } as any, false
-    );
-    expect(updated.venue).toBe('Relocated');
-    expect(updated.name).toBe('Keep This Name');
+    expect(updated.ticketing).toBe('external');
   });
 });
