@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { NotificationService } from '@services/notification.service';
+import { Notification } from '@models/notification.model';
 import { Buyer } from '@models/buyer.model';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 
@@ -7,6 +8,39 @@ describe('NotificationService recipient-actor', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  // "Read doesn't work" for OLD rows: a legacy row can carry `readAt: null`
+  // (present-but-null) rather than the field being absent — the Mongoose model
+  // never writes that on insert, but past data operations leave such rows.
+  // list() treats null as unread (Boolean(null) === false) so the user SEES it,
+  // yet markRead's `{ readAt: { $exists: false } }` filter matched only ABSENT,
+  // so the row could never be cleared → "I keep seeing the same notification;
+  // clicking doesn't wipe it." markRead must clear null-or-absent alike.
+  it('marks a legacy row whose readAt is explicitly null (not absent) as read', async () => {
+    const recipient = new mongoose.Types.ObjectId();
+    await Notification.collection.insertOne({
+      recipientType: 'buyer',
+      recipientId: recipient,
+      type: 'follow',
+      title: 'Old one',
+      body: 'followed you',
+      data: {},
+      readAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const before = await NotificationService.list('buyer', String(recipient), {});
+    expect(before.items).toHaveLength(1);
+    expect(before.items[0]!.read).toBe(false); // the user sees it as unread
+    expect(before.unreadCount).toBe(1); // …and it counts toward the badge
+
+    await NotificationService.markRead('buyer', String(recipient), [String(before.items[0]!.id)]);
+
+    const after = await NotificationService.list('buyer', String(recipient), {});
+    expect(after.items[0]!.read).toBe(true); // it actually clears now
+    expect(after.unreadCount).toBe(0);
+  });
 
   // A meetup notification carries the acting buyer as `data.buyerId` (requester
   // for meetup_request, accepter for meetup_accepted). Read-time hydration must

@@ -78,7 +78,11 @@ export class NotificationService {
 
     const [docs, unreadCount] = await Promise.all([
       Notification.find(query).sort({ _id: -1 }).limit(limit),
-      Notification.countDocuments({ recipientType, recipientId, readAt: { $exists: false } }, { limit: 99 }),
+      // `readAt: null` matches BOTH an absent field and an explicit null, so
+      // the count agrees with the per-row `Boolean(d.readAt)` flag below and
+      // with markRead — a legacy null-readAt row is unread everywhere or
+      // nowhere, never a stuck in-between. ($exists:false missed null rows.)
+      Notification.countDocuments({ recipientType, recipientId, readAt: null }, { limit: 99 }),
     ]);
 
     // Batch-hydrate the acting buyer/vendor for every row in exactly two
@@ -124,7 +128,10 @@ export class NotificationService {
    *  array is a no-op (an empty selection must never wipe the inbox).
    *  Scoped to the recipient so foreign ids are silently no-ops. */
   static async markRead(recipientType: NotificationRecipientType, recipientId: string, ids?: string[]): Promise<void> {
-    const query: Record<string, unknown> = { recipientType, recipientId, readAt: { $exists: false } };
+    // `readAt: null` matches an absent field AND an explicit null, so legacy
+    // rows stored with readAt:null (which list() shows as unread) can finally
+    // be cleared — `{ $exists: false }` matched only absent and left them stuck.
+    const query: Record<string, unknown> = { recipientType, recipientId, readAt: null };
     if (ids !== undefined) {
       if (ids.length === 0) return;
       query['_id'] = { $in: ids };
