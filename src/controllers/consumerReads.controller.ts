@@ -12,6 +12,7 @@ import { SuggestionsService } from '@services/suggestions.service';
 import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
 import { MeetupService } from '@services/meetup.service';
+import { DmEligibilityService } from '@services/dmEligibility.service';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { notEndedFilter } from '@utils/eventVisibility.util';
@@ -160,6 +161,7 @@ export class ConsumerReadsController {
         String(buyer._id),
         rows.map((r) => r.id)
       );
+      const dmable = await DmEligibilityService.canDmMap(String(buyer._id), rows.map((r) => r.id));
       const people = rows.map((r) => {
         const m = statusMap.get(r.id);
         return {
@@ -175,6 +177,7 @@ export class ConsumerReadsController {
           currentEvent: null,
           meetupStatus: m ? m.status : 'none',
           meetupRequestId: m ? m.id : null,
+          canDm: dmable.has(r.id),
         };
       });
       return ApiResponseUtil.success(res, { people });

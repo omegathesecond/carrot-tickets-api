@@ -6,6 +6,7 @@ import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
 import { Block } from '@models/block.model';
 import { BuyerPresence } from '@models/buyerPresence.model';
+import { MeetupRequest } from '@models/meetupRequest.model';
 
 const PHONE = '+26878422613';
 // Viewer's search origin. Kept at (0, 0) so north/south offsets in degrees
@@ -118,7 +119,36 @@ describe('GET /api/social/nearby/people', () => {
       currentEvent: null,
       meetupStatus: 'none',
       meetupRequestId: null,
+      canDm: false,
     });
+  });
+
+  it('nearby people include canDm — true only for a friend or accepted-meetup partner', async () => {
+    const me = await seedBuyer(PHONE, { username: 'me_one' });
+    const partner = await seedBuyer('+26878000028', {
+      username: 'partner_g',
+      location: nearPoint(0.01),
+      locationUpdatedAt: new Date(),
+    });
+    const stranger = await seedBuyer('+26878000029', {
+      username: 'stranger_h',
+      location: nearPoint(0.02),
+      locationUpdatedAt: new Date(),
+    });
+    await MeetupRequest.create({ requesterId: me._id, targetId: partner._id, status: 'accepted' });
+
+    const res = await request(app)
+      .get('/api/social/nearby/people')
+      .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .expect(200);
+
+    const partnerRow = res.body.data.people.find((p: any) => p.username === 'partner_g');
+    const strangerRow = res.body.data.people.find((p: any) => p.username === 'stranger_h');
+    expect(partnerRow).toBeTruthy();
+    expect(strangerRow).toBeTruthy();
+    expect(partnerRow.canDm).toBe(true);
+    expect(strangerRow.canDm).toBe(false);
   });
 
   it('excludes a buyer outside radiusKm', async () => {

@@ -17,6 +17,7 @@ import { NotificationService } from '@services/notification.service';
 import { SocialProfileViewService } from '@services/socialProfileView.service';
 import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/controllerHelpers.util';
 import { onlineBuyerIds } from '@utils/buyerOnline.util';
+import { DmEligibilityService } from '@services/dmEligibility.service';
 import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
 
 export class SocialProfileController {
@@ -340,7 +341,11 @@ export class SocialProfileController {
           { username: { $regex: `^${escaped}`, $options: 'i' } },
         ],
       }).limit(20);
-      return ApiResponseUtil.success(res, buyers.map(toBuyerSummary));
+      const dmable = await DmEligibilityService.canDmMap(myId, buyers.map((b) => String(b._id)));
+      return ApiResponseUtil.success(
+        res,
+        buyers.map((b) => ({ ...toBuyerSummary(b), canDm: dmable.has(String(b._id)) }))
+      );
     } catch (error: any) {
       return SocialProfileController.failSocial(res, error, 'Failed to search users');
     }
