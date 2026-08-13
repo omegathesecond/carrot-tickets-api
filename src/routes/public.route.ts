@@ -5,6 +5,7 @@ import { ReviewController } from '@controllers/review.controller';
 import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { ServicesController } from '@controllers/services.controller';
+import { EnquiryController } from '@controllers/enquiry.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
@@ -220,6 +221,15 @@ router.get('/services', ServicesController.directory);
  * @access  Public
  */
 router.get('/services/:businessId', ServicesController.profile);
+
+/**
+ * @route   POST /api/public/services/:businessId/enquiries
+ * @desc    Submit a lead/enquiry to a verified SERVICES business. Also
+ *          establishes proof-of-contact (unlocks a review later — Task E2).
+ * @access  Buyer (Bearer buyer token)
+ * @body    message (required, max 1000), eventDate?, eventType?, contactPhone?, contactEmail?
+ */
+router.post('/services/:businessId/enquiries', authenticateBuyer, EnquiryController.create);
 
 /**
  * @route   POST /api/public/purchase
