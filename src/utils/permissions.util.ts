@@ -2,14 +2,19 @@ import {
   TicketsPermission,
   EVENT_PERMISSIONS,
   TRANSPORT_PERMISSIONS,
+  SERVICES_PERMISSIONS,
 } from '@interfaces/ticketsPermission.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
 
-/** The permissions to strip for a type — the OPPOSITE vertical's perms. */
+/** Strip every vertical EXCEPT the operator's own (full disjoint partition). */
 function disallowedForType(type: OperatorType): Set<TicketsPermission> {
-  if (type === OperatorType.EVENTS) return new Set(TRANSPORT_PERMISSIONS);
-  if (type === OperatorType.TRANSPORT) return new Set(EVENT_PERMISSIONS);
-  return new Set(); // BOTH strips nothing
+  switch (type) {
+    case OperatorType.EVENTS:    return new Set([...TRANSPORT_PERMISSIONS, ...SERVICES_PERMISSIONS]);
+    case OperatorType.TRANSPORT: return new Set([...EVENT_PERMISSIONS, ...SERVICES_PERMISSIONS]);
+    case OperatorType.SERVICES:  return new Set([...EVENT_PERMISSIONS, ...TRANSPORT_PERMISSIONS]);
+    case OperatorType.BOTH:      return new Set(SERVICES_PERMISSIONS); // events+transport, not a service biz
+    default:                     return new Set();
+  }
 }
 
 /**
