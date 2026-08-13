@@ -104,6 +104,29 @@ describe('POS stock routes', () => {
     ]);
   });
 
+  it('GET /api/merchant/stock carries price/barcode/category + a computed status', async () => {
+    const { eventId } = await seedPublishedEvent({});
+    await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
+    const bar = await Merchant.create({ name: 'Bar A', eventId, loginCode: String(seq++), pin: '000000' });
+    // low: onHand 3 <= threshold 5
+    const beer = await Product.create({ eventId, name: 'Castle Lite', category: ProductCategory.BEER, price: 2500, barcode: '6001240100015', unitsPerPack: 24, packLabel: 'case' });
+    await ProductStock.create({ eventId, merchantId: bar._id, productId: beer._id, onHand: 3, lowStockThreshold: 5 });
+    // sold_out: onHand 0. barcodeless (food) -> barcode null.
+    const ice = await Product.create({ eventId, name: 'Ice', category: ProductCategory.OTHER, price: 1000 });
+    await ProductStock.create({ eventId, merchantId: bar._id, productId: ice._id, onHand: 0 });
+
+    const res = await request(app)
+      .get('/api/merchant/stock')
+      .set('Authorization', `Bearer ${merchantToken(String(bar._id), String(eventId))}`);
+    expect(res.status).toBe(200);
+    const rows: any[] = res.body.data.stock;
+    const beerRow = rows.find((r) => r.productId === String(beer._id));
+    expect(beerRow).toMatchObject({ price: 2500, barcode: '6001240100015', category: 'beer', unitsPerPack: 24, packLabel: 'case', onHand: 3, lowStockThreshold: 5, status: 'low' });
+    const iceRow = rows.find((r) => r.productId === String(ice._id));
+    expect(iceRow).toMatchObject({ price: 1000, category: 'other', onHand: 0, status: 'sold_out' });
+    expect(iceRow.barcode).toBeNull();
+  });
+
   it('POST /api/merchant/stock/count is scoped to the TOKEN\'s merchant', async () => {
     const { eventId, barAId, barBId, productId } = await setup();
     // Bar B has no stock row at all; a count by Bar B's token must reconcile

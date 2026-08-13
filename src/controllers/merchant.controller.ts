@@ -135,7 +135,17 @@ export class MerchantController {
       const byProduct = new Map(rows.map((r) => [String(r.productId), r]));
       const stock = products.map((p) => {
         const r = byProduct.get(String(p._id));
-        return { productId: String(p._id), name: p.name, unitLabel: p.unitLabel, onHand: r?.onHand ?? 0, lowStockThreshold: r?.lowStockThreshold ?? null };
+        const onHand = r?.onHand ?? 0;
+        const threshold = r?.lowStockThreshold ?? null;
+        // Same status rule as the Slice-4 organiser board: sold_out at 0, low
+        // at/below a set threshold, else in_stock. Drives the POS tile badges.
+        const status = onHand <= 0 ? 'sold_out' : (threshold != null && threshold > 0 && onHand <= threshold ? 'low' : 'in_stock');
+        return {
+          productId: String(p._id), name: p.name,
+          price: p.price, barcode: p.barcode ?? null, category: p.category, imageUrl: p.imageUrl ?? null,
+          unitLabel: p.unitLabel, unitsPerPack: p.unitsPerPack ?? null, packLabel: p.packLabel ?? null,
+          onHand, lowStockThreshold: threshold, status,
+        };
       });
       return ApiResponseUtil.success(res, { stock });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Failed to load stock', 500); }
