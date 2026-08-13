@@ -25,7 +25,10 @@ export class StockTransferService {
         out = { transfer: created[0]!, fromOnHand: outMove.onHand, toOnHand: inMove.onHand };
       });
       // Best-effort re-arm the destination (a transfer-in may lift it above threshold).
-      await StockAlertService.rearm(toMerchantId, productId);
+      // Fire-and-forget: it runs AFTER commit, so it must never be able to reject
+      // (and thus 500) a transfer that already succeeded. rearm() already logs its
+      // own errors internally.
+      StockAlertService.rearm(toMerchantId, productId).catch(() => {});
       return out;
     } finally {
       await session.endSession();

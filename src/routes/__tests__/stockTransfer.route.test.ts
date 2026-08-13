@@ -11,6 +11,7 @@ import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
+import { ProductStock } from '@models/productStock.model';
 import { StockService } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
@@ -50,14 +51,19 @@ describe('stock transfer route', () => {
     expect(res.body.data.transferId).toBeTruthy();
   });
 
-  it('declines an over-transfer (409)', async () => {
+  it('declines an over-transfer (409) with the decline payload, and rolls back both legs', async () => {
     const { eventId, token, barAId, barBId, productId } = await owned();
     const res = await request(app)
       .post(`/api/tickets/events/${eventId}/stock/transfer`)
       .set('Authorization', `Bearer ${token}`)
       .send({ productId, fromMerchantId: barAId, toMerchantId: barBId, qty: 500 });
     expect(res.status).toBe(409);
-    expect(res.body.error).toBeTruthy();
+    const payload = JSON.parse(res.body.error);
+    expect(payload).toMatchObject({ reason: 'insufficient_stock', productId, available: 100 });
+
+    // Rollback: source untouched, dest row never created.
+    expect((await ProductStock.findOne({ merchantId: barAId, productId }))!.onHand).toBe(100);
+    expect(await ProductStock.countDocuments({ merchantId: barBId, productId })).toBe(0);
   });
 
   it('rejects a same-bar transfer (400)', async () => {
