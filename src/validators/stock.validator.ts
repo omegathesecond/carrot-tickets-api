@@ -35,3 +35,9 @@ export const receiveStockSchema = Joi.object({
   unit: Joi.string().valid('unit', 'pack').default('unit'),
   note: Joi.string().trim().optional(),
 });
+
+export const thresholdSchema = Joi.object({
+  merchantId: Joi.string().trim().required(),
+  productId: Joi.string().trim().required(),
+  lowStockThreshold: Joi.number().integer().min(0).allow(null).required(),
+});

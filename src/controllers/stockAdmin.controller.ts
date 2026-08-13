@@ -2,10 +2,11 @@ import { NextFunction, Request, Response } from 'express';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
+import { ProductStock } from '@models/productStock.model';
 import { StockService } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { createProductSchema, updateProductSchema, receiveStockSchema } from '@validators/stock.validator';
+import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema } from '@validators/stock.validator';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -111,6 +112,27 @@ export class StockAdminController {
         note: value.note,
       });
       ApiResponseUtil.success(res, { onHand, movementId: String(movement._id) });
+    } catch (err) { next(err); }
+  }
+
+  /** PATCH /api/tickets/events/:eventId/stock/threshold */
+  static async setThreshold(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const event = await loadOwnedEvent(req, res, String(req.params['eventId'] || ''));
+      if (!event) return;
+      const { error, value } = thresholdSchema.validate(req.body || {});
+      if (error) { ApiResponseUtil.badRequest(res, error.message); return; }
+      const merchant = await Merchant.findById(value.merchantId).lean();
+      if (!merchant || String(merchant.eventId) !== String(event._id)) { ApiResponseUtil.badRequest(res, 'merchant does not belong to this event'); return; }
+      const product = await Product.findById(value.productId).lean();
+      if (!product || String(product.eventId) !== String(event._id)) { ApiResponseUtil.badRequest(res, 'product does not belong to this event'); return; }
+      // Upsert the bar-product stock row's threshold + re-arm (clear lowStockAlertedAt).
+      const row = await ProductStock.findOneAndUpdate(
+        { merchantId: value.merchantId, productId: value.productId },
+        { $set: { lowStockThreshold: value.lowStockThreshold, lowStockAlertedAt: null }, $setOnInsert: { eventId: event._id, onHand: 0 } },
+        { new: true, upsert: true },
+      );
+      ApiResponseUtil.success(res, { merchantId: value.merchantId, productId: value.productId, lowStockThreshold: row.lowStockThreshold });
     } catch (err) { next(err); }
   }
 }

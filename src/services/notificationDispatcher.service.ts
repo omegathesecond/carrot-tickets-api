@@ -16,6 +16,11 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   // the closest existing pref bucket, kept only for Record<NotificationType,…>
   // exhaustiveness.
   follow: 'social',
+  // Vendor low-stock alerts bypass this buyer dispatcher entirely (written
+  // directly via NotificationService.create — see cashless stock Slice 3
+  // Task 1); 'social' is the closest existing pref bucket, kept only for
+  // Record<NotificationType,…> exhaustiveness.
+  low_stock: 'social',
 };
 
 const CHUNK = 50;
