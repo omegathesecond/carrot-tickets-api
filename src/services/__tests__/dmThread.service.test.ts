@@ -5,6 +5,8 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { CommunityService } from '@services/community.service';
 import { FollowService } from '@services/follow.service';
+import { Follow } from '@models/follow.model';
+import { MeetupRequest } from '@models/meetupRequest.model';
 import { BlockService } from '@services/block.service';
 import { DmThreadService } from '@services/dmThread.service';
 import { DmThread } from '@models/dmThread.model';
@@ -18,6 +20,13 @@ async function makeFriends(a: IBuyer, b: IBuyer) {
   await FollowService.follow(a, 'buyer', String(b._id));
   await FollowService.follow(b, 'buyer', String(a._id));
 }
+
+const befriend = async (a: IBuyer, b: IBuyer) => {
+  await Follow.create({ followerType: 'buyer', followerId: a._id, targetType: 'buyer', targetId: b._id });
+  await Follow.create({ followerType: 'buyer', followerId: b._id, targetType: 'buyer', targetId: a._id });
+};
+const acceptMeetup = (a: IBuyer, b: IBuyer) =>
+  MeetupRequest.create({ requesterId: a._id, targetId: b._id, status: 'accepted' });
 
 async function shareCommunity(...buyers: IBuyer[]) {
   const seeded = await seedPublishedEvent();
@@ -34,10 +43,15 @@ describe('DmThreadService', () => {
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
-  it('default privacy: anyone can message, no shared community needed', async () => {
+  it('a stranger is refused; a friend and an accepted-meetup partner are allowed', async () => {
     const a = await seedBuyer('+26878000001');
     const b = await seedBuyer('+26878000002');
+    await expect(DmThreadService.assertCanDm(a, b)).rejects.toMatchObject({ statusCode: 403 });
+    await befriend(a, b);
     await expect(DmThreadService.assertCanDm(a, b)).resolves.toBeUndefined();
+    const c = await seedBuyer('+26878000021');
+    await acceptMeetup(c, a); // c requested a, accepted — either direction counts
+    await expect(DmThreadService.assertCanDm(a, c)).resolves.toBeUndefined();
   });
 
   it('friends privacy: a stranger is refused, a friend is allowed', async () => {
@@ -62,6 +76,7 @@ describe('DmThreadService', () => {
     const a = await seedBuyer('+26878000001');
     const b = await seedBuyer('+26878000002');
     await shareCommunity(a, b);
+    await befriend(a, b);
 
     const t1 = await DmThreadService.openThread(a, [String(b._id)]);
     const t2 = await DmThreadService.openThread(b, [String(a._id)]);
@@ -83,6 +98,7 @@ describe('DmThreadService', () => {
     const a = await seedBuyer('+26878000001');
     const b = await seedBuyer('+26878000002');
     await shareCommunity(a, b);
+    await befriend(a, b);
 
     const t1 = await DmThreadService.openThread(a, [String(b._id)]);
     const t2 = await DmThreadService.openThread(a, [String(b._id).toUpperCase()]);
@@ -95,6 +111,7 @@ describe('DmThreadService', () => {
     const others: IBuyer[] = [];
     for (let i = 0; i < 3; i++) others.push(await seedBuyer(`+2687800001${i}`));
     await shareCommunity(a, ...others);
+    for (const m of others) await befriend(a, m);
 
     const group = await DmThreadService.openThread(a, others.map((o) => String(o._id)));
     expect(group.isGroup).toBe(true);
@@ -113,6 +130,7 @@ describe('DmThreadService', () => {
     const others: IBuyer[] = [];
     for (let i = 0; i < 7; i++) others.push(await seedBuyer(`+2687800002${i}`));
     await shareCommunity(a, ...others);
+    for (const m of others) await befriend(a, m);
 
     resetBuckets();
     for (let i = 0; i < 5; i++) {
@@ -128,6 +146,7 @@ describe('DmThreadService', () => {
     const b = await seedBuyer('+26878000002');
     const c = await seedBuyer('+26878000003');
     await shareCommunity(a, b);
+    await befriend(a, b);
     const t = await DmThreadService.openThread(a, [String(b._id)]);
 
     await expect(DmThreadService.requireDmAccess(String(t._id), { type: 'buyer', id: String(b._id) })).resolves.toBeDefined();

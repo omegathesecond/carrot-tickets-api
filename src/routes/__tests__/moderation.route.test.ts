@@ -8,6 +8,7 @@ import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Channel } from '@models/channel.model';
 import { Membership } from '@models/membership.model';
+import { MeetupRequest } from '@models/meetupRequest.model';
 import { CommunityService } from '@services/community.service';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { resetBuckets } from '@utils/rateLimit.util';
@@ -80,16 +81,14 @@ describe('organizer moderation routes', () => {
     });
 
     it('cannot delete a DM message (404 — organizers never touch DMs)', async () => {
-      const { seeded, buyerAuth, vendorAuth } = await seedWorld();
+      const { buyer, buyerAuth, vendorAuth } = await seedWorld();
       const OTHER = '+26878000042';
       const other = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'DM Partner' });
-      // DmThreadService.assertCanDm requires a shared (non-banned) community —
-      // join the second buyer so thread creation doesn't 403 before we even
-      // get to the moderation-delete assertion.
-      await request(app)
-        .post(`/api/community/${seeded.eventId}/join`)
-        .set('Authorization', `Bearer ${signBuyerToken(OTHER)}`)
-        .expect(200);
+      // assertCanDm now gates on connection (friend or accepted meetup), not
+      // shared community — accept a meetup between the pair so thread
+      // creation doesn't 403 before we even get to the moderation-delete
+      // assertion.
+      await MeetupRequest.create({ requesterId: buyer._id, targetId: other._id, status: 'accepted' });
 
       const thread = await request(app)
         .post('/api/dm/threads')
@@ -419,13 +418,12 @@ describe('organizer moderation routes', () => {
     });
 
     it('cannot pin a DM message (404)', async () => {
-      const { seeded, buyerAuth, vendorAuth } = await seedWorld();
+      const { buyer, buyerAuth, vendorAuth } = await seedWorld();
       const OTHER = '+26878000043';
       const other = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'DM Partner' });
-      await request(app)
-        .post(`/api/community/${seeded.eventId}/join`)
-        .set('Authorization', `Bearer ${signBuyerToken(OTHER)}`)
-        .expect(200);
+      // assertCanDm now gates on connection (friend or accepted meetup) —
+      // accept a meetup so thread creation doesn't 403 first.
+      await MeetupRequest.create({ requesterId: buyer._id, targetId: other._id, status: 'accepted' });
 
       const thread = await request(app)
         .post('/api/dm/threads')

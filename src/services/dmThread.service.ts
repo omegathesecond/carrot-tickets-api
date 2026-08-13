@@ -3,8 +3,8 @@ import { DmThread, IDmThread } from '@models/dmThread.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Message } from '@models/message.model';
-import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
+import { DmEligibilityService } from '@services/dmEligibility.service';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
 import { consumeToken } from '@utils/rateLimit.util';
@@ -32,9 +32,11 @@ export class DmThreadService {
   }
 
   /**
-   * The DM privacy gate (§2.4). Order matters: a block beats everything, then
-   * the target's own privacy setting decides. 'friends' accepts messages from
-   * friends only; the default ('community') accepts anyone on the platform.
+   * The DM privacy gate. A block beats everything; otherwise the two buyers must
+   * be connected — a mutual-follow friend OR an accepted meetup in either
+   * direction (see DmEligibilityService). This supersedes the old dmPrivacy
+   * branch: 'community' no longer means "anyone", and an accepted meetup
+   * overrides a 'friends'-only setting, so dmPrivacy no longer changes the gate.
    */
   static async assertCanDm(sender: IBuyer, target: IBuyer): Promise<void> {
     const senderId = String(sender._id);
@@ -43,10 +45,8 @@ export class DmThreadService {
     if (await BlockService.isBlockedEitherWay(senderId, targetId)) {
       throw new HttpError(403, 'You cannot message this user');
     }
-
-    if (target.dmPrivacy === 'friends') {
-      const friends = await FollowService.isFriend(senderId, targetId);
-      if (!friends) throw new HttpError(403, 'This user only accepts messages from friends');
+    if (!(await DmEligibilityService.isConnected(senderId, targetId))) {
+      throw new HttpError(403, "You can only message people you've met up with");
     }
   }
 
