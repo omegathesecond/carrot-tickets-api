@@ -35,7 +35,7 @@ afterEach(() => {
 
 async function cashSale(resellerId: string, hubId: string) {
   const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 50 });
-  return ResellerSaleService.createSale({
+  const sale = await ResellerSaleService.createSale({
     operatorId: new mongoose.Types.ObjectId().toString(),
     resellerId,
     hubId,
@@ -45,6 +45,7 @@ async function cashSale(resellerId: string, hubId: string) {
     paymentMethod: 'cash',
     customerPhone: '+26878422613',
   });
+  return { sale, eventId };
 }
 
 it('listSales/summary are scoped to the reseller — no cross-reseller leakage', async () => {
@@ -88,6 +89,55 @@ it('hub_manager only sees their own hub', async () => {
 
   const list = await ResellerReportService.listSales({
     scope: { resellerId: r._id.toString(), role: 'reseller_hub_manager', hubId: hub1 },
+  });
+  expect(list.total).toBe(1);
+});
+
+it('summary narrows to a single event when eventId is provided', async () => {
+  await PaymentConfigService.update({
+    cashEnabled: true,
+    defaultResellerCommissionPercent: 0,
+    platformFeePercent: 0,
+  });
+  const r = await Reseller.create({ businessName: 'EventFilterSummary', commissionPercent: null });
+  const hub = new mongoose.Types.ObjectId().toString();
+
+  // Two sales for the same reseller but two DIFFERENT events (each cashSale
+  // seeds its own event).
+  const { eventId: eventA } = await cashSale(r._id.toString(), hub);
+  await cashSale(r._id.toString(), hub);
+
+  // No filter → both events counted.
+  const all = await ResellerReportService.summary({
+    scope: { resellerId: r._id.toString(), role: 'reseller_admin' },
+  });
+  expect(all.totals.salesCount).toBe(2);
+  expect(all.totals.revenue).toBe(200);
+
+  // eventId filter → only that event's single sale.
+  const scoped = await ResellerReportService.summary({
+    scope: { resellerId: r._id.toString(), role: 'reseller_admin' },
+    eventId: eventA,
+  });
+  expect(scoped.totals.salesCount).toBe(1);
+  expect(scoped.totals.revenue).toBe(100);
+});
+
+it('listSales narrows to a single event when eventId is provided', async () => {
+  await PaymentConfigService.update({
+    cashEnabled: true,
+    defaultResellerCommissionPercent: 0,
+    platformFeePercent: 0,
+  });
+  const r = await Reseller.create({ businessName: 'EventFilterList', commissionPercent: null });
+  const hub = new mongoose.Types.ObjectId().toString();
+
+  const { eventId: eventA } = await cashSale(r._id.toString(), hub);
+  await cashSale(r._id.toString(), hub);
+
+  const list = await ResellerReportService.listSales({
+    scope: { resellerId: r._id.toString(), role: 'reseller_admin' },
+    eventId: eventA,
   });
   expect(list.total).toBe(1);
 });

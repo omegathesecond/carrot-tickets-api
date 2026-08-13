@@ -67,6 +67,7 @@ export class ResellerReportService {
     from?: Date;
     to?: Date;
     hubId?: string;
+    eventId?: string;
     operatorId?: string;
     paymentMethod?: string;
   }): Promise<{ sales: ManagerSaleRow[]; total: number; page: number; limit: number }> {
@@ -74,6 +75,7 @@ export class ResellerReportService {
     const limit = Math.min(100, Math.max(1, params.limit ?? 25));
 
     const filter = scopeMatch(params.scope, params.hubId);
+    if (params.eventId) filter['eventId'] = new mongoose.Types.ObjectId(params.eventId);
     if (params.operatorId) filter['soldBy'] = new mongoose.Types.ObjectId(params.operatorId);
     if (params.paymentMethod) filter['paymentMethod'] = params.paymentMethod;
     const range = dateRange(params.from, params.to);
@@ -116,6 +118,7 @@ export class ResellerReportService {
     from?: Date;
     to?: Date;
     hubId?: string;
+    eventId?: string;
   }): Promise<{
     totals: { revenue: number; tickets: number; salesCount: number };
     byMethod: Array<{ method: string; revenue: number; tickets: number; count: number }>;
@@ -125,6 +128,7 @@ export class ResellerReportService {
   }> {
     const match = scopeMatch(params.scope, params.hubId);
     match['paymentStatus'] = 'completed';
+    if (params.eventId) match['eventId'] = new mongoose.Types.ObjectId(params.eventId);
     const range = dateRange(params.from, params.to);
     if (range) match['soldAt'] = range;
 
