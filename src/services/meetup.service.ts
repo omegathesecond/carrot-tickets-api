@@ -145,4 +145,64 @@ export class MeetupService {
     for (const r of rows) map.set(String(r.targetId), { id: String(r._id), status: r.status });
     return map;
   }
+
+  /** True if an accepted meetup exists between the two buyers in EITHER direction. */
+  static async areMeetupAccepted(a: string, b: string): Promise<boolean> {
+    return Boolean(
+      await MeetupRequest.exists({
+        status: 'accepted',
+        $or: [
+          { requesterId: a, targetId: b },
+          { requesterId: b, targetId: a },
+        ],
+      })
+    );
+  }
+
+  /** Subset of `otherIds` the viewer has an accepted meetup with (either direction). */
+  static async acceptedPartnerIds(viewerId: string, otherIds: string[]): Promise<Set<string>> {
+    const partners = new Set<string>();
+    if (otherIds.length === 0) return partners;
+    const rows = await MeetupRequest.find({
+      status: 'accepted',
+      $or: [
+        { requesterId: viewerId, targetId: { $in: otherIds } },
+        { targetId: viewerId, requesterId: { $in: otherIds } },
+      ],
+    }).select('requesterId targetId');
+    for (const r of rows) {
+      const other = String(r.requesterId) === viewerId ? String(r.targetId) : String(r.requesterId);
+      partners.add(other);
+    }
+    return partners;
+  }
+
+  /** All accepted meetups the buyer is part of (sent OR received), newest first,
+   *  each mapped to the OTHER party. Powers the Accepted sub-tab (both directions). */
+  static async listAccepted(buyer: IBuyer): Promise<MeetupRow[]> {
+    const me = String(buyer._id);
+    const rows = await MeetupRequest.find({
+      status: 'accepted',
+      $or: [{ requesterId: me }, { targetId: me }],
+    })
+      .sort({ _id: -1 })
+      .limit(50);
+    if (rows.length === 0) return [];
+    const otherIds = rows.map((r) => (String(r.requesterId) === me ? String(r.targetId) : String(r.requesterId)));
+    const buyers = await Buyer.find({ _id: { $in: otherIds } }).select('name username avatarUrl');
+    const byId = new Map(buyers.map((b: any) => [String(b._id), b]));
+    const out: MeetupRow[] = [];
+    for (const r of rows) {
+      const otherId = String(r.requesterId) === me ? String(r.targetId) : String(r.requesterId);
+      const b: any = byId.get(otherId);
+      if (!b) continue; // account gone — drop silently, same as listIncoming
+      out.push({
+        id: String(r._id),
+        status: r.status,
+        createdAt: r.createdAt,
+        user: { id: String(b._id), name: b.name ?? null, username: b.username ?? null, avatarUrl: b.avatarUrl ?? null },
+      });
+    }
+    return out;
+  }
 }

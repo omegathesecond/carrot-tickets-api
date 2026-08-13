@@ -104,4 +104,51 @@ describe('MeetupService', () => {
     await expect(MeetupService.decline(acceptedTarget, acceptedId)).rejects.toMatchObject({ statusCode: 409 });
     await expect(MeetupService.cancel(me, acceptedId)).rejects.toMatchObject({ statusCode: 409 });
   });
+
+  describe('MeetupService acceptance lookups', () => {
+    it('areMeetupAccepted is true for an accepted row in either direction', async () => {
+      const a = await Buyer.create({ phone: '+26878010001', password: 'secret1', name: 'A', username: 'a_user' });
+      const b = await Buyer.create({ phone: '+26878010002', password: 'secret1', name: 'B', username: 'b_user' });
+      await MeetupRequest.create({ requesterId: a._id, targetId: b._id, status: 'accepted' });
+      expect(await MeetupService.areMeetupAccepted(String(a._id), String(b._id))).toBe(true);
+      expect(await MeetupService.areMeetupAccepted(String(b._id), String(a._id))).toBe(true); // other direction
+    });
+
+    it('areMeetupAccepted is false for pending / declined / none', async () => {
+      const a = await Buyer.create({ phone: '+26878010003', password: 'secret1', name: 'A', username: 'a_pend' });
+      const b = await Buyer.create({ phone: '+26878010004', password: 'secret1', name: 'B', username: 'b_pend' });
+      await MeetupRequest.create({ requesterId: a._id, targetId: b._id, status: 'pending' });
+      expect(await MeetupService.areMeetupAccepted(String(a._id), String(b._id))).toBe(false);
+      await MeetupRequest.updateOne({ requesterId: a._id, targetId: b._id }, { status: 'declined' });
+      expect(await MeetupService.areMeetupAccepted(String(a._id), String(b._id))).toBe(false);
+      const c = await Buyer.create({ phone: '+26878010005', password: 'secret1', name: 'C', username: 'c_none' });
+      expect(await MeetupService.areMeetupAccepted(String(a._id), String(c._id))).toBe(false);
+    });
+
+    it('acceptedPartnerIds returns only accepted partners from the given set, both directions', async () => {
+      const me = await Buyer.create({ phone: '+26878010006', password: 'secret1', name: 'Me', username: 'me_u' });
+      const out = await Buyer.create({ phone: '+26878010007', password: 'secret1', name: 'O', username: 'out_u' }); // I requested them
+      const inc = await Buyer.create({ phone: '+26878010008', password: 'secret1', name: 'I', username: 'inc_u' }); // they requested me
+      const pen = await Buyer.create({ phone: '+26878010009', password: 'secret1', name: 'P', username: 'pen_u' }); // pending
+      await MeetupRequest.create({ requesterId: me._id, targetId: out._id, status: 'accepted' });
+      await MeetupRequest.create({ requesterId: inc._id, targetId: me._id, status: 'accepted' });
+      await MeetupRequest.create({ requesterId: me._id, targetId: pen._id, status: 'pending' });
+      const set = await MeetupService.acceptedPartnerIds(String(me._id), [String(out._id), String(inc._id), String(pen._id)]);
+      expect(set.has(String(out._id))).toBe(true);
+      expect(set.has(String(inc._id))).toBe(true);
+      expect(set.has(String(pen._id))).toBe(false);
+    });
+
+    it('listAccepted returns accepted meetups in both directions, mapping to the OTHER party', async () => {
+      const me = await Buyer.create({ phone: '+26878010010', password: 'secret1', name: 'Me', username: 'me_l' });
+      const out = await Buyer.create({ phone: '+26878010011', password: 'secret1', name: 'Out', username: 'out_l' });
+      const inc = await Buyer.create({ phone: '+26878010012', password: 'secret1', name: 'Inc', username: 'inc_l' });
+      await MeetupRequest.create({ requesterId: me._id, targetId: out._id, status: 'accepted' });
+      await MeetupRequest.create({ requesterId: inc._id, targetId: me._id, status: 'accepted' });
+      const rows = await MeetupService.listAccepted(me);
+      const ids = rows.map((r) => r.user.id).sort();
+      expect(ids).toEqual([String(inc._id), String(out._id)].sort());
+      expect(rows.every((r) => r.status === 'accepted')).toBe(true);
+    });
+  });
 });
