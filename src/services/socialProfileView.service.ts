@@ -4,6 +4,9 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
+import { DmEligibilityService } from '@services/dmEligibility.service';
+import { MeetupService } from '@services/meetup.service';
+import { MeetupStatus } from '@models/meetupRequest.model';
 import type { SocialActor } from '@utils/socialActor.util';
 
 /** The one public shape for "a buyer's profile page", shared by every viewer type. */
@@ -21,6 +24,9 @@ export interface PublicBuyerProfile {
   isFollowedBy: boolean;
   isFriend: boolean;
   isBlocked: boolean;
+  meetupStatus: MeetupStatus | 'none';
+  meetupRequestId: string | null;
+  canDm: boolean;
 }
 
 export class SocialProfileViewService {
@@ -59,6 +65,25 @@ export class SocialProfileViewService {
       BlockService.isBlockedEitherWay(viewer.id, targetId),
     ]);
 
+    // A vendor viewer talks to a buyer over the brand-thread path, which
+    // bypasses the buyer<->buyer meetup gate entirely — so it never consults
+    // the buyer-only meetup lookups, and canDm collapses to "not blocked".
+    let meetupStatus: MeetupStatus | 'none' = 'none';
+    let meetupRequestId: string | null = null;
+    let canDm: boolean;
+    if (viewer.type === 'buyer') {
+      const [statusMap, dmable] = await Promise.all([
+        MeetupService.outgoingStatusMap(viewer.id, [targetId]),
+        DmEligibilityService.canDm(viewer.id, targetId),
+      ]);
+      const m = statusMap.get(targetId);
+      meetupStatus = m ? m.status : 'none';
+      meetupRequestId = m ? m.id : null;
+      canDm = dmable;
+    } else {
+      canDm = !isBlocked;
+    }
+
     return {
       id: targetId,
       username: buyer.username ?? null,
@@ -75,6 +100,9 @@ export class SocialProfileViewService {
       // (mutual follow, both directions) generalized to any viewer actor.
       isFriend: isFollowing && isFollowedBy,
       isBlocked,
+      meetupStatus,
+      meetupRequestId,
+      canDm,
     };
   }
 }
