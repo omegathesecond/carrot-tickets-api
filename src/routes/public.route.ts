@@ -5,6 +5,7 @@ import { ReviewController } from '@controllers/review.controller';
 import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
 import { ServicesController } from '@controllers/services.controller';
+import { ServiceCategoryController } from '@controllers/serviceCategory.controller';
 import { EnquiryController } from '@controllers/enquiry.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
@@ -203,6 +204,16 @@ router.post('/events/:eventId/share', optionalTicketsAuth, EventReactionControll
  * @access  Public
  */
 router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
+
+/**
+ * @route   GET /api/public/service-categories
+ * @desc    Active, DB-driven service-business categories (sound hire,
+ *          catering, decor, ...), sorted by admin order then label. Powers
+ *          the SERVICES signup form's category picker and the /services
+ *          directory's category filter chip list.
+ * @access  Public
+ */
+router.get('/service-categories', ServiceCategoryController.listActive);
 
 /**
  * @route   GET /api/public/services

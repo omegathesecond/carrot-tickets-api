@@ -13,6 +13,7 @@ import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
+import { AdminServiceCategoriesController } from '@controllers/adminServiceCategories.controller';
 import { AdminFeesController } from '@controllers/adminFees.controller';
 import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
@@ -80,6 +81,16 @@ router.get(
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
 router.post('/admin/organizers', requireSuperAdmin, AdminOrganizersController.createOrganizer);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
+
+/**
+ * Service-categories admin — the DB-driven category manager behind the
+ * dashboard's "Service Categories" panel. Super-admin only, mirroring
+ * /admin/organizers. Backs GET /api/public/service-categories and
+ * ServiceCategoryService.isValidActive (checked at SERVICES signup).
+ */
+router.get('/admin/service-categories', requireSuperAdmin, AdminServiceCategoriesController.list);
+router.post('/admin/service-categories', requireSuperAdmin, AdminServiceCategoriesController.create);
+router.patch('/admin/service-categories/:id', requireSuperAdmin, AdminServiceCategoriesController.update);
 
 // Fees — per-event booking charges Carrot has collected (super-admin only)
 router.get('/admin/fees', requireSuperAdmin, AdminFeesController.getFees);
