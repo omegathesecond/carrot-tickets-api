@@ -4,6 +4,7 @@ import { getFeed, FeedSlide } from '@services/feed.service';
 import { resolveActorFromRequest, isActorAuthorOf } from '@utils/socialActor.util';
 import { getViewerReactions } from '@services/update.service';
 import { getViewerEventReactions } from '@services/eventReaction.service';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
 const TABS = ['for-you', 'following', 'events'] as const;
 type Tab = (typeof TABS)[number];
@@ -22,6 +23,15 @@ export class FeedController {
     try {
       const { items, nextCursor } = await getFeed({ tab, cursor, actor: actor ?? undefined, category });
       if (actor) {
+        // Platform-staff moderator? Same rule as requireSuperAdminOrPermission
+        // (MODERATE_SOCIAL) — computed once from the token, identical for every
+        // slide, and surfaced so the client can offer the admin-only "Hide from
+        // Discover" action. Same value across slides, but attached per-slide to
+        // mirror viewerIsAuthor's shape.
+        const staff = (req as any).ticketsUser;
+        const canModerate =
+          !!staff?.isSuperAdmin || (staff?.permissions || []).includes(TicketsPermission.MODERATE_SOCIAL);
+
         const updateIds = items.filter((i) => i.type === 'update').map((i) => i.id);
         if (updateIds.length) {
           const rx = await getViewerReactions(updateIds, actor);
@@ -34,6 +44,7 @@ export class FeedController {
             // appear in the feed.
             const authorType = i.author.type === 'organizer' ? 'vendor' : 'buyer';
             i['viewerIsAuthor'] = isActorAuthorOf(authorType, i.author.id, actor);
+            i['viewerCanModerate'] = canModerate;
           }
         }
 

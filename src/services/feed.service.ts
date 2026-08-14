@@ -58,6 +58,10 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   // ---- fetch each source (over-fetch `limit`) ----
   const updateQuery: any = { status: 'active', 'media.status': 'ready' };
   if (opts.tab === 'following') updateQuery.authorId = { $in: [...followedAuthorIds, ...followedOrgIds] };
+  // Discover ('for-you') hides admin-moderated posts; `: null` also matches
+  // posts predating the field (Mongo null-equality). The 'following' tab and
+  // profile grids deliberately keep them — hiding is Discover-only.
+  if (opts.tab === 'for-you') updateQuery.hiddenFromDiscoverAt = null;
   if (cur.u) updateQuery.createdAt = { $lt: new Date(cur.u) };
   if (categoryEventIds) updateQuery.eventId = { $in: categoryEventIds };
   const updates = opts.tab === 'events' ? [] : await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();

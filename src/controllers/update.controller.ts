@@ -230,6 +230,45 @@ export class UpdateController {
     return ApiResponseUtil.success(res, { ok: true });
   }
 
+  /**
+   * POST /api/tickets/updates/:id/hide-from-discover — platform staff withhold
+   * a post from the public Discover ('for-you') feed. The route already gates
+   * on requireSuperAdminOrPermission(MODERATE_SOCIAL), so no auth check here.
+   *
+   * Discover-ONLY: unlike remove() (status:'removed', gone everywhere), this
+   * only sets a moderation stamp the feed service filters on for 'for-you' —
+   * the post stays live on the author's profile and in followers' feeds.
+   * Idempotent: re-hiding keeps the original stamp.
+   */
+  static async hideFromDiscover(req: Request, res: Response): Promise<any> {
+    const id = String(req.params['id'] || '');
+    if (!HEX24.test(id)) return ApiResponseUtil.error(res, 'Invalid update id', 400);
+    const update = await Update.findById(id);
+    if (!update) return ApiResponseUtil.notFound(res, 'Update not found');
+    if (!update.hiddenFromDiscoverAt) {
+      const staff = (req as any).ticketsUser;
+      update.hiddenFromDiscoverAt = new Date();
+      update.hiddenFromDiscoverBy = String(staff?.userId || staff?.vendorId || '');
+      await update.save();
+    }
+    return ApiResponseUtil.success(res, { ok: true, hidden: true });
+  }
+
+  /** DELETE /api/tickets/updates/:id/hide-from-discover — un-hide, restoring
+   *  the post to Discover. Idempotent. Same MODERATE_SOCIAL gate. */
+  static async unhideFromDiscover(req: Request, res: Response): Promise<any> {
+    const id = String(req.params['id'] || '');
+    if (!HEX24.test(id)) return ApiResponseUtil.error(res, 'Invalid update id', 400);
+    const update = await Update.findById(id);
+    if (!update) return ApiResponseUtil.notFound(res, 'Update not found');
+    if (update.hiddenFromDiscoverAt) {
+      update.hiddenFromDiscoverAt = null;
+      update.hiddenFromDiscoverBy = null;
+      await update.save();
+    }
+    return ApiResponseUtil.success(res, { ok: true, hidden: false });
+  }
+
   /** Ownership for an Update document. The rule itself lives in
    *  socialActor.util — the feed shares it through a different vocabulary. */
   static isActorAuthor(update: any, actor: SocialActor | null): boolean {

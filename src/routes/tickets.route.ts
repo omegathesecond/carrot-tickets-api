@@ -21,6 +21,7 @@ import { AnnouncementController } from '@controllers/announcement.controller';
 import { ChannelAdminController } from '@controllers/channelAdmin.controller';
 import { ModerationController } from '@controllers/moderation.controller';
 import { ReportController } from '@controllers/report.controller';
+import { UpdateController } from '@controllers/update.controller';
 
 const router = Router();
 
@@ -109,6 +110,23 @@ router.post(
   '/reports/:reportId/resolve',
   requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL),
   ReportController.resolve
+);
+
+/**
+ * Discover moderation — platform staff hide/un-hide a post from the public
+ * Discover ('for-you') feed WITHOUT taking it down: it stays on the author's
+ * profile and in followers' feeds (the filter is scoped to 'for-you' in
+ * feed.service). Same MODERATE_SOCIAL gate as the report queue above.
+ */
+router.post(
+  '/updates/:id/hide-from-discover',
+  requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL),
+  UpdateController.hideFromDiscover
+);
+router.delete(
+  '/updates/:id/hide-from-discover',
+  requireSuperAdminOrPermission(TicketsPermission.MODERATE_SOCIAL),
+  UpdateController.unhideFromDiscover
 );
 
 // Auth management
