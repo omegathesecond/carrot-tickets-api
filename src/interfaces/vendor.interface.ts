@@ -11,6 +11,7 @@ export enum OperatorType {
   EVENTS = 'events',
   TRANSPORT = 'transport',
   BOTH = 'both',
+  SERVICES = 'services',
 }
 
 export interface IVendor extends Document {
@@ -29,6 +30,10 @@ export interface IVendor extends Document {
   primaryContact?: string;
   logoUrl?: string;
   bio?: string;
+
+  // Service business (operatorType 'services') — the vertical of the supplier.
+  serviceCategory?: import('@/constants/serviceCategories').ServiceCategory;
+  startingPrice?: { amountCents: number; unit: import('@/constants/serviceCategories').StartingPriceUnit };
 
   // Contact Information
   address?: {

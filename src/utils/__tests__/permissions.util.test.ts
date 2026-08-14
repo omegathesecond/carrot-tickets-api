@@ -1,19 +1,19 @@
 import { TicketsPermission, TICKETS_ROLE_PERMISSIONS, TicketsRole,
-  EVENT_PERMISSIONS, TRANSPORT_PERMISSIONS, SHARED_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
+  EVENT_PERMISSIONS, TRANSPORT_PERMISSIONS, SHARED_PERMISSIONS, SERVICES_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
 import { scopePermissionsToType } from '@utils/permissions.util';
 
 const OWNER = TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER];
 const STAFF = [TicketsPermission.VIEW_USERS, TicketsPermission.PRINT_WRISTBANDS, TicketsPermission.MODERATE_SOCIAL];
-// Vertical-neutral perms deliberately outside the EVENT/TRANSPORT/SHARED
+// Vertical-neutral perms deliberately outside the EVENT/TRANSPORT/SERVICES/SHARED
 // partition (same mechanism as STAFF: scopePermissionsToType only strips
-// membership in a group, so absence from all three groups is what makes
+// membership in a group, so absence from all four groups is what makes
 // these survive scoping for every OperatorType).
 const VERTICAL_NEUTRAL = [TicketsPermission.EDIT_BRAND];
 
 describe('vertical permission groups', () => {
   it('partition all non-staff, non-vertical-neutral permissions (disjoint + exhaustive)', () => {
-    const groups = [...EVENT_PERMISSIONS, ...TRANSPORT_PERMISSIONS, ...SHARED_PERMISSIONS];
+    const groups = [...EVENT_PERMISSIONS, ...TRANSPORT_PERMISSIONS, ...SERVICES_PERMISSIONS, ...SHARED_PERMISSIONS];
     // disjoint
     expect(new Set(groups).size).toBe(groups.length);
     // exhaustive: every non-staff, non-vertical-neutral permission appears in exactly one group
@@ -44,8 +44,11 @@ describe('scopePermissionsToType', () => {
     expect(scoped.filter((p) => EVENT_PERMISSIONS.includes(p))).toHaveLength(0);
   });
 
-  it('both strips nothing', () => {
-    expect(scopePermissionsToType(OWNER, OperatorType.BOTH).sort()).toEqual([...OWNER].sort());
+  it('both keeps events + transport perms, strips services-only perms (not a service biz)', () => {
+    const scoped = scopePermissionsToType(OWNER, OperatorType.BOTH);
+    const expected = OWNER.filter((p) => !SERVICES_PERMISSIONS.includes(p));
+    expect(scoped.sort()).toEqual(expected.sort());
+    expect(scoped).not.toContain(TicketsPermission.MANAGE_ENQUIRIES);
   });
 
   it('never strips platform-staff perms (they belong to no vertical)', () => {
@@ -55,7 +58,7 @@ describe('scopePermissionsToType', () => {
   });
 
   it('never strips EDIT_BRAND — brand identity is vertical-neutral', () => {
-    for (const t of [OperatorType.EVENTS, OperatorType.TRANSPORT, OperatorType.BOTH]) {
+    for (const t of [OperatorType.EVENTS, OperatorType.TRANSPORT, OperatorType.BOTH, OperatorType.SERVICES]) {
       expect(scopePermissionsToType([TicketsPermission.EDIT_BRAND], t)).toContain(TicketsPermission.EDIT_BRAND);
     }
   });

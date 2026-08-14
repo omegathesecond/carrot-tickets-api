@@ -3,10 +3,13 @@ import { Review, IReview } from '@models/review.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { IBuyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
+import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
+import { EnquiryService } from '@services/enquiry.service';
 
 export interface ReviewView {
   id: string;
@@ -58,6 +61,56 @@ export class ReviewService {
   ): Promise<ReviewView[]> {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 50);
     const query: Record<string, unknown> = { eventId };
+    if (opts.before) query['_id'] = { $lt: opts.before };
+    const docs = await Review.find(query)
+      .sort({ _id: -1 })
+      .limit(limit)
+      .populate('buyerId', 'username name avatarUrl');
+    return docs.map((doc) => ReviewService.toView(doc));
+  }
+
+  /** Task E2: a services business sells no tickets, so eligibility to review
+   *  is gated on proof-of-contact (D1's EnquiryService.hasEnquired) instead
+   *  of ticket-holding. The review carries vendorId with NO eventId — E1's
+   *  partial-unique-index shape enforces one review per buyer per business. */
+  static async submitServiceReview(
+    businessId: string,
+    buyer: IBuyer,
+    input: { rating: number; text?: string }
+  ): Promise<IReview> {
+    assertNotSuspended(buyer);
+    const biz = await Vendor.findOne({
+      _id: businessId,
+      operatorType: OperatorType.SERVICES,
+      verificationStatus: VerificationStatus.VERIFIED,
+      isActive: true,
+    }).select('_id');
+    if (!biz) throw new HttpError(404, 'Business not found');
+    if (!(await EnquiryService.hasEnquired(String(buyer._id), businessId))) {
+      throw new HttpError(403, 'Only customers who have enquired can review this business');
+    }
+    try {
+      return await Review.create({
+        vendorId: biz._id,
+        buyerId: buyer._id,
+        rating: input.rating,
+        text: input.text || undefined,
+        verified: true, // only enquiry-verified contacts reach this point
+      });
+    } catch (err: any) {
+      if (err?.code === 11000) throw new HttpError(409, 'You have already reviewed this business');
+      throw err;
+    }
+  }
+
+  /** Event-less reviews for a services business — eventId is NEVER set on
+   *  these docs, so `{ $exists: false }` (not `null`) is the correct filter. */
+  static async listBusinessReviews(
+    businessId: string,
+    opts: { before?: string; limit?: number } = {}
+  ): Promise<ReviewView[]> {
+    const limit = Math.min(Math.max(opts.limit ?? 25, 1), 50);
+    const query: Record<string, unknown> = { vendorId: businessId, eventId: { $exists: false } };
     if (opts.before) query['_id'] = { $lt: opts.before };
     const docs = await Review.find(query)
       .sort({ _id: -1 })

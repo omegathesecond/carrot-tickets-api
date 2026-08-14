@@ -159,6 +159,91 @@ export class TicketsAuthService {
   }
 
   /**
+   * Self-service signup for an event SERVICE business (sound hire, catering,
+   * decor, etc.) — a Vendor with operatorType SERVICES that sells no tickets.
+   * OTP-gated exactly like register(): the code proves the signer controls the
+   * contact channel before any account is created (no unverified fallback).
+   * Returns the same { accessToken, refreshToken, user } shape as register()
+   * so a business signs in identically to an organizer — scopePermissionsToType
+   * strips the events/transport perms from the OWNER default set for SERVICES,
+   * leaving MANAGE_ENQUIRIES + EDIT_BRAND (see ticketsPermission.interface.ts).
+   */
+  static async registerBusiness(params: {
+    businessName: string;
+    email?: string;
+    phoneNumber?: string;
+    password: string;
+    serviceCategory: string;
+    startingPrice?: { amountCents: number; unit?: 'day' | 'event' | 'hour' };
+    city?: string;
+    code: string;
+  }) {
+    const { businessName, email, phoneNumber, password, serviceCategory, startingPrice, city, code } = params;
+
+    const id = this.signupIdentifier(email, phoneNumber);
+    if (!password || password.length < 6) {
+      throw new Error('Password must be at least 6 characters long');
+    }
+
+    // Reject duplicates up-front, same as register().
+    if (email && await Vendor.findOne({ email })) {
+      throw new Error('An account with this email already exists');
+    }
+    if (phoneNumber && await Vendor.findOne({ phoneNumber })) {
+      throw new Error('An account with this phone number already exists');
+    }
+
+    const vendor = await OtpService.withVerified('vendor', id, code, async () => {
+      const v = new Vendor({
+        businessName,
+        email,
+        phoneNumber,
+        password,
+        operatorType: OperatorType.SERVICES,
+        serviceCategory,
+        ...(startingPrice ? { startingPrice: { amountCents: startingPrice.amountCents, unit: startingPrice.unit ?? 'day' } } : {}),
+        ...(city ? { address: { city } } : {}),
+        // verificationStatus, isActive, isVerified and apps.tickets.enabled all
+        // fall back to the model defaults (PENDING / true / false / true).
+      });
+      await v.save();
+      return v;
+    });
+
+    const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
+    const payload = {
+      vendorId: vendor._id.toString(),
+      userType: 'vendor',
+      app: 'tickets',
+      role: TicketsRole.OWNER,
+      permissions: ownerPerms,
+      isSuperAdmin: false
+    };
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+    const refreshToken = this.generateRefreshToken();
+    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        _id: vendor._id,
+        email: vendor.email,
+        phoneNumber: vendor.phoneNumber,
+        businessName: vendor.businessName,
+        slug: vendor.slug,
+        userType: 'vendor',
+        role: TicketsRole.OWNER,
+        permissions: ownerPerms,
+        operatorType: vendor.operatorType,
+        isSuperAdmin: false,
+        verificationStatus: vendor.verificationStatus,
+        isVerified: vendor.isVerified
+      }
+    };
+  }
+
+  /**
    * Resolve the Vendor a reset identifier belongs to. Channel-precise: an email
    * matches the (lowercased) email field; a phone matches phoneNumber in any of
    * its stored formats (numbers are persisted verbatim — see phoneLoginCandidates).

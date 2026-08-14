@@ -1,0 +1,134 @@
+// api/src/services/__tests__/review.serviceGate.test.ts
+//
+// Task E2: enquiry-gated service reviews. A services business (Vendor
+// operatorType:'services') sells no tickets, so ticket-holder-ship (the
+// gate submitReview uses for event reviews) can't apply. Instead: only a
+// buyer who has previously sent the business an enquiry (D1's
+// EnquiryService.hasEnquired) may leave a review. One review per
+// buyer/business (409 on a second), and the review carries vendorId with
+// NO eventId (E1's partial-unique-index shape).
+import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
+import { Buyer, IBuyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
+import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { Review } from '@models/review.model';
+import { EnquiryService } from '@services/enquiry.service';
+import { ReviewService } from '@services/review.service';
+
+async function mkServicesBiz(over: any = {}) {
+  return Vendor.create({
+    businessName: over.businessName ?? 'Luxe Decor',
+    phoneNumber: over.phoneNumber ?? '+2687650' + Math.floor(Math.random() * 100000),
+    password: 'secret1',
+    operatorType: over.operatorType ?? OperatorType.SERVICES,
+    serviceCategory: over.serviceCategory ?? 'furniture_decor',
+    verificationStatus: over.verificationStatus ?? VerificationStatus.VERIFIED,
+    isActive: over.isActive ?? true,
+  });
+}
+
+async function mkBuyer(over: any = {}) {
+  return Buyer.create({
+    phone: over.phone ?? '+26878' + Math.floor(Math.random() * 1000000),
+    password: 'secret1',
+    name: over.name ?? 'Test Buyer',
+    username: over.username,
+  }) as Promise<IBuyer>;
+}
+
+describe('ReviewService.submitServiceReview', () => {
+  beforeAll(async () => {
+    await connectTestDb();
+    // The {vendorId, buyerId} partial-unique index (eventId absent) must
+    // actually exist in the in-memory Mongo before the duplicate-review
+    // assertion below, or a 409 would pass for the wrong reason.
+    await Review.init();
+  });
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  it('403s without a prior enquiry; succeeds after one; 409s on a second review', async () => {
+    const biz = await mkServicesBiz();
+    const buyer = await mkBuyer();
+
+    await expect(
+      ReviewService.submitServiceReview(String(biz._id), buyer, { rating: 5, text: 'Beautiful work' })
+    ).rejects.toMatchObject({ statusCode: 403, message: 'Only customers who have enquired can review this business' });
+
+    await EnquiryService.create(String(biz._id), buyer, { message: 'Do you do weddings?' });
+
+    const review = await ReviewService.submitServiceReview(String(biz._id), buyer, {
+      rating: 5,
+      text: 'Beautiful work',
+    });
+    expect(String(review.vendorId)).toBe(String(biz._id));
+    expect(review.eventId).toBeUndefined();
+    expect(review.verified).toBe(true);
+
+    const stored = await Review.findById(review._id);
+    expect(stored).not.toBeNull();
+    expect(stored!.eventId).toBeUndefined();
+
+    await expect(
+      ReviewService.submitServiceReview(String(biz._id), buyer, { rating: 4 })
+    ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('404s for a business that is not a verified, active SERVICES vendor', async () => {
+    const buyer = await mkBuyer();
+
+    const eventsVendor = await mkServicesBiz({ operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    await expect(
+      ReviewService.submitServiceReview(String(eventsVendor._id), buyer, { rating: 5 })
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    const unverified = await mkServicesBiz({ verificationStatus: VerificationStatus.PENDING });
+    await expect(
+      ReviewService.submitServiceReview(String(unverified._id), buyer, { rating: 5 })
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    const inactive = await mkServicesBiz({ isActive: false });
+    await expect(
+      ReviewService.submitServiceReview(String(inactive._id), buyer, { rating: 5 })
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(
+      ReviewService.submitServiceReview('aaaaaaaaaaaaaaaaaaaaaaaa', buyer, { rating: 5 })
+    ).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe('ReviewService.listBusinessReviews', () => {
+  beforeAll(connectTestDb);
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  it('returns only event-less reviews for the given vendor, newest first, with a hydrated reviewer', async () => {
+    const biz = await mkServicesBiz();
+    const buyer = await mkBuyer({ username: 'decor_fan' });
+    await EnquiryService.create(String(biz._id), buyer, { message: 'Interested!' });
+    const review = await ReviewService.submitServiceReview(String(biz._id), buyer, { rating: 5, text: 'Loved it' });
+
+    // An unrelated event review on the SAME vendor must never leak into the
+    // services list — listBusinessReviews filters eventId: { $exists: false }.
+    await Review.create({
+      eventId: '507f1f77bcf86cd799439011',
+      vendorId: biz._id,
+      buyerId: buyer._id,
+      rating: 3,
+      verified: true,
+    });
+
+    const list = await ReviewService.listBusinessReviews(String(biz._id));
+    expect(list).toHaveLength(1);
+    expect(list[0]!.id).toBe(String(review._id));
+    expect(list[0]!.rating).toBe(5);
+    expect(list[0]!.text).toBe('Loved it');
+    expect(list[0]!.reviewer.username).toBe('decor_fan');
+  });
+
+  it('returns an empty list for a business with no service reviews', async () => {
+    const biz = await mkServicesBiz();
+    expect(await ReviewService.listBusinessReviews(String(biz._id))).toEqual([]);
+  });
+});

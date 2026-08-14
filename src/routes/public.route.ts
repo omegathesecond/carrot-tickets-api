@@ -4,6 +4,8 @@ import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
+import { ServicesController } from '@controllers/services.controller';
+import { EnquiryController } from '@controllers/enquiry.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
@@ -201,6 +203,53 @@ router.post('/events/:eventId/share', optionalTicketsAuth, EventReactionControll
  * @access  Public
  */
 router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
+
+/**
+ * @route   GET /api/public/services
+ * @desc    Services directory — verified SERVICES-operatorType vendors as
+ *          cards, newest first. Query: category, search, before (cursor id),
+ *          limit (default 24, max 50).
+ * @access  Public
+ */
+router.get('/services', ServicesController.directory);
+
+/**
+ * @route   GET /api/public/services/:businessId
+ * @desc    Single services business profile. 404 for anything not a
+ *          verified SERVICES vendor. Registered AFTER the static
+ *          '/services' route above — order matters in Express.
+ * @access  Public
+ */
+router.get('/services/:businessId', ServicesController.profile);
+
+/**
+ * @route   POST /api/public/services/:businessId/enquiries
+ * @desc    Submit a lead/enquiry to a verified SERVICES business. Also
+ *          establishes proof-of-contact (unlocks a review later — Task E2).
+ * @access  Buyer (Bearer buyer token)
+ * @body    message (required, max 1000), eventDate?, eventType?, contactPhone?, contactEmail?
+ */
+router.post('/services/:businessId/enquiries', authenticateBuyer, EnquiryController.create);
+
+/**
+ * @route   GET /api/public/services/:businessId/reviews
+ * @desc    Paginated review list for a services business (eventId absent —
+ *          disjoint from GET /events/:eventId/reviews).
+ * @access  Public
+ * @query   before, limit
+ */
+router.get('/services/:businessId/reviews', ServicesController.listReviews);
+
+/**
+ * @route   POST /api/public/services/:businessId/reviews
+ * @desc    Submit a review of a services business. Gated on proof-of-contact:
+ *          only a buyer who has sent this business an enquiry (Task D1's
+ *          EnquiryService.hasEnquired) may post (403 otherwise), one review
+ *          per buyer per business.
+ * @access  Buyer (Bearer buyer token)
+ * @body    rating (1-5), text?
+ */
+router.post('/services/:businessId/reviews', authenticateBuyer, ServicesController.submitReview);
 
 /**
  * @route   POST /api/public/purchase

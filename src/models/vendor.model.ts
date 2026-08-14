@@ -1,6 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { IVendor, VerificationStatus, OperatorType } from '@interfaces/vendor.interface';
+import { SERVICE_CATEGORY_VALUES, STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
 
 const vendorSchema = new Schema<IVendor>({
   // Authentication - Email OR Phone (both optional but at least one required)
@@ -62,6 +63,29 @@ const vendorSchema = new Schema<IVendor>({
     trim: true,
     maxlength: [500, 'Bio cannot exceed 500 characters']
   },
+
+  // Service business (operatorType 'services') — the vertical of the supplier.
+  serviceCategory: {
+    type: String,
+    enum: SERVICE_CATEGORY_VALUES,
+    required: [
+      function (this: IVendor) { return this.operatorType === OperatorType.SERVICES; },
+      'A service category is required for service businesses',
+    ],
+    index: true,
+  },
+  startingPrice: {
+    type: new Schema(
+      { amountCents: {
+          type: Number, min: 0, required: true,
+          validate: { validator: Number.isInteger, message: 'amountCents must be a whole number of cents' },
+        },
+        unit: { type: String, enum: STARTING_PRICE_UNITS, default: 'day' } },
+      { _id: false },
+    ),
+    required: false,
+  },
+
   primaryContact: {
     type: String,
     trim: true,

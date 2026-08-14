@@ -4,6 +4,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
+import { SERVICE_CATEGORY_VALUES, STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
 
 // Cross-field guard: a max price, when both are present, must be >= the min.
 const priceRangeCheck = (value: any, helpers: any) => {
@@ -86,6 +87,33 @@ export const registerSchema = Joi.object({
 }).or('email', 'phoneNumber').messages({
   'object.missing': 'An email address or phone number is required'
 });
+
+/**
+ * Self-service SERVICES (event supplier) business signup. Mirrors registerSchema's
+ * OTP-gated shape but replaces businessType/primaryContact with the services
+ * fields (serviceCategory required, startingPrice/city optional).
+ */
+export const businessRegisterSchema = Joi.object({
+  businessName: Joi.string().required().trim().max(100).messages({
+    'string.empty': 'Business name is required',
+    'any.required': 'Business name is required',
+  }),
+  serviceCategory: Joi.string().valid(...SERVICE_CATEGORY_VALUES).required().messages({
+    'any.only': 'Choose a valid service category',
+    'any.required': 'Choose a service category',
+  }),
+  email: Joi.string().email().trim().lowercase().optional(),
+  phoneNumber: Joi.string().trim().max(20).optional(),
+  password: Joi.string().required().min(6),
+  code: Joi.string().required().pattern(/^\d{6}$/).messages({
+    'string.pattern.base': 'Enter the 6-digit code we sent you',
+  }),
+  city: Joi.string().trim().max(100).optional(),
+  startingPrice: Joi.object({
+    amountCents: Joi.number().integer().min(0).required(),
+    unit: Joi.string().valid(...STARTING_PRICE_UNITS).default('day'),
+  }).optional(),
+}).or('email', 'phoneNumber').messages({ 'object.missing': 'An email address or phone number is required' });
 
 /**
  * Admin-only operator creation (POST /admin/organizers). Unlike registerSchema

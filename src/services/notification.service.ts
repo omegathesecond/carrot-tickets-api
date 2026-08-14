@@ -41,9 +41,9 @@ function actorRef(type: NotificationType, data: Record<string, unknown>): ActorR
   if (isObjectId(data.actorId) && (gtype === 'buyer' || gtype === 'vendor')) return { kind: gtype, id: data.actorId };
   if (type === 'follow' && isObjectId(data.followerId))
     return { kind: data.followerType === 'organizer' ? 'vendor' : 'buyer', id: data.followerId };
-  // friend + meetup rows all carry the acting buyer as `data.buyerId` (the
-  // requester on meetup_request, the accepter on meetup_accepted).
-  if ((type === 'friend' || type === 'meetup_request' || type === 'meetup_accepted') && isObjectId(data.buyerId))
+  // friend + meetup + enquiry rows all carry the acting buyer as `data.buyerId`
+  // (requester on meetup_request, accepter on meetup_accepted, enquirer on enquiry_received).
+  if ((type === 'friend' || type === 'meetup_request' || type === 'meetup_accepted' || type === 'enquiry_received') && isObjectId(data.buyerId))
     return { kind: 'buyer', id: data.buyerId };
   return null;
 }
