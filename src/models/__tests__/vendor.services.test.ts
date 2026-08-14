@@ -19,11 +19,18 @@ describe('Vendor — services fields', () => {
     expect(v.startingPrice?.unit).toBe('day');
   });
 
-  it('rejects an unknown service category', async () => {
-    await expect(Vendor.create({
+  // serviceCategory is no longer a Mongoose enum — categories are DB-driven
+  // (ServiceCategory model), so ANY string persists at the model layer. The
+  // "is this a real, active category" check now happens one layer up, at
+  // signup, via ServiceCategoryService.isValidActive
+  // (see ticketsAuth.business.test.ts "rejects an unknown/unseeded service
+  // category" and "rejects a disabled service category").
+  it('persists an arbitrary category string (validity is checked at signup, not by the model)', async () => {
+    const v = await Vendor.create({
       businessName: 'X', phoneNumber: '+26876000002', password: 'secret1',
-      operatorType: OperatorType.SERVICES, serviceCategory: 'bouncy_castle' as any,
-    })).rejects.toThrow();
+      operatorType: OperatorType.SERVICES, serviceCategory: 'bouncy_castle',
+    });
+    expect(v.serviceCategory).toBe('bouncy_castle');
   });
 
   it('requires a category when operatorType is services', async () => {
