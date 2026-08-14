@@ -25,7 +25,7 @@ async function seedEndedWithTicket() {
   const seeded = await seedPublishedEvent();
   const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
   await Event.updateOne({ _id: seeded.eventId }, { eventDate: past, startTime: past, endTime: past });
-  await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Reviewer', username: 'reviewer_one' });
+  await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Reviewer', username: 'reviewer_one' });
   await Ticket.create({
     eventId: seeded.eventId, vendorId: seeded.vendorId, ticketType: 'General',
     price: 100, customerPhone: PHONE, status: TicketStatus.CHECKED_IN,
@@ -99,7 +99,7 @@ describe('review routes', () => {
       .expect(400);
 
     const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
-    await Buyer.create({ phone: PHONE, password: 'secret1' }).catch(() => null);
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' }).catch(() => null);
     await request(app)
       .post('/api/public/events/not-an-id/reviews')
       .set('Authorization', buyerAuth)

@@ -16,7 +16,7 @@ describe('/api/tickets/dm (brand ↔ buyer)', () => {
 
   it('brand opens a thread with a buyer, both sides exchange messages', async () => {
     const brand = await makeVendor();
-    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Attendee', username: 'attendee_one' });
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Attendee', username: 'attendee_one' });
     const brandTok = `Bearer ${signVendorToken(String(brand._id))}`;
     const buyerTok = `Bearer ${signBuyerToken('+26878422613')}`;
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
+import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { VendorSocialController } from '@controllers/vendorSocial.controller';
 import { VendorConsumerReadsController } from '@controllers/vendorConsumerReads.controller';
 import { StoryController } from '@controllers/story.controller';
@@ -14,7 +15,7 @@ router.get('/me', authenticateTickets, VendorSocialController.me);
 // param route (which only captures the '/users' prefix, so no conflict).
 router.patch('/me/location', authenticateTickets, VendorConsumerReadsController.updateLocation);
 router.delete('/me/location', authenticateTickets, VendorConsumerReadsController.deleteLocation);
-router.post('/follow', authenticateTickets, VendorSocialController.follow);
+router.post('/follow', authenticateTickets, requireProfilePhoto, VendorSocialController.follow);
 router.delete('/follow/:targetType/:targetId', authenticateTickets, VendorSocialController.unfollow);
 router.get('/me/following', authenticateTickets, VendorSocialController.following);
 router.get('/me/followers', authenticateTickets, VendorSocialController.followers);
@@ -42,8 +43,8 @@ router.get('/me/following/events', authenticateTickets, VendorConsumerReadsContr
 // buyer mount in @routes/social.route, entered through the vendor twins so the
 // actor is the brand (Story.authorType 'vendor'); story.service was
 // actor-shaped already, so nothing below the controller changed.
-router.post('/stories', authenticateTickets, StoryController.createAsVendor);
-router.post('/stories/:id/finalize', authenticateTickets, StoryController.finalizeAsVendor);
+router.post('/stories', authenticateTickets, requireProfilePhoto, StoryController.createAsVendor);
+router.post('/stories/:id/finalize', authenticateTickets, requireProfilePhoto, StoryController.finalizeAsVendor);
 router.get('/stories', authenticateTickets, StoryController.listAsVendor);
 router.post('/stories/:id/seen', authenticateTickets, StoryController.seenAsVendor);
 router.get('/stories/:id/viewers', authenticateTickets, StoryController.viewersAsVendor);

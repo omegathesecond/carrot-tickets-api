@@ -32,7 +32,7 @@ async function seedWorld() {
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, String(vendor._id));
   const general = (await Channel.findOne({ communityId: community._id, slug: 'general' }))!;
 
-  const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Reporter Buyer' });
+  const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Reporter Buyer' });
   const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
   const adminAuth = `Bearer ${signVendorToken('admin-1', [TicketsPermission.MODERATE_SOCIAL])}`;
   const superAdminAuth = `Bearer ${signVendorToken('super-1', [], true)}`;
@@ -66,7 +66,7 @@ describe('report routes', () => {
     it('files a message report — 201 on first file, 200 on a duplicate open report', async () => {
       const { general, buyerAuth } = await seedWorld();
       const reporterAuth = `Bearer ${signBuyerToken('+26878300001')}`;
-      await Buyer.create({ phone: '+26878300001', password: 'secret1', name: 'Rando' });
+      await Buyer.create({ phone: '+26878300001', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Rando' });
 
       const sent = await request(app)
         .post(`/api/community/channels/${String(general._id)}/messages`)
@@ -91,7 +91,7 @@ describe('report routes', () => {
 
     it('files a buyer report', async () => {
       const { buyerAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300002', password: 'secret1', name: 'Target' });
+      const target = await Buyer.create({ phone: '+26878300002', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Target' });
 
       await request(app)
         .post('/api/community/reports')
@@ -102,7 +102,7 @@ describe('report routes', () => {
 
     it('rejects a body with both messageId and targetBuyerId, and a body with neither (400)', async () => {
       const { buyerAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300003', password: 'secret1' });
+      const target = await Buyer.create({ phone: '+26878300003', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       await request(app)
         .post('/api/community/reports')
         .set('Authorization', buyerAuth)
@@ -131,7 +131,7 @@ describe('report routes', () => {
   describe('admin queue — GET/POST /api/tickets/reports*', () => {
     it('403s a team member without tickets:moderate_social; 200s one who holds it', async () => {
       const { buyerAuth, adminAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300010', password: 'secret1' });
+      const target = await Buyer.create({ phone: '+26878300010', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       await request(app)
         .post('/api/community/reports')
         .set('Authorization', buyerAuth)
@@ -152,7 +152,7 @@ describe('report routes', () => {
 
     it('defaults to status=open and supports the status filter', async () => {
       const { buyerAuth, adminAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300011', password: 'secret1' });
+      const target = await Buyer.create({ phone: '+26878300011', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       const row = await fileAndFetch(buyerAuth, adminAuth, {
         targetType: 'buyer',
         targetBuyerId: String(target._id),
@@ -178,7 +178,7 @@ describe('report routes', () => {
     it('resolve: delete_message deletes a channel message cross-vendor and the admin view shows it deleted+unmasked', async () => {
       const { general, buyerAuth } = await seedWorld();
       const reporterAuth = `Bearer ${signBuyerToken('+26878300012')}`;
-      await Buyer.create({ phone: '+26878300012', password: 'secret1' });
+      await Buyer.create({ phone: '+26878300012', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
 
       const sent = await request(app)
         .post(`/api/community/channels/${String(general._id)}/messages`)
@@ -219,9 +219,9 @@ describe('report routes', () => {
 
     it('resolve: suspend_buyer then unsuspend_buyer round-trips socialSuspendedAt, enforced end-to-end on a write path', async () => {
       const { buyerAuth, adminAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300013', password: 'secret1', name: 'Follow Target' });
+      const target = await Buyer.create({ phone: '+26878300013', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Follow Target' });
       const targetAuth = `Bearer ${signBuyerToken('+26878300013')}`;
-      const someoneElse = await Buyer.create({ phone: '+26878300014', password: 'secret1' });
+      const someoneElse = await Buyer.create({ phone: '+26878300014', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
 
       const row = await fileAndFetch(buyerAuth, adminAuth, {
         targetType: 'buyer',
@@ -268,7 +268,7 @@ describe('report routes', () => {
 
     it('resolve: dismiss just closes the report, no side effects', async () => {
       const { buyerAuth, adminAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300015', password: 'secret1' });
+      const target = await Buyer.create({ phone: '+26878300015', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       const row = await fileAndFetch(buyerAuth, adminAuth, {
         targetType: 'buyer',
         targetBuyerId: String(target._id),
@@ -299,7 +299,7 @@ describe('report routes', () => {
         .send({ action: 'dismiss' })
         .expect(400);
 
-      const target = await Buyer.create({ phone: '+26878300016', password: 'secret1' });
+      const target = await Buyer.create({ phone: '+26878300016', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       const row = await fileAndFetch(buyerAuth, adminAuth, {
         targetType: 'buyer',
         targetBuyerId: String(target._id),
@@ -311,7 +311,7 @@ describe('report routes', () => {
 
     it('resolve rejects an unknown action (400 at the Joi layer)', async () => {
       const { buyerAuth, adminAuth } = await seedWorld();
-      const target = await Buyer.create({ phone: '+26878300017', password: 'secret1' });
+      const target = await Buyer.create({ phone: '+26878300017', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       const row = await fileAndFetch(buyerAuth, adminAuth, {
         targetType: 'buyer',
         targetBuyerId: String(target._id),

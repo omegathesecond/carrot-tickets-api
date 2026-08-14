@@ -68,7 +68,7 @@ describe('community organizer read-only peek', () => {
     const { eventId, vendorId } = await seedOwnedCommunity();
 
     // A buyer joins so there's someone to list.
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Test Buyer' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Test Buyer' });
     await request(app)
       .post(`/api/community/${eventId}/join`)
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)

@@ -19,7 +19,7 @@ describe('/api/tickets/social/me/following|followers (vendor)', () => {
   it('following lists the buyers and brands the vendor follows', async () => {
     const me = await makeVendor();
     const followedBrand = await makeVendor();
-    const followedBuyer = await Buyer.create({ phone: '+26878000601', password: 'secret1', name: 'Alice', username: 'alice_ff' });
+    const followedBuyer = await Buyer.create({ phone: '+26878000601', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Alice', username: 'alice_ff' });
     const token = `Bearer ${signVendorToken(String(me._id))}`;
 
     await request(app).post('/api/tickets/social/follow').set('Authorization', token).send({ targetType: 'organizer', targetId: String(followedBrand._id) }).expect(200);
@@ -34,7 +34,7 @@ describe('/api/tickets/social/me/following|followers (vendor)', () => {
   it('followers lists buyers and brands that follow the vendor', async () => {
     const me = await makeVendor();
     const followerBrand = await makeVendor();
-    const followerBuyer = await Buyer.create({ phone: '+26878000602', password: 'secret1', name: 'Bob' });
+    const followerBuyer = await Buyer.create({ phone: '+26878000602', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Bob' });
 
     // buyer follows me (buyer route resolves the buyer from the token phone)
     await request(app).post('/api/social/follow').set('Authorization', `Bearer ${signBuyerToken('+26878000602')}`).send({ targetType: 'organizer', targetId: String(me._id) }).expect(200);

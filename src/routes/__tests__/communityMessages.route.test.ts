@@ -18,7 +18,7 @@ async function seedWorld() {
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   const channels = await Channel.find({ communityId: community._id });
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
-  await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Chatty Buyer' });
+  await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Chatty Buyer' });
   const auth = `Bearer ${signBuyerToken(PHONE)}`;
   return { seeded, community, bySlug, auth };
 }
@@ -171,7 +171,7 @@ describe('community message routes', () => {
       .expect(201);
 
     const OTHER = '+26878000099';
-    await Buyer.create({ phone: OTHER, password: 'secret1' });
+    await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const otherAuth = `Bearer ${signBuyerToken(OTHER)}`;
     await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', otherAuth).expect(200);
 

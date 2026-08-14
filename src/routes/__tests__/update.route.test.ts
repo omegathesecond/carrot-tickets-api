@@ -23,7 +23,7 @@ describe('POST /api/public/updates', () => {
   afterAll(disconnectTestDb);
 
   it('creates a processing video update and returns a presigned upload url', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
@@ -35,7 +35,7 @@ describe('POST /api/public/updates', () => {
   });
 
   it('rejects a mismatched kind/contentType', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     await request(app)
       .post('/api/public/updates')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
@@ -48,7 +48,7 @@ describe('POST /api/public/updates', () => {
   });
 
   it('201s with one upload per item for a 3-photo post', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
@@ -58,7 +58,7 @@ describe('POST /api/public/updates', () => {
   });
 
   it('400s a 6-photo post', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
@@ -73,7 +73,7 @@ describe('POST /api/public/updates/:id/view', () => {
   afterAll(disconnectTestDb);
 
   it('increments and returns viewCount with no auth required', async () => {
-    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
     const update = await Update.create({
       authorType: 'buyer',
       authorId: author._id,
@@ -150,7 +150,7 @@ describe('DELETE /api/public/updates/:id', () => {
   // checking authorType, so a buyer whose _id equalled a vendor's id could
   // delete that brand's post. Construct exactly that collision.
   it('forbids a buyer from deleting a VENDOR post whose authorId equals the buyer _id', async () => {
-    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Collider' });
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Collider' });
     // Same raw id, but authored by a *vendor* — only the authorType check saves us.
     const update = await seedVendorUpdate(String(buyer._id));
 
@@ -164,7 +164,7 @@ describe('DELETE /api/public/updates/:id', () => {
   });
 
   it('allows the author (buyer who created it) to delete their own update', async () => {
-    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
     const update = await seedUpdate(String(author._id));
 
     const res = await request(app)
@@ -179,7 +179,7 @@ describe('DELETE /api/public/updates/:id', () => {
 
   it('allows a super-admin to delete an update they did not author', async () => {
     const OTHER_PHONE = '+26876000001';
-    const author = await Buyer.create({ phone: OTHER_PHONE, password: 'secret1', name: 'Someone Else' });
+    const author = await Buyer.create({ phone: OTHER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Someone Else' });
     const update = await seedUpdate(String(author._id));
 
     const res = await request(app)
@@ -193,9 +193,9 @@ describe('DELETE /api/public/updates/:id', () => {
   });
 
   it('forbids a different buyer (non-author, non-admin) from deleting', async () => {
-    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
     const NON_AUTHOR_PHONE = '+26876000002';
-    await Buyer.create({ phone: NON_AUTHOR_PHONE, password: 'secret1', name: 'Rando' });
+    await Buyer.create({ phone: NON_AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Rando' });
     const update = await seedUpdate(String(author._id));
 
     await request(app)
@@ -208,7 +208,7 @@ describe('DELETE /api/public/updates/:id', () => {
   });
 
   it('denies an anonymous request (no Authorization header)', async () => {
-    const author = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Author' });
+    const author = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
     const update = await seedUpdate(String(author._id));
 
     await request(app)

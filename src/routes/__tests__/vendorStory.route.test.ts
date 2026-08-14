@@ -64,7 +64,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
     });
 
     it('401s a buyer token (carries no vendorId)', async () => {
-      await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', name: 'Buyer' });
+      await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
       await request(app)
         .post('/api/tickets/social/stories')
         .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
@@ -129,7 +129,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
   describe('GET /api/tickets/social/stories', () => {
     it("returns a followed buyer's story plus the brand's own, and flips seen after marking", async () => {
       const vendor = await makeVendor();
-      const author = await Buyer.create({ phone: '+26878400301', password: 'secret1', name: 'Author' });
+      const author = await Buyer.create({ phone: '+26878400301', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await FollowService.followAsVendor(String(vendor._id), 'buyer', String(author._id));
       const theirs = await seedReadyStory('buyer', String(author._id));
       await seedReadyStory('vendor', String(vendor._id));
@@ -153,7 +153,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
 
     it('excludes a story from an author the brand does not follow', async () => {
       const vendor = await makeVendor();
-      const stranger = await Buyer.create({ phone: '+26878400302', password: 'secret1', name: 'Stranger' });
+      const stranger = await Buyer.create({ phone: '+26878400302', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Stranger' });
       await seedReadyStory('buyer', String(stranger._id));
 
       const res = await request(app)
@@ -164,7 +164,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
     });
 
     it('401s a buyer token', async () => {
-      await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', name: 'Buyer' });
+      await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
       await request(app)
         .get('/api/tickets/social/stories')
         .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
@@ -175,7 +175,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
   describe('GET /api/tickets/social/stories/:id/viewers', () => {
     it("lists who saw the brand's own story, and 403s a story the brand did not author", async () => {
       const vendor = await makeVendor();
-      const viewer = await Buyer.create({ phone: '+26878400303', password: 'secret1', name: 'Watcher' });
+      const viewer = await Buyer.create({ phone: '+26878400303', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Watcher' });
       await FollowService.follow(viewer, 'organizer', String(vendor._id));
       const mine = await seedReadyStory('vendor', String(vendor._id));
 

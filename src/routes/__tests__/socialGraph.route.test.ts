@@ -16,9 +16,9 @@ const PHONE_B = '+26878000042';
 const PHONE_C = '+26878000043';
 
 async function seedBuyers() {
-  const a = await Buyer.create({ phone: PHONE_A, password: 'secret1', name: 'Alpha', username: 'alpha_one' });
-  const b = await Buyer.create({ phone: PHONE_B, password: 'secret1', name: 'Beta', username: 'beta_two' });
-  const c = await Buyer.create({ phone: PHONE_C, password: 'secret1', name: 'Gamma', username: 'gamma_three' });
+  const a = await Buyer.create({ phone: PHONE_A, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Alpha', username: 'alpha_one' });
+  const b = await Buyer.create({ phone: PHONE_B, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Beta', username: 'beta_two' });
+  const c = await Buyer.create({ phone: PHONE_C, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Gamma', username: 'gamma_three' });
   return { a, b, c, authA: `Bearer ${signBuyerToken(PHONE_A)}`, authB: `Bearer ${signBuyerToken(PHONE_B)}` };
 }
 
@@ -100,7 +100,7 @@ describe('social graph routes', () => {
   it('user search matches display name and includes usernameless buyers', async () => {
     const { authA } = await seedBuyers();
     // A buyer who never had a social touch: has a name, no username at all.
-    const noHandle = await Buyer.create({ phone: '+26878000044', password: 'secret1', name: 'Sipho Dlamini' });
+    const noHandle = await Buyer.create({ phone: '+26878000044', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Sipho Dlamini' });
 
     const hits = await request(app).get('/api/social/users/search?q=sipho').set('Authorization', authA).expect(200);
     expect(hits.body.data).toHaveLength(1);
@@ -111,7 +111,7 @@ describe('social graph routes', () => {
 
   it('resolves a usernameless buyer profile by id (the /u/<id> fallback)', async () => {
     const { authA } = await seedBuyers();
-    const noHandle = await Buyer.create({ phone: '+26878000045', password: 'secret1', name: 'Thandi' });
+    const noHandle = await Buyer.create({ phone: '+26878000045', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Thandi' });
 
     const res = await request(app).get(`/api/social/users/${String(noHandle._id)}`).set('Authorization', authA).expect(200);
     expect(res.body.data.id).toBe(String(noHandle._id));
@@ -143,7 +143,7 @@ describe('social graph routes', () => {
     // The who's-going roster is public social proof (optionalCommunityViewer):
     // a non-member — and a signed-out visitor — reads the same list. Joining
     // and messaging stay gated on the write routes.
-    await Buyer.create({ phone: '+26878000044', password: 'secret1' });
+    await Buyer.create({ phone: '+26878000044', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const nonMember = await request(app)
       .get(`/api/community/${seeded.eventId}/members`)
       .set('Authorization', `Bearer ${signBuyerToken('+26878000044')}`)

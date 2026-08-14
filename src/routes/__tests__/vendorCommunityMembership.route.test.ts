@@ -53,7 +53,7 @@ describe('vendor community membership (non-owner brand)', () => {
   it('the brand member shows up in the roster as an organizer row alongside buyers', async () => {
     const eventId = await seedForeignCommunity();
     const guest = await makeBrand('Roster Brand');
-    await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'A Buyer', username: 'a_buyer' });
+    await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'A Buyer', username: 'a_buyer' });
 
     await request(app).post(`/api/community/${eventId}/join`).set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
     await request(app).post(`/api/community/${eventId}/join`).set('Authorization', `Bearer ${signVendorToken(String(guest._id))}`).expect(200);

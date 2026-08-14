@@ -21,7 +21,7 @@ describe('buyer → brand DM thread (POST /api/dm/brand-threads)', () => {
   afterAll(disconnectTestDb);
 
   async function seed() {
-    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', username: 'alpha_one', name: 'Alpha' });
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'alpha_one', name: 'Alpha' });
     const vendor = await Vendor.create({
       businessName: 'Loud Events', email: 'loud@example.com', password: 'secret123',
       phoneNumber: '+26878000055', logoUrl: null,

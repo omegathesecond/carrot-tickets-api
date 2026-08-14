@@ -18,8 +18,8 @@ describe('meetup routes', () => {
   afterAll(disconnectTestDb);
 
   it('POST /meetups creates a pending request; target sees it as an incoming row, requester as outgoing', async () => {
-    await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
-    const target = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'T', username: 'target_a' });
+    await Buyer.create({ phone: ME, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Me', username: 'me_one' });
+    const target = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'T', username: 'target_a' });
 
     const created = await request(app)
       .post('/api/social/meetups')
@@ -48,8 +48,8 @@ describe('meetup routes', () => {
   });
 
   it('target accepts; requester cannot accept (403)', async () => {
-    await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
-    const target = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'T', username: 'target_a' });
+    await Buyer.create({ phone: ME, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Me', username: 'me_one' });
+    const target = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'T', username: 'target_a' });
     const created = await request(app).post('/api/social/meetups').set(auth(ME)).send({ targetId: String(target._id) });
     const id = created.body.data.id;
 
@@ -60,22 +60,22 @@ describe('meetup routes', () => {
   });
 
   it('requester cancels a pending request', async () => {
-    await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
-    const target = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'T', username: 'target_a' });
+    await Buyer.create({ phone: ME, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Me', username: 'me_one' });
+    const target = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'T', username: 'target_a' });
     const created = await request(app).post('/api/social/meetups').set(auth(ME)).send({ targetId: String(target._id) });
     await request(app).delete(`/api/social/meetups/${created.body.data.id}`).set(auth(ME)).expect(200);
     expect(await MeetupRequest.countDocuments({})).toBe(0);
   });
 
   it('rejects an invalid status filter', async () => {
-    await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
+    await Buyer.create({ phone: ME, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Me', username: 'me_one' });
     await request(app).get('/api/social/meetups?status=bogus').set(auth(ME)).expect(400);
   });
 
   it('GET /meetups?status=accepted returns accepted meetups in both directions', async () => {
-    const me = await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
-    const A = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'A', username: 'user_a' });
-    const B = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'B', username: 'user_b' });
+    const me = await Buyer.create({ phone: ME, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Me', username: 'me_one' });
+    const A = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'A', username: 'user_a' });
+    const B = await Buyer.create({ phone: '+26878000002', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'B', username: 'user_b' });
 
     // Direction 1: viewer (ME) is the requester, A accepts.
     const req1 = await request(app).post('/api/social/meetups').set(auth(ME)).send({ targetId: String(A._id) });
@@ -94,8 +94,8 @@ describe('meetup routes', () => {
   });
 
   it('GET /meetups?status=declined surfaces outgoing-declined to the requester', async () => {
-    await Buyer.create({ phone: ME, password: 'secret1', name: 'Me', username: 'me_one' });
-    const target = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'T', username: 'target_a' });
+    await Buyer.create({ phone: ME, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Me', username: 'me_one' });
+    const target = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'T', username: 'target_a' });
     const created = await request(app).post('/api/social/meetups').set(auth(ME)).send({ targetId: String(target._id) });
     await request(app).post(`/api/social/meetups/${created.body.data.id}/decline`).set(auth(OTHER)).expect(200);
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { SocialProfileController } from '@controllers/socialProfile.controller';
 import { ConsumerReadsController } from '@controllers/consumerReads.controller';
 import { StoryController } from '@controllers/story.controller';
@@ -22,7 +23,7 @@ router.delete('/me/location', authenticateBuyer, SocialProfileController.deleteL
 router.get('/notifications', authenticateBuyer, SocialProfileController.myNotifications);
 router.post('/notifications/read', authenticateBuyer, SocialProfileController.markNotificationsRead);
 router.get('/username-available', authenticateBuyer, SocialProfileController.usernameAvailable);
-router.post('/follow', authenticateBuyer, SocialProfileController.followTarget);
+router.post('/follow', authenticateBuyer, requireProfilePhoto, SocialProfileController.followTarget);
 router.delete('/follow/:targetType/:targetId', authenticateBuyer, SocialProfileController.unfollowTarget);
 // Follower/following lists are PUBLIC social data — optional auth so
 // anonymous visitors and signed-in vendors (viewing their own brand's
@@ -37,15 +38,15 @@ router.get('/suggestions/people', authenticateBuyer, ConsumerReadsController.sug
 router.get('/suggestions/organizers', authenticateBuyer, ConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recommendations);
 router.get('/nearby/people', authenticateBuyer, ConsumerReadsController.nearbyPeople);
-router.post('/meetups', authenticateBuyer, MeetupController.request);
+router.post('/meetups', authenticateBuyer, requireProfilePhoto, MeetupController.request);
 router.get('/meetups', authenticateBuyer, MeetupController.list);
 router.post('/meetups/:id/accept', authenticateBuyer, MeetupController.accept);
 router.post('/meetups/:id/decline', authenticateBuyer, MeetupController.decline);
 router.delete('/meetups/:id', authenticateBuyer, MeetupController.cancel);
 // Ephemeral 24h Stories — registered above '/users/:username' alongside the
 // rest of the fixed-segment routes, same reasoning as '/users/search' below.
-router.post('/stories', authenticateBuyer, StoryController.create);
-router.post('/stories/:id/finalize', authenticateBuyer, StoryController.finalize);
+router.post('/stories', authenticateBuyer, requireProfilePhoto, StoryController.create);
+router.post('/stories/:id/finalize', authenticateBuyer, requireProfilePhoto, StoryController.finalize);
 router.get('/stories', authenticateBuyer, StoryController.list);
 router.post('/stories/:id/seen', authenticateBuyer, StoryController.seen);
 router.get('/stories/:id/viewers', authenticateBuyer, StoryController.viewers);
