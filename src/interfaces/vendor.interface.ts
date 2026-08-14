@@ -32,7 +32,10 @@ export interface IVendor extends Document {
   bio?: string;
 
   // Service business (operatorType 'services') — the vertical of the supplier.
-  serviceCategory?: import('@/constants/serviceCategories').ServiceCategory;
+  // Plain string: categories are now DB-driven (ServiceCategory collection),
+  // so an admin can add values beyond the seed constant — the runtime invariant
+  // is enforced by ServiceCategoryService.isValidActive, not this type.
+  serviceCategory?: string;
   startingPrice?: { amountCents: number; unit: import('@/constants/serviceCategories').StartingPriceUnit };
 
   // Contact Information
