@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { IVendor, VerificationStatus, OperatorType } from '@interfaces/vendor.interface';
-import { SERVICE_CATEGORY_VALUES, STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
+import { STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
 
 const vendorSchema = new Schema<IVendor>({
   // Authentication - Email OR Phone (both optional but at least one required)
@@ -65,9 +65,14 @@ const vendorSchema = new Schema<IVendor>({
   },
 
   // Service business (operatorType 'services') — the vertical of the supplier.
+  // A plain validated string, NOT a Mongoose enum: categories are now DB-driven
+  // (see ServiceCategory model / ServiceCategoryService), so the set of valid
+  // values can change without a code deploy. Membership in the active category
+  // set is checked at signup by ServiceCategoryService.isValidActive
+  // (TicketsAuthService.registerBusiness), not enforced here at the schema level.
   serviceCategory: {
     type: String,
-    enum: SERVICE_CATEGORY_VALUES,
+    trim: true,
     required: [
       function (this: IVendor) { return this.operatorType === OperatorType.SERVICES; },
       'A service category is required for service businesses',

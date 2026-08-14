@@ -11,6 +11,7 @@ import { scopePermissionsToType } from '@utils/permissions.util';
 import { phoneLoginCandidates } from '@utils/phone.util';
 import { classifyIdentifier, Identifier } from '@utils/identifier.util';
 import { OtpService } from '@services/otp.service';
+import { ServiceCategoryService } from '@services/serviceCategory.service';
 import { JWT_SECRET } from '@config/jwt.config';
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
@@ -191,6 +192,13 @@ export class TicketsAuthService {
     }
     if (phoneNumber && await Vendor.findOne({ phoneNumber })) {
       throw new Error('An account with this phone number already exists');
+    }
+
+    // Categories are DB-driven now (ServiceCategoryService), not a hardcoded
+    // enum — check BEFORE burning the OTP code, so an invalid category never
+    // consumes it (same reasoning as the duplicate-account guards above).
+    if (!(await ServiceCategoryService.isValidActive(serviceCategory))) {
+      throw new Error('Choose a valid service category');
     }
 
     const vendor = await OtpService.withVerified('vendor', id, code, async () => {

@@ -4,7 +4,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
-import { SERVICE_CATEGORY_VALUES, STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
+import { STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
 
 // Cross-field guard: a max price, when both are present, must be >= the min.
 const priceRangeCheck = (value: any, helpers: any) => {
@@ -98,8 +98,12 @@ export const businessRegisterSchema = Joi.object({
     'string.empty': 'Business name is required',
     'any.required': 'Business name is required',
   }),
-  serviceCategory: Joi.string().valid(...SERVICE_CATEGORY_VALUES).required().messages({
-    'any.only': 'Choose a valid service category',
+  // Membership in the active category set is DB-driven now (not a hardcoded
+  // enum) — checked by ServiceCategoryService.isValidActive in
+  // TicketsAuthService.registerBusiness, which throws the same
+  // 'Choose a valid service category' message this validator used to.
+  serviceCategory: Joi.string().trim().required().messages({
+    'string.empty': 'Choose a service category',
     'any.required': 'Choose a service category',
   }),
   email: Joi.string().email().trim().lowercase().optional(),
