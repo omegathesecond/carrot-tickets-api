@@ -171,7 +171,7 @@ export class VendorSocialController {
             { username: { $regex: `^${escaped}`, $options: 'i' } },
           ],
         }).limit(20),
-        Vendor.find({ businessName: { $regex: escaped, $options: 'i' }, isActive: true, _id: { $ne: vendorId } })
+        Vendor.find({ businessName: { $regex: escaped, $options: 'i' }, isActive: true, isSuperAdmin: { $ne: true }, _id: { $ne: vendorId } })
           .select('businessName slug logoUrl').limit(20),
       ]);
       return ApiResponseUtil.success(res, { buyers: buyers.map(toBuyerSummary), organizers: brands.map(toVendorSummary) });

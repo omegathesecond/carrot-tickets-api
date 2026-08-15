@@ -6,8 +6,17 @@ dotenv.config();
 
 const MONGODB_URI = process.env['MONGODB_URI'] || 'mongodb://localhost:27017/keshless-tickets-dev';
 
+// The admin password must never be committed. Supply it at run time via
+// ADMIN_SEED_PASSWORD — fail loudly rather than fall back to a known default.
+const ADMIN_PASSWORD = process.env['ADMIN_SEED_PASSWORD'];
+
 async function seedAdmin() {
   console.log('🔐 Seeding admin user for Keshless Tickets API...\n');
+
+  if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
+    console.error('❌ ADMIN_SEED_PASSWORD env var is required (min 12 chars) to seed the admin. Aborting.');
+    process.exit(1);
+  }
 
   try {
     // Connect to MongoDB
@@ -31,7 +40,7 @@ async function seedAdmin() {
     const admin = await Vendor.create({
       email: 'admin@keshless.com',
       phoneNumber: '+26878999999',
-      password: 'Admin@123',
+      password: ADMIN_PASSWORD,
       businessName: 'Keshless Tickets Administrator',
       apps: {
         keshless: { enabled: false },
@@ -45,7 +54,7 @@ async function seedAdmin() {
 
     console.log('✅ Admin user created:');
     console.log(`   - Email: admin@keshless.com`);
-    console.log(`   - Password: Admin@123`);
+    console.log(`   - Password: (from ADMIN_SEED_PASSWORD env — not printed)`);
     console.log(`   - ID: ${admin._id}`);
     console.log(`   - Slug: ${admin.slug}`);
     console.log(`   - Role: tickets_owner (GOD permissions)`);
@@ -53,9 +62,7 @@ async function seedAdmin() {
     console.log(`   - Super Admin: YES (System-wide access)\n`);
 
     console.log('👑👑👑 SYSTEM-WIDE ADMIN CREATED SUCCESSFULLY! 👑👑👑\n');
-    console.log('📝 Admin credentials:');
-    console.log('   Email: admin@keshless.com');
-    console.log('   Password: Admin@123\n');
+    console.log('📝 Admin login: admin@keshless.com (password from ADMIN_SEED_PASSWORD)\n');
     console.log('✨ Admin capabilities:');
     console.log('   - View ALL events from ALL vendors');
     console.log('   - Publish/Unpublish any event');
