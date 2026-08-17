@@ -3,6 +3,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Cashier } from '@models/cashier.model';
 import { CashierService } from '@services/cashier.service';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
+import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 function actorOf(req: Request) {
@@ -46,11 +47,16 @@ export class CashierAdminController {
         ApiResponseUtil.badRequest(res, 'fullName is required'); return;
       }
 
+      // Validated against the cashier's OWN vendor — see the gate-operator
+      // controller for why the caller's vendor is the wrong thing to check.
+      const assignment = await validateEventAssignment(req.body.eventIds ?? [], vendorId);
+      if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+
       const loginCode = await generateUniqueLoginCode();
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
-      const cashier = await Cashier.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, loginCode, pin });
+      const cashier = await Cashier.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventIds: assignment.eventIds, loginCode, pin });
       // loginCode + pin are returned ONCE here (the pin is never serialized again).
       ApiResponseUtil.created(res, { cashier, loginCode, pin });
     } catch (err) { next(err); }
@@ -77,6 +83,11 @@ export class CashierAdminController {
       if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
       if ('fullName' in req.body) cashier.fullName = req.body.fullName;
       if ('isActive' in req.body) cashier.isActive = !!req.body.isActive;
+      if ('eventIds' in req.body) {
+        const assignment = await validateEventAssignment(req.body.eventIds, cashier.vendorId?.toString());
+        if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+        cashier.eventIds = assignment.eventIds as any;
+      }
       await cashier.save();
       ApiResponseUtil.success(res, cashier);
     } catch (err) { next(err); }

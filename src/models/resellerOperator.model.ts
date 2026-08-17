@@ -1,6 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import { IResellerOperator } from '@interfaces/reseller.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
+import { applyOperatorEventScope } from '@models/operatorEventScope.schema';
 
 const operatorSchema = new Schema<IResellerOperator>({
   hubId: { type: Schema.Types.ObjectId, ref: 'ResellerHub', required: true },
@@ -33,6 +34,7 @@ const operatorSchema = new Schema<IResellerOperator>({
 });
 
 applyOperatorCredentials(operatorSchema);
+applyOperatorEventScope(operatorSchema);
 
 operatorSchema.index({ resellerId: 1, isActive: 1 });
 operatorSchema.index({ hubId: 1, isActive: 1 });

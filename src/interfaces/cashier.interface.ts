@@ -18,6 +18,8 @@ export interface ICashier extends Document {
   scope: CashierScope;
   /** The organizer (stored as a Vendor) this cashier works for; unset when platform-scoped. */
   vendorId?: Types.ObjectId;
+  /** Events this cashier may work. EMPTY = every event of their organizer. */
+  eventIds: Types.ObjectId[];
   isActive: boolean;
   failedPinAttempts: number;
   lockedUntil: Date | null;

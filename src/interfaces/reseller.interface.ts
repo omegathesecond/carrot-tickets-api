@@ -32,6 +32,8 @@ export interface IResellerOperator {
   loginCode: string;
   pin: string;
   role: string;
+  /** Events this operator may sell. EMPTY = every event available to their reseller. */
+  eventIds: any[];
   isActive: boolean;
   failedPinAttempts: number;
   lockedUntil?: Date | null;

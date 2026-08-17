@@ -11,6 +11,7 @@ import { normalizeBandUid } from '@utils/bandUid.util';
 import { cashTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
 import { CashierToken } from '@interfaces/cashier.interface';
+import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 /** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
 const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
@@ -23,12 +24,19 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
  * Load a cashless, PUBLISHED event or send the right 4xx. Mirrors the lifecycle
  * guards in ResellerController.cashTopup / MerchantController.charge — a cashier
  * token must not move money at a non-cashless, cancelled, or not-yet-live event.
+ *
+ * Also the single chokepoint for the cashier's event assignment: every money
+ * move (top-up, cash-out) loads its event through here, so the check cannot be
+ * forgotten on a new one.
  */
-async function loadCashlessEvent(res: Response, eventId: string): Promise<any | null> {
+async function loadCashlessEvent(req: Request, res: Response, eventId: string): Promise<any | null> {
   const event = await Event.findById(eventId).lean();
   if (!event) { ApiResponseUtil.error(res, 'Event not found', 404); return null; }
   if (!event.cashless) { ApiResponseUtil.error(res, 'Event is not cashless', 400); return null; }
   if (event.status !== EventStatus.PUBLISHED) { ApiResponseUtil.error(res, 'Event is not published', 400); return null; }
+  if (!(await operatorMayActOnEvent(req, eventId))) {
+    ApiResponseUtil.error(res, 'You are not assigned to this event', 403); return null;
+  }
   return event;
 }
 
@@ -43,6 +51,8 @@ export class CashierController {
       const cashier = (req as any).cashier as CashierToken;
       const filter: Record<string, unknown> = { status: EventStatus.PUBLISHED, cashless: true };
       if (!cashier.isSuperAdmin) filter['vendorId'] = cashier.vendorId;
+      const allowedEventIds = await resolveOperatorEventScope(req);
+      if (allowedEventIds) filter['_id'] = { $in: allowedEventIds };
       const events = await Event.find(filter)
         .select('name venue eventDate cashless')
         .sort({ eventDate: 1 })
@@ -66,7 +76,7 @@ export class CashierController {
       const { error, value } = cashTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
-      const event = await loadCashlessEvent(res, value.eventId);
+      const event = await loadCashlessEvent(req, res, value.eventId);
       if (!event) return;
 
       const cashier = (req as any).cashier as CashierToken;
@@ -105,7 +115,7 @@ export class CashierController {
       const { error, value } = cashierWithdrawSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
-      const event = await loadCashlessEvent(res, value.eventId);
+      const event = await loadCashlessEvent(req, res, value.eventId);
       if (!event) return;
 
       const cashier = (req as any).cashier as CashierToken;
@@ -147,6 +157,9 @@ export class CashierController {
       const eventId = String(req.query.eventId || '');
       const rawUid = String(req.query.bandUid || '');
       if (!eventId || !rawUid) return ApiResponseUtil.error(res, 'eventId and bandUid are required', 400);
+      if (!(await operatorMayActOnEvent(req, eventId))) {
+        return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+      }
       const view = await WalletService.getWalletViewByBand(normalizeBandUid(rawUid), eventId);
       if (!view) return ApiResponseUtil.notFound(res, 'No wallet for that band');
       return ApiResponseUtil.success(res, view);

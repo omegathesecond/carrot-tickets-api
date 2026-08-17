@@ -12,6 +12,7 @@ import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { WalletService } from '@services/wallet.service';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
+import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 export class ResellerController {
   /**
@@ -97,6 +98,7 @@ export class ResellerController {
         status: EventStatus.PUBLISHED,
         isSuperAdmin: true,
         ...value,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       return ApiResponseUtil.success(res, result);
@@ -187,6 +189,10 @@ export class ResellerController {
 
       if (error) {
         return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      if (!(await operatorMayActOnEvent(req, value.eventId))) {
+        return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
       }
 
       const result = await ResellerSaleService.createSale({

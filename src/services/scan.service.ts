@@ -16,6 +16,11 @@ export interface ValidateTicketParams {
   // When set, the ticket must belong to this event or it is rejected as
   // "wrong event". Lets a gate operator lock scanning to a single show.
   expectedEventId?: string;
+  // The operator's back-office event assignment. Unset (or empty) means
+  // unrestricted. Unlike expectedEventId — which the DEVICE chooses and can
+  // therefore change at will — this is resolved server-side from the operator
+  // row, so it is the authoritative check.
+  allowedEventIds?: string[];
 }
 
 export interface CheckInTicketParams {
@@ -26,6 +31,8 @@ export interface CheckInTicketParams {
   isSuperAdmin?: boolean;
   notes?: string;
   expectedEventId?: string;
+  /** See ValidateTicketParams.allowedEventIds. */
+  allowedEventIds?: string[];
 }
 
 /** Extract a ticket's event id as a string, whether eventId is populated or raw. */
@@ -34,6 +41,22 @@ const eventIdOf = (ticket: any): string | undefined => {
   if (!e) return undefined;
   return (e._id ? e._id.toString() : e.toString());
 };
+
+/**
+ * Whether an operator assigned to `allowedEventIds` may scan this ticket.
+ *
+ * Deliberately keyed off the TICKET's own event rather than the device's
+ * expectedEventId: the device picks that value, so checking it would let any
+ * operator work any of their organizer's shows just by choosing a different
+ * one in the app.
+ */
+const isOutsideAssignment = (ticket: any, allowedEventIds?: string[]): boolean => {
+  if (!allowedEventIds?.length) return false;
+  const ticketEventId = eventIdOf(ticket);
+  return !ticketEventId || !allowedEventIds.includes(ticketEventId);
+};
+
+const NOT_ASSIGNED_MESSAGE = 'You are not assigned to this event';
 
 export interface GetScansQuery {
   vendorId: string;
@@ -44,6 +67,8 @@ export interface GetScansQuery {
   page?: number;
   limit?: number;
   isSuperAdmin?: boolean;
+  /** The operator's event assignment; unset means unrestricted. */
+  allowedEventIds?: string[];
 }
 
 export interface ScanResult {
@@ -74,7 +99,7 @@ export class ScanService {
    */
   static async validateTicket(params: ValidateTicketParams): Promise<ScanResult> {
     try {
-      const { ticketId, vendorId, expectedEventId } = params;
+      const { ticketId, vendorId, expectedEventId, allowedEventIds } = params;
 
       const ticket = await findTicketByCode(ticketId);
       if (ticket) await ticket.populate('eventId');
@@ -92,6 +117,12 @@ export class ScanService {
 
       if (!params.isSuperAdmin && ticket.vendorId.toString() !== vendorId) {
         return { valid: false, ticket, event, ticketType, message: 'Ticket belongs to different vendor' };
+      }
+
+      // Assignment guard, checked BEFORE the device-selected show: an operator
+      // restricted to specific events cannot preview a ticket outside them.
+      if (isOutsideAssignment(ticket, allowedEventIds)) {
+        return { valid: false, ticket, event, ticketType, message: NOT_ASSIGNED_MESSAGE };
       }
 
       // Gate guard: reject tickets for a different show than the one selected.
@@ -159,7 +190,7 @@ export class ScanService {
     }
 
     try {
-      const { ticketId, vendorId, scannedBy, scannedByType, notes, expectedEventId } = params;
+      const { ticketId, vendorId, scannedBy, scannedByType, notes, expectedEventId, allowedEventIds } = params;
 
       // Find ticket
       const ticket = await findTicketByCode(ticketId, session ?? undefined);
@@ -215,6 +246,26 @@ export class ScanService {
           scan,
           message: 'Ticket belongs to different vendor'
         };
+      }
+
+      // Assignment guard, checked BEFORE the device-selected show. Recorded
+      // like any other wrong_event refusal so the gate keeps an audit trail of
+      // someone trying to work a show they are not on.
+      if (isOutsideAssignment(ticket, allowedEventIds)) {
+        if (session) { await session.abortTransaction(); session.endSession(); }
+
+        const scan = await this.createScanRecord({
+          ticketId: ticket._id,
+          eventId: ticket.eventId,
+          vendorId: scanVendorId,
+          scannedBy,
+          scannedByType,
+          isValid: false,
+          scanResult: 'wrong_event',
+          notes
+        });
+
+        return { valid: false, ticket, scan, message: NOT_ASSIGNED_MESSAGE };
       }
 
       // Gate guard: reject (and record) tickets for a different show.
@@ -372,6 +423,8 @@ export class ScanService {
     vendorId: string;
     isSuperAdmin?: boolean;
     expectedEventId?: string;
+    /** The operator's event assignment; unset means unrestricted. */
+    allowedEventIds?: string[];
     boundBy?: string;
   }): Promise<{ ticket: ITicket; wallet: IWallet }> {
     const ticket = await findTicketByCode(params.ticketId);
@@ -379,6 +432,10 @@ export class ScanService {
 
     if (!params.isSuperAdmin && ticket.vendorId.toString() !== params.vendorId) {
       throw new Error('Ticket belongs to a different vendor');
+    }
+
+    if (isOutsideAssignment(ticket, params.allowedEventIds)) {
+      throw new Error(NOT_ASSIGNED_MESSAGE);
     }
 
     if (params.expectedEventId && String(ticket.eventId) !== String(params.expectedEventId)) {
@@ -414,6 +471,8 @@ export class ScanService {
     vendorId: string;
     isSuperAdmin?: boolean;
     expectedEventId?: string;
+    /** The operator's event assignment; unset means unrestricted. */
+    allowedEventIds?: string[];
     boundBy?: string;
   }): Promise<{ wallet: IWallet }> {
     const ticket = await findTicketByCode(params.ticketId);
@@ -421,6 +480,10 @@ export class ScanService {
 
     if (!params.isSuperAdmin && ticket.vendorId.toString() !== params.vendorId) {
       throw new Error('Ticket belongs to a different vendor');
+    }
+
+    if (isOutsideAssignment(ticket, params.allowedEventIds)) {
+      throw new Error(NOT_ASSIGNED_MESSAGE);
     }
 
     if (params.expectedEventId && String(ticket.eventId) !== String(params.expectedEventId)) {
@@ -453,14 +516,25 @@ export class ScanService {
         endDate,
         page = 1,
         limit = 20,
-        isSuperAdmin = false
+        isSuperAdmin = false,
+        allowedEventIds
       } = query;
 
       // Build query — superadmins see scans across every vendor's events.
       const filter: any = {};
       if (!isSuperAdmin) filter.vendorId = vendorId;
 
-      if (eventId) filter.eventId = eventId;
+      // A restricted operator sees only their own shows' scans. Applied before
+      // the eventId filter so an explicit ?eventId= outside the assignment
+      // narrows to nothing rather than widening access.
+      if (allowedEventIds?.length) filter.eventId = { $in: allowedEventIds };
+
+      if (eventId) {
+        if (allowedEventIds?.length && !allowedEventIds.includes(String(eventId))) {
+          return { data: [], pagination: { total: 0, page, limit, pages: 0, hasNext: false, hasPrev: false } };
+        }
+        filter.eventId = eventId;
+      }
       // A scan is "successful" only when scanResult === 'success' (isValid).
       // Everything else (invalid_ticket, wrong_event, cancelled, …) is a
       // "failed" scan. 'already_scanned' is a distinct, explicit bucket.
@@ -583,6 +657,8 @@ export class ScanService {
     startDate?: Date;
     endDate?: Date;
     isSuperAdmin?: boolean;
+    /** The operator's event assignment; unset means unrestricted. */
+    allowedEventIds?: string[];
   }): Promise<{
     totalScans: number;
     successfulScans: number;
@@ -590,14 +666,23 @@ export class ScanService {
     alreadyScannedCount: number;
   }> {
     try {
-      const { vendorId, eventId, startDate, endDate, isSuperAdmin = false } = query;
+      const { vendorId, eventId, startDate, endDate, isSuperAdmin = false, allowedEventIds } = query;
 
       // Match getScans: platform-scope (super-admin) operators have no single
       // vendor, so don't filter by vendorId — otherwise every count is 0 even
       // though their scans succeed and show up in history.
       const filter: any = {};
       if (!isSuperAdmin) filter.vendorId = vendorId;
-      if (eventId) filter.eventId = eventId;
+
+      // A restricted operator's counts cover only their own shows.
+      if (allowedEventIds?.length) filter.eventId = { $in: allowedEventIds };
+
+      if (eventId) {
+        if (allowedEventIds?.length && !allowedEventIds.includes(String(eventId))) {
+          return { totalScans: 0, successfulScans: 0, failedScans: 0, alreadyScannedCount: 0 };
+        }
+        filter.eventId = eventId;
+      }
       if (startDate || endDate) {
         filter.scannedAt = {};
         if (startDate) filter.scannedAt.$gte = startDate;

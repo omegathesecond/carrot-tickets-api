@@ -38,6 +38,7 @@ import {
   analyticsQuerySchema
 } from '@validators/tickets.validator';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
+import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 export class TicketsController {
   /**
@@ -415,10 +416,20 @@ export class TicketsController {
         return;
       }
 
+      // Pulled OUT of the spread on purpose: `...value` lands after vendorId,
+      // so leaving a client-supplied vendorId in it would overwrite the one
+      // from the token and let any organizer read another's catalogue. It goes
+      // to filterVendorId instead, which only narrows a super-admin's view.
+      const { vendorId: requestedVendorId, ...eventQuery } = value;
+
       const result = await EventService.getEvents({
         vendorId: ticketsUser.vendorId as string,
-        ...value,
-        isSuperAdmin: ticketsUser.isSuperAdmin || false
+        ...eventQuery,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        ...(requestedVendorId ? { filterVendorId: requestedVendorId } : {}),
+        // Narrows the event picker (and every other list) to what a restricted
+        // operator is actually allowed to work.
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       ApiResponseUtil.success(res, result);
@@ -766,6 +777,11 @@ export class TicketsController {
         return;
       }
 
+      if (!(await operatorMayActOnEvent(req, value.eventId))) {
+        ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+        return;
+      }
+
       const result = await TicketService.sellTickets({
         vendorId: ticketsUser.vendorId as string,
         soldBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
@@ -885,6 +901,7 @@ export class TicketsController {
         scannedByType,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
         expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       if (result.valid) {
@@ -940,6 +957,11 @@ export class TicketsController {
         if (!ticketsUser.isSuperAdmin && String(event.vendorId) !== ticketsUser.vendorId) {
           return ApiResponseUtil.error(res, 'Event belongs to a different vendor', 403);
         }
+        // Same assignment guard as the QR path, applied before any band/wallet
+        // lookup so a restricted operator cannot probe bands at another show.
+        if (!(await operatorMayActOnEvent(req, String(eventId)))) {
+          return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+        }
 
         const wallet = await Wallet.findOne({ eventId, bandUid: normalizeBandUid(value.bandUid) });
         if (!wallet) {
@@ -965,7 +987,8 @@ export class TicketsController {
         scannedByType,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
         notes: value.notes,
-        expectedEventId: value.expectedEventId
+        expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       if (result.valid) {
@@ -1002,6 +1025,7 @@ export class TicketsController {
         vendorId: ticketsUser.vendorId as string,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
         expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
         boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
       });
 
@@ -1036,6 +1060,7 @@ export class TicketsController {
         vendorId: ticketsUser.vendorId as string,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
         expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
         boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
       });
 
@@ -1071,6 +1096,9 @@ export class TicketsController {
       if (!event) {
         return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 404);
       }
+      if (!(await operatorMayActOnEvent(req, eventId))) {
+        return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+      }
       if (!ticketsUser.isSuperAdmin && String(event.vendorId) !== ticketsUser.vendorId) {
         return ApiResponseUtil.forbidden(res, 'This event belongs to a different vendor');
       }
@@ -1104,7 +1132,8 @@ export class TicketsController {
       const result = await ScanService.getScans({
         vendorId: ticketsUser.vendorId as string,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
-        ...value
+        ...value,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       ApiResponseUtil.success(res, result);
@@ -1133,7 +1162,8 @@ export class TicketsController {
         eventId: value.eventId,
         startDate: value.startDate,
         endDate: value.endDate,
-        isSuperAdmin: ticketsUser.isSuperAdmin || false
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       ApiResponseUtil.success(res, stats);

@@ -396,7 +396,11 @@ export const eventQuerySchema = Joi.object({
   }).messages({
     'date.min': 'End date must be after start date'
   }),
-  search: Joi.string().optional()
+  search: Joi.string().optional(),
+  // Platform-staff-only narrowing: pick one organizer's catalogue while acting
+  // on their behalf. Silently ignored for everyone else, whose own vendorId
+  // already scopes the query.
+  vendorId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional()
 });
 
 /**

@@ -69,6 +69,18 @@ export interface GetEventsQuery {
   page?: number;
   limit?: number;
   isSuperAdmin?: boolean;
+  /**
+   * When set, only these events are listed — an operator's back-office
+   * assignment. Unset means unrestricted, which is every caller who is not a
+   * restricted operator.
+   */
+  allowedEventIds?: string[];
+  /**
+   * Narrows a super-admin's platform-wide view to one organizer. Ignored for
+   * everyone else — their own vendorId already scopes the query, so this can
+   * never widen access.
+   */
+  filterVendorId?: string;
 }
 
 export function computeAvailable(t: { quantity: number; sold: number; reserved?: number }): number {
@@ -136,13 +148,23 @@ export class EventService {
         search,
         page = 1,
         limit = 20,
-        isSuperAdmin = false
+        isSuperAdmin = false,
+        allowedEventIds,
+        filterVendorId
       } = query;
 
       // Build query - skip vendorId filter for superadmin
       const filter: any = {};
       if (!isSuperAdmin) {
         filter.vendorId = vendorId;
+      } else if (filterVendorId) {
+        filter.vendorId = filterVendorId;
+      }
+
+      // An operator's event assignment narrows the list even for a
+      // platform-scoped one, so it is applied outside the isSuperAdmin branch.
+      if (allowedEventIds?.length) {
+        filter._id = { $in: allowedEventIds };
       }
 
       if (status) {

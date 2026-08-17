@@ -2,6 +2,7 @@
 import mongoose, { Schema } from 'mongoose';
 import { ICashier } from '@interfaces/cashier.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
+import { applyOperatorEventScope } from '@models/operatorEventScope.schema';
 
 /**
  * In-venue money-desk operator for an organizer (cashless spec — cashier
@@ -23,6 +24,7 @@ const cashierSchema = new Schema<ICashier>({
 });
 
 applyOperatorCredentials(cashierSchema);
+applyOperatorEventScope(cashierSchema);
 
 cashierSchema.index({ vendorId: 1, isActive: 1 });
 
