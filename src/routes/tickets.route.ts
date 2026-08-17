@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
+import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import {
   authenticateTickets,
   requireTicketsPermission,
@@ -147,6 +148,15 @@ router.get('/my-tickets', TicketsController.getMyTickets);
  * buyer checkout (/api/public/purchase) — both call purchaseForCustomer.
  */
 router.post('/purchase', TicketsController.purchaseAsUser);
+
+/**
+ * Shareable ticket PDF — lazily generated and cached in R2.
+ * Accepts the ticket code (TKT-…) or Mongo _id. Authorised either by the
+ * requester's phone matching the ticket (user-app via proxy) or by vendor
+ * ownership / super-admin (dashboard). The `/pdf` suffix keeps this clear of
+ * the vendor-scoped `/events/:eventId` and other routes above.
+ */
+router.get('/:ticketId/pdf', TicketPdfController.getTicketPdf);
 
 /**
  * User Account Settings Routes

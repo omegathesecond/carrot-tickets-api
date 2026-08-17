@@ -10,6 +10,7 @@ import { EnquiryController } from '@controllers/enquiry.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
+import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 import { CommunityEventSubmitController } from '@controllers/communityEventSubmit.controller';
@@ -411,5 +412,14 @@ router.get('/purchase/deltapay/latest/status', authenticateBuyer, PublicControll
  * @access  Buyer (Bearer buyer token)
  */
 router.get('/purchase/deltapay/:sessionId/status', authenticateBuyer, PublicController.getDeltapayStatus);
+
+/**
+ * @route   GET /api/public/tickets/:ticketId/pdf
+ * @desc    Shareable ticket PDF (lazily generated, cached in R2). Same
+ *          generator + R2 object the user-app uses — authorised by the buyer's
+ *          verified phone matching the ticket.
+ * @access  Buyer
+ */
+router.get('/tickets/:ticketId/pdf', authenticateBuyer, TicketPdfController.getTicketPdf);
 
 export default router;
