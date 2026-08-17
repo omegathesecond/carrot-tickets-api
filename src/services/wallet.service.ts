@@ -1,9 +1,12 @@
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
-import { WalletTopup, IWalletTopup } from '@models/walletTopup.model';
+import { WalletTopup, IWalletTopup, TopupRecordedByType } from '@models/walletTopup.model';
+import { WalletWithdrawal, IWalletWithdrawal } from '@models/walletWithdrawal.model';
+import { MerchantCharge } from '@models/merchantCharge.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
+import { WalletDeclinedError } from '@services/merchant.service';
 
 /**
  * Safety ceiling on a single cash top-up, in minor units (cents): R100,000.
@@ -205,9 +208,14 @@ export class WalletService {
     eventId: string;
     amount: number;
     recordedBy: string;
+    /** Actor population recording the top-up. Defaults to ResellerOperator — the
+     * only historical caller — so the reseller desk path is unchanged; the
+     * cashier desk passes 'Cashier'. */
+    recordedByType?: TopupRecordedByType;
     clientTxnId: string;
   }): Promise<{ wallet: IWallet; topup: IWalletTopup }> {
     const { walletId, eventId, amount, recordedBy, clientTxnId } = params;
+    const recordedByType: TopupRecordedByType = params.recordedByType ?? 'ResellerOperator';
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new Error('amount must be a positive integer (cents)');
     }
@@ -260,7 +268,7 @@ export class WalletService {
         });
 
         const [topup] = await WalletTopup.create(
-          [{ walletId, eventId, amount, method: 'cash', status: 'completed', recordedBy, clientTxnId }],
+          [{ walletId, eventId, amount, method: 'cash', status: 'completed', recordedBy, recordedByType, clientTxnId }],
           { session },
         );
         if (!topup) throw new Error('wallet topup insert failed');
@@ -284,6 +292,113 @@ export class WalletService {
   }
 
   /**
+   * Cash-OUT at a desk (cashless spec — cashier slice): the mirror image of
+   * topUpCash. A cashier hands physical cash back to the attendee, so we DEBIT
+   * the wallet and pay the venue's cash float down.
+   *
+   * Money direction and safety are borrowed wholesale from MerchantService.charge:
+   *  - Atomic CAS debit — the guard (active + sufficient balance) and the
+   *    decrement are ONE operation, so no concurrent desk can push the balance
+   *    negative; a DECLINE (insufficient / inactive / missing) throws
+   *    WalletDeclinedError and leaves the wallet, ledger and withdrawal
+   *    collection completely untouched.
+   *  - cashFundedBalance is drawn down first and floored at 0 via $max. Per the
+   *    client-confirmed rule "cash back = full remaining balance", a cash-out
+   *    MAY exceed cashFundedBalance (returning card/MoMo-loaded value as cash);
+   *    the $max floor keeps the field valid while the full `amount` still leaves
+   *    the wallet. (Today only cash top-up exists, so the two are always equal.)
+   *  - Idempotent on {walletId, clientTxnId}, including E11000 re-read recovery.
+   *
+   * Ledger (reverse of top-up, sum of deltas = 0, so the invariant holds):
+   *   WALLET:ref  += amount   (attendee liability reduced)
+   *   FLOAT       -= amount   (cash paid out of the desk)
+   */
+  static async withdrawCash(params: {
+    walletId: string;
+    eventId: string;
+    amount: number;
+    recordedBy: string;
+    clientTxnId: string;
+  }): Promise<{ wallet: IWallet; withdrawal: IWalletWithdrawal }> {
+    const { walletId, eventId, amount, recordedBy, clientTxnId } = params;
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new Error('amount must be a positive integer (cents)');
+    }
+    // Same defense-in-depth ceiling as top-up/charge against a fat-fingered amount.
+    if (amount > MAX_TOPUP_CENTS) {
+      throw new Error('amount exceeds the maximum allowed withdrawal');
+    }
+
+    // Idempotency: a genuine retry for THIS wallet returns the original outcome.
+    const existing = await WalletWithdrawal.findOne({ walletId, clientTxnId });
+    if (existing) {
+      const w = await Wallet.findById(existing.walletId);
+      if (!w) throw new Error('wallet not found');
+      return { wallet: w, withdrawal: existing };
+    }
+
+    const session = await mongoose.startSession();
+    try {
+      let out!: { wallet: IWallet; withdrawal: IWalletWithdrawal };
+      await session.withTransaction(async () => {
+        const wallet = await Wallet.findOneAndUpdate(
+          { _id: walletId, eventId, status: 'active', balance: { $gte: amount } },
+          [
+            {
+              $set: {
+                balance: { $subtract: ['$balance', amount] },
+                cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', amount] }] },
+              },
+            },
+          ],
+          { new: true, session },
+        );
+
+        if (!wallet) {
+          // DECLINE — nothing written yet; re-read only to report a true reason.
+          const fresh = await Wallet.findOne({ _id: walletId, eventId }).session(session);
+          if (!fresh) throw new WalletDeclinedError('wallet_not_found', 'wallet not found', null);
+          if (fresh.status !== 'active') {
+            throw new WalletDeclinedError('wallet_not_active', 'wallet is not active', fresh.balance);
+          }
+          throw new WalletDeclinedError('insufficient_balance', 'insufficient balance', fresh.balance);
+        }
+
+        await LedgerService.post({
+          eventId,
+          postings: [
+            { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: amount },
+            { account: { type: LedgerAccountType.FLOAT }, delta: -amount, tag: FloatTag.CASH_DESK },
+          ],
+          refType: 'wallet_withdrawal',
+          refId: clientTxnId,
+          session,
+        });
+
+        const [withdrawal] = await WalletWithdrawal.create(
+          [{ walletId, eventId, amount, method: 'cash', status: 'completed', recordedBy, recordedByType: 'Cashier', clientTxnId }],
+          { session },
+        );
+        if (!withdrawal) throw new Error('wallet withdrawal insert failed');
+
+        out = { wallet, withdrawal };
+      });
+      return out;
+    } catch (e) {
+      // Concurrent duplicate: the {walletId, clientTxnId} unique index lost the
+      // race — re-read the winner with the SAME scoped filter.
+      if ((e as { code?: number })?.code === 11000) {
+        const withdrawal = await WalletWithdrawal.findOne({ walletId, clientTxnId });
+        const wallet = withdrawal ? await Wallet.findById(withdrawal.walletId) : null;
+        if (withdrawal && wallet) return { wallet, withdrawal };
+      }
+      throw e;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
    * Gate-side read: resolve a tapped band's wallet (cashless spec §5.1/§5.3) —
    * balance, cash-funded portion, status, and its 10 most recent top-ups.
    * Scoped to one event (a band UID is only unique per event, per the
@@ -294,11 +409,25 @@ export class WalletService {
   static async getWalletViewByBand(bandUid: string, eventId: string) {
     const wallet = await Wallet.findOne({ eventId, bandUid });
     if (!wallet) return null;
-    const history = await WalletTopup.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean();
+    // A true statement: top-ups (money in), withdrawals (cash out), and vendor
+    // charges (spend) merged and time-sorted, so the balance-check and receipt
+    // screens can show how the current balance was arrived at.
+    const [topups, withdrawals, charges] = await Promise.all([
+      WalletTopup.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
+      WalletWithdrawal.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
+      MerchantCharge.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
+    ]);
+    const history = [
+      ...topups.map(h => ({ type: 'topup' as const, amount: h.amount, at: h.createdAt })),
+      ...withdrawals.map(h => ({ type: 'withdrawal' as const, amount: h.amount, at: h.createdAt })),
+      ...charges.map(h => ({ type: 'purchase' as const, amount: h.amount, at: h.createdAt })),
+    ]
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+      .slice(0, 15);
     return {
       ticket: { id: String(wallet.ticketId) },
       balance: wallet.balance, cashFundedBalance: wallet.cashFundedBalance, status: wallet.status,
-      history: history.map(h => ({ type: 'topup', method: h.method, amount: h.amount, at: h.createdAt })),
+      history,
     };
   }
 }

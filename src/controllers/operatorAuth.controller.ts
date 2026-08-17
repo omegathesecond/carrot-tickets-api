@@ -2,12 +2,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
+import { Merchant } from '@models/merchant.model';
+import { Cashier } from '@models/cashier.model';
 import { ResellerAuthService } from '@services/resellerAuth.service';
 import { GateOperatorAuthService } from '@services/gateOperatorAuth.service';
+import { MerchantAuthService } from '@services/merchantAuth.service';
+import { CashierAuthService } from '@services/cashierAuth.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 export class OperatorAuthController {
-  /** Resolve a login code across both operator populations and route accordingly. */
+  /** Resolve a login code across all operator populations and route accordingly. */
   static async login(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { loginCode, pin } = req.body || {};
@@ -17,9 +21,11 @@ export class OperatorAuthController {
       }
       if (!loginCode || !pin) { ApiResponseUtil.badRequest(res, 'loginCode and pin are required'); return; }
 
-      const [reseller, gate] = await Promise.all([
+      const [reseller, gate, merchant, cashier] = await Promise.all([
         ResellerOperator.exists({ loginCode, isActive: true }),
         GateOperator.exists({ loginCode, isActive: true }),
+        Merchant.exists({ loginCode, status: 'active' }),
+        Cashier.exists({ loginCode, isActive: true }),
       ]);
 
       try {
@@ -28,9 +34,19 @@ export class OperatorAuthController {
           ApiResponseUtil.success(res, { type: 'gate', ...result });
           return;
         }
+        if (cashier) {
+          const result = await CashierAuthService.login(loginCode, pin);
+          ApiResponseUtil.success(res, { type: 'cashier', ...result });
+          return;
+        }
         if (reseller) {
           const result = await ResellerAuthService.login(loginCode, pin);
           ApiResponseUtil.success(res, { type: 'reseller', ...result });
+          return;
+        }
+        if (merchant) {
+          const result = await MerchantAuthService.login(loginCode, pin);
+          ApiResponseUtil.success(res, { type: 'merchant', ...result });
           return;
         }
       } catch (e: any) {

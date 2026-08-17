@@ -1,8 +1,14 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
+export type TopupRecordedByType = 'ResellerOperator' | 'Cashier' | 'Merchant' | 'Platform';
+
 export interface IWalletTopup extends Document {
   walletId: Types.ObjectId; eventId: Types.ObjectId; amount: number;
-  method: 'cash'; status: 'completed'; recordedBy: string; clientTxnId: string; createdAt: Date;
+  method: 'cash'; status: 'completed'; recordedBy: string;
+  /** Actor population that recorded this top-up. Existing rows predate the field
+   * and are all reseller-desk top-ups, hence the ResellerOperator default. */
+  recordedByType: TopupRecordedByType;
+  clientTxnId: string; createdAt: Date;
 }
 const walletTopupSchema = new Schema<IWalletTopup>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
@@ -10,7 +16,8 @@ const walletTopupSchema = new Schema<IWalletTopup>({
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
   method: { type: String, enum: ['cash'], required: true },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
-  recordedBy: { type: String, required: true },
+  recordedBy: { type: String, required: true, index: true },
+  recordedByType: { type: String, enum: ['ResellerOperator', 'Cashier', 'Merchant', 'Platform'], required: true, default: 'ResellerOperator' },
   clientTxnId: { type: String, required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 

@@ -28,7 +28,8 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "test": "jest",
-    "seed:dev": "ts-node -r tsconfig-paths/register src/scripts/seedDevEnvironment.ts"
+    "seed:dev": "ts-node -r tsconfig-paths/register src/scripts/seedDevEnvironment.ts",
+    "seed:cashless": "ts-node -r tsconfig-paths/register src/scripts/seedCashlessDemo.ts"
   },
   "keywords": [
     "api",

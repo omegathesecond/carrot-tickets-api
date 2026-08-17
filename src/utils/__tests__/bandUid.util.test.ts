@@ -7,7 +7,10 @@ it('normalizes case and separators', () => {
 it('accepts a 7-byte (14 hex) uid', () => {
   expect(assertValidBandUid('04a22b1c3d4e5f')).toBe('04a22b1c3d4e5f');
 });
-it('rejects a 4-byte (8 hex) uid and non-hex', () => {
-  expect(() => assertValidBandUid('04a22b1c')).toThrow(/at least 7 bytes/);
+it('accepts a 4-byte (8 hex) uid', () => {
+  expect(assertValidBandUid('04a22b1c')).toBe('04a22b1c');
+});
+it('rejects a uid shorter than 4 bytes (8 hex) and non-hex', () => {
+  expect(() => assertValidBandUid('04a22b')).toThrow(/at least 4 bytes/);
   expect(() => assertValidBandUid('zzzz')).toThrow(/hex/i);
 });

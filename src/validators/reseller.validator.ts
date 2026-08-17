@@ -1,7 +1,7 @@
 import Joi from 'joi';
 import { MAX_TOPUP_CENTS } from '@services/wallet.service';
 
-const uid = Joi.string().trim().lowercase().pattern(/^[0-9a-f]{14,}$/);
+const uid = Joi.string().trim().lowercase().pattern(/^[0-9a-f]{8,}$/);
 
 /**
  * POST /api/reseller/wallets/cash-topup — either an already-bound band OR a

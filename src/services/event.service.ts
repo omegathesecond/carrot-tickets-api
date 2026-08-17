@@ -20,6 +20,7 @@ export interface CreateEventParams {
   startTime: Date;
   endTime: Date;
   isMultiDay?: boolean;
+  cashless?: boolean; // NFC tap-and-go wallet/POS toggle (cashless spec §11); defaults to false via the model
   capacity?: number; // optional — derived from ticket-type quantities server-side
   ticketTypes?: Array<{
     name: string;
@@ -43,6 +44,7 @@ export interface UpdateEventParams {
   startTime?: Date;
   endTime?: Date;
   isMultiDay?: boolean;
+  cashless?: boolean; // NFC tap-and-go wallet/POS toggle (cashless spec §11)
   capacity?: number;
   ticketTypes?: Array<{
     name: string;
@@ -90,6 +92,7 @@ export class EventService {
         startTime: params.startTime,
         endTime: params.endTime,
         isMultiDay: params.isMultiDay,
+        cashless: params.cashless,
         capacity: params.capacity,
         category: params.category ?? 'Other',
         ticketing: params.ticketing ?? 'carrot',
@@ -328,6 +331,10 @@ export class EventService {
       if (updates.endTime) event.endTime = updates.endTime;
       if (updates.isMultiDay !== undefined) event.isMultiDay = updates.isMultiDay;
       if (updates.capacity) event.capacity = updates.capacity;
+      // Boolean toggle — !== undefined so `cashless: false` actually unsets
+      // it (a truthy check would silently ignore false, same trap as
+      // isMultiDay not being threaded here at all).
+      if (updates.cashless !== undefined) event.cashless = updates.cashless;
       if (updates.category) event.category = updates.category;
       if (updates.ticketing) event.ticketing = updates.ticketing;
       if (updates.externalTicketUrl !== undefined) event.externalTicketUrl = updates.externalTicketUrl;
