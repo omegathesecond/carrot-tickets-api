@@ -10,7 +10,7 @@ import { EventQuestion } from '@models/eventQuestion.model';
 const PHONE = '+26878422613';
 
 async function seedBuyer(phone = PHONE, name = 'Test Buyer') {
-  return Buyer.create({ phone, password: 'secret1', name });
+  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name });
 }
 
 describe('GET /api/public/questions', () => {

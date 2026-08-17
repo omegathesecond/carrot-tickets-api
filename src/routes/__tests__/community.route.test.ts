@@ -17,7 +17,7 @@ async function seedCommunityEvent() {
 }
 
 async function seedBuyer(phone = PHONE) {
-  return Buyer.create({ phone, password: 'secret1', name: 'Test Buyer' });
+  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Test Buyer' });
 }
 
 describe('community routes', () => {

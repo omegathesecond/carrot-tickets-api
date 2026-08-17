@@ -52,7 +52,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
   });
 
   it('publishes the event immediately (no admin review) with an uploaded poster', async () => {
-    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
@@ -81,7 +81,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
   // lands would put a posterless event on the feed and leave it there when the
   // upload fails. It must stay an invisible draft instead.
   it('leaves nothing published when the poster upload fails', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     (R2Service.uploadEventMedia as jest.Mock).mockRejectedValueOnce(new Error('R2 down'));
     const req = request(app)
       .post('/api/public/events/submit')
@@ -94,7 +94,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
   });
 
   it('refuses to create sellable ticket types (selling is dashboard-only)', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
@@ -112,7 +112,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
   });
 
   it('lists a ticketless event (calendar/feed only) with no ticket types', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
@@ -129,7 +129,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
   // a self-listing skips — leaving the event page's Community tab, its roster
   // and "Going" all 404, so the event could never reach anyone's calendar.
   it('creates the community so the roster and Going work on a listing', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
@@ -145,7 +145,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     // And a buyer with no ticket can say they're going — a listing sells
     // nothing, so ticket verification must not gate the join.
     const other = '+26878000099';
-    await Buyer.create({ phone: other, password: 'secret1', name: 'Attendee' });
+    await Buyer.create({ phone: other, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Attendee' });
     await request(app)
       .post(`/api/community/${eventId}/join`)
       .set('Authorization', `Bearer ${signBuyerToken(other)}`)
@@ -156,7 +156,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
   });
 
   it('requires a poster image', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Lister' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
       .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);

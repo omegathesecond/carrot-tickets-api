@@ -34,7 +34,7 @@ describe('Stories API', () => {
 
   describe('POST /api/social/stories', () => {
     it('creates a processing story and returns a presigned upload url', async () => {
-      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
       const res = await request(app)
         .post('/api/social/stories')
         .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
@@ -53,14 +53,14 @@ describe('Stories API', () => {
     });
 
     it('403s a suspended buyer creating a story; a non-suspended buyer still succeeds (control)', async () => {
-      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Suspended Poster', socialSuspendedAt: new Date() });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Suspended Poster', socialSuspendedAt: new Date() });
       await request(app)
         .post('/api/social/stories')
         .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(403);
 
-      await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'OK Poster' });
+      await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'OK Poster' });
       await request(app)
         .post('/api/social/stories')
         .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
@@ -71,7 +71,7 @@ describe('Stories API', () => {
 
   describe('POST /api/social/stories/:id/finalize', () => {
     it('marks an image story ready with a url', async () => {
-      const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
+      const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
       const create = await request(app)
         .post('/api/social/stories')
         .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
@@ -89,8 +89,8 @@ describe('Stories API', () => {
     });
 
     it("forbids finalizing someone else's story", async () => {
-      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Poster' });
-      const other = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Other' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
+      const other = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Other' });
       const story = await Story.create({
         authorType: 'buyer', authorId: other._id, kind: 'image',
         media: { rawKey: 'k', status: 'processing' },
@@ -110,8 +110,8 @@ describe('Stories API', () => {
 
   describe('GET /api/social/stories', () => {
     it("returns a followed author's ready active story grouped, seen:false, then seen:true after marking it seen", async () => {
-      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
-      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await FollowService.follow(viewer, 'buyer', String(author._id));
       const story = await seedReadyStory(String(author._id));
 
@@ -128,8 +128,8 @@ describe('Stories API', () => {
     });
 
     it('excludes an EXPIRED story (expiresAt in the past)', async () => {
-      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
-      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await FollowService.follow(viewer, 'buyer', String(author._id));
       await seedReadyStory(String(author._id), { expiresAt: new Date(Date.now() - 1000) });
 
@@ -141,8 +141,8 @@ describe('Stories API', () => {
     });
 
     it('excludes a story from a non-followed author', async () => {
-      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
-      const stranger = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Stranger' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
+      const stranger = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Stranger' });
       await seedReadyStory(String(stranger._id));
 
       const res = await request(app)
@@ -160,8 +160,8 @@ describe('Stories API', () => {
     // video transcoder ever set one), and the client's Math.max(1, null)
     // collapsed that to a 1-second flash. It must always be a real number.
     it('gives an image story a real 5s playback duration, never null', async () => {
-      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
-      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await FollowService.follow(viewer, 'buyer', String(author._id));
       await seedReadyStory(String(author._id));
 
@@ -173,8 +173,8 @@ describe('Stories API', () => {
     });
 
     it('clamps a long video story to 30s', async () => {
-      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Viewer' });
-      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Author' });
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await FollowService.follow(viewer, 'buyer', String(author._id));
       await Story.create({
         authorType: 'buyer', authorId: String(author._id), kind: 'video',
@@ -193,8 +193,8 @@ describe('Stories API', () => {
     });
 
     it('reports viewerCount on your OWN items but never on other authors\' items', async () => {
-      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
-      const watcher = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Watcher' });
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      const watcher = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Watcher' });
       const story = await seedReadyStory(String(owner._id));
       await FollowService.follow(watcher, 'buyer', String(owner._id));
 
@@ -227,7 +227,7 @@ describe('Stories API', () => {
     // Previewing your own status is not a view: it must not add you to your
     // own viewer list, and must not dim your own ring (seen stays false).
     it('does NOT record the author viewing their own story', async () => {
-      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
       const story = await seedReadyStory(String(owner._id));
       const auth = `Bearer ${signBuyerToken(PHONE)}`;
 
@@ -243,9 +243,9 @@ describe('Stories API', () => {
 
   describe('GET /api/social/stories/:id/viewers', () => {
     it('lists who saw the story, newest first, for the author', async () => {
-      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
-      const first = await Buyer.create({ phone: '+26878400202', password: 'secret1', name: 'First Watcher', username: 'firstw' });
-      const second = await Buyer.create({ phone: '+26878400303', password: 'secret1', name: 'Second Watcher', username: 'secondw' });
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      const first = await Buyer.create({ phone: '+26878400202', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'First Watcher', username: 'firstw' });
+      const second = await Buyer.create({ phone: '+26878400303', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Second Watcher', username: 'secondw' });
       const story = await seedReadyStory(String(owner._id));
       await FollowService.follow(first, 'buyer', String(owner._id));
       await FollowService.follow(second, 'buyer', String(owner._id));
@@ -265,8 +265,8 @@ describe('Stories API', () => {
     });
 
     it("403s a non-author asking who saw someone else's story", async () => {
-      const owner = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', name: 'Owner' });
-      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Nosy' });
+      const owner = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Nosy' });
       const story = await seedReadyStory(String(owner._id));
 
       await request(app)
@@ -276,7 +276,7 @@ describe('Stories API', () => {
     });
 
     it('404s an unknown story id', async () => {
-      await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Owner' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
       await request(app)
         .get('/api/social/stories/000000000000000000000000/viewers')
         .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)

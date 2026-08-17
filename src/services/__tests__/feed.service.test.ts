@@ -43,6 +43,34 @@ describe('feed.service getFeed', () => {
     expect(items.find((i) => i.type === 'update')).toBeUndefined();
   });
 
+  it('excludes admin-hidden posts from the for-you (Discover) feed', async () => {
+    const visible = await seedReadyUpdate('visible');
+    const hidden = await seedReadyUpdate('hidden');
+    // $set the moderation stamp directly — mirrors what the admin hide endpoint
+    // writes; the post stays 'active' and media-ready, only hiddenFromDiscoverAt
+    // takes it off Discover.
+    await Update.updateOne({ _id: hidden._id }, { $set: { hiddenFromDiscoverAt: new Date() } });
+
+    const { items } = await getFeed({ tab: 'for-you', limit: 8 });
+    const ids = items.map((i) => i.id);
+    expect(ids).toContain(String(visible._id));
+    expect(ids).not.toContain(String(hidden._id));
+  });
+
+  it('keeps admin-hidden posts in the following feed — hiding is Discover-only', async () => {
+    const vendor = await Vendor.create({ businessName: 'Followed Org H', password: 'password123', slug: 'followed-org-h' });
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'password123' });
+    const orgUpdate = await Update.create({
+      authorType: 'vendor', authorId: vendor._id, kind: 'image', caption: 'hidden but followed',
+      media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
+      hiddenFromDiscoverAt: new Date(),
+    });
+    await Follow.create({ followerId: buyer._id, targetType: 'organizer', targetId: vendor._id });
+
+    const { items } = await getFeed({ tab: 'following', actor: { type: 'buyer', id: String(buyer._id) }, limit: 8 });
+    expect(items.some((i) => i.id === String(orgUpdate._id))).toBe(true);
+  });
+
   it('events tab returns only event slides', async () => {
     await seedReadyUpdate('u1'); await seedEvent('E1');
     const { items } = await getFeed({ tab: 'events', limit: 8 });

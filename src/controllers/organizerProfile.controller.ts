@@ -77,8 +77,8 @@ export class OrganizerProfileController {
       const vendorId = String(req.params['vendorId'] || '');
       if (!HEX24.test(vendorId)) return ApiResponseUtil.error(res, 'vendorId must be an organizer id', 400);
 
-      const vendor = await Vendor.findById(vendorId).select('businessName slug logoUrl bio isActive');
-      if (!vendor || !vendor.isActive) return ApiResponseUtil.error(res, 'Organizer not found', 404);
+      const vendor = await Vendor.findById(vendorId).select('businessName slug logoUrl bio isActive isSuperAdmin');
+      if (!vendor || !vendor.isActive || vendor.isSuperAdmin) return ApiResponseUtil.error(res, 'Organizer not found', 404);
 
       const now = new Date();
       const eventFields = '_id name eventDate venue posterUrl thumbnailUrl';

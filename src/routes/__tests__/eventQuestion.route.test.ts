@@ -9,11 +9,11 @@ import { Vendor } from '@models/vendor.model';
 const PHONE = '+26878422613';
 
 async function seedBuyer(phone = PHONE, name = 'Test Buyer') {
-  return Buyer.create({ phone, password: 'secret1', name });
+  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name });
 }
 
 async function seedSuspendedBuyer(phone = PHONE, name = 'Suspended Buyer') {
-  return Buyer.create({ phone, password: 'secret1', name, socialSuspendedAt: new Date() });
+  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name, socialSuspendedAt: new Date() });
 }
 
 describe('event Q&A routes', () => {

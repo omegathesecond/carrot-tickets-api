@@ -179,7 +179,9 @@ export class SuggestionsService {
     const skip = (Math.max(1, page) - 1) * limit;
 
     // A vendor viewing "organizers to follow" must never be offered itself.
-    const match: Record<string, unknown> = { isActive: true, verificationStatus: VerificationStatus.VERIFIED };
+    // Super-admin brands (the platform admin account) are never a real organizer
+    // to follow — keep them out of the public directory, same as adminOrganizers.
+    const match: Record<string, unknown> = { isActive: true, verificationStatus: VerificationStatus.VERIFIED, isSuperAdmin: { $ne: true } };
     if (actor.type === 'vendor') match['_id'] = { $ne: new Types.ObjectId(actor.id) };
 
     // Ranking pipeline shared by both paths — identical to the pre-shuffle

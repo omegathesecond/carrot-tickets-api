@@ -18,6 +18,13 @@ export interface IUpdate extends Document {
    *  soft-delete) — never recomputed from a count() on read. */
   commentCount: number;
   status: 'active' | 'removed';
+  /** Platform-staff moderation: when set, this post is withheld from the
+   *  public Discover ('for-you') feed only — it stays live on the author's
+   *  profile and in followers' feeds. Cleared to un-hide. Distinct from
+   *  `status: 'removed'`, which takes the post down everywhere. */
+  hiddenFromDiscoverAt?: Date | null;
+  /** The moderator (vendor/sub-user id) who hid it — audit trail for the above. */
+  hiddenFromDiscoverBy?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +50,11 @@ const updateSchema = new Schema<IUpdate>({
   viewCount: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'removed'], default: 'active', index: true },
+  // Nullable moderation stamp — absent/null means "visible on Discover" (the
+  // for-you query matches on `: null`, which Mongo's null-equality also
+  // satisfies for posts predating this field). A Date takes it off Discover.
+  hiddenFromDiscoverAt: { type: Date, default: null },
+  hiddenFromDiscoverBy: { type: String, default: null },
 }, { timestamps: true });
 
 updateSchema.index({ createdAt: -1 });

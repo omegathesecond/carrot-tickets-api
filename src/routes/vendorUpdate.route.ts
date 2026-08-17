@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
+import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { UpdateController } from '@controllers/update.controller';
 
 // Vendor (organizer dashboard) counterpart to update.route.ts's buyer
@@ -8,9 +9,9 @@ import { UpdateController } from '@controllers/update.controller';
 // shadowed.
 const router = Router();
 
-router.post('/', authenticateTickets, UpdateController.createAsVendor);
-router.post('/:id/finalize', authenticateTickets, UpdateController.finalizeAsVendor);
-router.post('/:id/like', authenticateTickets, UpdateController.reactAsVendor('like'));
+router.post('/', authenticateTickets, requireProfilePhoto, UpdateController.createAsVendor);
+router.post('/:id/finalize', authenticateTickets, requireProfilePhoto, UpdateController.finalizeAsVendor);
+router.post('/:id/like', authenticateTickets, requireProfilePhoto, UpdateController.reactAsVendor('like'));
 router.post('/:id/save', authenticateTickets, UpdateController.reactAsVendor('save'));
 
 export default router;

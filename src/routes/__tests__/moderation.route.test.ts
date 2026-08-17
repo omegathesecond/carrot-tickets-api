@@ -38,7 +38,7 @@ async function seedWorld() {
   const channels = await Channel.find({ communityId: community._id });
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
 
-  const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Chatty Buyer' });
+  const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Chatty Buyer' });
   const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
   const vendorAuth = `Bearer ${signVendorToken(String(vendor._id))}`;
 
@@ -83,7 +83,7 @@ describe('organizer moderation routes', () => {
     it('cannot delete a DM message (404 — organizers never touch DMs)', async () => {
       const { buyer, buyerAuth, vendorAuth } = await seedWorld();
       const OTHER = '+26878000042';
-      const other = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'DM Partner' });
+      const other = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'DM Partner' });
       // assertCanDm now gates on connection (friend or accepted meetup), not
       // shared community — accept a meetup between the pair so thread
       // creation doesn't 403 before we even get to the moderation-delete
@@ -279,7 +279,7 @@ describe('organizer moderation routes', () => {
       const { community, buyer, vendorAuth } = await seedWorld();
       const communityId = String(community._id);
 
-      const other = await Buyer.create({ phone: '+26878000050', password: 'secret1', name: 'Second Buyer' });
+      const other = await Buyer.create({ phone: '+26878000050', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Second Buyer' });
       await Membership.create({ buyerId: other._id, communityId: community._id });
 
       await request(app)
@@ -420,7 +420,7 @@ describe('organizer moderation routes', () => {
     it('cannot pin a DM message (404)', async () => {
       const { buyer, buyerAuth, vendorAuth } = await seedWorld();
       const OTHER = '+26878000043';
-      const other = await Buyer.create({ phone: OTHER, password: 'secret1', name: 'DM Partner' });
+      const other = await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'DM Partner' });
       // assertCanDm now gates on connection (friend or accepted meetup) —
       // accept a meetup so thread creation doesn't 403 first.
       await MeetupRequest.create({ requesterId: buyer._id, targetId: other._id, status: 'accepted' });
@@ -482,7 +482,7 @@ describe('organizer moderation routes', () => {
       const general = String(bySlug['general']!._id);
 
       const OUTSIDER = '+26878000060';
-      await Buyer.create({ phone: OUTSIDER, password: 'secret1' });
+      await Buyer.create({ phone: OUTSIDER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
       const outsiderAuth = `Bearer ${signBuyerToken(OUTSIDER)}`;
 
       await request(app)

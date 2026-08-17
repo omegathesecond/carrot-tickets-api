@@ -14,7 +14,7 @@ async function seedWorld() {
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   const channels = await Channel.find({ communityId: community._id });
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
-  await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Resync Buyer' });
+  await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Resync Buyer' });
   const auth = `Bearer ${signBuyerToken(PHONE)}`;
   return { seeded, community, bySlug, auth };
 }

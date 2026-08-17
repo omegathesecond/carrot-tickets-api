@@ -15,8 +15,8 @@ const PHONE_A = '+26878422613';
 const PHONE_B = '+26878000042';
 
 async function seedWorld() {
-  const a = await Buyer.create({ phone: PHONE_A, password: 'secret1', name: 'Alpha', username: 'alpha_one' });
-  const b = await Buyer.create({ phone: PHONE_B, password: 'secret1', name: 'Beta', username: 'beta_two' });
+  const a = await Buyer.create({ phone: PHONE_A, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Alpha', username: 'alpha_one' });
+  const b = await Buyer.create({ phone: PHONE_B, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Beta', username: 'beta_two' });
   const seeded = await seedPublishedEvent();
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   await Membership.create({ buyerId: a._id, communityId: community._id });
@@ -78,7 +78,7 @@ describe('dm routes', () => {
 
   it('privacy: stranger cannot open a thread; block-after-open refuses sends', async () => {
     const { a, b, authA } = await seedWorld();
-    const stranger = await Buyer.create({ phone: '+26878000099', password: 'secret1' });
+    const stranger = await Buyer.create({ phone: '+26878000099', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     await request(app).post('/api/dm/threads').set('Authorization', `Bearer ${signBuyerToken('+26878000099')}`)
       .send({ participantIds: [String(a._id)] }).expect(403);
 
@@ -91,7 +91,7 @@ describe('dm routes', () => {
 
   it('non-participant gets 404 on messages/read; delete-own works and masks', async () => {
     const { b, authA, authB } = await seedWorld();
-    const outsider = await Buyer.create({ phone: '+26878000098', password: 'secret1' });
+    const outsider = await Buyer.create({ phone: '+26878000098', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const authO = `Bearer ${signBuyerToken('+26878000098')}`;
     const threadId = await openThread(authA, String(b._id));
 

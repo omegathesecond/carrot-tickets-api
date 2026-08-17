@@ -12,6 +12,7 @@ import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
 import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 import { CommunityEventSubmitController } from '@controllers/communityEventSubmit.controller';
 
@@ -173,14 +174,14 @@ router.get('/events/:eventId/reviews', ReviewController.listForEvent);
 // review, because a community listing sells no tickets (see the controller).
 router.post('/events/submit', authenticateBuyer, communityEventUpload, handleMulterError, CommunityEventSubmitController.submit);
 
-router.post('/events/:eventId/reviews', authenticateBuyer, ReviewController.submit);
+router.post('/events/:eventId/reviews', authenticateBuyer, requireProfilePhoto, ReviewController.submit);
 
 /**
  * @route   POST /api/public/events/:eventId/like
  * @desc    Toggle the signed-in actor's like on an event (Discover event slides).
  * @access  Buyer or vendor session required — 401 when anonymous.
  */
-router.post('/events/:eventId/like', optionalTicketsAuth, EventReactionController.like);
+router.post('/events/:eventId/like', optionalTicketsAuth, requireProfilePhoto, EventReactionController.like);
 
 /**
  * @route   POST /api/public/events/:eventId/save

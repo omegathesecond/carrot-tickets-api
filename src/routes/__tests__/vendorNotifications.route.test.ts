@@ -12,7 +12,7 @@ describe('/api/tickets/social/notifications (vendor)', () => {
 
   it('lists follow notifications and marks them read', async () => {
     const brand = await Vendor.create({ businessName: 'Notif Brand', email: 'notif@example.com', phoneNumber: '+26878001001', password: 'secret123' });
-    await Buyer.create({ phone: '+26878001002', password: 'secret1', name: 'Fan', username: 'fan_one' });
+    await Buyer.create({ phone: '+26878001002', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Fan', username: 'fan_one' });
     const brandToken = `Bearer ${signVendorToken(String(brand._id))}`;
 
     await request(app).post('/api/social/follow').set('Authorization', `Bearer ${signBuyerToken('+26878001002')}`).send({ targetType: 'organizer', targetId: String(brand._id) }).expect(200);

@@ -27,7 +27,7 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
 
   it('200s with the buyer public profile for a vendor token', async () => {
     const vendor = await makeVendor('Bhora Fest');
-    const buyer = await Buyer.create({ phone: '+26878000301', name: 'Bo', password: 'secret1', username: 'bhora_bo' });
+    const buyer = await Buyer.create({ phone: '+26878000301', name: 'Bo', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'bhora_bo' });
     const token = `Bearer ${signVendorToken(String(vendor._id))}`;
 
     const res = await request(app).get('/api/tickets/social/users/bhora_bo')
@@ -60,14 +60,14 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
   });
 
   it('401s a buyer token (no vendorId)', async () => {
-    await Buyer.create({ phone: '+26878000302', password: 'secret1', username: 'plain_buyer' });
+    await Buyer.create({ phone: '+26878000302', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'plain_buyer' });
     await request(app).get('/api/tickets/social/users/plain_buyer')
       .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
   });
 
   it('isFollowing is true once this vendor follows the buyer, false after unfollow', async () => {
     const vendor = await makeVendor();
-    const buyer = await Buyer.create({ phone: '+26878000303', name: 'Cee', password: 'secret1', username: 'cee_buyer' });
+    const buyer = await Buyer.create({ phone: '+26878000303', name: 'Cee', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'cee_buyer' });
     const token = `Bearer ${signVendorToken(String(vendor._id))}`;
 
     const before = await request(app).get('/api/tickets/social/users/cee_buyer')
@@ -90,7 +90,7 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
 
   it('isFollowedBy + isFriend reflect the buyer following the vendor brand back', async () => {
     const vendor = await makeVendor('Followed Brand');
-    const buyer = await Buyer.create({ phone: '+26878000304', name: 'Dee', password: 'secret1', username: 'dee_buyer' });
+    const buyer = await Buyer.create({ phone: '+26878000304', name: 'Dee', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'dee_buyer' });
     const vendorToken = `Bearer ${signVendorToken(String(vendor._id))}`;
     const buyerToken = `Bearer ${signBuyerToken('+26878000304')}`;
 
