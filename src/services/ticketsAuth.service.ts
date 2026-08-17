@@ -15,15 +15,15 @@ import { ServiceCategoryService } from '@services/serviceCategory.service';
 import { JWT_SECRET } from '@config/jwt.config';
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
+// Refresh tokens are opaque random strings stored in the RefreshToken collection
+// (see generateRefreshToken / storeRefreshToken) — they are NOT JWTs, so there is
+// no separate refresh signing secret. Only the access-token lifetime is configurable.
 const JWT_REFRESH_EXPIRY: string = process.env['JWT_REFRESH_EXPIRY'] || '7d';
 
-// Log JWT configuration at startup for debugging
+// Log JWT configuration at startup for debugging (never log the secret itself).
 console.log('[TicketsAuth] JWT Configuration:', {
   accessTokenExpiry: JWT_EXPIRY,
   refreshTokenExpiry: JWT_REFRESH_EXPIRY,
-  jwtSecretConfigured: !!process.env['JWT_SECRET'],
-  jwtSecretLength: JWT_SECRET?.length || 0,
-  refreshSecretConfigured: !!process.env['JWT_REFRESH_SECRET'],
   envJwtExpiry: process.env['JWT_EXPIRY'],
   envRefreshExpiry: process.env['JWT_REFRESH_EXPIRY'],
 });
