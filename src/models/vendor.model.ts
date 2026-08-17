@@ -259,7 +259,12 @@ vendorSchema.methods.comparePassword = async function(this: IVendor, candidatePa
 // options, which MongoDB rejects — silently, since Mongoose builds indexes in
 // the background. Only compound indexes belong here.
 vendorSchema.index({ isActive: 1, isVerified: 1 });
-vendorSchema.index({ keshlessVendorId: 1 });
+// NOTE: keshlessVendorId is intentionally NOT re-declared here — the field
+// (above) already declares its own sparse single-field index. Re-declaring it
+// produced a second, non-sparse "keshlessVendorId_1" that MongoDB rejects as a
+// name/options conflict (it silently blocked index builds in prod and broke the
+// whole test suite's shared DB setup). Carrot no longer depends on Keshless, so
+// this link field is legacy; the field-level sparse index is all lookups need.
 // Sparse by nature: a 2dsphere index only covers docs that actually have the
 // geo field, so brands that never opted into location sharing are excluded.
 vendorSchema.index({ location: '2dsphere' });
