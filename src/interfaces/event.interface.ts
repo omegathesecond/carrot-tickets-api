@@ -59,6 +59,7 @@ export interface IEvent extends Document {
   startTime: Date; // For single-day: start time on eventDate. For multi-day: start datetime
   endTime: Date; // For single-day: end time on eventDate. For multi-day: end datetime
   isMultiDay?: boolean; // Whether this is a multi-day event (default: false)
+  cashless: boolean; // Whether NFC tap-and-go wallet/POS is enabled for this event (default: false)
 
   // Capacity & Tickets
   capacity: number; // Total event capacity

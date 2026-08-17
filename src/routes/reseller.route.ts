@@ -57,6 +57,12 @@ router.post(
 );
 
 router.post(
+  '/sales/sell-band',
+  requireResellerPermission(ResellerPermission.SELL_TICKETS),
+  ResellerController.sellBand
+);
+
+router.post(
   '/sales/:referenceId/finalize',
   requireResellerPermission(ResellerPermission.SELL_TICKETS),
   ResellerController.finalizeSale
@@ -126,5 +132,12 @@ router.get('/payouts',
 router.post('/payouts',
   requireResellerPermission(ResellerPermission.REQUEST_PAYOUT),
   ResellerPayoutController.request);
+
+/**
+ * Wallets (cashless) — cash top-up at a desk (CASH_TOPUP)
+ */
+router.post('/wallets/cash-topup',
+  requireResellerPermission(ResellerPermission.CASH_TOPUP),
+  ResellerController.cashTopup);
 
 export default router;

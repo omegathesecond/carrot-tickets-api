@@ -108,6 +108,10 @@ const eventSchema = new Schema<IEvent>({
     type: Boolean,
     default: false
   },
+  cashless: {
+    type: Boolean,
+    default: false
+  },
 
   // Capacity & Tickets
   // Capacity is no longer collected at event creation — it is derived from

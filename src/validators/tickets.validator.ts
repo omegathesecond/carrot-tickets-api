@@ -509,13 +509,22 @@ export const validateTicketSchema = Joi.object({
     .messages({ 'string.pattern.base': 'Invalid event ID' })
 });
 
+// Gate check-in accepts EITHER a scanned QR/short-code ticketId OR a tapped
+// cashless band uid (cashless spec §5.1) — never both, never neither. bandUid
+// uses the same 14-hex (7-byte) minimum as bindBandSchema/reissueBandSchema.
 export const checkInTicketSchema = Joi.object({
   ticketId: Joi.string()
-    .required()
     .trim()
     .messages({
-      'string.empty': 'Ticket ID is required',
-      'any.required': 'Ticket ID is required'
+      'string.empty': 'Ticket ID is required'
+    }),
+  bandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{14,}$/)
+    .messages({
+      'string.empty': 'Band UID is required',
+      'string.pattern.base': 'Band UID must be at least 7 bytes (14 hex chars)'
     }),
   expectedEventId: Joi.string()
     .optional()
@@ -527,6 +536,71 @@ export const checkInTicketSchema = Joi.object({
     .messages({
       'string.max': 'Notes cannot exceed 500 characters'
     })
+}).xor('ticketId', 'bandUid').messages({
+  'object.xor': 'Provide exactly one of ticketId or bandUid'
+});
+
+// Band binding is a dedicated band-desk action (cashless spec §5.1) — see
+// ScanService.bindBandToTicket. bandUid must be a real NFC chip id: 14 hex
+// chars = 7 bytes, the minimum real-world UID length (see @utils/bandUid.util
+// for the shared normalize/validate logic consumed elsewhere in the system).
+export const bindBandSchema = Joi.object({
+  ticketId: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Ticket ID is required',
+      'any.required': 'Ticket ID is required'
+    }),
+  bandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{14,}$/)
+    .required()
+    .messages({
+      'string.empty': 'Band UID is required',
+      'string.pattern.base': 'Band UID must be at least 7 bytes (14 hex chars)',
+      'any.required': 'Band UID is required'
+    }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
+});
+
+// Reissue is the lost-band path (cashless spec §5.1) — see
+// ScanService.reissueBandForTicket. `reason` is required so the audit trail
+// (BandBinding.unboundReason) always has a true explanation, never a blank.
+// newBandUid uses the same 14-hex (7-byte) requirement as bindBandSchema.bandUid.
+export const reissueBandSchema = Joi.object({
+  ticketId: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Ticket ID is required',
+      'any.required': 'Ticket ID is required'
+    }),
+  newBandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{14,}$/)
+    .required()
+    .messages({
+      'string.empty': 'New band UID is required',
+      'string.pattern.base': 'New band UID must be at least 7 bytes (14 hex chars)',
+      'any.required': 'New band UID is required'
+    }),
+  reason: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Reason is required',
+      'any.required': 'Reason is required'
+    }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
 });
 
 export const scanQuerySchema = Joi.object({
