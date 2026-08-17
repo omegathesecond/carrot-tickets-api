@@ -31,8 +31,11 @@ describe('POST /api/public/events/:eventId/save', () => {
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
+  // avatarUrl matters only for the cross-check tests below that POST /like:
+  // that route is mounted behind requireProfilePhoto, so a photoless buyer
+  // 403s and creates no reaction at all. /save itself is not gated.
   beforeEach(async () => {
-    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester' });
+    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester', avatarUrl: 'https://cdn.test/avatar.jpg' });
   });
 
   it('401s an anonymous save — never a silent no-op', async () => {

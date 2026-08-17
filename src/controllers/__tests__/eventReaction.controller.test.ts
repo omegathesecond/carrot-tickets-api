@@ -23,6 +23,7 @@ async function seedEvent() {
 }
 
 const BUYER_PHONE = '+26878422613';
+const AVATAR_URL = 'https://cdn.test/avatar.jpg';
 const buyerAuth = () => ({ Authorization: `Bearer ${signBuyerToken(BUYER_PHONE)}` });
 
 describe('POST /api/public/events/:eventId/like', () => {
@@ -34,8 +35,12 @@ describe('POST /api/public/events/:eventId/like', () => {
   // the token's normalized phone; without this row the actor resolves to null
   // and every buyer-authed request here 401s before it can reach the
   // event-existence check or the toggle itself.
+  //
+  // avatarUrl is required because the like route is mounted behind
+  // requireProfilePhoto — a photoless buyer 403s (PHOTO_REQUIRED) before the
+  // handler runs. See the photoless case asserted at the bottom of this file.
   beforeEach(async () => {
-    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester' });
+    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester', avatarUrl: AVATAR_URL });
   });
 
   it('401s an anonymous like — never a silent no-op', async () => {
@@ -69,6 +74,19 @@ describe('POST /api/public/events/:eventId/like', () => {
       .set({ Authorization: `Bearer ${signVendorToken(vendorId)}` });
     expect(res.status).toBe(200);
     expect(res.body.data.active).toBe(true);
+  });
+
+  // The route sits behind requireProfilePhoto. Asserted explicitly so the
+  // avatarUrl in the fixture above reads as the gate being satisfied rather
+  // than incidental test data someone could drop while tidying up.
+  it('403s a buyer with no profile photo — liking is a gated social write', async () => {
+    const e = await seedEvent();
+    await Buyer.updateOne({ phone: BUYER_PHONE }, { $unset: { avatarUrl: 1 } });
+
+    const res = await request(app).post(`/api/public/events/${e.id}/like`).set(buyerAuth());
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('PHOTO_REQUIRED');
   });
 });
 
