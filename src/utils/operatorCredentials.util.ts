@@ -3,7 +3,7 @@ import { randomInt } from 'crypto';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
-import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 
 /**
  * Crockford base32 — 32 glyphs with I, L, O and U removed. Chosen over
@@ -49,7 +49,7 @@ export async function generateUniqueLoginCode(): Promise<string> {
       ResellerOperator.exists({ loginCode: code }),
       GateOperator.exists({ loginCode: code }),
       Cashier.exists({ loginCode: code }),
-      Merchant.exists({ loginCode: code }),
+      MerchantOperator.exists({ loginCode: code }),
     ]);
     if (!r && !g && !c && !m) return code;
   }

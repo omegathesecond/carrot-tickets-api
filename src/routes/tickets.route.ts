@@ -559,7 +559,6 @@ router.get('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCES
 router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
 router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
 router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
-router.post('/merchants/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.resetPin);
 
 /**
  * Organizer Cashless Reporting — the "you're in charge" view of one event:

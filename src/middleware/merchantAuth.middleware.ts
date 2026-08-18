@@ -12,6 +12,13 @@ export const authenticateMerchant = (req: Request, res: Response, next: NextFunc
     const token = header.replace('Bearer ', '');
     if (!token) { ApiResponseUtil.unauthorized(res, 'No token provided'); return; }
     const decoded = MerchantAuthService.verifyToken(token); // throws if scope !== 'merchant'
+    // Every charge must name the PERSON who took it. A token minted before
+    // per-person operators names only the stall, so it is rejected outright
+    // rather than allowed through as an unattributable charge.
+    if (!decoded.merchantOperatorId) {
+      ApiResponseUtil.unauthorized(res, 'Token predates per-person operators — sign in again');
+      return;
+    }
     (req as any).merchant = decoded;
     next();
   } catch (e: any) {

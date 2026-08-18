@@ -20,13 +20,18 @@ import { StockMovementReason } from '@interfaces/stock.interface';
 import { Notification } from '@models/notification.model';
 import { MerchantPermission } from '@interfaces/merchant.interface';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import mongoose from 'mongoose';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-let seq = 620001;
-const mToken = (merchantId: string, eventId: string) => jwt.sign({ scope: 'merchant', merchantId, eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE] }, JWT_SECRET);
+// A merchant token names the STALL and the PERSON on its till; without the
+// person authenticateMerchant rejects it.
+const mToken = (merchantId: string, eventId: string) => jwt.sign({
+  scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+  operatorName: 'Thabo Dlamini', eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE],
+}, JWT_SECRET);
 const lowStockCount = (vendorId: string) => Notification.countDocuments({ recipientType: 'vendor', recipientId: vendorId, type: 'low_stock' });
 
 async function setup() {
@@ -36,7 +41,7 @@ async function setup() {
   const w = await WalletService.ensureWalletForTicket({ ticketId: String(t._id), eventId: String(eventId) });
   const bandUid = '04b1c2d3e4f5'; await WalletService.bindBand(String(w._id), bandUid, 'op1');
   await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: 1_000_000, recordedBy: 'op1', clientTxnId: 'seed' });
-  const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0, loginCode: String(seq++), pin: '111111' });
+  const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0 });
   const product = await Product.create({ eventId, name: 'Beer', category: 'beer', price: 100 });
   await StockService.applyMovement({ eventId, merchantId: merchant._id, productId: product._id, delta: 6, reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: 'v1' });
   // set threshold 5 via the organizer endpoint

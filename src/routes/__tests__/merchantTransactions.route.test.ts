@@ -17,14 +17,9 @@ beforeAll(connectTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-let __loginCodeSeq = 700001;
-
 async function seedMerchant(): Promise<{ merchantId: string; eventId: string }> {
   const eventId = new mongoose.Types.ObjectId();
-  const merchant = await Merchant.create({
-    name: 'Fixture Merchant', eventId, commissionPercent: 10,
-    loginCode: String(__loginCodeSeq++), pin: '111111',
-  });
+  const merchant = await Merchant.create({ name: 'Fixture Merchant', eventId, commissionPercent: 10 });
   return { merchantId: String(merchant._id), eventId: String(eventId) };
 }
 
@@ -43,8 +38,13 @@ async function seedCharge(opts: {
   });
 }
 
+// A merchant token names the STALL and the PERSON on its till; without the
+// person authenticateMerchant rejects it.
 const token = (merchantId: string, eventId: string, perms = [MerchantPermission.CHARGE]) =>
-  jwt.sign({ scope: 'merchant', merchantId, eventId, name: 'Fixture Merchant', permissions: perms }, JWT_SECRET);
+  jwt.sign({
+    scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+    operatorName: 'Thabo Dlamini', eventId, name: 'Fixture Merchant', permissions: perms,
+  }, JWT_SECRET);
 
 it('returns only the requesting merchant\'s charges — isolation across merchants', async () => {
   const a = await seedMerchant();

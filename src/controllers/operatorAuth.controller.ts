@@ -2,7 +2,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
-import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { Cashier } from '@models/cashier.model';
 import { ResellerAuthService } from '@services/resellerAuth.service';
 import { GateOperatorAuthService } from '@services/gateOperatorAuth.service';
@@ -31,7 +31,7 @@ export class OperatorAuthController {
       const [reseller, gate, merchant, cashier] = await Promise.all([
         ResellerOperator.exists({ loginCode: code, isActive: true }),
         GateOperator.exists({ loginCode: code, isActive: true }),
-        Merchant.exists({ loginCode: code, status: 'active' }),
+        MerchantOperator.exists({ loginCode: code, isActive: true }),
         Cashier.exists({ loginCode: code, isActive: true }),
       ]);
 

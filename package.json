@@ -18,6 +18,7 @@
     "backfill:event-category": "ts-node -r tsconfig-paths/register src/scripts/backfillEventCategory.ts",
     "backfill:update-hashtags": "ts-node -r tsconfig-paths/register src/scripts/backfillUpdateHashtags.ts",
     "migrate:review-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-review-indexes.ts",
+    "migrate:merchant-credentials": "ts-node -r tsconfig-paths/register src/scripts/migrate-merchant-credentials.ts",
     "seed:service-categories": "ts-node -r tsconfig-paths/register src/scripts/seed-service-categories.ts",
     "deploy:realtime": "bash scripts/deploy-realtime.sh",
     "migrate:update-media-array": "ts-node -r tsconfig-paths/register scripts/migrate-update-media-array.ts",

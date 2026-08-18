@@ -12,6 +12,7 @@ import { WalletService } from '@services/wallet.service';
 import { Wallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
 import { MerchantPermission } from '@interfaces/merchant.interface';
+import mongoose from 'mongoose';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
@@ -41,8 +42,14 @@ async function seedMerchantAndFundedBand(opts: { cashless?: boolean; balance?: n
   return { eventId: String(eventId), bandUid, walletId: String(w._id), merchantId: String(merchant._id) };
 }
 
+// A merchant token names the STALL and the PERSON on its till. The person is
+// not optional: authenticateMerchant rejects a token without one rather than
+// letting an unattributable charge through.
 const token = (merchantId: string, eventId: string, perms = [MerchantPermission.CHARGE], over = {}) =>
-  jwt.sign({ scope: 'merchant', merchantId, eventId, name: 'Fixture Merchant', permissions: perms, ...over }, JWT_SECRET);
+  jwt.sign({
+    scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+    operatorName: 'Thabo Dlamini', eventId, name: 'Fixture Merchant', permissions: perms, ...over,
+  }, JWT_SECRET);
 
 it('charges a wallet by band uid and credits the merchant', async () => {
   const { eventId, bandUid, merchantId } = await seedMerchantAndFundedBand({ balance: 1000 });
@@ -158,4 +165,21 @@ it('rejects a bad-scope token (e.g. a reseller token) with 401', async () => {
     .send({ bandUid, amount: 300, clientTxnId: 'c-badscope', eventId });
 
   expect(res.status).toBe(401);
+});
+
+it('rejects a legacy token minted before per-person operators — no anonymous charge', async () => {
+  const { eventId, bandUid, walletId, merchantId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  // Exactly the old payload shape: a stall, no person.
+  const legacy = jwt.sign(
+    { scope: 'merchant', merchantId, eventId, name: 'Fixture Merchant', permissions: [MerchantPermission.CHARGE] },
+    JWT_SECRET,
+  );
+
+  const res = await request(app).post('/api/merchant/charge')
+    .set('Authorization', `Bearer ${legacy}`)
+    .send({ bandUid, amount: 300, clientTxnId: 'c-legacy' });
+
+  expect(res.status).toBe(401);
+  const w = await Wallet.findById(walletId).lean();
+  expect(w?.balance).toBe(1000); // untouched — rejected, not silently attributed to the stall
 });

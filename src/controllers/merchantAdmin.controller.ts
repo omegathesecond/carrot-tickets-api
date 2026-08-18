@@ -3,7 +3,6 @@ import { NextFunction, Request, Response } from 'express';
 import { Merchant } from '@models/merchant.model';
 import { Event } from '@models/event.model';
 import { MerchantService } from '@services/merchant.service';
-import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 function actorOf(req: Request) {
@@ -54,17 +53,15 @@ export class MerchantAdminController {
         ? Math.min(100, Math.max(0, commissionPercent))
         : 0;
 
-      const loginCode = await generateUniqueLoginCode();
-      const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin) ? req.body.pin : generatePin();
+      // No credentials are issued here: a stall does not log in. The people
+      // who work its till are MerchantOperators, created separately, each
+      // with their own loginCode + PIN.
       const merchant = await Merchant.create({
         name: name.trim(),
         eventId,
         commissionPercent: commission,
-        loginCode,
-        pin,
       });
-      // loginCode + pin are returned ONCE here (pin is never serialized again).
-      ApiResponseUtil.created(res, { merchant, loginCode, pin });
+      ApiResponseUtil.created(res, { merchant });
     } catch (err) { next(err); }
   }
 
@@ -107,22 +104,6 @@ export class MerchantAdminController {
         event: { id: String(event._id), name: event.name },
         ...result,
       });
-    } catch (err) { next(err); }
-  }
-
-  /** POST /api/tickets/merchants/:id/reset-pin */
-  static async resetPin(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const merchant = await Merchant.findById(req.params['id']).select('+pin');
-      if (!merchant) { ApiResponseUtil.notFound(res, 'Vendor not found'); return; }
-      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
-      if (!event) return;
-      const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin) ? req.body.pin : generatePin();
-      merchant.pin = pin;
-      merchant.failedPinAttempts = 0;
-      merchant.lockedUntil = null;
-      await merchant.save();
-      ApiResponseUtil.success(res, { merchantId: (merchant._id as any).toString(), pin });
     } catch (err) { next(err); }
   }
 }

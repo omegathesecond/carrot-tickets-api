@@ -13,8 +13,6 @@ beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-let __loginCodeSeq = 900001;
-
 async function seedFundedWallet(amount = 1000) {
   const eventId = new mongoose.Types.ObjectId();
   const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
@@ -25,10 +23,8 @@ async function seedFundedWallet(amount = 1000) {
 }
 
 async function seedMerchant(eventId: string, commissionPercent = 0) {
-  const m = await Merchant.create({
-    name: 'Fixture Merchant', eventId, commissionPercent,
-    loginCode: String(__loginCodeSeq++), pin: '111111',
-  });
+  // A stall holds no credentials — the people on its till do (MerchantOperator).
+  const m = await Merchant.create({ name: 'Fixture Merchant', eventId, commissionPercent });
   return String(m._id);
 }
 

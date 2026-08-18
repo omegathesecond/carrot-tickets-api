@@ -14,14 +14,19 @@ import { Product } from '@models/product.model';
 import { ProductCategory, StockMovementReason } from '@interfaces/stock.interface';
 import { StockService } from '@services/stock.service';
 import { MerchantPermission } from '@interfaces/merchant.interface';
+import mongoose from 'mongoose';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-let seq = 700001;
+// A merchant token names the STALL and the PERSON on its till; without the
+// person authenticateMerchant rejects it.
 const token = (merchantId: string, eventId: string) =>
-  jwt.sign({ scope: 'merchant', merchantId, eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE] }, JWT_SECRET);
+  jwt.sign({
+    scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+    operatorName: 'Thabo Dlamini', eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE],
+  }, JWT_SECRET);
 
 async function setup({ beerStock = 100 }: { beerStock?: number } = {}) {
   const { eventId, vendorId } = await seedPublishedEvent({});
@@ -31,7 +36,7 @@ async function setup({ beerStock = 100 }: { beerStock?: number } = {}) {
   const bandUid = '04a1b2c3d4e5';
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
   await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: 100000, recordedBy: 'op1', clientTxnId: 'seed' });
-  const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0, loginCode: String(seq++), pin: '111111' });
+  const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0 });
   const beer = await Product.create({ eventId, name: 'Castle Lite', category: ProductCategory.BEER, price: 2500 });
   if (beerStock) {
     await StockService.applyMovement({

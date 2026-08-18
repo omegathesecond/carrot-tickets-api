@@ -76,8 +76,13 @@ describe('organizer stock count route', () => {
 });
 
 describe('POS stock routes', () => {
+  // A merchant token names the STALL and the PERSON on its till; without the
+  // person authenticateMerchant rejects it.
   const merchantToken = (merchantId: string, eventId: string) =>
-    jwt.sign({ scope: 'merchant', merchantId, eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE] }, JWT_SECRET);
+    jwt.sign({
+      scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+      operatorName: 'Thabo Dlamini', eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE],
+    }, JWT_SECRET);
 
   async function setup() {
     const { eventId } = await seedPublishedEvent({});

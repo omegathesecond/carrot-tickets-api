@@ -4,6 +4,7 @@ const crypto = require('crypto');
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { generatePin, generateUniqueLoginCode, normalizeLoginCode, LOGIN_CODE_ALPHABET } from '@utils/operatorCredentials.util';
 
 beforeAll(connectTestDb);
@@ -75,4 +76,24 @@ it('generateUniqueLoginCode avoids codes taken by a gate operator', async () => 
   await GateOperator.collection.insertOne({ loginCode: '100000', fullName: 'g', scope: 'platform', isActive: true } as any);
   const code = await generateUniqueLoginCode();
   expect(code).not.toBe('100000');
+});
+
+// The stall (Merchant) left this uniqueness check when it stopped holding a
+// login code; the PERSON on its till took its place. Without this probe two
+// populations could be handed the same code and the operator-login dispatcher
+// would route by whichever it found first.
+it('generateUniqueLoginCode avoids codes taken by a stall operator', async () => {
+  const seededCode = 'ABCDEF';
+  await MerchantOperator.collection.insertOne({ loginCode: seededCode, fullName: 'till', isActive: true } as any);
+  const spy = jest.spyOn(crypto, 'randomInt') as unknown as jest.SpyInstance;
+  spy
+    .mockReturnValueOnce(10).mockReturnValueOnce(11).mockReturnValueOnce(12)
+    .mockReturnValueOnce(13).mockReturnValueOnce(14).mockReturnValueOnce(15)
+    .mockReturnValueOnce(1).mockReturnValueOnce(1).mockReturnValueOnce(1)
+    .mockReturnValueOnce(1).mockReturnValueOnce(1).mockReturnValueOnce(1);
+
+  const code = await generateUniqueLoginCode();
+
+  expect(spy).toHaveBeenCalledTimes(12); // it drew twice: the collision, then a fresh one
+  expect(code).toBe('111111');
 });

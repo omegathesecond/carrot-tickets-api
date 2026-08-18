@@ -17,6 +17,7 @@ import { Cashier } from '../models/cashier.model';
 import { ResellerOperator } from '../models/resellerOperator.model';
 import { GateOperator } from '../models/gateOperator.model';
 import { Merchant } from '../models/merchant.model';
+import { MerchantOperator } from '../models/merchantOperator.model';
 import { Product } from '../models/product.model';
 import { ProductStock } from '../models/productStock.model';
 import { StockMovement } from '../models/stockMovement.model';
@@ -40,7 +41,7 @@ async function codeTakenElsewhere(code: string): Promise<boolean> {
   const [r, g, m] = await Promise.all([
     ResellerOperator.exists({ loginCode: code }),
     GateOperator.exists({ loginCode: code }),
-    Merchant.exists({ loginCode: code }),
+    MerchantOperator.exists({ loginCode: code }),
   ]);
   return !!(r || g || m);
 }
@@ -62,9 +63,10 @@ export async function seedStock(event: any, opts: { vendorId: string | null; cas
   const preDoors = new Date(doorsOpen.getTime() - 60 * 60 * 1000); // 1h before doors → reads as Opening
 
   // ── bars (≥2) ──────────────────────────────────────────────────────────────
+  // The bar itself holds no credentials — one demo PERSON per bar does.
   const wantBars = [
-    { name: 'Main Bar', loginCode: '701001' },
-    { name: 'VIP Bar', loginCode: '701002' },
+    { name: 'Main Bar', staff: 'Thabo Dlamini', loginCode: '701001' },
+    { name: 'VIP Bar', staff: 'Nomsa Simelane', loginCode: '701002' },
   ];
   for (const b of wantBars) {
     const exists = await Merchant.exists({ eventId: event._id, name: b.name });
@@ -72,8 +74,11 @@ export async function seedStock(event: any, opts: { vendorId: string | null; cas
       const code = (await codeTakenElsewhere(b.loginCode))
         ? String(700000 + Math.floor(Math.random() * 9000))
         : b.loginCode;
-      await Merchant.create({ name: b.name, eventId: event._id, loginCode: code, pin: '000000' });
-      console.log(`🏪 Created bar "${b.name}" (login ${code})`);
+      const bar = await Merchant.create({ name: b.name, eventId: event._id });
+      await new MerchantOperator({
+        fullName: b.staff, merchantId: bar._id, eventId: event._id, loginCode: code, pin: '000000',
+      }).save();
+      console.log(`🏪 Created bar "${b.name}" with operator ${b.staff} (login ${code})`);
     }
   }
   const bars = await Merchant.find({ eventId: event._id }).lean();
