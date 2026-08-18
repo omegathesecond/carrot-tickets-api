@@ -4,7 +4,7 @@ import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
-import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { VISIBLE_BUSINESS_FILTER } from '@utils/businessVisibility.util';
 import { isTicketHolderForBuyer } from '@utils/ticketHolder.util';
 import { HttpError } from '@utils/httpError.util';
 import { toBuyerSummary, BuyerSummary } from '@utils/buyerSummary.util';
@@ -79,12 +79,7 @@ export class ReviewService {
     input: { rating: number; text?: string }
   ): Promise<IReview> {
     assertNotSuspended(buyer);
-    const biz = await Vendor.findOne({
-      _id: businessId,
-      operatorType: OperatorType.SERVICES,
-      verificationStatus: VerificationStatus.VERIFIED,
-      isActive: true,
-    }).select('_id');
+    const biz = await Vendor.findOne({ _id: businessId, ...VISIBLE_BUSINESS_FILTER }).select('_id');
     if (!biz) throw new HttpError(404, 'Business not found');
     if (!(await EnquiryService.hasEnquired(String(buyer._id), businessId))) {
       throw new HttpError(403, 'Only customers who have enquired can review this business');

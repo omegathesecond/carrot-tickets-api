@@ -74,6 +74,17 @@ describe('ReviewService.submitServiceReview', () => {
     ).rejects.toMatchObject({ statusCode: 409 });
   });
 
+  // A PENDING business is publicly visible (verification is only a badge), so
+  // it must clear the visibility gate and fall through to the enquiry gate —
+  // 403 "only customers who have enquired", not 404 "no such business".
+  it('lets a pending business through the visibility gate to the enquiry gate', async () => {
+    const buyer = await mkBuyer();
+    const pending = await mkServicesBiz({ verificationStatus: VerificationStatus.PENDING });
+    await expect(
+      ReviewService.submitServiceReview(String(pending._id), buyer, { rating: 5 })
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
   it('404s for a business that is not a verified, active SERVICES vendor', async () => {
     const buyer = await mkBuyer();
 
@@ -82,10 +93,12 @@ describe('ReviewService.submitServiceReview', () => {
       ReviewService.submitServiceReview(String(eventsVendor._id), buyer, { rating: 5 })
     ).rejects.toMatchObject({ statusCode: 404 });
 
-    const unverified = await mkServicesBiz({ verificationStatus: VerificationStatus.PENDING });
-    await expect(
-      ReviewService.submitServiceReview(String(unverified._id), buyer, { rating: 5 })
-    ).rejects.toMatchObject({ statusCode: 404 });
+    for (const status of [VerificationStatus.REJECTED, VerificationStatus.SUSPENDED]) {
+      const takenDown = await mkServicesBiz({ verificationStatus: status });
+      await expect(
+        ReviewService.submitServiceReview(String(takenDown._id), buyer, { rating: 5 })
+      ).rejects.toMatchObject({ statusCode: 404 });
+    }
 
     const inactive = await mkServicesBiz({ isActive: false });
     await expect(

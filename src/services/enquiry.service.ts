@@ -1,6 +1,6 @@
 import { Enquiry, IEnquiry, EnquiryStatus } from '@models/enquiry.model';
 import { Vendor } from '@models/vendor.model';
-import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { VISIBLE_BUSINESS_FILTER } from '@utils/businessVisibility.util';
 import { IBuyer } from '@models/buyer.model';
 import { NotificationService } from '@services/notification.service';
 import { HttpError } from '@utils/httpError.util';
@@ -16,12 +16,7 @@ export class EnquiryService {
     buyer: IBuyer,
     input: { message: string; eventDate?: string; eventType?: string; contactPhone?: string; contactEmail?: string }
   ): Promise<IEnquiry> {
-    const biz = await Vendor.findOne({
-      _id: businessId,
-      operatorType: OperatorType.SERVICES,
-      verificationStatus: VerificationStatus.VERIFIED,
-      isActive: true,
-    });
+    const biz = await Vendor.findOne({ _id: businessId, ...VISIBLE_BUSINESS_FILTER });
     if (!biz) throw new HttpError(404, 'Business not found');
     if (!input.message?.trim()) throw new HttpError(400, 'A message is required');
 
