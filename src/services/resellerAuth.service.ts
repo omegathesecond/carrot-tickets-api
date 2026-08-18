@@ -11,6 +11,9 @@ const LOCK_MINUTES = 15;
 
 export class ResellerAuthService {
   static async login(loginCode: string, pin: string) {
+    if (typeof loginCode !== 'string' || typeof pin !== 'string') {
+      throw new Error('Invalid credentials');
+    }
     const operator = await ResellerOperator.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 

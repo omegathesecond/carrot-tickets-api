@@ -9,6 +9,7 @@ import { GateOperatorAuthService } from '@services/gateOperatorAuth.service';
 import { MerchantAuthService } from '@services/merchantAuth.service';
 import { CashierAuthService } from '@services/cashierAuth.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
 export class OperatorAuthController {
   /** Resolve a login code across all operator populations and route accordingly. */
@@ -21,31 +22,37 @@ export class OperatorAuthController {
       }
       if (!loginCode || !pin) { ApiResponseUtil.badRequest(res, 'loginCode and pin are required'); return; }
 
+      // Normalize ONCE, here, and reuse the canonical code for both the
+      // routing probes below AND the service calls — otherwise a
+      // lowercase/misread-glyph code fails these raw .exists() checks and
+      // never reaches the (already-normalizing) service at all.
+      const code = normalizeLoginCode(loginCode);
+
       const [reseller, gate, merchant, cashier] = await Promise.all([
-        ResellerOperator.exists({ loginCode, isActive: true }),
-        GateOperator.exists({ loginCode, isActive: true }),
-        Merchant.exists({ loginCode, status: 'active' }),
-        Cashier.exists({ loginCode, isActive: true }),
+        ResellerOperator.exists({ loginCode: code, isActive: true }),
+        GateOperator.exists({ loginCode: code, isActive: true }),
+        Merchant.exists({ loginCode: code, status: 'active' }),
+        Cashier.exists({ loginCode: code, isActive: true }),
       ]);
 
       try {
         if (gate) {
-          const result = await GateOperatorAuthService.login(loginCode, pin);
+          const result = await GateOperatorAuthService.login(code, pin);
           ApiResponseUtil.success(res, { type: 'gate', ...result });
           return;
         }
         if (cashier) {
-          const result = await CashierAuthService.login(loginCode, pin);
+          const result = await CashierAuthService.login(code, pin);
           ApiResponseUtil.success(res, { type: 'cashier', ...result });
           return;
         }
         if (reseller) {
-          const result = await ResellerAuthService.login(loginCode, pin);
+          const result = await ResellerAuthService.login(code, pin);
           ApiResponseUtil.success(res, { type: 'reseller', ...result });
           return;
         }
         if (merchant) {
-          const result = await MerchantAuthService.login(loginCode, pin);
+          const result = await MerchantAuthService.login(code, pin);
           ApiResponseUtil.success(res, { type: 'merchant', ...result });
           return;
         }
