@@ -14,6 +14,7 @@ import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { CashierAdminController } from '@controllers/cashierAdmin.controller';
 import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
+import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
 import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
@@ -559,6 +560,14 @@ router.get('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCES
 router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
 router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
 router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
+
+/**
+ * The people on a stall's till. Same MANAGE_ACCESS gate as the stall itself.
+ */
+router.get('/merchants/:merchantId/operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.list);
+router.post('/merchants/:merchantId/operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.create);
+router.patch('/merchant-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.update);
+router.post('/merchant-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.resetPin);
 
 /**
  * Organizer Cashless Reporting — the "you're in charge" view of one event:
