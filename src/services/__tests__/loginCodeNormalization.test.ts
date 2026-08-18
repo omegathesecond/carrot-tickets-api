@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { seedOperator as seedResellerOperator } from '../../__tests__/helpers/fixtures';
 import { GateOperator } from '@models/gateOperator.model';
 import { GateOperatorAuthService } from '@services/gateOperatorAuth.service';
 
@@ -53,6 +54,35 @@ describe('POST /api/operator/login (routing probes)', () => {
     const res = await request(app).post('/api/operator/login').send({ loginCode: 'IAOB2C', pin: '123456' });
     expect(res.status).toBe(200);
     expect(res.body.data.type).toBe('gate');
+    expect(res.body.data.accessToken).toBeTruthy();
+  });
+});
+
+// The reseller portal (reseller.controller.ts -> POST /api/reseller/auth/login) calls
+// ResellerAuthService.login() directly — it does NOT go through
+// operatorAuth.controller.ts, so the routing-probe tests above give it zero coverage.
+// Separately, the shared seedOperator() fixture (src/__tests__/helpers/fixtures.ts)
+// generates purely sequential NUMERIC codes when no loginCode is given, so every
+// pre-existing reseller suite logs in with the exact code it seeded and never exercises
+// folding either. Seed an explicit canonical (letters+digits) code here so this test
+// actually exercises normalizeLoginCode — and, as a bonus, hits the Joi pattern Task 1
+// widened to /^[0-9A-Za-z]{6}$/ along the way.
+describe('POST /api/reseller/auth/login (reseller portal)', () => {
+  it('accepts a lowercase code', async () => {
+    const { loginCode, pin } = await seedResellerOperator({ loginCode: '7HK4M9', pin: '223344' });
+    const res = await request(app)
+      .post('/api/reseller/auth/login')
+      .send({ loginCode: loginCode.toLowerCase(), pin });
+    expect(res.status).toBe(200);
+    expect(res.body.data.accessToken).toBeTruthy();
+  });
+
+  it('folds a misread I onto 1 and O onto 0', async () => {
+    await seedResellerOperator({ loginCode: '1D0E2F', pin: '223344' });
+    const res = await request(app)
+      .post('/api/reseller/auth/login')
+      .send({ loginCode: 'IDOE2F', pin: '223344' });
+    expect(res.status).toBe(200);
     expect(res.body.data.accessToken).toBeTruthy();
   });
 });
