@@ -32,10 +32,20 @@
 import mongoose from 'mongoose';
 import { getDatabaseURI } from '../config/database.config';
 
-async function run(): Promise<void> {
-  // autoIndex:false for the same reason as migrate-review-indexes: a
-  // background createIndexes must not race the explicit drop below.
-  await mongoose.connect(getDatabaseURI(), { autoIndex: false });
+export interface MigrationResult {
+  /** Stalls found still carrying a loginCode. */
+  legacyStalls: number;
+  /** MerchantOperators inserted by this run (0 on a re-run). */
+  operatorsCreated: number;
+  /** True if this run dropped merchants.loginCode_1 (false if already gone). */
+  indexDropped: boolean;
+}
+
+/**
+ * Runs against the CURRENT mongoose connection, so a test can drive it against
+ * the in-memory harness. The CLI entrypoint below opens its own connection.
+ */
+export async function migrateMerchantCredentials(): Promise<MigrationResult> {
   const db = mongoose.connection.db!;
   const merchants = db.collection('merchants');
   const operators = db.collection('merchantoperators');
@@ -63,8 +73,10 @@ async function run(): Promise<void> {
   console.log(`👤 carried ${created} stall login(s) over to MerchantOperator (${legacy.length} credentialed stall(s) found)`);
 
   // ── 2. drop the unique non-sparse index the removed field left behind ─────
+  let indexDropped = false;
   try {
     await merchants.dropIndex('loginCode_1');
+    indexDropped = true;
     console.log('🗑️  dropped merchants.loginCode_1');
   } catch (e: any) {
     if (e?.code === 27) console.log('… merchants.loginCode_1 already gone');
@@ -78,7 +90,18 @@ async function run(): Promise<void> {
   );
   console.log(`🧹 cleared credential fields from ${res.modifiedCount} stall(s)`);
 
+  return { legacyStalls: legacy.length, operatorsCreated: created, indexDropped };
+}
+
+async function main(): Promise<void> {
+  // autoIndex:false for the same reason as migrate-review-indexes: a
+  // background createIndexes must not race the explicit drop below.
+  await mongoose.connect(getDatabaseURI(), { autoIndex: false });
+  await migrateMerchantCredentials();
   await mongoose.disconnect();
 }
 
-run().then(() => process.exit(0)).catch((err) => { console.error('❌ migration failed', err); process.exit(1); });
+// Importing this module (from its test) must not connect or exit.
+if (require.main === module) {
+  main().then(() => process.exit(0)).catch((err) => { console.error('❌ migration failed', err); process.exit(1); });
+}
