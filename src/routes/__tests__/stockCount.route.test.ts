@@ -14,6 +14,7 @@ import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
+import { StockCount } from '@models/stockCount.model';
 import { StockService } from '@services/stock.service';
 import { StockMovementReason, ProductCategory } from '@interfaces/stock.interface';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
@@ -77,10 +78,11 @@ describe('organizer stock count route', () => {
 
 describe('POS stock routes', () => {
   // A merchant token names the STALL and the PERSON on its till; without the
-  // person authenticateMerchant rejects it.
-  const merchantToken = (merchantId: string, eventId: string) =>
+  // person authenticateMerchant rejects it. `merchantOperatorId` defaults to a
+  // fresh id per call but can be pinned so a test can assert on it later.
+  const merchantToken = (merchantId: string, eventId: string, merchantOperatorId = new mongoose.Types.ObjectId().toString()) =>
     jwt.sign({
-      scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+      scope: 'merchant', merchantId, merchantOperatorId,
       operatorName: 'Thabo Dlamini', eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE],
     }, JWT_SECRET);
 
@@ -134,11 +136,12 @@ describe('POS stock routes', () => {
 
   it('POST /api/merchant/stock/count is scoped to the TOKEN\'s merchant', async () => {
     const { eventId, barAId, barBId, productId } = await setup();
+    const merchantOperatorId = new mongoose.Types.ObjectId().toString();
     // Bar B has no stock row at all; a count by Bar B's token must reconcile
     // BAR B's stock (0 -> 40), never touch Bar A's 100.
     const res = await request(app)
       .post('/api/merchant/stock/count')
-      .set('Authorization', `Bearer ${merchantToken(barBId, eventId)}`)
+      .set('Authorization', `Bearer ${merchantToken(barBId, eventId, merchantOperatorId)}`)
       .send({ productId, countedOnHand: 40 });
     expect(res.status).toBe(200);
     expect(res.body.data.expectedOnHand).toBe(0);
@@ -146,6 +149,12 @@ describe('POS stock routes', () => {
     expect(res.body.data.onHand).toBe(40);
 
     expect((await ProductStock.findOne({ merchantId: barBId, productId }))!.onHand).toBe(40);
+    // merchant.controller.ts's recordCount posts `by: merchantOperatorId`
+    // (the PERSON from the token), NOT `by: merchantId` (the stall) — assert
+    // both halves so this cannot pass by coincidence.
+    const count = await StockCount.findOne({ merchantId: barBId, productId });
+    expect(count!.by).toBe(merchantOperatorId);
+    expect(count!.by).not.toBe(barBId);
     expect((await ProductStock.findOne({ merchantId: barAId, productId }))!.onHand).toBe(100); // untouched
   });
 

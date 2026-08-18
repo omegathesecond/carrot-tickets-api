@@ -9,6 +9,7 @@ import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
 import { Wallet } from '@models/wallet.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
+import { StockMovement } from '@models/stockMovement.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
 
@@ -57,6 +58,14 @@ describe('MerchantService.charge — itemised', () => {
     expect((await ProductStock.findOne({ merchantId: merchant._id, productId: water._id }))!.onHand).toBe(99);
     // money ledger unchanged in shape
     expect(await LedgerService.totalOwed(String(eventId), LedgerAccountType.MERCHANT)).toBe(6500);
+
+    // Stock-movement attribution moved to the PERSON too (merchant.service.ts's
+    // StockService.applyMovement call for a sale posts `by: merchantOperatorId`,
+    // NOT `by: merchantId`) — assert both halves, the same way the ledger test
+    // discriminates, so this cannot pass by coincidence.
+    const saleMovement = await StockMovement.findOne({ merchantId: merchant._id, productId: beer._id, reason: StockMovementReason.SALE });
+    expect(saleMovement!.by).toBe(String(operator._id));
+    expect(saleMovement!.by).not.toBe(String(merchant._id));
   });
 
   it('hard-blocks an out-of-stock line and rolls EVERYTHING back', async () => {

@@ -57,9 +57,9 @@ export class MerchantController {
         clientTxnId: value.clientTxnId,
         ...(value.amount != null ? { amount: value.amount } : {}),
         ...(value.items ? { items: value.items } : {}),
-        // The PERSON who rang this up comes ONLY from the verified JWT — a
-        // client-supplied staffName (value.staffName, if the request still
-        // sends one) is validated-but-discarded below, never forwarded here.
+        // The PERSON who rang this up comes ONLY from the verified JWT. A
+        // client-supplied staffName is stripped at chargeSchema (Joi.any().strip())
+        // before `value` even exists here — nothing to read, let alone forward.
         merchantOperatorId, operatorName,
       });
 
