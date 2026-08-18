@@ -75,9 +75,10 @@ export class MerchantService {
     clientTxnId: string;
     amount?: number;
     items?: Array<{ productId: string; qty: number }>;
-    staffName?: string;
+    merchantOperatorId: string;
+    operatorName: string;
   }): Promise<{ wallet: IWallet; charge: IMerchantCharge }> {
-    const { merchantId, eventId, walletId, bandUid, clientTxnId, staffName } = params;
+    const { merchantId, eventId, walletId, bandUid, clientTxnId, merchantOperatorId, operatorName } = params;
 
     const hasItems = Array.isArray(params.items) && params.items.length > 0;
     const hasAmount = params.amount != null;
@@ -169,7 +170,7 @@ export class MerchantService {
             await StockService.applyMovement({
               eventId, merchantId, productId: String(line.productId), delta: -line.qty,
               reason: StockMovementReason.SALE, refType: 'merchant_charge', refId: clientTxnId,
-              byType: 'Merchant', by: merchantId, session,
+              byType: 'Merchant', by: merchantOperatorId, session,
             });
           }
         }
@@ -194,7 +195,7 @@ export class MerchantService {
           [{
             merchantId, eventId, walletId, bandUid, amount, fee, netAmount: net, clientTxnId, status: 'completed',
             ...(itemSnapshots ? { items: itemSnapshots } : {}),
-            ...(staffName ? { staffName } : {}),
+            merchantOperatorId, staffName: operatorName,
           }],
           { session },
         );

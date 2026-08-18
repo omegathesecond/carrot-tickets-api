@@ -4,6 +4,7 @@ import { MerchantService } from '@services/merchant.service';
 import { ReconciliationService } from '@services/reconciliation.service';
 import { Wallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import mongoose from 'mongoose';
 
 beforeAll(connectLedgerTestDb, 60000);
@@ -21,8 +22,14 @@ it('shows no drift after a mix of top-ups and merchant charges, including a decl
   const w1 = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
   const w2 = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
 
-  const merchantA = await Merchant.create({ name: 'Merchant A', eventId, commissionPercent: 10, loginCode: 'r1', pin: '111111' });
-  const merchantB = await Merchant.create({ name: 'Merchant B', eventId, commissionPercent: 0, loginCode: 'r2', pin: '222222' });
+  const merchantA = await Merchant.create({ name: 'Merchant A', eventId, commissionPercent: 10 });
+  const merchantB = await Merchant.create({ name: 'Merchant B', eventId, commissionPercent: 0 });
+  const operatorA = await new MerchantOperator({
+    fullName: 'Operator A', merchantId: merchantA._id, eventId, loginCode: '4KZ9P1', pin: '111111',
+  }).save();
+  const operatorB = await new MerchantOperator({
+    fullName: 'Operator B', merchantId: merchantB._id, eventId, loginCode: '4KZ9P2', pin: '222222',
+  }).save();
 
   // Top-ups: wallet 1 gets 2000, wallet 2 gets 1500.
   await WalletService.topUpCash({ walletId: String(w1._id), eventId: String(eventId), amount: 2000, recordedBy: 'op1', clientTxnId: 't1' });
@@ -31,15 +38,18 @@ it('shows no drift after a mix of top-ups and merchant charges, including a decl
   // Charges: merchant A charges wallet 1 twice (with commission), merchant B
   // charges wallet 2 once (no commission).
   await MerchantService.charge({
-    merchantId: String(merchantA._id), eventId: String(eventId), walletId: String(w1._id),
+    merchantId: String(merchantA._id), merchantOperatorId: String(operatorA._id), operatorName: operatorA.fullName,
+    eventId: String(eventId), walletId: String(w1._id),
     bandUid: 'aa', amount: 500, clientTxnId: 'c1',
   });
   await MerchantService.charge({
-    merchantId: String(merchantA._id), eventId: String(eventId), walletId: String(w1._id),
+    merchantId: String(merchantA._id), merchantOperatorId: String(operatorA._id), operatorName: operatorA.fullName,
+    eventId: String(eventId), walletId: String(w1._id),
     bandUid: 'aa', amount: 300, clientTxnId: 'c2',
   });
   await MerchantService.charge({
-    merchantId: String(merchantB._id), eventId: String(eventId), walletId: String(w2._id),
+    merchantId: String(merchantB._id), merchantOperatorId: String(operatorB._id), operatorName: operatorB.fullName,
+    eventId: String(eventId), walletId: String(w2._id),
     bandUid: 'bb', amount: 1000, clientTxnId: 'c3',
   });
 
@@ -48,7 +58,8 @@ it('shows no drift after a mix of top-ups and merchant charges, including a decl
   // written on decline, not by coincidence.
   await expect(
     MerchantService.charge({
-      merchantId: String(merchantA._id), eventId: String(eventId), walletId: String(w1._id),
+      merchantId: String(merchantA._id), merchantOperatorId: String(operatorA._id), operatorName: operatorA.fullName,
+      eventId: String(eventId), walletId: String(w1._id),
       bandUid: 'aa', amount: 100_000, clientTxnId: 'c-declined',
     }),
   ).rejects.toMatchObject({ reason: 'insufficient_balance' });

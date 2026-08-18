@@ -10,6 +10,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
 import { Merchant } from '@models/merchant.model';
+import { MerchantCharge } from '@models/merchantCharge.model';
 import { Product } from '@models/product.model';
 import { ProductCategory, StockMovementReason } from '@interfaces/stock.interface';
 import { StockService } from '@services/stock.service';
@@ -51,11 +52,18 @@ it('itemised charge returns 200 with the priced breakdown and new balance', asyn
   const { eventId, bandUid, merchantId, beerId } = await setup();
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    // A stale POS may still send staffName in the body. It must NOT cause a
+    // validation rejection (200, not 400) and must NOT reach the record —
+    // the token's operatorName ('Thabo Dlamini') is what gets stored.
     .send({ bandUid, clientTxnId: 'c1', staffName: 'Sipho', items: [{ productId: beerId, qty: 2 }] });
   expect(res.status).toBe(200);
   expect(res.body.data.amount).toBe(5000);
   expect(res.body.data.newBalance).toBe(95000);
   expect(res.body.data.items).toHaveLength(1);
+
+  const charge = await MerchantCharge.findOne({ merchantId, clientTxnId: 'c1' });
+  expect(charge!.staffName).toBe('Thabo Dlamini');
+  expect(charge!.staffName).not.toBe('Sipho');
 });
 
 it('an out-of-stock line declines with 409 out_of_stock, wallet untouched', async () => {

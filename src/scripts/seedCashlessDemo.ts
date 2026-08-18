@@ -147,24 +147,32 @@ export async function seedStock(event: any, opts: { vendorId: string | null; cas
       } catch (e: any) { console.warn(`   top-up skipped for band ${w.bandUid}: ${e.message}`); }
     }
     const w0 = wallets[0]!;
-    const SALES: Array<{ items?: Array<{ productId: string; qty: number }>; amount?: number; staffName: string; txn: string }> = [
-      { items: [{ productId: String(castle._id), qty: 2 }], staffName: 'Thandi', txn: 'seed-sale-1' },
-      { items: [{ productId: String(products['Heineken 330ml']._id), qty: 1 }, { productId: String(products['Coca-Cola 300ml']._id), qty: 1 }], staffName: 'Thandi', txn: 'seed-sale-2' },
-      { items: [{ productId: String(products['Red Bull 250ml']._id), qty: 3 }], staffName: 'Sipho', txn: 'seed-sale-3' },
-      { amount: 1500, staffName: 'Sipho', txn: 'seed-sale-amt' }, // un-itemised
-    ];
-    let sold = 0;
-    for (const s of SALES) {
-      try {
-        await MerchantService.charge({
-          merchantId: String(mainBar._id), eventId, walletId: String(w0._id), bandUid: w0.bandUid!,
-          clientTxnId: s.txn, staffName: s.staffName,
-          ...(s.items ? { items: s.items } : { amount: s.amount }),
-        });
-        sold++;
-      } catch (e: any) { console.warn(`   sale ${s.txn} skipped: ${e.message}`); }
+    // Attribution is now the PERSON on Main Bar's till, not a free-text label —
+    // reuse the operator seeded for it above rather than an arbitrary name.
+    const mainBarOperator = await MerchantOperator.findOne({ merchantId: mainBar._id }).lean();
+    if (!mainBarOperator) {
+      console.warn('⚠️  no operator found for Main Bar — skipping demo sales.');
+    } else {
+      const SALES: Array<{ items?: Array<{ productId: string; qty: number }>; amount?: number; txn: string }> = [
+        { items: [{ productId: String(castle._id), qty: 2 }], txn: 'seed-sale-1' },
+        { items: [{ productId: String(products['Heineken 330ml']._id), qty: 1 }, { productId: String(products['Coca-Cola 300ml']._id), qty: 1 }], txn: 'seed-sale-2' },
+        { items: [{ productId: String(products['Red Bull 250ml']._id), qty: 3 }], txn: 'seed-sale-3' },
+        { amount: 1500, txn: 'seed-sale-amt' }, // un-itemised
+      ];
+      let sold = 0;
+      for (const s of SALES) {
+        try {
+          await MerchantService.charge({
+            merchantId: String(mainBar._id), eventId, walletId: String(w0._id), bandUid: w0.bandUid!,
+            clientTxnId: s.txn,
+            merchantOperatorId: String(mainBarOperator._id), operatorName: mainBarOperator.fullName,
+            ...(s.items ? { items: s.items } : { amount: s.amount }),
+          });
+          sold++;
+        } catch (e: any) { console.warn(`   sale ${s.txn} skipped: ${e.message}`); }
+      }
+      console.log(`🛒 ${sold} demo sale(s) rung up on Main Bar`);
     }
-    console.log(`🛒 ${sold} demo sale(s) rung up on Main Bar`);
   }
 
   // ── closing count a few units short → visible shrinkage in reconciliation ──

@@ -15,20 +15,28 @@ let seq = 520000;
 async function bar(name: string) { return Merchant.create({ name, eventId, loginCode: String(seq++), pin: '000000' } as any); }
 async function prod(name: string, category = 'beer') { return Product.create({ eventId, name, category, price: 2500 } as any); }
 
-async function itemisedCharge(merchantId: any, productId: any, name: string, unitPrice: number, qty: number, staffName?: string, clientTxnId = String(new mongoose.Types.ObjectId())) {
+async function itemisedCharge(merchantId: any, productId: any, name: string, unitPrice: number, qty: number, staffName = 'Fixture Operator', clientTxnId = String(new mongoose.Types.ObjectId())) {
   const lineTotal = unitPrice * qty;
   return MerchantCharge.create({
-    merchantId, eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b1',
+    merchantId, merchantOperatorId: new mongoose.Types.ObjectId(), eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b1',
     amount: lineTotal, fee: 0, netAmount: lineTotal, clientTxnId, status: 'completed',
-    items: [{ productId, name, unitPrice, qty, lineTotal }], ...(staffName ? { staffName } : {}),
+    items: [{ productId, name, unitPrice, qty, lineTotal }], staffName,
   } as any);
 }
-async function amountOnlyCharge(merchantId: any, amount: number, clientTxnId = String(new mongoose.Types.ObjectId())) {
+async function amountOnlyCharge(merchantId: any, amount: number, clientTxnId = String(new mongoose.Types.ObjectId()), legacy = false) {
   // NO items field at all — mirrors MerchantService.charge amount-only path (default:undefined).
-  return MerchantCharge.create({
+  // `legacy: true` simulates a PRE-migration row that predates merchantOperatorId/staffName
+  // becoming required — bypasses Mongoose validation the same way an old, untouched
+  // document in the collection would, so the dashboard's $ifNull null-handling stays covered.
+  // Model.create(doc, options) is NOT a valid single-doc overload in this
+  // mongoose version (it resolves to the variadic multi-doc signature) — use
+  // `new Model(doc).save(options)` to actually skip validation for `legacy`.
+  const doc = new MerchantCharge({
     merchantId, eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b2',
     amount, fee: 0, netAmount: amount, clientTxnId, status: 'completed',
+    ...(legacy ? {} : { merchantOperatorId: new mongoose.Types.ObjectId(), staffName: 'Fixture Operator' }),
   } as any);
+  return doc.save({ validateBeforeSave: !legacy });
 }
 
 describe('StockReportService.dashboard', () => {
@@ -55,7 +63,8 @@ describe('StockReportService.dashboard', () => {
     const b = await bar('Bar 1');
     const p = await prod('Savanna', 'wine');
     await itemisedCharge(b._id, p._id, 'Savanna', 3000, 1, 'Thandi');
-    await amountOnlyCharge(b._id, 2000);                          // no staffName -> Unattributed
+    // legacy: true simulates a pre-migration row lacking staffName -> Unattributed.
+    await amountOnlyCharge(b._id, 2000, undefined, true);
 
     const d = await StockReportService.dashboard(String(eventId));
     expect(d.salesByBar[0]).toMatchObject({ merchantName: 'Bar 1', gross: 5000, count: 2 });

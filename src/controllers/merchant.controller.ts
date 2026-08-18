@@ -36,7 +36,7 @@ export class MerchantController {
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const merchant = (req as any).merchant as MerchantToken;
-      const { merchantId, eventId } = merchant;
+      const { merchantId, eventId, merchantOperatorId, operatorName } = merchant;
 
       const event = await Event.findById(eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
@@ -57,7 +57,10 @@ export class MerchantController {
         clientTxnId: value.clientTxnId,
         ...(value.amount != null ? { amount: value.amount } : {}),
         ...(value.items ? { items: value.items } : {}),
-        ...(value.staffName ? { staffName: value.staffName } : {}),
+        // The PERSON who rang this up comes ONLY from the verified JWT — a
+        // client-supplied staffName (value.staffName, if the request still
+        // sends one) is validated-but-discarded below, never forwarded here.
+        merchantOperatorId, operatorName,
       });
 
       if (result.charge.items?.length) {
@@ -154,12 +157,12 @@ export class MerchantController {
   /** POST /api/merchant/stock/count — a stock-take by this bar (merchantId from JWT). */
   static async recordCount(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
       const { error, value } = posCountSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
       const product = await Product.findById(value.productId).lean();
       if (!product || String(product.eventId) !== String(eventId)) return ApiResponseUtil.badRequest(res, 'product does not belong to this event');
-      const { count, onHand } = await StockCountService.recordCount({ eventId, merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantId });
+      const { count, onHand } = await StockCountService.recordCount({ eventId, merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantOperatorId });
       return ApiResponseUtil.success(res, { countId: String(count._id), expectedOnHand: count.expectedOnHand, countedOnHand: count.countedOnHand, variance: count.variance, onHand });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Count failed', 500); }
   }

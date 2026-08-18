@@ -11,7 +11,7 @@ describe('MerchantCharge items + staffName', () => {
 
   it('persists an itemised charge with a line-item snapshot and staffName', async () => {
     const c = await MerchantCharge.create({
-      merchantId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
+      merchantId: id(), merchantOperatorId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
       amount: 6500, fee: 0, netAmount: 6500, clientTxnId: 'c1', status: 'completed',
       staffName: 'Sipho',
       items: [
@@ -26,10 +26,26 @@ describe('MerchantCharge items + staffName', () => {
 
   it('still persists an amount-only charge with no items (un-itemised)', async () => {
     const c = await MerchantCharge.create({
-      merchantId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
+      merchantId: id(), merchantOperatorId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
       amount: 300, fee: 0, netAmount: 300, clientTxnId: 'c2', status: 'completed',
+      staffName: 'Sipho',
     });
     expect(c.items).toBeUndefined();
-    expect(c.staffName).toBeUndefined();
+    expect(c.staffName).toBe('Sipho');
+  });
+
+  it('rejects a charge with no merchantOperatorId (attribution is not optional)', async () => {
+    await expect(MerchantCharge.create({
+      merchantId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
+      amount: 300, fee: 0, netAmount: 300, clientTxnId: 'c3', status: 'completed',
+      staffName: 'Sipho',
+    })).rejects.toThrow(/merchantOperatorId/);
+  });
+
+  it('rejects a charge with no staffName (attribution snapshot is not optional)', async () => {
+    await expect(MerchantCharge.create({
+      merchantId: id(), merchantOperatorId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
+      amount: 300, fee: 0, netAmount: 300, clientTxnId: 'c4', status: 'completed',
+    })).rejects.toThrow(/staffName/);
   });
 });

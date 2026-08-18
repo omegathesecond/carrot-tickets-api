@@ -23,8 +23,8 @@ it('returns the dashboard with the itemised split for the owner', async () => {
   const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
   const bar = await Merchant.create({ name: 'Bar 1', eventId, loginCode: String(seq++), pin: '000000' } as any);
   const p = await Product.create({ eventId, name: 'Castle Lite', category: 'beer', price: 2500 } as any);
-  await MerchantCharge.create({ merchantId: bar._id, eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b', amount: 5000, fee: 0, netAmount: 5000, clientTxnId: 't1', status: 'completed', items: [{ productId: p._id, name: 'Castle Lite', unitPrice: 2500, qty: 2, lineTotal: 5000 }] } as any);
-  await MerchantCharge.create({ merchantId: bar._id, eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b', amount: 1500, fee: 0, netAmount: 1500, clientTxnId: 't2', status: 'completed' } as any);
+  await MerchantCharge.create({ merchantId: bar._id, merchantOperatorId: new mongoose.Types.ObjectId(), eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b', amount: 5000, fee: 0, netAmount: 5000, clientTxnId: 't1', status: 'completed', staffName: 'Fixture Operator', items: [{ productId: p._id, name: 'Castle Lite', unitPrice: 2500, qty: 2, lineTotal: 5000 }] } as any);
+  await MerchantCharge.create({ merchantId: bar._id, merchantOperatorId: new mongoose.Types.ObjectId(), eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b', amount: 1500, fee: 0, netAmount: 1500, clientTxnId: 't2', status: 'completed', staffName: 'Fixture Operator' } as any);
 
   const res = await request(app).get(`/api/tickets/events/${eventId}/stock/dashboard`).set('Authorization', `Bearer ${token}`);
   expect(res.status).toBe(200);

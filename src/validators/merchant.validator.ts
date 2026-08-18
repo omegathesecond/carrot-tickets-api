@@ -14,6 +14,10 @@ export const MAX_QTY_PER_LINE = 1000;
 export const chargeSchema = Joi.object({
   bandUid: uid.required(),
   clientTxnId: Joi.string().trim().required(),
+  // Accepted-but-ignored: attribution now comes ONLY from the verified
+  // MerchantToken (merchantOperatorId + operatorName), never the body. Kept
+  // here so a POS build still sending this field validates fine rather than
+  // 400ing the moment this deploys — the controller never reads the value.
   staffName: Joi.string().trim().max(80).optional(),
   amount: Joi.number().integer().min(1).max(MAX_CHARGE_CENTS),
   items: Joi.array()

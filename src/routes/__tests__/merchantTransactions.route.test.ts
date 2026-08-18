@@ -33,8 +33,8 @@ async function seedCharge(opts: {
 }) {
   const { merchantId, eventId, amount, fee, clientTxnId, bandUid = '04a22b1c3d4e5f' } = opts;
   return MerchantCharge.create({
-    merchantId, eventId, walletId: new mongoose.Types.ObjectId(),
-    bandUid, amount, fee, netAmount: amount - fee, clientTxnId, status: 'completed',
+    merchantId, merchantOperatorId: new mongoose.Types.ObjectId(), eventId, walletId: new mongoose.Types.ObjectId(),
+    bandUid, amount, fee, netAmount: amount - fee, clientTxnId, status: 'completed', staffName: 'Fixture Operator',
   });
 }
 

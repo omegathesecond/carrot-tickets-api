@@ -10,6 +10,8 @@ import { Schema, model, Document, Types } from 'mongoose';
  */
 export interface IMerchantCharge extends Document {
   merchantId: Types.ObjectId;
+  /** The PERSON who rang this up. Derived from the JWT, never from the body. */
+  merchantOperatorId: Types.ObjectId;
   eventId: Types.ObjectId;
   walletId: Types.ObjectId;
   bandUid: string;
@@ -22,12 +24,14 @@ export interface IMerchantCharge extends Document {
   clientTxnId: string;
   status: 'completed';
   items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }>;
-  staffName?: string;
+  /** Snapshot of the operator's name at sale time, so history survives a rename. */
+  staffName: string;
   createdAt: Date;
 }
 
 const merchantChargeSchema = new Schema<IMerchantCharge>({
   merchantId: { type: Schema.Types.ObjectId, required: true, index: true },
+  merchantOperatorId: { type: Schema.Types.ObjectId, required: true, index: true },
   eventId: { type: Schema.Types.ObjectId, required: true, index: true },
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   bandUid: { type: String, required: true, trim: true },
@@ -47,7 +51,7 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
     required: false,
     default: undefined,
   },
-  staffName: { type: String, trim: true },
+  staffName: { type: String, required: true, trim: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
 // Idempotency scoped to the OWNING merchant, NOT global — mirrors
