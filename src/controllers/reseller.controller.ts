@@ -52,7 +52,12 @@ export class ResellerController {
   static async login(req: Request, res: Response): Promise<any> {
     try {
       const { error, value } = Joi.object({
-        loginCode: Joi.string().pattern(/^\d{6}$/).required(),
+        // Login codes are now Crockford base32 (letters + digits), not
+        // 6-digit-numeric-only. Case-insensitive alnum only gates obviously
+        // malformed input — the service's normalizeLoginCode owns folding
+        // case and the I/L/O ambiguous glyphs, validation should not
+        // duplicate that logic.
+        loginCode: Joi.string().pattern(/^[0-9A-Za-z]{6}$/).required(),
         pin: Joi.string().pattern(/^\d{6}$/).required(),
       }).validate(req.body);
 
