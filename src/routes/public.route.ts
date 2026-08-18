@@ -11,7 +11,7 @@ import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
 import { TicketPdfController } from '@controllers/ticketPdf.controller';
-import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { authenticateBuyer, authenticateBuyerOrOrganizer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 import { CommunityEventSubmitController } from '@controllers/communityEventSubmit.controller';
@@ -255,14 +255,14 @@ router.get('/services/:businessId/reviews', ServicesController.listReviews);
 
 /**
  * @route   POST /api/public/services/:businessId/reviews
- * @desc    Submit a review of a services business. Gated on proof-of-contact:
- *          only a buyer who has sent this business an enquiry (Task D1's
- *          EnquiryService.hasEnquired) may post (403 otherwise), one review
- *          per buyer per business.
- * @access  Buyer (Bearer buyer token)
+ * @desc    Submit a review of a services business. A BUYER is gated on
+ *          proof-of-contact (must have enquired — 403 otherwise); a signed-in
+ *          ORGANIZER (vendor) may review any business freely EXCEPT its own.
+ *          One review per reviewer per business.
+ * @access  Buyer OR organizer (Bearer token)
  * @body    rating (1-5), text?
  */
-router.post('/services/:businessId/reviews', authenticateBuyer, ServicesController.submitReview);
+router.post('/services/:businessId/reviews', authenticateBuyerOrOrganizer, ServicesController.submitReview);
 
 /**
  * @route   POST /api/public/purchase

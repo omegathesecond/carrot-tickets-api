@@ -35,20 +35,31 @@
 import mongoose from 'mongoose';
 import { Review } from '@models/review.model';
 
-const LEGACY_INDEX_NAME = 'eventId_1_buyerId_1';
+// Indexes whose OPTIONS changed over time and therefore must be dropped before
+// syncIndexes() can recreate them under the same name (Mongoose never rewrites
+// an existing index's options in place — a name collision with different
+// options throws IndexKeySpecsConflict):
+//   - eventId_1_buyerId_1   was a plain unique index; now partial (eventId exists)
+//   - vendorId_1_buyerId_1  partial widened from {eventId:null} to also require
+//                           buyerId:$exists, so organizer service reviews (no
+//                           buyerId) share the {vendorId, reviewerVendorId}
+//                           index instead of colliding on this one.
+const LEGACY_INDEX_NAMES = ['eventId_1_buyerId_1', 'vendorId_1_buyerId_1'];
 const INDEX_NOT_FOUND_CODE = 27; // MongoDB server error code: IndexNotFound
 
 export async function migrateReviewIndexes(): Promise<void> {
   const col = mongoose.connection.collection('reviews');
 
-  try {
-    await col.dropIndex(LEGACY_INDEX_NAME);
-    console.log(`[migrate-review-indexes] dropped legacy index "${LEGACY_INDEX_NAME}"`);
-  } catch (err: any) {
-    if (err?.code === INDEX_NOT_FOUND_CODE || err?.codeName === 'IndexNotFound') {
-      console.log(`[migrate-review-indexes] legacy index "${LEGACY_INDEX_NAME}" already absent — skipping drop`);
-    } else {
-      throw err;
+  for (const name of LEGACY_INDEX_NAMES) {
+    try {
+      await col.dropIndex(name);
+      console.log(`[migrate-review-indexes] dropped legacy index "${name}"`);
+    } catch (err: any) {
+      if (err?.code === INDEX_NOT_FOUND_CODE || err?.codeName === 'IndexNotFound') {
+        console.log(`[migrate-review-indexes] legacy index "${name}" already absent — skipping drop`);
+      } else {
+        throw err;
+      }
     }
   }
 
