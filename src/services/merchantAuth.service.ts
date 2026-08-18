@@ -4,6 +4,7 @@ import { Merchant } from '@models/merchant.model';
 import { Event } from '@models/event.model';
 import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
+import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 const MAX_PIN_ATTEMPTS = 5;
@@ -22,7 +23,7 @@ export class MerchantAuthService {
     if (typeof loginCode !== 'string' || typeof pin !== 'string') {
       throw new Error('Invalid credentials');
     }
-    const merchant = await Merchant.findOne({ loginCode, status: 'active' }).select('+pin');
+    const merchant = await Merchant.findOne({ loginCode: normalizeLoginCode(loginCode), status: 'active' }).select('+pin');
     if (!merchant) throw new Error('Invalid credentials');
 
     if (merchant.lockedUntil && merchant.lockedUntil.getTime() > Date.now()) {

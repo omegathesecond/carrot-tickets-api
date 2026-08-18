@@ -3,6 +3,7 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { Cashier } from '@models/cashier.model';
 import { CASHIER_PERMISSIONS, CashierToken } from '@interfaces/cashier.interface';
 import { JWT_SECRET } from '@config/jwt.config';
+import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 const MAX_PIN_ATTEMPTS = 5;
@@ -18,7 +19,7 @@ export class CashierAuthService {
     if (typeof loginCode !== 'string' || typeof pin !== 'string') {
       throw new Error('Invalid credentials');
     }
-    const cashier = await Cashier.findOne({ loginCode, isActive: true }).select('+pin');
+    const cashier = await Cashier.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!cashier) throw new Error('Invalid credentials');
 
     if (cashier.lockedUntil && cashier.lockedUntil.getTime() > Date.now()) {
