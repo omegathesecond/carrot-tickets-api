@@ -12,20 +12,44 @@ async function mkBiz(over: any = {}) {
     businessName: over.businessName ?? 'Luxe Decor', phoneNumber: over.phoneNumber ?? '+2687650' + Math.floor(Math.random()*100000),
     password: 'secret1', operatorType: OperatorType.SERVICES, serviceCategory: over.serviceCategory ?? 'furniture_decor',
     verificationStatus: over.verificationStatus ?? VerificationStatus.VERIFIED, bio: over.bio ?? 'Elegant furniture & styling',
-    address: over.address, startingPrice: over.startingPrice,
+    address: over.address, startingPrice: over.startingPrice, isActive: over.isActive,
   });
 }
 
 describe('ServicesService.listDirectory', () => {
-  it('lists only verified active services vendors', async () => {
+  // Verification is a TRUST BADGE, not a visibility gate: a business that has
+  // just signed up (PENDING) is listed and reachable immediately, it simply
+  // carries no verified sign until an admin flips it.
+  it('lists pending businesses alongside verified ones', async () => {
     await mkBiz({ businessName: 'Verified Co' });
     await mkBiz({ businessName: 'Pending Co', verificationStatus: VerificationStatus.PENDING });
-    await Vendor.create({ businessName: 'Event Org', phoneNumber: '+26876999001', password: 'secret1', operatorType: OperatorType.EVENTS, verificationStatus: VerificationStatus.VERIFIED });
-    const cards = await ServicesService.listDirectory({});
-    const names = cards.map((c) => c.businessName);
+    const names = (await ServicesService.listDirectory({})).map((c) => c.businessName);
     expect(names).toContain('Verified Co');
-    expect(names).not.toContain('Pending Co');
-    expect(names).not.toContain('Event Org');
+    expect(names).toContain('Pending Co');
+  });
+
+  // ...but admin takedown still has to work, so the two "no" statuses and the
+  // isActive kill-switch stay hidden.
+  it('hides rejected, suspended and deactivated businesses', async () => {
+    await mkBiz({ businessName: 'Rejected Co', verificationStatus: VerificationStatus.REJECTED });
+    await mkBiz({ businessName: 'Suspended Co', verificationStatus: VerificationStatus.SUSPENDED });
+    await mkBiz({ businessName: 'Deactivated Co', isActive: false });
+    await mkBiz({ businessName: 'Live Co' });
+    expect((await ServicesService.listDirectory({})).map((c) => c.businessName)).toEqual(['Live Co']);
+  });
+
+  it('hides vendors from other verticals', async () => {
+    await mkBiz({ businessName: 'Verified Co' });
+    await Vendor.create({ businessName: 'Event Org', phoneNumber: '+26876999001', password: 'secret1', operatorType: OperatorType.EVENTS, verificationStatus: VerificationStatus.VERIFIED });
+    expect((await ServicesService.listDirectory({})).map((c) => c.businessName)).toEqual(['Verified Co']);
+  });
+
+  it('marks each card with its own badge state', async () => {
+    await mkBiz({ businessName: 'Verified Co' });
+    await mkBiz({ businessName: 'Pending Co', verificationStatus: VerificationStatus.PENDING });
+    const byName = Object.fromEntries((await ServicesService.listDirectory({})).map((c) => [c.businessName, c.verified]));
+    expect(byName['Verified Co']).toBe(true);
+    expect(byName['Pending Co']).toBe(false);
   });
 
   it('filters by category and searches by name', async () => {
@@ -51,6 +75,30 @@ describe('ServicesService.getBusinessProfile', () => {
     expect(p.startingPrice?.amountCents).toBe(18000);
     expect(p.city).toBe('Manzini');
     expect(p.verified).toBe(true);
+  });
+
+  // The bug this fixes: a business signed up, was redirected to its own
+  // profile, and got "Business not found" because it was still PENDING.
+  it('returns a pending business, unbadged, instead of 404ing it', async () => {
+    const v = await mkBiz({ businessName: 'Fresh Signup', verificationStatus: VerificationStatus.PENDING });
+    const p = await ServicesService.getBusinessProfile(String(v._id));
+    expect(p.businessName).toBe('Fresh Signup');
+    expect(p.verified).toBe(false);
+  });
+
+  it('404s for a rejected business', async () => {
+    const v = await mkBiz({ verificationStatus: VerificationStatus.REJECTED });
+    await expect(ServicesService.getBusinessProfile(String(v._id))).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('404s for a suspended business', async () => {
+    const v = await mkBiz({ verificationStatus: VerificationStatus.SUSPENDED });
+    await expect(ServicesService.getBusinessProfile(String(v._id))).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('404s for a deactivated business', async () => {
+    const v = await mkBiz({ isActive: false });
+    await expect(ServicesService.getBusinessProfile(String(v._id))).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it('404s for an events vendor', async () => {

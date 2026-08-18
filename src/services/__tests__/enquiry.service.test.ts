@@ -63,10 +63,22 @@ describe('EnquiryService.create', () => {
     await expect(EnquiryService.create(String(eventsVendor._id), buyer, { message: 'Hi' })).rejects.toMatchObject({ statusCode: 404 });
   });
 
-  it('rejects an unverified services vendor with 404', async () => {
+  // A pending business is publicly LISTED (verification is only a badge), so
+  // it has to be able to receive the leads that listing generates — otherwise
+  // the directory advertises a business whose enquiry button 404s.
+  it('accepts an enquiry for a pending services vendor', async () => {
     const biz = await mkServicesBiz({ verificationStatus: VerificationStatus.PENDING });
     const buyer = await mkBuyer();
-    await expect(EnquiryService.create(String(biz._id), buyer, { message: 'Hi' })).rejects.toMatchObject({ statusCode: 404 });
+    const enquiry = await EnquiryService.create(String(biz._id), buyer, { message: 'Hi' });
+    expect(String(enquiry.businessId)).toBe(String(biz._id));
+  });
+
+  it('rejects a rejected or suspended services vendor with 404', async () => {
+    const buyer = await mkBuyer();
+    for (const status of [VerificationStatus.REJECTED, VerificationStatus.SUSPENDED]) {
+      const biz = await mkServicesBiz({ verificationStatus: status });
+      await expect(EnquiryService.create(String(biz._id), buyer, { message: 'Hi' })).rejects.toMatchObject({ statusCode: 404 });
+    }
   });
 });
 
