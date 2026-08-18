@@ -16,7 +16,7 @@ export interface IWalletWithdrawal extends Document {
   /** Actor id that recorded this cash-out (a cashier id in v1). */
   recordedBy: string;
   /** Actor population, so reports/attribution can distinguish cashier vs other writers. */
-  recordedByType: 'Cashier' | 'ResellerOperator' | 'Merchant' | 'Platform';
+  recordedByType: 'Cashier' | 'ResellerOperator' | 'MerchantOperator' | 'Platform';
   clientTxnId: string;
   createdAt: Date;
 }
@@ -28,7 +28,7 @@ const walletWithdrawalSchema = new Schema<IWalletWithdrawal>({
   method: { type: String, enum: ['cash'], required: true, default: 'cash' },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
   recordedBy: { type: String, required: true, index: true },
-  recordedByType: { type: String, enum: ['Cashier', 'ResellerOperator', 'Merchant', 'Platform'], required: true, default: 'Cashier' },
+  recordedByType: { type: String, enum: ['Cashier', 'ResellerOperator', 'MerchantOperator', 'Platform'], required: true, default: 'Cashier' },
   clientTxnId: { type: String, required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 

@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type TopupRecordedByType = 'ResellerOperator' | 'Cashier' | 'Merchant' | 'Platform';
+export type TopupRecordedByType = 'ResellerOperator' | 'Cashier' | 'MerchantOperator' | 'Platform';
 
 export interface IWalletTopup extends Document {
   walletId: Types.ObjectId; eventId: Types.ObjectId; amount: number;
@@ -17,7 +17,7 @@ const walletTopupSchema = new Schema<IWalletTopup>({
   method: { type: String, enum: ['cash'], required: true },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
   recordedBy: { type: String, required: true, index: true },
-  recordedByType: { type: String, enum: ['ResellerOperator', 'Cashier', 'Merchant', 'Platform'], required: true, default: 'ResellerOperator' },
+  recordedByType: { type: String, enum: ['ResellerOperator', 'Cashier', 'MerchantOperator', 'Platform'], required: true, default: 'ResellerOperator' },
   clientTxnId: { type: String, required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
