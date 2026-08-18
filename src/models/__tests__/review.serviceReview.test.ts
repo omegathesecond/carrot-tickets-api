@@ -69,3 +69,84 @@ describe('Review — event-less service reviews', () => {
     expect(event.eventId?.toString()).toBe(eventId.toString());
   });
 });
+
+describe('Review — organizer (vendor) reviewers of a service business', () => {
+  it('lets an organizer review a business (reviewerVendorId set, no buyerId)', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    const reviewerVendorId = new mongoose.Types.ObjectId();
+
+    const review = await Review.create({ vendorId, reviewerVendorId, rating: 5, verified: true });
+
+    expect(review.buyerId).toBeUndefined();
+    expect(review.reviewerVendorId?.toString()).toBe(reviewerVendorId.toString());
+  });
+
+  it('rejects a second review from the same organizer to the same business (11000)', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    const reviewerVendorId = new mongoose.Types.ObjectId();
+
+    await Review.create({ vendorId, reviewerVendorId, rating: 5, verified: true });
+    await expect(
+      Review.create({ vendorId, reviewerVendorId, rating: 2, verified: true })
+    ).rejects.toMatchObject({ code: 11000 });
+  });
+
+  it('lets TWO DIFFERENT organizers each review the same business (no absent-field collision)', async () => {
+    // The critical case: organizer reviews have no buyerId. On the OLD buyer
+    // index (partial {eventId:null}) both would key as {vendorId, buyerId:null}
+    // and collide — only the buyerId:$exists scoping keeps them apart.
+    const vendorId = new mongoose.Types.ObjectId();
+    const orgA = new mongoose.Types.ObjectId();
+    const orgB = new mongoose.Types.ObjectId();
+
+    const a = await Review.create({ vendorId, reviewerVendorId: orgA, rating: 5, verified: true });
+    const b = await Review.create({ vendorId, reviewerVendorId: orgB, rating: 4, verified: true });
+
+    expect(a.reviewerVendorId?.toString()).toBe(orgA.toString());
+    expect(b.reviewerVendorId?.toString()).toBe(orgB.toString());
+  });
+
+  it('lets a buyer and an organizer each review the same business (different reviewer kinds)', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    const buyerId = new mongoose.Types.ObjectId();
+    const reviewerVendorId = new mongoose.Types.ObjectId();
+
+    const buyerReview = await Review.create({ vendorId, buyerId, rating: 5, verified: true });
+    const orgReview = await Review.create({ vendorId, reviewerVendorId, rating: 4, verified: true });
+
+    expect(buyerReview.buyerId?.toString()).toBe(buyerId.toString());
+    expect(orgReview.reviewerVendorId?.toString()).toBe(reviewerVendorId.toString());
+  });
+
+  it('rejects a review with BOTH a buyer and an organizer reviewer', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    await expect(
+      Review.create({
+        vendorId,
+        buyerId: new mongoose.Types.ObjectId(),
+        reviewerVendorId: new mongoose.Types.ObjectId(),
+        rating: 5,
+        verified: true,
+      })
+    ).rejects.toThrow(/exactly one reviewer/i);
+  });
+
+  it('rejects a review with NEITHER reviewer set', async () => {
+    const vendorId = new mongoose.Types.ObjectId();
+    await expect(Review.create({ vendorId, rating: 5, verified: true })).rejects.toThrow(
+      /exactly one reviewer/i
+    );
+  });
+
+  it('rejects an organizer reviewing an EVENT (organizer reviews are business-only)', async () => {
+    await expect(
+      Review.create({
+        eventId: new mongoose.Types.ObjectId(),
+        vendorId: new mongoose.Types.ObjectId(),
+        reviewerVendorId: new mongoose.Types.ObjectId(),
+        rating: 5,
+        verified: true,
+      })
+    ).rejects.toThrow(/only review a service business/i);
+  });
+});

@@ -219,6 +219,45 @@ export const authenticateCommunityViewer = async (
 };
 
 /**
+ * Dual-actor auth for WRITE routes open to both a buyer and an organizer
+ * (vendor / sub-user) — e.g. reviewing a services business, where a customer OR
+ * a fellow organizer may post. Both token kinds are attached as `ticketsUser`;
+ * unlike authenticateCommunityViewer (deliberately read-only for organizers)
+ * the controller/service here is responsible for gating what each actor may do
+ * (buyers keep the enquiry gate; an organizer can't review its own business).
+ */
+export const authenticateBuyerOrOrganizer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      return;
+    }
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      ApiResponseUtil.unauthorized(res, 'No token provided');
+      return;
+    }
+    const decoded = TicketsAuthService.verifyToken(token) as any;
+    const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);
+    const isOrganizer =
+      (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
+    if (!isBuyer && !isOrganizer) {
+      ApiResponseUtil.unauthorized(res, 'Invalid token');
+      return;
+    }
+    (req as any).ticketsUser = decoded;
+    next();
+  } catch (error: any) {
+    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+  }
+};
+
+/**
  * Like authenticateCommunityViewer, but NEVER rejects an anonymous request:
  * a valid buyer/organizer token still populates `req.ticketsUser` (so the
  * viewer gets their membership state), while a missing/invalid token falls

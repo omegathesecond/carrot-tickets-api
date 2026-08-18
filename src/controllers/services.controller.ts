@@ -47,20 +47,33 @@ export class ServicesController {
     }
   }
 
-  /** POST /api/public/services/:businessId/reviews — buyer-auth, enquiry-gated. */
+  /**
+   * POST /api/public/services/:businessId/reviews — a review from a BUYER
+   * (enquiry-gated) OR a fellow ORGANIZER (a signed-in vendor, no enquiry gate,
+   * can't review its own business). authenticateBuyerOrOrganizer attaches
+   * whichever token; we branch on its userType.
+   */
   static async submitReview(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
-      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
-
       const businessId = String(req.params['businessId'] || '');
       if (!HEX24.test(businessId)) return ApiResponseUtil.error(res, 'businessId must be a business id', 400);
 
       const { error, value } = reviewSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
-      const review = await ReviewService.submitServiceReview(businessId, buyer, value);
-      // By id — a "latest for business" read could echo a concurrent buyer's review.
+      const actor = (req as any).ticketsUser;
+      let review;
+      if (actor?.userType === 'vendor' || actor?.userType === 'sub-user') {
+        // Organizer reviewer — a sub-user reviews on behalf of its vendor.
+        const reviewerVendorId = String(actor.vendorId || '');
+        if (!reviewerVendorId) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+        review = await ReviewService.submitBusinessReviewAsOrganizer(businessId, reviewerVendorId, value);
+      } else {
+        const buyer = await resolveBuyerFromRequest(req);
+        if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+        review = await ReviewService.submitServiceReview(businessId, buyer, value);
+      }
+      // By id — a "latest for business" read could echo a concurrent review.
       const view = await ReviewService.getView(String(review._id));
       return ApiResponseUtil.success(res, view, 'Review submitted', 201);
     } catch (e: any) {
