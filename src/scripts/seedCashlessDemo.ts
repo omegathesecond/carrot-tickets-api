@@ -30,6 +30,7 @@ import { StockTransferService } from '../services/stockTransfer.service';
 import { StockCountService } from '../services/stockCount.service';
 import { EventStatus } from '../interfaces/event.interface';
 import { ProductCategory, StockMovementReason } from '../interfaces/stock.interface';
+import { OperatorGrant } from '../interfaces/operatorGrant.interface';
 
 const DEMO_EVENT_NAME = /Cashless NFC Tap Test Fest/i;
 const DEMO_CASHIER_NAME = 'Demo Cashier';
@@ -229,6 +230,10 @@ async function main() {
       loginCode: loginCode ?? String(500000 + Math.floor(Math.random() * 400000)),
       pin: DEMO_PIN,
       isActive: true,
+      // The demo desk hands out tags as well as cash — issuing is a per-person
+      // grant now, so without this the seeded cashier could top up but not
+      // give anyone a band to top up.
+      grants: [OperatorGrant.ISSUE_TAGS],
     });
     console.log(`👤 Created cashier "${DEMO_CASHIER_NAME}" — login ${cashier.loginCode} / PIN ${DEMO_PIN}`);
   } else {
@@ -236,6 +241,7 @@ async function main() {
     if (loginCode) cashier.loginCode = loginCode;
     cashier.pin = DEMO_PIN;
     cashier.isActive = true;
+    (cashier as any).grants = [OperatorGrant.ISSUE_TAGS];
     cashier.failedPinAttempts = 0;
     cashier.lockedUntil = null;
     await cashier.save();

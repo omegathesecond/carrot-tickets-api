@@ -38,6 +38,10 @@ export enum TicketsPermission {
   // catalogue, per-bar stock, transfers and counts. Events-vertical (a bus
   // operator has no bar stock), so it lives in EVENT_PERMISSIONS below.
   MANAGE_STOCK = 'tickets:manage_stock',
+  // Bind a blank tag to an attendee's ticket at the tag desk. Granted per
+  // operator (see OperatorGrant), never part of a role's default set — issuing
+  // tags is a distinct job from scanning people in.
+  ISSUE_TAGS = 'tickets:issue_tags',
 
   // Platform User Management (Carrot admins/team only) — see the platform-wide
   // list of registered buyers + signup analytics. Super-admins pass via
@@ -161,6 +165,7 @@ export const EVENT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.EXPORT_REPORTS,
   TicketsPermission.MANAGE_ACCESS,
   TicketsPermission.MANAGE_STOCK,
+  TicketsPermission.ISSUE_TAGS,
 ];
 
 export interface TicketsUserToken {

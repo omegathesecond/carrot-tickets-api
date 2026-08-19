@@ -37,6 +37,8 @@ export enum CashierPermission {
   CASH_WITHDRAW = 'cashier:cash_withdraw',
   VIEW_EVENTS = 'cashier:view_events',
   VIEW_OWN_TRANSACTIONS = 'cashier:view_own_transactions',
+  /** Tag desk — granted per cashier, so it is absent from CASHIER_PERMISSIONS. */
+  ISSUE_TAGS = 'cashier:issue_tags',
 }
 
 /** Every permission a cashier holds — top up, cash out, list events, see own desk. */

@@ -451,13 +451,13 @@ router.post(
 
 router.post(
   '/scans/bind-band',
-  requireTicketsPermission(TicketsPermission.SCAN_TICKETS),
+  requireTicketsPermission(TicketsPermission.ISSUE_TAGS),
   TicketsController.bindBand
 );
 
 router.post(
   '/scans/reissue-band',
-  requireTicketsPermission(TicketsPermission.SCAN_TICKETS),
+  requireTicketsPermission(TicketsPermission.ISSUE_TAGS),
   TicketsController.reissueBand
 );
 

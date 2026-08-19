@@ -7,6 +7,7 @@ import { CashierService } from '@services/cashier.service';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -102,7 +103,7 @@ export class CashierAdminController {
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
-      const cashier = await Cashier.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventId, loginCode, pin });
+      const cashier = await Cashier.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventId, loginCode, pin, grants: sanitizeGrants(req.body.grants) });
       // loginCode + pin are returned ONCE here (the pin is never serialized again).
       ApiResponseUtil.created(res, { cashier, loginCode, pin });
     } catch (err) { next(err); }
@@ -112,6 +113,7 @@ export class CashierAdminController {
     try {
       const cashier = await Cashier.findOne({ _id: req.params['id'], ...scopeFilter(req) }).select('+pin');
       if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
+      if ('grants' in req.body) (cashier as any).grants = sanitizeGrants(req.body.grants);
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();

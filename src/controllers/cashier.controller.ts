@@ -1,6 +1,8 @@
 // api/src/controllers/cashier.controller.ts
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { ScanService } from '@services/scan.service';
+import { bindBandSchema } from '@validators/tickets.validator';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { Wallet } from '@models/wallet.model';
@@ -46,6 +48,40 @@ export class CashierController {
    * to their organizer (vendorId) unless platform-scoped. The POS uses this to
    * pick which show's desk they're running.
    */
+  /**
+   * POST /api/cashier/bind-tag — the tag desk, for a cashier who has been
+   * granted it (OperatorGrant.ISSUE_TAGS). Same ScanService call the gate uses;
+   * the difference is only who is allowed to reach it and through which
+   * middleware, since cashiers carry their own token vocabulary. Scoped to the
+   * single event the cashier was hired for, so a granted cashier cannot bind a
+   * tag on another of their organizer's events.
+   */
+  static async bindTag(req: Request, res: Response): Promise<any> {
+    try {
+      const cashier = (req as any).cashier as CashierToken;
+
+      const { error, value } = bindBandSchema.validate(req.body);
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      const result = await ScanService.bindBandToTicket({
+        ticketId: value.ticketId,
+        bandUid: value.bandUid,
+        vendorId: cashier.vendorId as string,
+        isSuperAdmin: cashier.isSuperAdmin || false,
+        expectedEventId: value.expectedEventId,
+        allowedEventIds: cashier.eventId ? [cashier.eventId] : undefined,
+        boundBy: cashier.cashierId,
+      });
+
+      return ApiResponseUtil.success(res, result);
+    } catch (err: any) {
+      console.error('Cashier bind tag error:', err);
+      return ApiResponseUtil.error(res, err.message || 'Failed to issue tag', 400);
+    }
+  }
+
   static async getEvents(req: Request, res: Response): Promise<any> {
     try {
       const cashier = (req as any).cashier as CashierToken;

@@ -2,6 +2,7 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { Cashier } from '@models/cashier.model';
 import { CASHIER_PERMISSIONS, CashierToken } from '@interfaces/cashier.interface';
+import { grantedCashierPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
@@ -48,7 +49,8 @@ export class CashierAuthService {
       userType: 'cashier',
       cashierId: (cashier._id as any).toString(),
       role: 'cashier',
-      permissions: CASHIER_PERMISSIONS,
+      // Role set is the floor; per-person grants (e.g. the tag desk) add to it.
+      permissions: [...CASHIER_PERMISSIONS, ...grantedCashierPermissions((cashier as any).grants)],
       isSuperAdmin,
       fullName: cashier.fullName,
     };

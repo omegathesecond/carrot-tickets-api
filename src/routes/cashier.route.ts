@@ -15,6 +15,14 @@ router.get(
   CashierController.getEvents,
 );
 
+// The tag desk. Absent from CASHIER_PERMISSIONS, so only a cashier the
+// organizer granted OperatorGrant.ISSUE_TAGS reaches this.
+router.post(
+  '/bind-tag',
+  requireCashierPermission(CashierPermission.ISSUE_TAGS),
+  CashierController.bindTag,
+);
+
 router.post(
   '/topup',
   requireCashierPermission(CashierPermission.CASH_TOPUP),
