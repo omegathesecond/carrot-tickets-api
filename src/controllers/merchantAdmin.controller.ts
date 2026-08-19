@@ -16,7 +16,7 @@ function actorOf(req: Request) {
  * TicketsController.checkInTicket. Returns the event, or null after sending the
  * right 4xx.
  */
-async function loadOwnedEvent(req: Request, res: Response, eventId: string): Promise<any | null> {
+export async function loadOwnedEvent(req: Request, res: Response, eventId: string): Promise<any | null> {
   if (!eventId) { ApiResponseUtil.badRequest(res, 'eventId is required'); return null; }
   const event = await Event.findById(eventId).lean();
   if (!event) { ApiResponseUtil.notFound(res, 'Event not found'); return null; }

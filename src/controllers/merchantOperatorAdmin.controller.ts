@@ -4,17 +4,31 @@ import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { loadOwnedEvent } from '@controllers/merchantAdmin.controller';
 
 /**
  * Admin CRUD for the people on a stall's till. eventId is always inherited
  * from the stall — a body that supplies one is ignored, so an operator can
  * never be pointed at an event their stall does not belong to.
+ *
+ * SECURITY: every handler resolves the operator/stall FIRST (404 if it does
+ * not exist) and only then checks event ownership via the shared
+ * loadOwnedEvent (403 if it belongs to a different organizer) — mirroring
+ * MerchantAdminController, which sits right beside this file and guards the
+ * stall itself the same way. Without this, MANAGE_ACCESS (held by every
+ * ordinary organizer, not just platform staff) would let any organizer mint
+ * or rotate credentials for a stranger's till.
  */
 export class MerchantOperatorAdminController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      const merchant = await Merchant.findById(req.params['merchantId']);
+      if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
+      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
+      if (!event) return; // 404 (event gone) or 403 (different organizer) already answered
+
       const operators = await MerchantOperator
-        .find({ merchantId: req.params['merchantId'] })
+        .find({ merchantId: merchant._id })
         .sort({ createdAt: -1 });
       ApiResponseUtil.success(res, { operators });
     } catch (err) { next(err); }
@@ -24,6 +38,8 @@ export class MerchantOperatorAdminController {
     try {
       const merchant = await Merchant.findById(req.params['merchantId']);
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
+      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
+      if (!event) return;
 
       if (!req.body.fullName || typeof req.body.fullName !== 'string') {
         ApiResponseUtil.badRequest(res, 'fullName is required'); return;
@@ -51,6 +67,11 @@ export class MerchantOperatorAdminController {
     try {
       const operator = await MerchantOperator.findById(req.params['id']);
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
+      const merchant = await Merchant.findById(operator.merchantId);
+      if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
+      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
+      if (!event) return;
+
       if ('fullName' in req.body) operator.fullName = req.body.fullName;
       if ('isActive' in req.body) operator.isActive = !!req.body.isActive;
       await operator.save();
@@ -62,6 +83,11 @@ export class MerchantOperatorAdminController {
     try {
       const operator = await MerchantOperator.findById(req.params['id']).select('+pin');
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
+      const merchant = await Merchant.findById(operator.merchantId);
+      if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
+      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
+      if (!event) return;
+
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
