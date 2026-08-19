@@ -6,6 +6,7 @@ const cfg: ServiceFeeConfig = {
   momoServiceFee: 8,
   cardServiceFee: 15,
   deltapayServiceFee: 6,
+  yocoServiceFee: 0,
 };
 
 describe('computeServiceFee — waiveServiceFee (allocation tiers)', () => {

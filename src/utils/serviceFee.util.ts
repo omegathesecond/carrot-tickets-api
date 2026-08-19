@@ -15,6 +15,7 @@ export interface ServiceFeeConfig {
   momoServiceFee: number;
   cardServiceFee: number;
   deltapayServiceFee: number;
+  yocoServiceFee: number;
 }
 
 /** Hard cap on tickets a buyer may purchase in a single online order. */
@@ -36,6 +37,8 @@ export function serviceFeeFor(method: PaymentMethod, cfg: ServiceFeeConfig): num
       return cfg.cardServiceFee || 0;
     case PaymentMethod.DELTAPAY:
       return cfg.deltapayServiceFee || 0;
+    case PaymentMethod.YOCO:
+      return cfg.yocoServiceFee || 0;
     default:
       return 0;
   }

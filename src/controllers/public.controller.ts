@@ -13,6 +13,7 @@ import { notEndedFilter } from '@utils/eventVisibility.util';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { DeltapayClient } from '@services/payments/deltapay.client';
+import { YocoClient } from '@services/payments/yoco.client';
 import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
@@ -159,6 +160,15 @@ const cardInitiateSchema = Joi.object({
 // Validation schema for DeltaPay hosted-checkout purchase initiation.
 // Same shape as card: DeltaPay collects the payer identifier on its own page.
 const deltapayInitiateSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
+  customerName: Joi.string().max(100).optional(),
+});
+
+// Validation schema for Yoco hosted-checkout purchase initiation.
+// Same shape as card: Yoco collects the card details on its own page.
+const yocoInitiateSchema = Joi.object({
   eventId: Joi.string().hex().length(24).required(),
   ticketTypeId: Joi.string().hex().length(24).required(),
   quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
@@ -969,6 +979,8 @@ export class PublicController {
       // DeltaPay needs BOTH the config toggle and live credentials — a
       // half-configured deploy hides the button instead of failing at checkout.
       if (cfg.deltapayEnabled && new DeltapayClient().isConfigured()) methods.push('deltapay');
+      // Yoco, same rule: toggle AND live credentials, else the button is hidden.
+      if (cfg.yocoEnabled && new YocoClient().isConfigured()) methods.push('yoco');
       // Per-method flat buyer service fee (E) so checkout can show a live
       // breakdown. The charge is recomputed server-side on purchase (display only).
       const serviceFees = {
@@ -976,6 +988,7 @@ export class PublicController {
         mtn_momo: cfg.momoServiceFee,
         peach_card: cfg.cardServiceFee,
         deltapay: cfg.deltapayServiceFee,
+        yoco: cfg.yocoServiceFee,
       };
       return ApiResponseUtil.success(res, { methods, serviceFees });
     } catch (error: any) {
@@ -1097,6 +1110,74 @@ export class PublicController {
 
       const result = await TicketService.finalizeCardSale(paymentId);
       return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
+   * Initiate an async Yoco hosted-checkout purchase. Buyer-authed.
+   * Returns the redirect URL for the SPA to send the buyer to.
+   */
+  static async initiateYocoPurchase(req: Request, res: Response): Promise<any> {
+    const { error, value } = yocoInitiateSchema.validate(req.body);
+    if (error) return ApiResponseUtil.badRequest(res, error.message);
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    try {
+      const r = await TicketService.initiateYocoPurchase({
+        ...value,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
+        channel: SalesChannel.ONLINE,
+      });
+      return ApiResponseUtil.success(res, r);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Could not start Yoco payment', 400);
+    }
+  }
+
+  /**
+   * Poll the outcome of a Yoco purchase. Buyer-authed.
+   *
+   * READ-ONLY, unlike getCardStatus and getDeltapayStatus. Those poll the
+   * provider and finalise as a side effect; Yoco exposes no status-query
+   * endpoint, so the only thing that can move this sale is the signed webhook.
+   * This endpoint simply reports the sale's current stored status.
+   *
+   * Ownership check mirrors getDeltapayStatus: buyerId-primary with a legacy
+   * phone fallback, and a mismatch returns 404 (not 403) so the endpoint cannot
+   * be used to enumerate other buyers' checkouts.
+   */
+  static async getYocoStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const checkoutId = req.params['checkoutId']!;
+      const sale = await TicketService.getYocoSaleByCheckoutId(checkoutId);
+
+      const owns =
+        sale &&
+        ((sale.buyerId && String(sale.buyerId) === String(buyer._id)) ||
+          (!sale.buyerId &&
+            sale.customerPhone &&
+            buyer.phone &&
+            normalizePhone(sale.customerPhone) === normalizePhone(buyer.phone)));
+      if (!owns) {
+        return ApiResponseUtil.notFound(res, 'Payment not found');
+      }
+
+      const status =
+        sale.paymentStatus === 'completed'
+          ? 'completed'
+          : sale.paymentStatus === 'pending'
+          ? 'pending'
+          : 'failed';
+      return ApiResponseUtil.success(res, { status });
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
     }

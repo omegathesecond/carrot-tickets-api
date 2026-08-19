@@ -333,6 +333,24 @@ router.get('/purchase/peach-card/:paymentId/status', authenticateBuyer, PublicCo
 router.post('/purchase/deltapay', authenticateBuyer, PublicController.initiateDeltapayPurchase);
 
 /**
+ * @route   POST /api/public/purchase/yoco
+ * @desc    Initiate an async Yoco hosted-checkout ticket purchase. Identity
+ *          comes from the authenticated buyer, never the body. Returns the
+ *          Yoco redirect URL for the SPA to send the buyer to.
+ * @access  Buyer (authenticated)
+ */
+router.post('/purchase/yoco', authenticateBuyer, PublicController.initiateYocoPurchase);
+
+/**
+ * @route   GET /api/public/purchase/yoco/:checkoutId/status
+ * @desc    Read the status of a Yoco purchase. READ-ONLY — unlike the card and
+ *          DeltaPay pollers this does NOT finalise, because Yoco exposes no
+ *          status-query endpoint; only the signed webhook can mint.
+ * @access  Buyer (authenticated, must own the sale)
+ */
+router.get('/purchase/yoco/:checkoutId/status', authenticateBuyer, PublicController.getYocoStatus);
+
+/**
  * @route   GET /api/public/purchase/deltapay/latest/status
  * @desc    Outcome of the buyer's MOST RECENT DeltaPay payment. The reliable way
  *          to answer "did it go through?" after a DeltaPay return, because the

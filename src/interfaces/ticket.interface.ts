@@ -14,7 +14,8 @@ export enum PaymentMethod {
   KESHLESS_WALLET = 'keshless_wallet',
   MTN_MOMO = 'mtn_momo',
   PEACH_CARD = 'peach_card',
-  DELTAPAY = 'deltapay'
+  DELTAPAY = 'deltapay',
+  YOCO = 'yoco'
 }
 
 export enum PaymentStatus {
@@ -103,6 +104,7 @@ export interface ITicketSale extends Document {
   momoFailureReason?: string;    // MTN failure reason enum (e.g. NOT_ENOUGH_FUNDS) for buyer messaging
   peachPaymentId?: string;       // Peach Payments payment ID for card transactions
   deltapaySessionId?: string;    // DeltaPay hosted-checkout session ID (UUID) for wallet transactions
+  yocoCheckoutId?: string;       // Yoco checkout ID (ch_…) for Yoco card transactions
   reservationExpiresAt?: Date;   // when a PENDING MoMo reservation lapses
 
   // Staff

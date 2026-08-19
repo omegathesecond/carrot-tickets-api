@@ -49,3 +49,38 @@ describe('PaymentConfigService.update', () => {
     expect(cfg.platformFeePercent).toBe(5);
   });
 });
+
+describe('PaymentConfigService — Yoco', () => {
+  it('defaults Yoco to OFF with a zero fee until it is switched on', async () => {
+    const cfg = await PaymentConfigService.get();
+    expect(cfg.yocoEnabled).toBe(false);
+    expect(cfg.yocoServiceFee).toBe(0);
+  });
+
+  it('round-trips a Yoco toggle and fee through update()', async () => {
+    const saved = await PaymentConfigService.update({ yocoEnabled: true, yocoServiceFee: 7.5 });
+    expect(saved.yocoEnabled).toBe(true);
+    expect(saved.yocoServiceFee).toBe(7.5);
+
+    const reread = await PaymentConfigService.get();
+    expect(reread.yocoEnabled).toBe(true);
+    expect(reread.yocoServiceFee).toBe(7.5);
+  });
+
+  it('leaves untouched methods alone when updating one field', async () => {
+    await PaymentConfigService.update({ yocoEnabled: true });
+    const cfg = await PaymentConfigService.get();
+    expect(cfg.yocoEnabled).toBe(true);
+    expect(cfg.mtnMomoEnabled).toBe(true);    // still the default
+    expect(cfg.peachCardEnabled).toBe(false); // still the default
+  });
+});
+
+describe('PaymentConfigService — explicit zero must beat the default', () => {
+  it('lets a saved 0 fee win over the non-zero momo default', async () => {
+    // The whole point of `??` rather than `||`: a deliberate 0 must not
+    // silently revert to the E5 momo default.
+    await PaymentConfigService.update({ momoServiceFee: 0 });
+    expect((await PaymentConfigService.get()).momoServiceFee).toBe(0);
+  });
+});

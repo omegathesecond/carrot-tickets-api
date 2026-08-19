@@ -58,6 +58,7 @@ import publicRoutes from '@routes/public.route';
 import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
 import deltapayRoutes from '@routes/deltapay.route';
+import yocoRoutes from '@routes/yoco.route';
 import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
@@ -117,7 +118,30 @@ app.use(cors({
   credentials: false
 }));
 
-app.use(express.json({ limit: '10mb' })); // Parse JSON bodies with size limit
+// Parse JSON bodies with a size limit.
+//
+// The `verify` hook stashes the RAW bytes on the request. The Yoco webhook's
+// Standard-Webhooks signature is computed over the exact body Yoco sent, so a
+// re-serialised `req.body` would never verify — see YocoController.webhook.
+// Capturing here (rather than remounting middleware around the webhook route)
+// keeps route ordering untouched.
+// Only the Yoco webhook needs its raw bytes kept. Scoping the capture to that
+// one path avoids duplicating every 10mb JSON body into a second string.
+const YOCO_WEBHOOK_PATH = '/api/public/purchase/yoco/webhook';
+
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    // The Yoco webhook's Standard-Webhooks signature is computed over the exact
+    // body Yoco sent, so a re-serialised `req.body` would never verify. Stash
+    // the raw bytes here — see YocoController.webhook. Capturing at this level
+    // (rather than remounting middleware around the route) leaves route
+    // ordering untouched.
+    if (buf?.length && req.url?.split('?')[0] === YOCO_WEBHOOK_PATH) {
+      (req as any).rawBody = buf.toString('utf8');
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies with limit
 
 // Health check endpoint
@@ -170,6 +194,7 @@ app.use('/api/public/updates', updateRoutes);          // Buyer updates (Discove
 app.use('/api/public', publicRoutes);                  // Public routes - no auth required
 app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
 app.use('/api/public/purchase/deltapay', deltapayRoutes);    // DeltaPay return + session callback (unauthenticated)
+app.use('/api/public/purchase/yoco', yocoRoutes);            // Yoco signed webhook + return (unauthenticated)
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 app.use('/api/community', communityRoutes);          // Event communities (buyer social)
