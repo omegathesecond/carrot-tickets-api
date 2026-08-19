@@ -6,6 +6,9 @@ import { WalletTopup } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { Merchant } from '@models/merchant.model';
+import { GateOperator } from '@models/gateOperator.model';
+import { Cashier } from '@models/cashier.model';
+import { Vendor } from '@models/vendor.model';
 
 export interface TagSummary {
   tagsInUse: number;
@@ -43,6 +46,17 @@ export interface TagMovement {
 }
 
 export type TagDetail = TagRow & { bindings: TagBinding[]; movements: TagMovement[] };
+
+/** One tag handed to one attendee, as the register desk recorded it. */
+export interface TagRegistrationRow {
+  bandUid: string;
+  walletId: string;
+  at: Date;
+  releasedAt: Date | null;
+  balance: number;
+  registeredBy: string;
+  holder: { name: string | null; phone: string | null; ticketCode: string | null };
+}
 
 /**
  * Status is derived: the plastic and the wallet each tell half the story. A
@@ -147,6 +161,76 @@ export class TagReportService {
           ticketCode: r.ticket?.ticketId ?? null,
         },
       })),
+      hasMore,
+      nextCursor: hasMore ? String(page[page.length - 1]!._id) : null,
+    };
+  }
+
+  /**
+   * The register desk's log: every tag registered at this event, newest first,
+   * with who registered it. Read from BandBinding rather than from the wallets
+   * because THAT is the append-only record of the act of registering — a wallet
+   * only ever shows the tag it carries right now, so a reissued or released tag
+   * would silently drop out of the list.
+   */
+  static async registrations(
+    eventId: string,
+    opts: { limit?: number; cursor?: string; q?: string },
+  ): Promise<{ registrations: TagRegistrationRow[]; hasMore: boolean; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const match: Record<string, unknown> = { eventId: new mongoose.Types.ObjectId(eventId) };
+    if (opts.cursor) match['_id'] = { $lt: new mongoose.Types.ObjectId(opts.cursor) };
+    if (opts.q?.trim()) {
+      const safe = opts.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      match['bandUid'] = new RegExp(safe, 'i');
+    }
+
+    const rows = await BandBinding.find(match).sort({ _id: -1 }).limit(limit + 1).lean();
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+
+    const wallets = await Wallet.find({ _id: { $in: page.map((b: any) => b.walletId) } })
+      .select('balance ticketId')
+      .lean();
+    const walletById = new Map(wallets.map((w: any) => [String(w._id), w]));
+    const tickets = await Ticket.find({ _id: { $in: wallets.map((w: any) => w.ticketId) } })
+      .select('ticketId customerName customerPhone')
+      .lean();
+    const ticketById = new Map(tickets.map((t: any) => [String(t._id), t]));
+
+    // boundBy is an opaque actor id — a gate operator at the register desk, a
+    // cashier doubling as one, or the organizer's own account. Resolved across
+    // all three so the column reads as a person, never as a hex string.
+    const actorIds = [...new Set(page.map((b: any) => b.boundBy).filter((id: any) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)))] as string[];
+    const actorOids = actorIds.map((id) => new mongoose.Types.ObjectId(id));
+    const [operators, cashiers, vendors] = await Promise.all([
+      GateOperator.find({ _id: { $in: actorOids } }).select('fullName').lean(),
+      Cashier.find({ _id: { $in: actorOids } }).select('fullName').lean(),
+      Vendor.find({ _id: { $in: actorOids } }).select('businessName').lean(),
+    ]);
+    const actorName = new Map<string, string>();
+    operators.forEach((o: any) => actorName.set(String(o._id), o.fullName));
+    cashiers.forEach((c: any) => actorName.set(String(c._id), c.fullName));
+    vendors.forEach((v: any) => actorName.set(String(v._id), v.businessName));
+
+    return {
+      registrations: page.map((b: any): TagRegistrationRow => {
+        const wallet = walletById.get(String(b.walletId));
+        const ticket = wallet ? ticketById.get(String(wallet.ticketId)) : undefined;
+        return {
+          bandUid: b.bandUid,
+          walletId: String(b.walletId),
+          at: b.boundAt,
+          releasedAt: b.unboundAt ?? null,
+          balance: wallet?.balance ?? 0,
+          registeredBy: (b.boundBy && actorName.get(String(b.boundBy))) || 'Unknown',
+          holder: {
+            name: ticket?.customerName ?? null,
+            phone: ticket?.customerPhone ?? null,
+            ticketCode: ticket?.ticketId ?? null,
+          },
+        };
+      }),
       hasMore,
       nextCursor: hasMore ? String(page[page.length - 1]!._id) : null,
     };

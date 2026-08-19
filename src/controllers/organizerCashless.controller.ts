@@ -34,7 +34,7 @@ export class OrganizerCashlessController {
     }
   }
 
-  /** GET /api/tickets/events/:eventId/cashless/transactions?type=&page=&limit= */
+  /** GET /api/tickets/events/:eventId/cashless/transactions?type=&tagUid=&page=&limit= */
   static async transactions(req: Request, res: Response): Promise<any> {
     try {
       const eventId = String(req.params['eventId']);
@@ -44,7 +44,13 @@ export class OrganizerCashlessController {
       const type = ['topup', 'withdrawal', 'purchase'].includes(rawType) ? (rawType as any) : undefined;
       const page = Number(req.query.page) || 1;
       const limit = Number(req.query.limit) || 50;
-      const data = await OrganizerCashlessService.transactions({ eventId, type, page, limit });
+      // Only forward a tag search that has content: an empty ?tagUid= is the
+      // dashboard's cleared search box, which must read as "no filter" rather
+      // than as a UID that matches nothing.
+      const tagUid = String(req.query.tagUid || '').trim();
+      const data = await OrganizerCashlessService.transactions({
+        eventId, type, page, limit, ...(tagUid ? { tagUid } : {}),
+      });
       return ApiResponseUtil.success(res, data);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load cashless transactions', 500);

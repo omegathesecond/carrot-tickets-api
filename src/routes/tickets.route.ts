@@ -540,6 +540,7 @@ router.get(
 router.get('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.list);
 router.post('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
 router.patch('/gate-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
+router.get('/gate-operators/:id/activity', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.activity);
 router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
 
 /**
@@ -600,6 +601,7 @@ router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(Ti
  * or Express matches "summary" as a wallet id.
  */
 router.get('/events/:eventId/tags/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.summary);
+router.get('/events/:eventId/tags/registrations', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.registrations);
 router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.list);
 router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
 router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);
