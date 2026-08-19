@@ -5,6 +5,7 @@ import { StockReportService } from '@services/stockReport.service';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
+import { MerchantCharge } from '@models/merchantCharge.model';
 
 const eventId = new mongoose.Types.ObjectId();
 let seq = 500000;
@@ -13,6 +14,16 @@ async function bar(name: string) { return Merchant.create({ name, eventId, login
 async function prod(name: string, category = 'beer') { return Product.create({ eventId, name, category, price: 2500 } as any); }
 async function stock(merchantId: any, productId: any, onHand: number, lowStockThreshold?: number) {
   return ProductStock.create({ eventId, merchantId, productId, onHand, ...(lowStockThreshold != null ? { lowStockThreshold } : {}) } as any);
+}
+/** An itemised tap at a bar — the only record that knows what a unit sold for. */
+async function sale(merchantId: any, productId: any, name: string, qty: number, unitPrice: number) {
+  return MerchantCharge.create({
+    merchantId, merchantOperatorId: new mongoose.Types.ObjectId(), eventId,
+    walletId: new mongoose.Types.ObjectId(), bandUid: '04AABBCC',
+    amount: qty * unitPrice, fee: 0, netAmount: qty * unitPrice,
+    clientTxnId: 'tap-' + seq++, status: 'completed', staffName: 'Bar Betty',
+    items: [{ productId, name, unitPrice, qty, lineTotal: qty * unitPrice }],
+  } as any);
 }
 
 describe('StockReportService.board', () => {
@@ -46,5 +57,48 @@ describe('StockReportService.board', () => {
     const { perBar } = await StockReportService.board(String(eventId));
     expect(perBar[0]!.status).toBe('IN_STOCK');
     expect(perBar[0]!.lowStockThreshold).toBeNull();
+  });
+
+  it('reports what sold and what it made, next to what is left', async () => {
+    const b1 = await bar('Bar 1'); const b2 = await bar('Bar 2');
+    const castle = await prod('Castle Lite');
+    await stock(b1._id, castle._id, 63);
+    await stock(b2._id, castle._id, 31);
+    await sale(b1._id, castle._id, 'Castle Lite', 20, 2500);
+    await sale(b2._id, castle._id, 'Castle Lite', 10, 2500);
+
+    const { perBar, byProduct } = await StockReportService.board(String(eventId));
+
+    const atBar1 = perBar.find((r) => r.merchantName === 'Bar 1')!;
+    expect(atBar1.unitsSold).toBe(20);
+    expect(atBar1.revenue).toBe(50000);              // 20 x R25.00, in cents
+
+    const castleAgg = byProduct.find((p) => p.productName === 'Castle Lite')!;
+    expect(castleAgg.unitsSold).toBe(30);
+    expect(castleAgg.revenue).toBe(75000);
+    expect(castleAgg.totalOnHand).toBe(94);
+  });
+
+  it('reads zero sold rather than blank for a product nobody has bought', async () => {
+    const b1 = await bar('Bar 1'); const ice = await prod('Ice', 'other');
+    await stock(b1._id, ice._id, 40);
+
+    const { perBar, byProduct } = await StockReportService.board(String(eventId));
+
+    expect(perBar[0]!.unitsSold).toBe(0);
+    expect(perBar[0]!.revenue).toBe(0);
+    expect(byProduct[0]!.unitsSold).toBe(0);
+  });
+
+  it('still shows a product that sold at a bar carrying no stock row for it', async () => {
+    const b1 = await bar('Pop-up Bar'); const shooter = await prod('Shooter');
+    await sale(b1._id, shooter._id, 'Shooter', 4, 3000);
+
+    const { byProduct } = await StockReportService.board(String(eventId));
+
+    const row = byProduct.find((p) => p.productName === 'Shooter')!;
+    expect(row.unitsSold).toBe(4);
+    expect(row.revenue).toBe(12000);
+    expect(row.totalOnHand).toBe(0);
   });
 });

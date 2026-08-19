@@ -7,6 +7,7 @@ import { Merchant } from '@models/merchant.model';
 import { Cashier } from '@models/cashier.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { Wallet } from '@models/wallet.model';
+import { BandBinding } from '@models/bandBinding.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
 const sumField = (field: string) => [{ $group: { _id: null, total: { $sum: field }, count: { $sum: 1 } } }];
@@ -98,14 +99,56 @@ export class OrganizerCashlessService {
   }
 
   /**
+   * Every band UID ever seen in this event that matches `q`, resolved to the
+   * WALLETS behind them. A UID search must go through the binding history and
+   * not just `wallet.bandUid`: a reissued tag leaves its old UID only in
+   * BandBinding, and the organizer searching the number printed on the plastic
+   * they are holding is exactly the reissue case.
+   */
+  private static async walletIdsForTagQuery(eid: mongoose.Types.ObjectId, q: string) {
+    // Escaped — a UID typed by an organizer is user input, and an unescaped
+    // regex here is both a correctness bug and a ReDoS foothold.
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const [wallets, bindings] = await Promise.all([
+      Wallet.find({ eventId: eid, bandUid: rx }).select('_id').lean(),
+      BandBinding.find({ eventId: eid, bandUid: rx }).select('walletId').lean(),
+    ]);
+    return [
+      ...new Set([
+        ...wallets.map((w: any) => String(w._id)),
+        ...bindings.map((b: any) => String(b.walletId)),
+      ]),
+    ];
+  }
+
+  /**
+   * The UID that was on a wallet at a given moment. Top-ups and cash-outs are
+   * recorded against the wallet, not the plastic, so the tag column has to be
+   * reconstructed from the binding that was live at the time — showing the
+   * CURRENT uid against a pre-reissue top-up would misattribute it to a tag
+   * that did not exist yet.
+   */
+  private static tagAt(bindings: Array<{ bandUid: string; boundAt: Date; unboundAt?: Date | null }>, at: Date) {
+    const t = new Date(at).getTime();
+    const live = bindings.find((b) => {
+      const from = new Date(b.boundAt).getTime();
+      const to = b.unboundAt ? new Date(b.unboundAt).getTime() : Infinity;
+      return t >= from && t <= to;
+    });
+    return live?.bandUid ?? null;
+  }
+
+  /**
    * The full event transaction log — top-ups, withdrawals, and vendor charges —
-   * merged, newest first, page-bounded. `type` filters to one kind. Simple
-   * skip/limit paging (the organizer report is a reviewing surface, not a hot
-   * path); returns `hasMore` so the dashboard can page.
+   * merged, newest first, page-bounded. `type` filters to one kind, `tagUid`
+   * narrows to one band (matched against every UID that band has ever carried).
+   * Simple skip/limit paging (the organizer report is a reviewing surface, not
+   * a hot path); returns `hasMore` so the dashboard can page.
    */
   static async transactions(params: {
     eventId: string;
     type?: 'topup' | 'withdrawal' | 'purchase';
+    tagUid?: string;
     page?: number;
     limit?: number;
   }) {
@@ -113,6 +156,16 @@ export class OrganizerCashlessService {
     const eid = oid(eventId);
     const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
     const page = Math.max(params.page ?? 1, 1);
+    const tagUid = params.tagUid?.trim();
+
+    // A UID that has never been bound in this event matches nothing — an empty
+    // page, not every transaction in the event.
+    let walletScope: Record<string, unknown> = {};
+    if (tagUid) {
+      const walletIds = await OrganizerCashlessService.walletIdsForTagQuery(eid, tagUid);
+      if (walletIds.length === 0) return { transactions: [], page, limit, hasMore: false };
+      walletScope = { walletId: { $in: walletIds.map(oid) } };
+    }
 
     // Over-fetch each source to the page window, merge, then slice — correct for
     // a reviewing surface without a cross-collection cursor.
@@ -122,15 +175,15 @@ export class OrganizerCashlessService {
     const wantPurchases = !type || type === 'purchase';
 
     const [topups, withdrawals, charges] = await Promise.all([
-      wantTopups ? WalletTopup.find({ eventId: eid }).sort({ createdAt: -1 }).limit(window).lean() : [],
-      wantWithdrawals ? WalletWithdrawal.find({ eventId: eid }).sort({ createdAt: -1 }).limit(window).lean() : [],
-      wantPurchases ? MerchantCharge.find({ eventId: eid }).sort({ createdAt: -1 }).limit(window).lean() : [],
+      wantTopups ? WalletTopup.find({ eventId: eid, ...walletScope }).sort({ createdAt: -1 }).limit(window).lean() : [],
+      wantWithdrawals ? WalletWithdrawal.find({ eventId: eid, ...walletScope }).sort({ createdAt: -1 }).limit(window).lean() : [],
+      wantPurchases ? MerchantCharge.find({ eventId: eid, ...walletScope }).sort({ createdAt: -1 }).limit(window).lean() : [],
     ]);
 
     const merged = [
-      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, at: t.createdAt, actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
-      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, at: w.createdAt, actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
-      ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, bandUid: c.bandUid, fee: c.fee, netAmount: c.netAmount, actorType: 'Merchant', actorId: c.merchantId ? String(c.merchantId) : null })),
+      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, at: t.createdAt, ref: t.clientTxnId ?? null, status: t.status ?? 'completed', walletId: String(t.walletId), actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
+      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, at: w.createdAt, ref: w.clientTxnId ?? null, status: w.status ?? 'completed', walletId: String(w.walletId), actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
+      ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, ref: c.clientTxnId ?? null, status: c.status ?? 'completed', walletId: String(c.walletId), bandUid: c.bandUid, fee: c.fee, netAmount: c.netAmount, actorType: 'Merchant', actorId: c.merchantId ? String(c.merchantId) : null })),
     ].sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
     const start = (page - 1) * limit;
@@ -141,15 +194,25 @@ export class OrganizerCashlessService {
     // page costs at most 3 extra look-ups regardless of row count.
     const idsOfType = (t: string) =>
       [...new Set(pageRows.filter((r) => r.actorType === t && r.actorId && /^[0-9a-fA-F]{24}$/.test(r.actorId)).map((r) => r.actorId))];
-    const [merchants, cashiers, resellers] = await Promise.all([
+    const walletIdsOnPage = [...new Set(pageRows.map((r) => r.walletId).filter((id) => id && /^[0-9a-fA-F]{24}$/.test(id)))];
+    const [merchants, cashiers, resellers, bindings] = await Promise.all([
       Merchant.find({ _id: { $in: idsOfType('Merchant').map(oid) } }).select('name').lean(),
       Cashier.find({ _id: { $in: idsOfType('Cashier').map(oid) } }).select('fullName').lean(),
       ResellerOperator.find({ _id: { $in: idsOfType('ResellerOperator').map(oid) } }).select('fullName').lean(),
+      BandBinding.find({ walletId: { $in: walletIdsOnPage.map(oid) } }).sort({ boundAt: -1 }).lean(),
     ]);
     const nameOf = new Map<string, string>();
     merchants.forEach((m: any) => nameOf.set(String(m._id), m.name));
     cashiers.forEach((c: any) => nameOf.set(String(c._id), c.fullName));
     resellers.forEach((r: any) => nameOf.set(String(r._id), r.fullName));
+
+    const bindingsByWallet = new Map<string, Array<{ bandUid: string; boundAt: Date; unboundAt?: Date | null }>>();
+    bindings.forEach((b: any) => {
+      const k = String(b.walletId);
+      const list = bindingsByWallet.get(k) ?? [];
+      list.push({ bandUid: b.bandUid, boundAt: b.boundAt, unboundAt: b.unboundAt ?? null });
+      bindingsByWallet.set(k, list);
+    });
 
     const fallback: Record<string, string> = {
       Merchant: 'Vendor', Cashier: 'Cashier', ResellerOperator: 'Reseller', Platform: 'Platform',
@@ -157,6 +220,9 @@ export class OrganizerCashlessService {
     const withActor = pageRows.map((r) => ({
       ...r,
       actorName: (r.actorId && nameOf.get(r.actorId)) || fallback[r.actorType] || 'Unknown',
+      // A charge carries the UID it was tapped with; wallet-side movements are
+      // dated back to whichever tag was live at the time.
+      tagUid: r.bandUid ?? OrganizerCashlessService.tagAt(bindingsByWallet.get(r.walletId) ?? [], r.at),
     }));
 
     const hasMore = merged.length > start + limit;

@@ -32,17 +32,40 @@ export class StockReportService {
   /** Live stock board — per bar-product status + per-product aggregate. */
   static async board(eventId: string) {
     const eid = oid(eventId);
-    const [rows, products, merchants] = await Promise.all([
+    const [rows, products, merchants, sales] = await Promise.all([
       ProductStock.find({ eventId: eid }).lean(),
       Product.find({ eventId: eid }).select('name category').lean(),
       Merchant.find({ eventId: eid }).select('name').lean(),
+      // What actually left the shelf and what it brought in, from the CHARGES
+      // rather than the stock journal: the journal knows units, only the charge
+      // knows the money. Un-itemised charges carry no product lines and so
+      // contribute to neither — see `itemisedSplit` on the dashboard for how
+      // much revenue that is.
+      MerchantCharge.aggregate([
+        { $match: { eventId: eid } },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: { merchantId: '$merchantId', productId: '$items.productId' },
+            unitsSold: { $sum: '$items.qty' },
+            revenue: { $sum: '$items.lineTotal' },
+          },
+        },
+      ]),
     ]);
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
     const productCat = new Map(products.map((p: any) => [String(p._id), p.category]));
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name]));
+    const soldByBar = new Map<string, { unitsSold: number; revenue: number }>(
+      sales.map((s: any) => [
+        `${String(s._id.merchantId)}|${String(s._id.productId)}`,
+        { unitsSold: s.unitsSold, revenue: s.revenue },
+      ]),
+    );
 
     const perBar = rows.map((r: any) => {
       const threshold = r.lowStockThreshold ?? null;
+      const sold = soldByBar.get(`${String(r.merchantId)}|${String(r.productId)}`) ?? { unitsSold: 0, revenue: 0 };
       return {
         merchantId: String(r.merchantId),
         merchantName: merchantName.get(String(r.merchantId)) || 'Unknown bar',
@@ -50,24 +73,38 @@ export class StockReportService {
         productName: productName.get(String(r.productId)) || 'Unknown product',
         category: productCat.get(String(r.productId)) || 'other',
         onHand: r.onHand,
+        unitsSold: sold.unitsSold,
+        revenue: sold.revenue,
         lowStockThreshold: threshold,
         status: statusOf(r.onHand, threshold),
       };
     }).sort((a, b) => a.productName.localeCompare(b.productName) || a.merchantName.localeCompare(b.merchantName));
 
     // Aggregate one product across all its bars.
-    const agg = new Map<string, { totalOnHand: number; anyLow: boolean }>();
+    const agg = new Map<string, { totalOnHand: number; unitsSold: number; revenue: number; anyLow: boolean }>();
     for (const r of perBar) {
-      const a = agg.get(r.productId) || { totalOnHand: 0, anyLow: false };
+      const a = agg.get(r.productId) || { totalOnHand: 0, unitsSold: 0, revenue: 0, anyLow: false };
       a.totalOnHand += r.onHand;
+      a.unitsSold += r.unitsSold;
+      a.revenue += r.revenue;
       if (r.status === 'LOW') a.anyLow = true;
       agg.set(r.productId, a);
+    }
+    // A product sold at a stall that never carried stock has no perBar row, so
+    // it would vanish from the board entirely — the sales still happened and
+    // the organizer must see them.
+    for (const [key, s] of soldByBar) {
+      const productId = key.split('|')[1] ?? '';
+      if (agg.has(productId)) continue;
+      agg.set(productId, { totalOnHand: 0, unitsSold: s.unitsSold, revenue: s.revenue, anyLow: false });
     }
     const byProduct = [...agg.entries()].map(([productId, a]) => ({
       productId,
       productName: productName.get(productId) || 'Unknown product',
       category: productCat.get(productId) || 'other',
       totalOnHand: a.totalOnHand,
+      unitsSold: a.unitsSold,
+      revenue: a.revenue,
       status: (a.totalOnHand <= 0 ? 'SOLD_OUT' : (a.anyLow ? 'LOW' : 'IN_STOCK')) as StockStatus,
     })).sort((a, b) => a.productName.localeCompare(b.productName));
 

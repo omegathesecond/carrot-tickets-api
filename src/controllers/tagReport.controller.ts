@@ -56,6 +56,33 @@ export class TagReportController {
     }
   }
 
+  /** GET /api/tickets/events/:eventId/tags/registrations */
+  static async registrations(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = String(req.params['eventId']);
+      const event = await loadOwnedCashlessEvent(req, res, eventId);
+      if (!event) return;
+
+      const hex24 = /^[0-9a-fA-F]{24}$/;
+      const cursor = req.query['cursor'] ? String(req.query['cursor']) : undefined;
+      if (cursor && !hex24.test(cursor)) return ApiResponseUtil.badRequest(res, 'invalid cursor');
+
+      const rawLimit = req.query['limit'] ? Number(req.query['limit']) : undefined;
+      if (rawLimit !== undefined && (!Number.isInteger(rawLimit) || rawLimit < 1)) {
+        return ApiResponseUtil.badRequest(res, 'invalid limit');
+      }
+
+      return ApiResponseUtil.success(res, await TagReportService.registrations(eventId, {
+        ...(rawLimit !== undefined ? { limit: rawLimit } : {}),
+        ...(cursor ? { cursor } : {}),
+        ...(req.query['q'] ? { q: String(req.query['q']) } : {}),
+      }));
+    } catch (err: any) {
+      console.error('Tag registrations error:', err);
+      return ApiResponseUtil.error(res, 'Failed to load tag registrations', 500);
+    }
+  }
+
   /** GET /api/tickets/events/:eventId/tags/:walletId */
   static async detail(req: Request, res: Response): Promise<any> {
     try {

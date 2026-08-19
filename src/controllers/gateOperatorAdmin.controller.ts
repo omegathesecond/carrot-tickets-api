@@ -5,6 +5,7 @@ import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials
 import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
+import { GateOperatorActivityService } from '@services/gateOperatorActivity.service';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -54,6 +55,30 @@ export class GateOperatorAdminController {
         : generatePin();
       const operator = await GateOperator.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventIds: assignment.eventIds, loginCode, pin, grants: sanitizeGrants(req.body.grants) });
       ApiResponseUtil.created(res, { operator, loginCode, pin });
+    } catch (err) { next(err); }
+  }
+
+  /**
+   * GET /api/tickets/gate-operators/:id/activity?eventId=&limit=
+   *
+   * What this person actually did on the door — scans taken, how many were
+   * admitted vs turned away, and the tags they registered. Scoped through the
+   * same filter as every other route here, so an organizer can only ever read
+   * their own operators.
+   */
+  static async activity(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const operator = await GateOperator.findOne({ _id: req.params['id'], ...scopeFilter(req) });
+      if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
+      const eventId = req.query['eventId'] ? String(req.query['eventId']) : undefined;
+      const rawLimit = Number(req.query['limit']);
+      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? rawLimit : 50;
+      const operatorId = String(operator._id);
+      const [activity, registrations] = await Promise.all([
+        GateOperatorActivityService.forOperator({ operatorId, ...(eventId ? { eventId } : {}), limit }),
+        GateOperatorActivityService.registrationsBy({ operatorId, ...(eventId ? { eventId } : {}), limit }),
+      ]);
+      ApiResponseUtil.success(res, { operator, ...activity, registrations });
     } catch (err) { next(err); }
   }
 
