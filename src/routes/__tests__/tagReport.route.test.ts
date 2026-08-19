@@ -68,3 +68,21 @@ it('400s a malformed cursor', async () => {
     .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
   expect(res.status).toBe(400);
 });
+
+it('serves the registrations route rather than treating "registrations" as a tag id', async () => {
+  const event = await cashlessEvent();
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags/registrations`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(200);
+  expect(res.body.data).toHaveProperty('registrations');
+});
+
+it("403s another vendor's registrations", async () => {
+  const event = await cashlessEvent(OTHER);
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags/registrations`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(403);
+});
+
