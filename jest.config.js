@@ -16,6 +16,8 @@ module.exports = {
     '^@validators/(.*)$': '<rootDir>/src/validators/$1',
     '^@config/(.*)$': '<rootDir>/src/config/$1',
   },
+  // Suites using connectLedgerTestDb() (replica set) start slower than this and
+  // pass their own longer timeout to beforeAll rather than inflating it here.
   testTimeout: 30000,
   setupFiles: ['<rootDir>/jest.setup.ts'],
 };

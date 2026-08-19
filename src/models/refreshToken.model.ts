@@ -17,7 +17,10 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
     userId: { type: String },
     vendorId: { type: String },
     userType: { type: String, required: true, enum: ['vendor', 'sub-user'] },
-    expiresAt: { type: Date, required: true, index: true },
+    // No `index: true` here — that built a plain "expiresAt_1" which then made
+    // MongoDB REJECT the TTL index below (same name, different options), so
+    // expired tokens were never actually purged. The TTL index is the intent.
+    expiresAt: { type: Date, required: true },
     isRevoked: { type: Boolean, default: false },
     deviceInfo: { type: String }
   },

@@ -9,10 +9,16 @@ import { TicketService } from '@services/ticket.service';
 import { ScanService } from '@services/scan.service';
 import { AnalyticsService } from '@services/analytics.service';
 import { ExportService } from '@services/export.service';
+import { WalletService } from '@services/wallet.service';
+import { normalizeBandUid } from '@utils/bandUid.util';
+import { Event } from '@models/event.model';
+import { Wallet } from '@models/wallet.model';
+import { Ticket } from '@models/ticket.model';
 import { EventStatus } from '@interfaces/event.interface';
 import {
   loginSchema,
   registerSchema,
+  businessRegisterSchema,
   requestRegistrationOtpSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
@@ -20,16 +26,20 @@ import {
   changePasswordSchema,
   createEventSchema,
   updateEventSchema,
+  cashlessRequestSchema,
   eventQuerySchema,
   sellTicketSchema,
   refundTicketSchema,
   ticketSalesQuerySchema,
   validateTicketSchema,
   checkInTicketSchema,
+  bindBandSchema,
+  reissueBandSchema,
   scanQuerySchema,
   analyticsQuerySchema
 } from '@validators/tickets.validator';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
+import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 export class TicketsController {
   /**
@@ -127,6 +137,23 @@ export class TicketsController {
       ApiResponseUtil.created(res, result, 'Account created. You can start building events now — publishing unlocks once your account is verified.');
     } catch (error: any) {
       console.error('Register error:', error);
+      ApiResponseUtil.error(res, error.message || 'Registration failed', 400);
+    }
+  }
+
+  /**
+   * POST /api/tickets/auth/business/register — create an event SERVICE business
+   * (operatorType 'services'): sells no tickets, appears in the Services
+   * directory once verified. OTP-gated (reuses /auth/register/request-otp).
+   */
+  static async registerBusiness(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = businessRegisterSchema.validate(req.body);
+      if (error) { ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400); return; }
+      const result = await TicketsAuthService.registerBusiness(value);
+      ApiResponseUtil.created(res, result, 'Business account created. Your profile goes live once verified.');
+    } catch (error: any) {
+      console.error('Business register error:', error);
       ApiResponseUtil.error(res, error.message || 'Registration failed', 400);
     }
   }
@@ -390,10 +417,20 @@ export class TicketsController {
         return;
       }
 
+      // Pulled OUT of the spread on purpose: `...value` lands after vendorId,
+      // so leaving a client-supplied vendorId in it would overwrite the one
+      // from the token and let any organizer read another's catalogue. It goes
+      // to filterVendorId instead, which only narrows a super-admin's view.
+      const { vendorId: requestedVendorId, ...eventQuery } = value;
+
       const result = await EventService.getEvents({
         vendorId: ticketsUser.vendorId as string,
-        ...value,
-        isSuperAdmin: ticketsUser.isSuperAdmin || false
+        ...eventQuery,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        ...(requestedVendorId ? { filterVendorId: requestedVendorId } : {}),
+        // Narrows the event picker (and every other list) to what a restricted
+        // operator is actually allowed to work.
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       ApiResponseUtil.success(res, result);
@@ -462,13 +499,41 @@ export class TicketsController {
 
       const event = await EventService.createEvent({
         vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         ...value
       });
 
       ApiResponseUtil.created(res, event, 'Event created successfully');
     } catch (error: any) {
-      console.error('Create event error:', error);
-      ApiResponseUtil.error(res, error.message || 'Failed to create event');
+      // Preserve the cashless gate's 403; anything else stays a generic failure.
+      return failWithHttpError(res, error, 'Failed to create event');
+    }
+  }
+
+  /**
+   * Events: Organizer asks Carrot to enable cashless on their event.
+   * POST /api/tickets/events/:eventId/cashless-request
+   */
+  static async requestCashless(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const { error, value } = cashlessRequestSchema.validate(req.body ?? {});
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const event = await EventService.requestCashless(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        value.note
+      );
+
+      ApiResponseUtil.success(res, event, 'Cashless requested — Carrot will be in touch');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to request cashless');
     }
   }
 
@@ -741,6 +806,11 @@ export class TicketsController {
         return;
       }
 
+      if (!(await operatorMayActOnEvent(req, value.eventId))) {
+        ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+        return;
+      }
+
       const result = await TicketService.sellTickets({
         vendorId: ticketsUser.vendorId as string,
         soldBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
@@ -860,6 +930,7 @@ export class TicketsController {
         scannedByType,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
         expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       if (result.valid) {
@@ -887,19 +958,66 @@ export class TicketsController {
         return;
       }
 
+      // Resolve a tapped band's uid to a ticket BEFORE handing off to
+      // ScanService.checkInTicket — the QR/ticketId path below is otherwise
+      // completely unchanged. `findTicketByCode` (used inside checkInTicket)
+      // only matches Ticket.ticketId (the short code), never `_id`, but
+      // Wallet.ticketId stores the Ticket's `_id` — so the ticket must be
+      // loaded by `_id` here first and its short code passed through.
+      let ticketId = value.ticketId;
+      if (value.bandUid) {
+        const eventId = value.expectedEventId;
+        if (!eventId) {
+          return ApiResponseUtil.error(res, 'expectedEventId is required for band check-in', 400);
+        }
+
+        const event = await Event.findById(eventId).lean();
+        if (!event) {
+          return ApiResponseUtil.error(res, 'Event not found', 404);
+        }
+        if (!event.cashless) {
+          return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+        }
+        // Vendor-ownership guard BEFORE any band/wallet lookup: an operator may
+        // only resolve bands at their OWN event. ScanService.checkInTicket also
+        // enforces the vendor check, but doing it here first closes a
+        // cross-tenant existence leak (whether a uid is bound at another vendor's
+        // event). Mirrors ScanService.bindBandToTicket's vendor check.
+        if (!ticketsUser.isSuperAdmin && String(event.vendorId) !== ticketsUser.vendorId) {
+          return ApiResponseUtil.error(res, 'Event belongs to a different vendor', 403);
+        }
+        // Same assignment guard as the QR path, applied before any band/wallet
+        // lookup so a restricted operator cannot probe bands at another show.
+        if (!(await operatorMayActOnEvent(req, String(eventId)))) {
+          return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+        }
+
+        const wallet = await Wallet.findOne({ eventId, bandUid: normalizeBandUid(value.bandUid) });
+        if (!wallet) {
+          return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 400);
+        }
+
+        const ticket = await Ticket.findById(wallet.ticketId);
+        if (!ticket) {
+          return ApiResponseUtil.error(res, 'Ticket not found for that wallet', 400);
+        }
+        ticketId = ticket.ticketId;
+      }
+
       const scannedByType =
         ticketsUser.userType === 'vendor' ? 'vendor'
         : ticketsUser.userType === 'gate-operator' ? 'gate-operator'
         : 'sub-user';
 
       const result = await ScanService.checkInTicket({
-        ticketId: value.ticketId,
+        ticketId,
         vendorId: ticketsUser.vendorId as string,
         scannedBy: (ticketsUser.userId || ticketsUser.vendorId) as string,
         scannedByType,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
         notes: value.notes,
-        expectedEventId: value.expectedEventId
+        expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       if (result.valid) {
@@ -910,6 +1028,119 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Check-in ticket error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to check in ticket');
+    }
+  }
+
+  /**
+   * Scans: Bind a blank NFC band to a scanned ticket's cashless wallet
+   * (cashless spec §5.1). Independent of turnstile check-in — does NOT flip
+   * the ticket's entry-scan status, so a dedicated band desk can bind without
+   * tripping an "already checked in" error.
+   */
+  static async bindBand(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = bindBandSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.bindBandToTicket({
+        ticketId: value.ticketId,
+        bandUid: value.bandUid,
+        vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
+        boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Bind band error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to bind band', 400);
+    }
+  }
+
+  /**
+   * Scans: Reissue a lost band for a ticket's cashless wallet (cashless spec
+   * §5.1) — unbinds the old uid and binds a new one on the same wallet, so the
+   * balance is preserved. Mirrors bindBand's vendor ownership + event-lock
+   * enforcement exactly.
+   */
+  static async reissueBand(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      // Validate input
+      const { error, value } = reissueBandSchema.validate(req.body);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const result = await ScanService.reissueBandForTicket({
+        ticketId: value.ticketId,
+        newBandUid: value.newBandUid,
+        reason: value.reason,
+        vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        expectedEventId: value.expectedEventId,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
+        boundBy: (ticketsUser.userId || ticketsUser.vendorId) as string
+      });
+
+      ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      console.error('Reissue band error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to reissue band', 400);
+    }
+  }
+
+  /**
+   * Gate: Look up a tapped band's cashless wallet (cashless spec §5.1/§5.3) —
+   * balance, cash-funded portion, status, and recent top-up history. Read-only,
+   * gated by the same SCAN_TICKETS permission as the rest of the gate flow.
+   * eventId is required (a band uid is only unique per event) and must be a
+   * 24-hex ObjectId; anything else is a 400, not a 500.
+   */
+  static async walletByBand(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const uid = normalizeBandUid(req.params.uid as string);
+      const eventId = String(req.query.eventId || '');
+      if (!/^[0-9a-fA-F]{24}$/.test(eventId)) {
+        return ApiResponseUtil.error(res, 'eventId is required', 400);
+      }
+
+      // Vendor-ownership guard: an operator may only read bands at their OWN
+      // event. Mirrors ScanService.bindBandToTicket's vendor check. Without this,
+      // any operator with SCAN_TICKETS could read another vendor's attendees'
+      // wallet balances by guessing a band uid + event id. 403 (not 404) so the
+      // rejection is honest rather than leaking existence.
+      const event = await Event.findById(eventId).lean();
+      if (!event) {
+        return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 404);
+      }
+      if (!(await operatorMayActOnEvent(req, eventId))) {
+        return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+      }
+      if (!ticketsUser.isSuperAdmin && String(event.vendorId) !== ticketsUser.vendorId) {
+        return ApiResponseUtil.forbidden(res, 'This event belongs to a different vendor');
+      }
+
+      const view = await WalletService.getWalletViewByBand(uid, eventId);
+      if (!view) {
+        return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 404);
+      }
+
+      return ApiResponseUtil.success(res, view);
+    } catch (error: any) {
+      console.error('Wallet by band error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Lookup failed', 500);
     }
   }
 
@@ -930,7 +1161,8 @@ export class TicketsController {
       const result = await ScanService.getScans({
         vendorId: ticketsUser.vendorId as string,
         isSuperAdmin: ticketsUser.isSuperAdmin || false,
-        ...value
+        ...value,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       ApiResponseUtil.success(res, result);
@@ -959,7 +1191,8 @@ export class TicketsController {
         eventId: value.eventId,
         startDate: value.startDate,
         endDate: value.endDate,
-        isSuperAdmin: ticketsUser.isSuperAdmin || false
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
+        allowedEventIds: (await resolveOperatorEventScope(req)) ?? undefined,
       });
 
       ApiResponseUtil.success(res, stats);

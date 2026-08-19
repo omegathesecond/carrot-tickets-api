@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
+import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import {
   authenticateTickets,
   requireTicketsPermission,
@@ -11,8 +12,17 @@ import { avatarUpload, handleMulterError, validateFileUpload } from '@middleware
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
+import { CashierAdminController } from '@controllers/cashierAdmin.controller';
+import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
+import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAdmin.controller';
+import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
+import { StockAdminController } from '@controllers/stockAdmin.controller';
+import { StockReportController } from '@controllers/stockReport.controller';
+import { TagReportController } from '@controllers/tagReport.controller';
+import { TagAdminController } from '@controllers/tagAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
+import { AdminServiceCategoriesController } from '@controllers/adminServiceCategories.controller';
 import { AdminFeesController } from '@controllers/adminFees.controller';
 import { WristbandController } from '@controllers/wristband.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
@@ -21,6 +31,7 @@ import { AnnouncementController } from '@controllers/announcement.controller';
 import { ChannelAdminController } from '@controllers/channelAdmin.controller';
 import { ModerationController } from '@controllers/moderation.controller';
 import { ReportController } from '@controllers/report.controller';
+import { EnquiryController } from '@controllers/enquiry.controller';
 import { UpdateController } from '@controllers/update.controller';
 
 const router = Router();
@@ -33,6 +44,8 @@ router.post('/auth/login', TicketsController.login);
 // Self-service organizer signup (public): request a code, then verify + create.
 router.post('/auth/register/request-otp', TicketsController.requestRegistrationOtp);
 router.post('/auth/register', TicketsController.register);
+// Self-service SERVICES business signup (public): reuses the same request-otp step.
+router.post('/auth/business/register', TicketsController.registerBusiness);
 // Self-service organizer password reset (public): request a code, then verify + set.
 router.post('/auth/forgot-password', TicketsController.forgotPassword);
 router.post('/auth/reset-password', TicketsController.resetPassword);
@@ -78,6 +91,16 @@ router.get(
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
 router.post('/admin/organizers', requireSuperAdmin, AdminOrganizersController.createOrganizer);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
+
+/**
+ * Service-categories admin — the DB-driven category manager behind the
+ * dashboard's "Service Categories" panel. Super-admin only, mirroring
+ * /admin/organizers. Backs GET /api/public/service-categories and
+ * ServiceCategoryService.isValidActive (checked at SERVICES signup).
+ */
+router.get('/admin/service-categories', requireSuperAdmin, AdminServiceCategoriesController.list);
+router.post('/admin/service-categories', requireSuperAdmin, AdminServiceCategoriesController.create);
+router.patch('/admin/service-categories/:id', requireSuperAdmin, AdminServiceCategoriesController.update);
 
 // Fees — per-event booking charges Carrot has collected (super-admin only)
 router.get('/admin/fees', requireSuperAdmin, AdminFeesController.getFees);
@@ -153,6 +176,15 @@ router.get('/my-tickets', TicketsController.getMyTickets);
 router.post('/purchase', TicketsController.purchaseAsUser);
 
 /**
+ * Shareable ticket PDF — lazily generated and cached in R2.
+ * Accepts the ticket code (TKT-…) or Mongo _id. Authorised either by the
+ * requester's phone matching the ticket (user-app via proxy) or by vendor
+ * ownership / super-admin (dashboard). The `/pdf` suffix keeps this clear of
+ * the vendor-scoped `/events/:eventId` and other routes above.
+ */
+router.get('/:ticketId/pdf', TicketPdfController.getTicketPdf);
+
+/**
  * User Account Settings Routes
  */
 router.put('/users/profile', TicketsController.updateProfile);
@@ -214,6 +246,14 @@ router.put(
   '/events/:eventId',
   requireTicketsPermission(TicketsPermission.EDIT_EVENT),
   TicketsController.updateEvent
+);
+
+// An organizer cannot flip `cashless` themselves (EventService.updateEvent
+// gates it to admins) — this is how they ask for it.
+router.post(
+  '/events/:eventId/cashless-request',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  TicketsController.requestCashless
 );
 
 router.delete(
@@ -411,6 +451,29 @@ router.post(
   TicketsController.checkInTicket
 );
 
+router.post(
+  '/scans/bind-band',
+  requireTicketsPermission(TicketsPermission.ISSUE_TAGS),
+  TicketsController.bindBand
+);
+
+router.post(
+  '/scans/reissue-band',
+  requireTicketsPermission(TicketsPermission.ISSUE_TAGS),
+  TicketsController.reissueBand
+);
+
+/**
+ * Gate-side cashless wallet lookup (cashless spec §5.1/§5.3) — tap a band, see
+ * its wallet balance + recent history. Same SCAN_TICKETS gate as the rest of
+ * the gate flow above.
+ */
+router.get(
+  '/wallets/by-band/:uid',
+  requireTicketsPermission(TicketsPermission.SCAN_TICKETS),
+  TicketsController.walletByBand
+);
+
 router.get(
   '/scans/stats',
   requireTicketsPermission(TicketsPermission.VIEW_SCANS),
@@ -478,5 +541,87 @@ router.get('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_
 router.post('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
 router.patch('/gate-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
 router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
+
+/**
+ * Services business enquiry inbox — leads submitted via
+ * POST /api/public/services/:businessId/enquiries.
+ */
+router.get('/services/enquiries', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.list);
+router.patch('/services/enquiries/:id/status', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.setStatus);
+
+/**
+ * Cashier Admin Routes — an organizer creates/deactivates the in-venue money
+ * desk staff who top up + cash out attendee wallets. Same MANAGE_ACCESS gate +
+ * organizer-scoping as gate operators; a cashier is NOT a reseller.
+ */
+router.get('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.list);
+router.post('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.create);
+router.get('/cashiers/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.transactions);
+router.patch('/cashiers/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.update);
+router.post('/cashiers/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.resetPin);
+
+/**
+ * Vendor (in-event merchant) Admin Routes — an organizer sets up the stalls
+ * that charge bands at their cashless event, each with a commission cut. A
+ * merchant is scoped to ONE event; ownership of that event is enforced in the
+ * controller. Same MANAGE_ACCESS gate as gate operators + cashiers.
+ */
+router.get('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.list);
+router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
+router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
+router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
+
+/**
+ * The people on a stall's till. Same MANAGE_ACCESS gate as the stall itself.
+ */
+router.get('/merchants/:merchantId/operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.list);
+router.post('/merchants/:merchantId/operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.create);
+router.patch('/merchant-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.update);
+router.post('/merchant-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.resetPin);
+
+/**
+ * Organizer Cashless Reporting — the "you're in charge" view of one event:
+ * circulated / spent / withdrawn / left-behind, per-vendor takings, per-cashier
+ * activity, and the full transaction log. Money data → VIEW_REVENUE; ownership
+ * (own event only) is enforced in the controller.
+ */
+router.get('/events/:eventId/cashless/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.summary);
+router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.transactions);
+
+/**
+ * Cashless Stock Reporting (design 2026-08-13, Slice 4) — organiser read-only
+ * views over the stock journal: live board, reconciliation, event dashboard,
+ * movements audit. Stock figures are revenue-adjacent → VIEW_REVENUE; ownership
+ * (own cashless event only) enforced by the shared guard in the controller.
+ */
+/**
+ * Tag management — the wallets behind the NFC tags at a cashless event.
+ * ORDER MATTERS: the literal /tags/summary must stay above /tags/:walletId,
+ * or Express matches "summary" as a wallet id.
+ */
+router.get('/events/:eventId/tags/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.summary);
+router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.list);
+router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
+router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);
+router.post('/events/:eventId/tags/:walletId/reissue', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.reissue);
+router.post('/events/:eventId/tags/:walletId/refund', requireTicketsPermission(TicketsPermission.REFUND_TICKET), TagAdminController.refund);
+
+router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
+router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
+router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
+router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.movements);
+
+/**
+ * Cashless Stock/Inventory — organiser manages the product catalogue and
+ * loads per-bar stock (design 2026-08-12, Slice 1). MANAGE_STOCK gate +
+ * event-ownership enforced in the controller.
+ */
+router.post('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.createProduct);
+router.get('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listProducts);
+router.patch('/products/:id', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.updateProduct);
+router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.receiveStock);
+router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setThreshold);
+router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.transferStock);
+router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.recordCount);
 
 export default router;

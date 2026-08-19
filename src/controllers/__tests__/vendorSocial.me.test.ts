@@ -5,6 +5,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helper
 import { TicketsPermission, TicketsRole, TICKETS_ROLE_PERMISSIONS } from '@interfaces/ticketsPermission.interface';
 import vendorSocialRoutes from '@routes/vendorSocial.route';
 import { Vendor } from '@models/vendor.model';
+import { OperatorType } from '@interfaces/vendor.interface';
 
 const SECRET = process.env['JWT_SECRET'] || 'test-secret-key';
 
@@ -123,5 +124,27 @@ describe('GET /api/tickets/social/me — canEditBrand', () => {
       logoUrl: null,
       canEditBrand: false,
     });
+  });
+});
+
+/**
+ * The consumer website signs a service business in as a vendor session and
+ * needs to route it to its business profile instead of the events dashboard.
+ * That routing decision happens in the website's SessionContext, which reads
+ * operatorType straight off this endpoint's response — so it must be present
+ * here, not just on internal-only vendor reads. See task C4a.
+ */
+describe('GET /api/tickets/social/me — operatorType', () => {
+  it("includes the vendor's operatorType alongside the brand identity", async () => {
+    const vendor = await Vendor.findById(vendorId);
+    expect(vendor?.operatorType).toBe(OperatorType.EVENTS); // schema default, not set explicitly in beforeEach
+
+    const res = await request(app)
+      .get('/api/tickets/social/me')
+      .set('Authorization', `Bearer ${tokenFor(TicketsRole.OWNER, TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER])}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.operatorType).toBe(vendor?.operatorType);
+    expect(res.body.data.operatorType).toBe(OperatorType.EVENTS);
   });
 });

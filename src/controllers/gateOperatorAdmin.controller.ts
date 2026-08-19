@@ -2,7 +2,9 @@
 import { NextFunction, Request, Response } from 'express';
 import { GateOperator } from '@models/gateOperator.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
+import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -41,11 +43,16 @@ export class GateOperatorAdminController {
         if (!vendorId) { ApiResponseUtil.forbidden(res, 'No organizer scope on token'); return; }
       }
 
+      // Validated against the operator's OWN vendor, so a super-admin creating
+      // on an organizer's behalf still cannot reach past that organizer.
+      const assignment = await validateEventAssignment(req.body.eventIds ?? [], vendorId);
+      if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+
       const loginCode = await generateUniqueLoginCode();
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
-      const operator = await GateOperator.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, loginCode, pin });
+      const operator = await GateOperator.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventIds: assignment.eventIds, loginCode, pin, grants: sanitizeGrants(req.body.grants) });
       ApiResponseUtil.created(res, { operator, loginCode, pin });
     } catch (err) { next(err); }
   }
@@ -71,6 +78,15 @@ export class GateOperatorAdminController {
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       if ('fullName' in req.body) operator.fullName = req.body.fullName;
       if ('isActive' in req.body) operator.isActive = !!req.body.isActive;
+      // Unknown values are dropped rather than rejected: the list is a set of
+      // capabilities, and a client sending one this version doesn't know about
+      // must not be able to write it through to the token.
+      if ('grants' in req.body) (operator as any).grants = sanitizeGrants(req.body.grants);
+      if ('eventIds' in req.body) {
+        const assignment = await validateEventAssignment(req.body.eventIds, operator.vendorId?.toString());
+        if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+        operator.eventIds = assignment.eventIds as any;
+      }
       await operator.save();
       ApiResponseUtil.success(res, operator);
     } catch (err) { next(err); }

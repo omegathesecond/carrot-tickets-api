@@ -5,7 +5,7 @@ import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { PaymentStatus } from '@interfaces/ticket.interface';
-import { VerificationStatus } from '@interfaces/vendor.interface';
+import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { createOrganizerSchema } from '@validators/tickets.validator';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
@@ -27,8 +27,10 @@ const verificationSchema = Joi.object({
  */
 export class AdminOrganizersController {
   /**
-   * GET /api/tickets/admin/organizers?search=&status=&page=&limit=
+   * GET /api/tickets/admin/organizers?search=&status=&operatorType=&page=&limit=
    * Paginated organizer list, each with event count + tickets sold + revenue.
+   * operatorType filters to one OperatorType value (events|transport|both|services);
+   * an unrecognized value is ignored rather than erroring.
    */
   static async listOrganizers(req: Request, res: Response): Promise<any> {
     try {
@@ -36,6 +38,7 @@ export class AdminOrganizersController {
       const limit = Math.min(100, Math.max(1, parseInt(String(req.query['limit'] ?? '25'), 10) || 25));
       const search = String(req.query['search'] ?? '').trim();
       const status = String(req.query['status'] ?? '').trim();
+      const operatorType = String(req.query['operatorType'] ?? '').trim();
 
       const filter: Record<string, unknown> = { isSuperAdmin: { $ne: true } };
       if (search) {
@@ -45,13 +48,16 @@ export class AdminOrganizersController {
       if (status && (Object.values(VerificationStatus) as string[]).includes(status)) {
         filter['verificationStatus'] = status;
       }
+      if (operatorType && (Object.values(OperatorType) as string[]).includes(operatorType)) {
+        filter['operatorType'] = operatorType;
+      }
 
       const [vendors, total, statusRows] = await Promise.all([
         Vendor.find(filter)
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
-          .select('businessName email phoneNumber primaryContact businessType verificationStatus verifiedAt rejectionReason isActive createdAt')
+          .select('businessName email phoneNumber primaryContact businessType operatorType serviceCategory verificationStatus verifiedAt rejectionReason isActive createdAt')
           .lean(),
         Vendor.countDocuments(filter),
         // Status breakdown across ALL organizers (ignores search/status filter)
@@ -96,6 +102,8 @@ export class AdminOrganizersController {
           phoneNumber: v.phoneNumber ?? null,
           primaryContact: v.primaryContact ?? null,
           businessType: v.businessType ?? null,
+          operatorType: v.operatorType ?? null,
+          serviceCategory: v.serviceCategory ?? null,
           verificationStatus: v.verificationStatus,
           verifiedAt: v.verifiedAt ?? null,
           rejectionReason: v.rejectionReason ?? null,

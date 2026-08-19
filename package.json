@@ -17,6 +17,10 @@
     "backfill:event-ticketing": "ts-node -r tsconfig-paths/register src/scripts/backfillEventTicketing.ts",
     "backfill:event-category": "ts-node -r tsconfig-paths/register src/scripts/backfillEventCategory.ts",
     "backfill:update-hashtags": "ts-node -r tsconfig-paths/register src/scripts/backfillUpdateHashtags.ts",
+    "migrate:review-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-review-indexes.ts",
+    "migrate:merchant-credentials": "ts-node -r tsconfig-paths/register src/scripts/migrate-merchant-credentials.ts",
+    "cleanup:eventless-cashiers": "ts-node -r tsconfig-paths/register src/scripts/cleanup-eventless-cashiers.ts",
+    "seed:service-categories": "ts-node -r tsconfig-paths/register src/scripts/seed-service-categories.ts",
     "deploy:realtime": "bash scripts/deploy-realtime.sh",
     "migrate:update-media-array": "ts-node -r tsconfig-paths/register scripts/migrate-update-media-array.ts",
     "test:models": "ts-node -r tsconfig-paths/register src/scripts/testModels.ts",
@@ -27,6 +31,7 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "test": "jest",
     "seed:dev": "ts-node -r tsconfig-paths/register src/scripts/seedDevEnvironment.ts",
+    "seed:cashless": "ts-node -r tsconfig-paths/register src/scripts/seedCashlessDemo.ts",
     "yoco:register-webhook": "ts-node -r tsconfig-paths/register src/scripts/yocoRegisterWebhook.ts"
   },
   "keywords": [

@@ -1,6 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { IVendor, VerificationStatus, OperatorType } from '@interfaces/vendor.interface';
+import { STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
 
 const vendorSchema = new Schema<IVendor>({
   // Authentication - Email OR Phone (both optional but at least one required)
@@ -10,7 +11,7 @@ const vendorSchema = new Schema<IVendor>({
     sparse: true,
     lowercase: true,
     trim: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
+    match: [/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, 'Please enter a valid email']
   },
   phoneNumber: {
     type: String,
@@ -62,6 +63,34 @@ const vendorSchema = new Schema<IVendor>({
     trim: true,
     maxlength: [500, 'Bio cannot exceed 500 characters']
   },
+
+  // Service business (operatorType 'services') — the vertical of the supplier.
+  // A plain validated string, NOT a Mongoose enum: categories are now DB-driven
+  // (see ServiceCategory model / ServiceCategoryService), so the set of valid
+  // values can change without a code deploy. Membership in the active category
+  // set is checked at signup by ServiceCategoryService.isValidActive
+  // (TicketsAuthService.registerBusiness), not enforced here at the schema level.
+  serviceCategory: {
+    type: String,
+    trim: true,
+    required: [
+      function (this: IVendor) { return this.operatorType === OperatorType.SERVICES; },
+      'A service category is required for service businesses',
+    ],
+    index: true,
+  },
+  startingPrice: {
+    type: new Schema(
+      { amountCents: {
+          type: Number, min: 0, required: true,
+          validate: { validator: Number.isInteger, message: 'amountCents must be a whole number of cents' },
+        },
+        unit: { type: String, enum: STARTING_PRICE_UNITS, default: 'day' } },
+      { _id: false },
+    ),
+    required: false,
+  },
+
   primaryContact: {
     type: String,
     trim: true,
@@ -224,11 +253,18 @@ vendorSchema.methods.comparePassword = async function(this: IVendor, candidatePa
 };
 
 // Indexes
-vendorSchema.index({ email: 1 });
-vendorSchema.index({ phoneNumber: 1 });
-vendorSchema.index({ slug: 1 });
+// NOTE: email / phoneNumber / slug / keshlessVendorId declare their own
+// single-field indexes on the field (unique + sparse / unique + index / sparse
+// + index). Re-declaring them here produced a second "<field>_1" WITHOUT those
+// options, which MongoDB rejects — silently, since Mongoose builds indexes in
+// the background. Only compound indexes belong here.
 vendorSchema.index({ isActive: 1, isVerified: 1 });
-vendorSchema.index({ keshlessVendorId: 1 });
+// NOTE: keshlessVendorId is intentionally NOT re-declared here — the field
+// (above) already declares its own sparse single-field index. Re-declaring it
+// produced a second, non-sparse "keshlessVendorId_1" that MongoDB rejects as a
+// name/options conflict (it silently blocked index builds in prod and broke the
+// whole test suite's shared DB setup). Carrot no longer depends on Keshless, so
+// this link field is legacy; the field-level sparse index is all lookups need.
 // Sparse by nature: a 2dsphere index only covers docs that actually have the
 // geo field, so brands that never opted into location sharing are excluded.
 vendorSchema.index({ location: '2dsphere' });

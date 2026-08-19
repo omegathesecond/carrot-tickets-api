@@ -34,6 +34,15 @@ export enum TicketsPermission {
   // Access Management
   MANAGE_ACCESS = 'tickets:manage_access',
 
+  // Cashless stock/inventory management — organiser manages the product
+  // catalogue, per-bar stock, transfers and counts. Events-vertical (a bus
+  // operator has no bar stock), so it lives in EVENT_PERMISSIONS below.
+  MANAGE_STOCK = 'tickets:manage_stock',
+  // Bind a blank tag to an attendee's ticket at the tag desk. Granted per
+  // operator (see OperatorGrant), never part of a role's default set — issuing
+  // tags is a distinct job from scanning people in.
+  ISSUE_TAGS = 'tickets:issue_tags',
+
   // Platform User Management (Carrot admins/team only) — see the platform-wide
   // list of registered buyers + signup analytics. Super-admins pass via
   // middleware; everyone else needs this assigned explicitly. NEVER part of any
@@ -58,7 +67,11 @@ export enum TicketsPermission {
   // both groups is what makes scopePermissionsToType never strip it,
   // regardless of OperatorType. Granted only to brand-owner roles
   // (OWNER/MANAGER) — SALES/SCANNER must not overwrite brand identity.
-  EDIT_BRAND = 'tickets:edit_brand'
+  EDIT_BRAND = 'tickets:edit_brand',
+
+  // Service-business leads — a services vendor reads/updates its own enquiry
+  // inbox. Vertical (SERVICES) so scoping strips it from events/transport.
+  MANAGE_ENQUIRIES = 'tickets:manage_enquiries'
 }
 
 export enum TicketsRole {
@@ -94,6 +107,7 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
     TicketsPermission.MANAGE_TRANSPORT,
     TicketsPermission.VIEW_REVENUE,
     TicketsPermission.EXPORT_REPORTS,
+    TicketsPermission.MANAGE_STOCK,
     TicketsPermission.EDIT_BRAND
   ],
 
@@ -127,6 +141,10 @@ export const TRANSPORT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.MANAGE_TRANSPORT,
 ];
 
+export const SERVICES_PERMISSIONS: TicketsPermission[] = [
+  TicketsPermission.MANAGE_ENQUIRIES,
+];
+
 // Cross-cutting — granted to every type. Empty in v1 (no cross-vertical
 // dashboard surface exists yet; analytics/sales/refund views are event-shaped).
 export const SHARED_PERMISSIONS: TicketsPermission[] = [];
@@ -146,6 +164,8 @@ export const EVENT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.VIEW_REVENUE,
   TicketsPermission.EXPORT_REPORTS,
   TicketsPermission.MANAGE_ACCESS,
+  TicketsPermission.MANAGE_STOCK,
+  TicketsPermission.ISSUE_TAGS,
 ];
 
 export interface TicketsUserToken {

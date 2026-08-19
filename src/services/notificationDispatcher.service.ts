@@ -18,6 +18,16 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   follow: 'social',
   meetup_request: 'social',
   meetup_accepted: 'social',
+  // Enquiries also bypass this buyer dispatcher — the recipient is the vendor
+  // inbox (EnquiryService.create writes via NotificationService.create
+  // directly), so this entry exists only for Record<NotificationType,…>
+  // exhaustiveness.
+  enquiry_received: 'social',
+  // Vendor low-stock alerts bypass this buyer dispatcher entirely (written
+  // directly via NotificationService.create — see cashless stock Slice 3
+  // Task 1); 'social' is the closest existing pref bucket, kept only for
+  // Record<NotificationType,…> exhaustiveness.
+  low_stock: 'social',
 };
 
 const CHUNK = 50;

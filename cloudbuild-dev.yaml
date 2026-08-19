@@ -1,0 +1,31 @@
+steps:
+  - id: Build
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_IMAGE}', '.', '-f', 'Dockerfile']
+  - id: Push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '${_IMAGE}']
+  - id: Deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - carrot-tickets-api-dev
+      - --platform=managed
+      - --image=${_IMAGE}
+      - --region=europe-west1
+      - --quiet
+substitutions:
+  # Defaults to 'latest', not ${COMMIT_SHA}: COMMIT_SHA is only populated when
+  # Cloud Build is triggered from a connected GitHub push. A local
+  # `gcloud builds submit` (how dev is actually deployed today — there is no
+  # trigger) leaves ${COMMIT_SHA} empty, producing an invalid image reference
+  # ("...carrot-tickets-api-dev:") that fails at the Build step. Pass
+  # --substitutions=_IMAGE=... explicitly for a traceable tag; this default
+  # just keeps an untagged local run from failing outright.
+  _IMAGE: europe-west1-docker.pkg.dev/contracts-470406/cloud-run-source-deploy/carrot-tickets-api/carrot-tickets-api-dev:latest
+images: ['${_IMAGE}']
+options:
+  logging: CLOUD_LOGGING_ONLY

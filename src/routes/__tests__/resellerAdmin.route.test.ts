@@ -31,7 +31,7 @@ it('issues an operator with a login code + PIN', async () => {
     .set('Authorization', `Bearer ${superAdminToken}`)
     .send({ fullName: 'New Till', role: 'reseller_operator' });
   expect(res.status).toBe(201);
-  expect(res.body.data.loginCode).toMatch(/^\d{6}$/);
+  expect(res.body.data.loginCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/);
   expect(res.body.data.pin).toMatch(/^\d{6}$/);
   expect(res.body.data.operator.pin).toBeUndefined();
 });

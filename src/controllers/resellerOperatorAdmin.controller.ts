@@ -3,6 +3,7 @@ import { ResellerOperator } from '@models/resellerOperator.model';
 import { ResellerHub } from '@models/resellerHub.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { validateEventAssignment } from '@services/operatorEventScope.service';
 
 const ROLE_RANK: Record<string, number> = {
   reseller_operator: 0,
@@ -59,6 +60,11 @@ export class ResellerOperatorAdminController {
         return;
       }
 
+      // No vendor to check against: a reseller sells events platform-wide
+      // rather than one organizer's catalogue, so only existence is validated.
+      const assignment = await validateEventAssignment(req.body.eventIds ?? [], undefined);
+      if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+
       const loginCode = await generateUniqueLoginCode();
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
@@ -70,6 +76,7 @@ export class ResellerOperatorAdminController {
         role: requestedRole,
         hubId: hub._id,
         resellerId: hub.resellerId,
+        eventIds: assignment.eventIds,
         loginCode,
         pin,
       });
@@ -130,6 +137,11 @@ export class ResellerOperatorAdminController {
           return;
         }
         operator.role = req.body.role;
+      }
+      if ('eventIds' in req.body) {
+        const assignment = await validateEventAssignment(req.body.eventIds, undefined);
+        if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+        operator.eventIds = assignment.eventIds as any;
       }
       await operator.save();
       ApiResponseUtil.success(res, operator);

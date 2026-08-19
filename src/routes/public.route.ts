@@ -4,10 +4,14 @@ import { BuyerProfileController } from '@controllers/buyerProfile.controller';
 import { ReviewController } from '@controllers/review.controller';
 import { EventReactionController } from '@controllers/eventReaction.controller';
 import { OrganizerProfileController } from '@controllers/organizerProfile.controller';
+import { ServicesController } from '@controllers/services.controller';
+import { ServiceCategoryController } from '@controllers/serviceCategory.controller';
+import { EnquiryController } from '@controllers/enquiry.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
-import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { TicketPdfController } from '@controllers/ticketPdf.controller';
+import { authenticateBuyer, authenticateBuyerOrOrganizer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 import { CommunityEventSubmitController } from '@controllers/communityEventSubmit.controller';
@@ -204,6 +208,63 @@ router.post('/events/:eventId/share', optionalTicketsAuth, EventReactionControll
 router.get('/organizers/:vendorId', OrganizerProfileController.publicProfile);
 
 /**
+ * @route   GET /api/public/service-categories
+ * @desc    Active, DB-driven service-business categories (sound hire,
+ *          catering, decor, ...), sorted by admin order then label. Powers
+ *          the SERVICES signup form's category picker and the /services
+ *          directory's category filter chip list.
+ * @access  Public
+ */
+router.get('/service-categories', ServiceCategoryController.listActive);
+
+/**
+ * @route   GET /api/public/services
+ * @desc    Services directory — verified SERVICES-operatorType vendors as
+ *          cards, newest first. Query: category, search, before (cursor id),
+ *          limit (default 24, max 50).
+ * @access  Public
+ */
+router.get('/services', ServicesController.directory);
+
+/**
+ * @route   GET /api/public/services/:businessId
+ * @desc    Single services business profile. 404 for anything not a
+ *          verified SERVICES vendor. Registered AFTER the static
+ *          '/services' route above — order matters in Express.
+ * @access  Public
+ */
+router.get('/services/:businessId', ServicesController.profile);
+
+/**
+ * @route   POST /api/public/services/:businessId/enquiries
+ * @desc    Submit a lead/enquiry to a verified SERVICES business. Also
+ *          establishes proof-of-contact (unlocks a review later — Task E2).
+ * @access  Buyer (Bearer buyer token)
+ * @body    message (required, max 1000), eventDate?, eventType?, contactPhone?, contactEmail?
+ */
+router.post('/services/:businessId/enquiries', authenticateBuyer, EnquiryController.create);
+
+/**
+ * @route   GET /api/public/services/:businessId/reviews
+ * @desc    Paginated review list for a services business (eventId absent —
+ *          disjoint from GET /events/:eventId/reviews).
+ * @access  Public
+ * @query   before, limit
+ */
+router.get('/services/:businessId/reviews', ServicesController.listReviews);
+
+/**
+ * @route   POST /api/public/services/:businessId/reviews
+ * @desc    Submit a review of a services business. A BUYER is gated on
+ *          proof-of-contact (must have enquired — 403 otherwise); a signed-in
+ *          ORGANIZER (vendor) may review any business freely EXCEPT its own.
+ *          One review per reviewer per business.
+ * @access  Buyer OR organizer (Bearer token)
+ * @body    rating (1-5), text?
+ */
+router.post('/services/:businessId/reviews', authenticateBuyerOrOrganizer, ServicesController.submitReview);
+
+/**
  * @route   POST /api/public/purchase
  * @desc    Buy tickets using a Keshless card. The buyer must first prove
  *          ownership of their phone via the OTP login below — the ticket is
@@ -370,5 +431,14 @@ router.get('/purchase/deltapay/latest/status', authenticateBuyer, PublicControll
  * @access  Buyer (Bearer buyer token)
  */
 router.get('/purchase/deltapay/:sessionId/status', authenticateBuyer, PublicController.getDeltapayStatus);
+
+/**
+ * @route   GET /api/public/tickets/:ticketId/pdf
+ * @desc    Shareable ticket PDF (lazily generated, cached in R2). Same
+ *          generator + R2 object the user-app uses — authorised by the buyer's
+ *          verified phone matching the ticket.
+ * @access  Buyer
+ */
+router.get('/tickets/:ticketId/pdf', authenticateBuyer, TicketPdfController.getTicketPdf);
 
 export default router;

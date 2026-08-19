@@ -8,6 +8,7 @@ import type { EventCategory } from '@/constants/eventCategories';
 import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
 import { HttpError } from '@utils/httpError.util';
+import { LedgerEntry } from '@models/ledgerEntry.model';
 
 export interface CreateEventParams {
   vendorId?: string;
@@ -20,6 +21,8 @@ export interface CreateEventParams {
   startTime: Date;
   endTime: Date;
   isMultiDay?: boolean;
+  cashless?: boolean; // NFC tap-and-go wallet/POS toggle (cashless spec §11); defaults to false via the model
+  isSuperAdmin?: boolean; // only an admin may create an event already marked cashless
   capacity?: number; // optional — derived from ticket-type quantities server-side
   ticketTypes?: Array<{
     name: string;
@@ -43,6 +46,7 @@ export interface UpdateEventParams {
   startTime?: Date;
   endTime?: Date;
   isMultiDay?: boolean;
+  cashless?: boolean; // NFC tap-and-go wallet/POS toggle (cashless spec §11)
   capacity?: number;
   ticketTypes?: Array<{
     name: string;
@@ -67,6 +71,18 @@ export interface GetEventsQuery {
   page?: number;
   limit?: number;
   isSuperAdmin?: boolean;
+  /**
+   * When set, only these events are listed — an operator's back-office
+   * assignment. Unset means unrestricted, which is every caller who is not a
+   * restricted operator.
+   */
+  allowedEventIds?: string[];
+  /**
+   * Narrows a super-admin's platform-wide view to one organizer. Ignored for
+   * everyone else — their own vendorId already scopes the query, so this can
+   * never widen access.
+   */
+  filterVendorId?: string;
 }
 
 export function computeAvailable(t: { quantity: number; sold: number; reserved?: number }): number {
@@ -79,6 +95,11 @@ export class EventService {
    */
   static async createEvent(params: CreateEventParams): Promise<IEvent> {
     try {
+      // Cashless is an admin switch (see updateEvent) — an organizer creating
+      // an event cannot hand themselves bands, a float and a settlement run.
+      if (params.cashless === true && !params.isSuperAdmin) {
+        throw new HttpError(403, 'Only an administrator can enable cashless for an event');
+      }
       // Create event
       const event = new Event({
         vendorId: params.vendorId,
@@ -90,6 +111,7 @@ export class EventService {
         startTime: params.startTime,
         endTime: params.endTime,
         isMultiDay: params.isMultiDay,
+        cashless: params.cashless,
         capacity: params.capacity,
         category: params.category ?? 'Other',
         ticketing: params.ticketing ?? 'carrot',
@@ -115,6 +137,7 @@ export class EventService {
       await event.save();
       return event;
     } catch (error: any) {
+      if (error instanceof HttpError) throw error;
       console.error('Event creation error:', error);
       throw new Error(error.message || 'Failed to create event');
     }
@@ -133,13 +156,23 @@ export class EventService {
         search,
         page = 1,
         limit = 20,
-        isSuperAdmin = false
+        isSuperAdmin = false,
+        allowedEventIds,
+        filterVendorId
       } = query;
 
       // Build query - skip vendorId filter for superadmin
       const filter: any = {};
       if (!isSuperAdmin) {
         filter.vendorId = vendorId;
+      } else if (filterVendorId) {
+        filter.vendorId = filterVendorId;
+      }
+
+      // An operator's event assignment narrows the list even for a
+      // platform-scoped one, so it is applied outside the isSuperAdmin branch.
+      if (allowedEventIds?.length) {
+        filter._id = { $in: allowedEventIds };
       }
 
       if (status) {
@@ -319,6 +352,26 @@ export class EventService {
         }
       }
 
+      // `cashless` is not an ordinary setting. Turning it ON commits Carrot to
+      // bands, handhelds, a float and a settlement run, so only an admin may do
+      // it — and unlike the core-info lock above, that holds at EVERY status,
+      // draft included. Turning it OFF is barred for everyone once money has
+      // moved: wallets, merchants and stock outlive the flag, so unsetting it
+      // would strand funded bands behind "Event is not cashless" while the
+      // ledger still owes them. Compared against the stored value so an edit
+      // form echoing back the current value is not read as a switch.
+      if (updates.cashless !== undefined && updates.cashless !== event.cashless) {
+        if (!isSuperAdmin) {
+          throw new HttpError(403, "Only an administrator can change an event's cashless setting");
+        }
+        if (updates.cashless === false && (await LedgerEntry.exists({ eventId: event._id }))) {
+          throw new HttpError(
+            409,
+            'Cashless cannot be switched off — money has already moved on this event',
+          );
+        }
+      }
+
       // Update fields
       if (updates.name) event.name = updates.name;
       if (updates.description !== undefined) event.description = updates.description;
@@ -328,6 +381,18 @@ export class EventService {
       if (updates.endTime) event.endTime = updates.endTime;
       if (updates.isMultiDay !== undefined) event.isMultiDay = updates.isMultiDay;
       if (updates.capacity) event.capacity = updates.capacity;
+      // Boolean toggle — !== undefined so `cashless: false` actually unsets
+      // it (a truthy check would silently ignore false, same trap as
+      // isMultiDay not being threaded here at all).
+      if (updates.cashless !== undefined) {
+        event.cashless = updates.cashless;
+        // Granted — the standing request has been answered.
+        if (updates.cashless === true) {
+          event.cashlessRequestedAt = null;
+          event.cashlessRequestedBy = undefined;
+          event.cashlessRequestNote = null;
+        }
+      }
       if (updates.category) event.category = updates.category;
       if (updates.ticketing) event.ticketing = updates.ticketing;
       if (updates.externalTicketUrl !== undefined) event.externalTicketUrl = updates.externalTicketUrl;
@@ -365,6 +430,36 @@ export class EventService {
       console.error('Update event error:', error);
       throw new Error(error.message || 'Failed to update event');
     }
+  }
+
+  /**
+   * Organizer asks Carrot to make this event cashless. Deliberately NOT a
+   * self-serve toggle — see the gate in updateEvent. The request is a stamp on
+   * the event rather than its own collection: there is at most one open request
+   * per event, and granting it (admin sets cashless) clears the stamp, so a
+   * separate lifecycle would carry no information the event doesn't already hold.
+   */
+  static async requestCashless(
+    eventId: string,
+    vendorId: string,
+    note?: string
+  ): Promise<IEvent> {
+    // Scoped by vendorId: another organizer's event must read as absent, not
+    // as forbidden — the same shape getEventById uses.
+    const event = await Event.findOne({ _id: eventId, vendorId });
+    if (!event) {
+      throw new HttpError(404, 'Event not found');
+    }
+    if (event.cashless) {
+      throw new HttpError(409, 'Event is already cashless');
+    }
+
+    // Re-requesting refreshes the ask instead of stacking a duplicate.
+    event.cashlessRequestedAt = new Date();
+    event.cashlessRequestedBy = vendorId;
+    event.cashlessRequestNote = note?.trim() || null;
+    await event.save();
+    return event;
   }
 
   /**

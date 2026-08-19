@@ -17,6 +17,15 @@ export class ResellerReportController {
   /** GET /reseller/manager/sales — sale rows across the actor's scope. */
   static async listSales(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      const actor = (req as any).reseller;
+      const requestedHubId = (req.query['hubId'] as string) || undefined;
+
+      // Hub managers are pinned to their own hub; reject out-of-scope hubId queries.
+      if (actor.role === 'reseller_hub_manager' && requestedHubId && requestedHubId !== actor.hubId) {
+        ApiResponseUtil.forbidden(res, 'Hub is outside your scope');
+        return;
+      }
+
       const page = parseInt(String(req.query['page'] ?? '1'), 10) || 1;
       const limit = parseInt(String(req.query['limit'] ?? '25'), 10) || 25;
       const { sales, total, page: p, limit: l } = await ResellerReportService.listSales({
@@ -25,7 +34,7 @@ export class ResellerReportController {
         limit,
         from: parseDate(req.query['from']),
         to: parseDate(req.query['to']),
-        hubId: (req.query['hubId'] as string) || undefined,
+        hubId: requestedHubId,
         eventId: (req.query['eventId'] as string) || undefined,
         operatorId: (req.query['operatorId'] as string) || undefined,
         paymentMethod: (req.query['paymentMethod'] as string) || undefined,

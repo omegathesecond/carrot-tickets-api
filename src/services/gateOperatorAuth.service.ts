@@ -5,7 +5,9 @@ import {
   TicketsRole,
   TICKETS_ROLE_PERMISSIONS,
 } from '@interfaces/ticketsPermission.interface';
+import { grantedTicketsPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
+import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 const MAX_PIN_ATTEMPTS = 5;
@@ -16,7 +18,7 @@ export class GateOperatorAuthService {
     if (typeof loginCode !== 'string' || typeof pin !== 'string') {
       throw new Error('Invalid credentials');
     }
-    const operator = await GateOperator.findOne({ loginCode, isActive: true }).select('+pin');
+    const operator = await GateOperator.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
     if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {
@@ -47,7 +49,11 @@ export class GateOperatorAuthService {
       role: 'gate_operator',
       // Use the canonical SCANNER role set so gate operators can list events
       // (VIEW_EVENTS) to pick which show they're scanning — not just scan.
-      permissions: TICKETS_ROLE_PERMISSIONS[TicketsRole.SCANNER],
+      // Role set is the floor; per-person grants (e.g. the tag desk) add to it.
+      permissions: [
+        ...TICKETS_ROLE_PERMISSIONS[TicketsRole.SCANNER],
+        ...grantedTicketsPermissions((operator as any).grants),
+      ],
       isSuperAdmin,
     };
     if (!isSuperAdmin && operator.vendorId) payload['vendorId'] = operator.vendorId.toString();
