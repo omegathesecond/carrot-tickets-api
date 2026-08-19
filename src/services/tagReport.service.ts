@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 import { Wallet } from '@models/wallet.model';
 import { Ticket } from '@models/ticket.model';
+import { BandBinding } from '@models/bandBinding.model';
+import { WalletTopup } from '@models/walletTopup.model';
+import { WalletWithdrawal } from '@models/walletWithdrawal.model';
+import { MerchantCharge } from '@models/merchantCharge.model';
+import { Merchant } from '@models/merchant.model';
 
 export interface TagSummary {
   tagsInUse: number;
@@ -21,6 +26,23 @@ export interface TagRow {
   cashFundedBalance: number;
   holder: { name: string | null; phone: string | null; ticketCode: string | null };
 }
+
+export interface TagBinding {
+  bandUid: string;
+  boundAt: Date;
+  boundBy: string | null;
+  unboundAt: Date | null;
+  unboundReason: string | null;
+}
+
+export interface TagMovement {
+  kind: 'topup' | 'spend' | 'cashout';
+  amount: number;
+  at: Date;
+  label: string;
+}
+
+export type TagDetail = TagRow & { bindings: TagBinding[]; movements: TagMovement[] };
 
 /**
  * Status is derived: the plastic and the wallet each tell half the story. A
@@ -127,6 +149,75 @@ export class TagReportService {
       })),
       hasMore,
       nextCursor: hasMore ? String(page[page.length - 1]!._id) : null,
+    };
+  }
+
+  static async detail(eventId: string, walletId: string): Promise<TagDetail | null> {
+    const eid = new mongoose.Types.ObjectId(eventId);
+    // Scoped by BOTH ids: another event's wallet must read as absent.
+    const wallet = await Wallet.findOne({ _id: walletId, eventId: eid }).lean();
+    if (!wallet) return null;
+
+    const ticket = await Ticket.findById(wallet.ticketId).lean();
+
+    // Keyed on walletId, never bandUid: one UID legitimately spans several
+    // wallets over an event, and a UID-keyed read would merge their histories.
+    const bindings = await BandBinding.find({ walletId: wallet._id }).sort({ boundAt: -1 }).lean();
+
+    const [topups, charges, withdrawals] = await Promise.all([
+      WalletTopup.find({ walletId: wallet._id }).lean(),
+      MerchantCharge.find({ walletId: wallet._id }).lean(),
+      WalletWithdrawal.find({ walletId: wallet._id }).lean(),
+    ]);
+
+    const merchantNames = new Map<string, string>(
+      (await Merchant.find({ _id: { $in: charges.map((c: any) => c.merchantId) } })
+        .select('name')
+        .lean()).map((m: any) => [String(m._id), m.name]),
+    );
+
+    const movements: TagMovement[] = [
+      ...topups.map((t: any) => ({ kind: 'topup' as const, amount: t.amount, at: t.createdAt, label: 'Top-up' })),
+      ...charges.map((c: any) => ({
+        kind: 'spend' as const, amount: c.amount, at: c.createdAt,
+        label: merchantNames.get(String(c.merchantId)) ?? 'Stall',
+      })),
+      ...withdrawals.map((w: any) => ({
+        kind: 'cashout' as const, amount: w.amount, at: w.createdAt,
+        label: w.method === 'office_cash' ? 'Office refund' : 'Cash-out',
+      })),
+    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+    // Same rule as `statusStage` in list(), expressed in JS because this path
+    // reads a document rather than running a pipeline. If you change one,
+    // change both — the list and the detail disagreeing about whether a tag is
+    // "unbound" is the kind of bug nobody reports and everybody distrusts.
+    const status: TagStatus =
+      wallet.status === 'frozen' || wallet.status === 'closed'
+        ? wallet.status
+        : wallet.bandUid == null
+          ? 'unbound'
+          : 'active';
+
+    return {
+      walletId: String(wallet._id),
+      bandUid: wallet.bandUid ?? null,
+      status,
+      balance: wallet.balance,
+      cashFundedBalance: wallet.cashFundedBalance,
+      holder: {
+        name: ticket?.customerName ?? null,
+        phone: ticket?.customerPhone ?? null,
+        ticketCode: (ticket as any)?.ticketId ?? null,
+      },
+      bindings: bindings.map((b: any) => ({
+        bandUid: b.bandUid,
+        boundAt: b.boundAt,
+        boundBy: b.boundBy ?? null,
+        unboundAt: b.unboundAt ?? null,
+        unboundReason: b.unboundReason ?? null,
+      })),
+      movements,
     };
   }
 }

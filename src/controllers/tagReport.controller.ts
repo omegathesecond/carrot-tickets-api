@@ -55,4 +55,23 @@ export class TagReportController {
       return ApiResponseUtil.error(res, 'Failed to load tags', 500);
     }
   }
+
+  /** GET /api/tickets/events/:eventId/tags/:walletId */
+  static async detail(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = String(req.params['eventId']);
+      const walletId = String(req.params['walletId']);
+      const event = await loadOwnedCashlessEvent(req, res, eventId);
+      if (!event) return;
+
+      if (!/^[0-9a-fA-F]{24}$/.test(walletId)) return ApiResponseUtil.badRequest(res, 'invalid tag id');
+
+      const detail = await TagReportService.detail(eventId, walletId);
+      if (!detail) return ApiResponseUtil.error(res, 'Tag not found', 404);
+      return ApiResponseUtil.success(res, detail);
+    } catch (err: any) {
+      console.error('Tag detail error:', err);
+      return ApiResponseUtil.error(res, 'Failed to load the tag', 500);
+    }
+  }
 }
