@@ -11,12 +11,12 @@ export interface IWalletWithdrawal extends Document {
   walletId: Types.ObjectId;
   eventId: Types.ObjectId;
   amount: number;
-  method: 'cash';
+  method: 'cash' | 'office_cash';
   status: 'completed';
   /** Actor id that recorded this cash-out (a cashier id in v1). */
   recordedBy: string;
   /** Actor population, so reports/attribution can distinguish cashier vs other writers. */
-  recordedByType: 'Cashier' | 'ResellerOperator' | 'MerchantOperator' | 'Platform';
+  recordedByType: 'Cashier' | 'ResellerOperator' | 'MerchantOperator' | 'Platform' | 'Vendor';
   clientTxnId: string;
   createdAt: Date;
 }
@@ -25,10 +25,10 @@ const walletWithdrawalSchema = new Schema<IWalletWithdrawal>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   eventId: { type: Schema.Types.ObjectId, required: true, index: true },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
-  method: { type: String, enum: ['cash'], required: true, default: 'cash' },
+  method: { type: String, enum: ['cash', 'office_cash'], required: true, default: 'cash' },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
   recordedBy: { type: String, required: true, index: true },
-  recordedByType: { type: String, enum: ['Cashier', 'ResellerOperator', 'MerchantOperator', 'Platform'], required: true, default: 'Cashier' },
+  recordedByType: { type: String, enum: ['Cashier', 'ResellerOperator', 'MerchantOperator', 'Platform', 'Vendor'], required: true, default: 'Cashier' },
   clientTxnId: { type: String, required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 

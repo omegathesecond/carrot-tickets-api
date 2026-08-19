@@ -149,3 +149,40 @@ describe('reissue', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('office refund', () => {
+  const REFUNDER = () => token(['tickets:refund_ticket']);
+
+  it('403s without refund_ticket', async () => {
+    const { event, wallet } = await setup();
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ amount: 1000, clientTxnId: 'r1' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects a rand amount — the wire is integer cents', async () => {
+    const { event, wallet } = await setup();
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
+      .set('Authorization', `Bearer ${REFUNDER()}`)
+      .send({ amount: 12.5, clientTxnId: 'r2' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('requires an idempotency key so a double submit cannot double-refund', async () => {
+    const { event, wallet } = await setup();
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
+      .set('Authorization', `Bearer ${REFUNDER()}`)
+      .send({ amount: 1000 });
+
+    expect(res.status).toBe(400);
+  });
+});

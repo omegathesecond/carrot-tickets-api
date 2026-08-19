@@ -319,8 +319,22 @@ export class WalletService {
     amount: number;
     recordedBy: string;
     clientTxnId: string;
+    /**
+     * Money leaving a wallet is one movement with more than one story: a
+     * cashier hands cash over a desk at the venue, or the office hands a
+     * residual balance back afterwards. Same CAS, same balanced posting, same
+     * idempotency — only the labelling differs, so these are options rather
+     * than a second copy of the routine. Defaults keep the cashier path
+     * byte-identical.
+     */
+    method?: 'cash' | 'office_cash';
+    recordedByType?: 'Cashier' | 'Vendor';
+    floatTag?: FloatTag;
   }): Promise<{ wallet: IWallet; withdrawal: IWalletWithdrawal }> {
-    const { walletId, eventId, amount, recordedBy, clientTxnId } = params;
+    const {
+      walletId, eventId, amount, recordedBy, clientTxnId,
+      method = 'cash', recordedByType = 'Cashier', floatTag = FloatTag.CASH_DESK,
+    } = params;
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new Error('amount must be a positive integer (cents)');
     }
@@ -368,7 +382,7 @@ export class WalletService {
           eventId,
           postings: [
             { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: amount },
-            { account: { type: LedgerAccountType.FLOAT }, delta: -amount, tag: FloatTag.CASH_DESK },
+            { account: { type: LedgerAccountType.FLOAT }, delta: -amount, tag: floatTag },
           ],
           refType: 'wallet_withdrawal',
           refId: clientTxnId,
@@ -376,7 +390,7 @@ export class WalletService {
         });
 
         const [withdrawal] = await WalletWithdrawal.create(
-          [{ walletId, eventId, amount, method: 'cash', status: 'completed', recordedBy, recordedByType: 'Cashier', clientTxnId }],
+          [{ walletId, eventId, amount, method, status: 'completed', recordedBy, recordedByType, clientTxnId }],
           { session },
         );
         if (!withdrawal) throw new Error('wallet withdrawal insert failed');

@@ -604,6 +604,7 @@ router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.V
 router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
 router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);
 router.post('/events/:eventId/tags/:walletId/reissue', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.reissue);
+router.post('/events/:eventId/tags/:walletId/refund', requireTicketsPermission(TicketsPermission.REFUND_TICKET), TagAdminController.refund);
 
 router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
 router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
