@@ -725,3 +725,12 @@ export const updateAccessSchema = Joi.object({
 }).or('role', 'customPermissions').messages({
   'object.missing': 'At least one field (role or customPermissions) must be provided for update'
 });
+
+
+// An organizer's ask for cashless (they may not set the flag themselves — see
+// EventService.requestCashless). The note is optional context for Carrot ops.
+export const cashlessRequestSchema = Joi.object({
+  note: Joi.string().trim().max(300).allow('').optional().messages({
+    'string.max': 'Note cannot exceed 300 characters',
+  }),
+});

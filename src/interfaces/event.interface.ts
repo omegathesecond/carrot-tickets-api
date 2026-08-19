@@ -60,6 +60,12 @@ export interface IEvent extends Document {
   endTime: Date; // For single-day: end time on eventDate. For multi-day: end datetime
   isMultiDay?: boolean; // Whether this is a multi-day event (default: false)
   cashless: boolean; // Whether NFC tap-and-go wallet/POS is enabled for this event (default: false)
+  // An organizer cannot switch `cashless` on themselves (it commits Carrot to
+  // bands, handhelds, a float and settlement), so they ask and an admin grants.
+  // Granting clears the request; these are the whole request record.
+  cashlessRequestedAt?: Date | null;
+  cashlessRequestedBy?: any;
+  cashlessRequestNote?: string | null;
 
   // Capacity & Tickets
   capacity: number; // Total event capacity

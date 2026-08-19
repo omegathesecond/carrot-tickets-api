@@ -26,6 +26,7 @@ import {
   changePasswordSchema,
   createEventSchema,
   updateEventSchema,
+  cashlessRequestSchema,
   eventQuerySchema,
   sellTicketSchema,
   refundTicketSchema,
@@ -498,13 +499,41 @@ export class TicketsController {
 
       const event = await EventService.createEvent({
         vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         ...value
       });
 
       ApiResponseUtil.created(res, event, 'Event created successfully');
     } catch (error: any) {
-      console.error('Create event error:', error);
-      ApiResponseUtil.error(res, error.message || 'Failed to create event');
+      // Preserve the cashless gate's 403; anything else stays a generic failure.
+      return failWithHttpError(res, error, 'Failed to create event');
+    }
+  }
+
+  /**
+   * Events: Organizer asks Carrot to enable cashless on their event.
+   * POST /api/tickets/events/:eventId/cashless-request
+   */
+  static async requestCashless(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const { error, value } = cashlessRequestSchema.validate(req.body ?? {});
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+
+      const event = await EventService.requestCashless(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        value.note
+      );
+
+      ApiResponseUtil.success(res, event, 'Cashless requested — Carrot will be in touch');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to request cashless');
     }
   }
 

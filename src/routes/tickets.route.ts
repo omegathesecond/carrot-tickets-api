@@ -246,6 +246,14 @@ router.put(
   TicketsController.updateEvent
 );
 
+// An organizer cannot flip `cashless` themselves (EventService.updateEvent
+// gates it to admins) — this is how they ask for it.
+router.post(
+  '/events/:eventId/cashless-request',
+  requireTicketsPermission(TicketsPermission.EDIT_EVENT),
+  TicketsController.requestCashless
+);
+
 router.delete(
   '/events/:eventId',
   requireTicketsPermission(TicketsPermission.DELETE_EVENT),

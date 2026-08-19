@@ -112,6 +112,21 @@ const eventSchema = new Schema<IEvent>({
     type: Boolean,
     default: false
   },
+  // Organizer's standing request for cashless (admin grants it — see
+  // EventService.requestCashless). Cleared the moment cashless goes on.
+  cashlessRequestedAt: {
+    type: Date,
+    default: null
+  },
+  cashlessRequestedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor'
+  },
+  cashlessRequestNote: {
+    type: String,
+    trim: true,
+    maxlength: 300
+  },
 
   // Capacity & Tickets
   // Capacity is no longer collected at event creation — it is derived from
