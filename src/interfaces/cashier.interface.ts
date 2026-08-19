@@ -18,8 +18,8 @@ export interface ICashier extends Document {
   scope: CashierScope;
   /** The organizer (stored as a Vendor) this cashier works for; unset when platform-scoped. */
   vendorId?: Types.ObjectId;
-  /** Events this cashier may work. EMPTY = every event of their organizer. */
-  eventIds: Types.ObjectId[];
+  /** The single event this cashier works. Unset only for platform scope. */
+  eventId?: Types.ObjectId;
   isActive: boolean;
   failedPinAttempts: number;
   lockedUntil: Date | null;
@@ -53,6 +53,8 @@ export interface CashierToken {
   cashierId: string;
   /** The organizer this cashier works for; absent for platform-scoped cashiers. */
   vendorId?: string;
+  /** The single event this cashier works; absent for platform-scoped cashiers. */
+  eventId?: string;
   isSuperAdmin: boolean;
   fullName: string;
   permissions: CashierPermission[];

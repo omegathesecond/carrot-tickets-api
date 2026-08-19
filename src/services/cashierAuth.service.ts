@@ -53,6 +53,7 @@ export class CashierAuthService {
       fullName: cashier.fullName,
     };
     if (!isSuperAdmin && cashier.vendorId) payload['vendorId'] = cashier.vendorId.toString();
+    if (!isSuperAdmin && cashier.eventId) payload['eventId'] = cashier.eventId.toString();
 
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 
@@ -78,6 +79,7 @@ export class CashierAuthService {
       scope: 'cashier',
       cashierId: decoded.cashierId,
       vendorId: decoded.vendorId,
+      eventId: decoded.eventId,
       isSuperAdmin: !!decoded.isSuperAdmin,
       fullName: decoded.fullName,
       permissions: decoded.permissions || [],
