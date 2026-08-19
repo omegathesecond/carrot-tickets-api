@@ -16,6 +16,11 @@ import { EventStatus } from '@interfaces/event.interface';
  * the event the dashboard panel is rendered inside.
  */
 
+// validateEventAssignment's own refusal — a non-existent event and another
+// organizer's event are deliberately indistinguishable to the caller, so
+// neither doubles as a probe for whether an event id exists.
+const FOREIGN_EVENT_MESSAGE = 'One or more events do not exist or belong to a different organizer';
+
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64c000000000000000000a01';
 const VENDOR_B = '64c000000000000000000b02';
@@ -93,7 +98,11 @@ describe('POST /api/tickets/cashiers', () => {
       .send({ fullName: 'Nomsa', eventId: otherVendorEventId });
 
     expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/event/i);
+    // Pinned to the VALIDATOR's own message. A bare /event/i would also match
+    // the schema's ValidationError, so it would keep passing if the whole
+    // `if (scope === 'organizer')` block were deleted — hiding the fact that
+    // the cross-organizer check had stopped running.
+    expect(res.body.message).toBe(FOREIGN_EVENT_MESSAGE);
     expect(await Cashier.countDocuments({})).toBe(0);
   });
 
@@ -103,6 +112,8 @@ describe('POST /api/tickets/cashiers', () => {
       .send({ fullName: 'Nomsa', eventId: new mongoose.Types.ObjectId().toString() });
 
     expect(res.status).toBe(400);
+    expect(res.body.message).toBe(FOREIGN_EVENT_MESSAGE);
+    expect(await Cashier.countDocuments({})).toBe(0);
   });
 
   it("checks a super-admin's eventId against the ORGANIZER being hired for, not the caller", async () => {

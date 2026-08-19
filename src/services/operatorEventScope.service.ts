@@ -75,13 +75,29 @@ export async function resolveOperatorEventScope(req: Request): Promise<string[] 
 
   if (ref.assignment === 'one') {
     // Read the SINGULAR eventId — a cashier has no eventIds set at all. The
-    // Pick<ICashier, 'eventId'> annotation is load-bearing: if that field is
-    // ever renamed or dropped, this breaks the build instead of quietly
-    // resolving every cashier to "unrestricted".
-    const cashier = await Cashier.findById(ref.id).select('eventId').lean<Pick<ICashier, 'eventId'> | null>();
-    // Only a PLATFORM cashier legitimately has no event — organizer cashiers
-    // are required to carry one at the schema level.
-    return cashier?.eventId ? [String(cashier.eventId)] : null;
+    // Pick<ICashier, …> annotation documents the shape and catches a rename
+    // on the INTERFACE, but note .lean<T>() is an unchecked cast: dropping
+    // the field from the SCHEMA while leaving it on ICashier would still
+    // compile. It is a help, not a guarantee — the fail-closed branch below
+    // is what actually holds the line.
+    const cashier = await Cashier.findById(ref.id).select('eventId scope')
+      .lean<Pick<ICashier, 'eventId' | 'scope'> | null>();
+    if (!cashier) return null;
+
+    // `scope` is selected precisely so the two no-event cases can be told
+    // apart. An ORGANIZER cashier is REQUIRED to carry an event, so a row
+    // without one is a legacy row written before that rule existed — the
+    // schema enforces `required` on WRITE, not on read. Falling through to
+    // null there would make her unrestricted, and loadCashlessEvent does no
+    // vendor comparison of its own, so she could top up and cash out at any
+    // published cashless event belonging to ANY organizer. An empty array
+    // denies every event instead (allowed.includes() is false for all), so
+    // the row surfaces as a 403 and gets cleaned up rather than silently
+    // holding global access.
+    if (cashier.scope === 'organizer' && !cashier.eventId) return [];
+
+    // Only a PLATFORM cashier — Carrot's own staff — is legitimately global.
+    return cashier.eventId ? [String(cashier.eventId)] : null;
   }
 
   const operator: { eventIds?: unknown[] } | null = await (ref.model as any).findById(ref.id).select('eventIds').lean();

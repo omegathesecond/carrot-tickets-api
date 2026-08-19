@@ -124,6 +124,26 @@ describe('operatorMayActOnEvent', () => {
     expect(await operatorMayActOnEvent(req as any, undefined)).toBe(false);
   });
 
+  // A LEGACY organizer cashier: written before eventId was required, so she
+  // reads back with no event. The schema's `required` fires on WRITE, not on
+  // read, so this row is reachable in any database that predates the change —
+  // she has to be inserted through the raw driver to reproduce it, because
+  // the model itself would now refuse.
+  it('DENIES an organizer cashier whose row carries no event, rather than freeing her', async () => {
+    const raw = await mongoose.connection.db!.collection('cashiers').insertOne({
+      fullName: 'Legacy', loginCode: '820012', pin: '$2b$10$notarealhashbutfine',
+      scope: 'organizer', vendorId: oid(), isActive: true,
+      failedPinAttempts: 0, lockedUntil: null, createdAt: new Date(), updatedAt: new Date(),
+    });
+    const req = { cashier: { scope: 'cashier', cashierId: String(raw.insertedId) } };
+
+    // An EMPTY array, not null — null would mean unrestricted, and
+    // loadCashlessEvent does no vendor check of its own, so she would be able
+    // to transact at any published cashless event of ANY organizer.
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+    expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
+  });
+
   it('lets a PLATFORM cashier work any event', async () => {
     const c = await Cashier.create({ fullName: 'Carrot Staff', loginCode: '820011', pin: '222222', scope: 'platform' });
     const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
