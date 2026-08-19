@@ -1,6 +1,8 @@
 // api/src/controllers/cashierAdmin.controller.ts
+import mongoose from 'mongoose';
 import { NextFunction, Request, Response } from 'express';
 import { Cashier } from '@models/cashier.model';
+import { Event } from '@models/event.model';
 import { CashierService } from '@services/cashier.service';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { validateEventAssignment } from '@services/operatorEventScope.service';
@@ -39,8 +41,11 @@ export class CashierAdminController {
 
       if (actor.isSuperAdmin) {
         scope = req.body.scope === 'platform' ? 'platform' : 'organizer';
+        // Deliberately NOT rejected here when absent — for organizer scope it
+        // is derived from the event further down. Organizer scope still
+        // cannot end up vendor-less: it requires an eventId, and the
+        // derivation refuses an event that has no organizer.
         vendorId = scope === 'organizer' ? req.body.vendorId : undefined;
-        if (scope === 'organizer' && !vendorId) { ApiResponseUtil.badRequest(res, 'vendorId is required for organizer scope'); return; }
       } else {
         // A non-super-admin (an organizer) can only create cashiers for themselves.
         scope = 'organizer';
@@ -57,10 +62,37 @@ export class CashierAdminController {
       let eventId: string | undefined;
       if (scope === 'organizer') {
         if (!req.body.eventId) { ApiResponseUtil.badRequest(res, 'eventId is required'); return; }
+
+        // The in-event Cashiers panel sends { fullName, eventId } and has no
+        // vendorId to send — the event is the only context it has. Derive the
+        // organizer from it, matching MerchantAdminController, which already
+        // takes the vendor from the event when creating a stall. Two adjacent
+        // admin surfaces disagreeing on this question is exactly the sort of
+        // thing that gets rediscovered as a bug later.
+        if (!vendorId) {
+          const event = mongoose.Types.ObjectId.isValid(String(req.body.eventId))
+            ? await Event.findById(req.body.eventId).select('vendorId').lean<{ vendorId?: unknown } | null>()
+            : null;
+          if (!event) { ApiResponseUtil.badRequest(res, 'Event not found'); return; }
+          // A buyer self-listed community event has no owning vendor (see
+          // event.model.ts). An organizer-scope cashier with no vendorId
+          // would be invisible to every scopeFilter and so unmanageable —
+          // refuse rather than create one.
+          if (!event.vendorId) { ApiResponseUtil.badRequest(res, 'That event has no organizer to hire a cashier for'); return; }
+          vendorId = String(event.vendorId);
+        }
+
         // Validated against the cashier's OWN vendor, not the caller's — a
         // super-admin creating staff for an organizer is still held to that
         // organizer's catalogue. The shared multi-event validator takes an
         // array, so the one event is passed as a one-element one.
+        //
+        // On the DERIVED path this is now true by construction, which is
+        // correct rather than a weakening: the check exists to stop one
+        // organizer's staff being pointed at another organizer's show, and
+        // taking the vendor FROM the event makes them consistent by
+        // definition instead of by assertion. On the EXPLICIT-vendorId path
+        // it still does real work.
         const assignment = await validateEventAssignment([req.body.eventId], vendorId);
         if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
         eventId = String(assignment.eventIds[0]);

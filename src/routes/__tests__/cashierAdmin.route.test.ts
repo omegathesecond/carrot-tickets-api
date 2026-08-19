@@ -20,6 +20,9 @@ import { EventStatus } from '@interfaces/event.interface';
 // organizer's event are deliberately indistinguishable to the caller, so
 // neither doubles as a probe for whether an event id exists.
 const FOREIGN_EVENT_MESSAGE = 'One or more events do not exist or belong to a different organizer';
+// A buyer self-listed community event has no owning vendor, so there is no
+// organizer to hire for.
+const NO_ORGANIZER_MESSAGE = 'That event has no organizer to hire a cashier for';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64c000000000000000000a01';
@@ -126,6 +129,81 @@ describe('POST /api/tickets/cashiers', () => {
       .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Sipho', scope: 'organizer', vendorId: VENDOR_A, eventId: otherVendorEventId });
     expect(mismatched.status).toBe(400);
+  });
+
+  // The in-event Cashiers panel sends { fullName, eventId } and has no
+  // vendorId to send — the event is its only context. Mirrors
+  // MerchantAdminController, which already derives the vendor from the event.
+  it('derives the organizer from the event when a super-admin sends no vendorId', async () => {
+    const res = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Nomsa', eventId: myEventId });
+
+    expect(res.status).toBe(201);
+    // Re-read raw rather than trusting the response body — this asserts what
+    // was actually persisted, which is what scopeFilter will later match on.
+    const stored = await Cashier.findById(res.body.data.cashier._id);
+    expect(stored!.scope).toBe('organizer');
+    expect(stored!.vendorId!.toString()).toBe(VENDOR_A);
+    expect(stored!.eventId!.toString()).toBe(myEventId);
+  });
+
+  it('does NOT become permissive when a super-admin passes a vendorId that does not own the event', async () => {
+    const res = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Nomsa', scope: 'organizer', vendorId: VENDOR_B, eventId: myEventId });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe(FOREIGN_EVENT_MESSAGE);
+    expect(await Cashier.countDocuments({})).toBe(0);
+  });
+
+  it('refuses an event with no organizer rather than creating a vendorless cashier', async () => {
+    // A buyer self-listed community event: published, but nobody sells or
+    // gets paid for it, so it has no vendorId at all.
+    const future = new Date(Date.now() + 7 * 864e5);
+    const community = await Event.create({
+      name: 'Community Braai', venue: 'V', submittedByBuyerId: new mongoose.Types.ObjectId(),
+      eventDate: future, startTime: future, endTime: future, status: EventStatus.PUBLISHED,
+      ticketTypes: [{ name: 'General', price: 0, quantity: 10, sold: 0, reserved: 0 }],
+    });
+
+    const res = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Nomsa', eventId: (community._id as any).toString() });
+
+    expect(res.status).toBe(400);
+    // Pinned to the exact message: the OLD "vendorId is required for
+    // organizer scope" also matches /organizer/i, so a loose matcher would
+    // keep passing if the derivation were removed entirely.
+    expect(res.body.message).toBe(NO_ORGANIZER_MESSAGE);
+    // An organizer-scope row with no vendorId is invisible to every
+    // scopeFilter and therefore unmanageable — none may exist.
+    expect(await Cashier.countDocuments({})).toBe(0);
+  });
+
+  it('refuses an event that does not exist when deriving', async () => {
+    const res = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Nomsa', eventId: new mongoose.Types.ObjectId().toString() });
+
+    expect(res.status).toBe(400);
+    // Status alone would also be satisfied by the pre-derivation
+    // "vendorId is required for organizer scope" refusal.
+    expect(res.body.message).toBe('Event not found');
+    expect(await Cashier.countDocuments({})).toBe(0);
+  });
+
+  it('an ordinary organizer still takes the vendor from their TOKEN, not the event', async () => {
+    const res = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .send({ fullName: 'Nomsa', eventId: myEventId, vendorId: VENDOR_B });
+
+    expect(res.status).toBe(201);
+    // VENDOR_B in the body is ignored outright — an organizer can only ever
+    // hire for themselves, and the event still has to be theirs.
+    const stored = await Cashier.findById(res.body.data.cashier._id);
+    expect(stored!.vendorId!.toString()).toBe(VENDOR_A);
   });
 
   it('lets a platform cashier be created with no event at all', async () => {
