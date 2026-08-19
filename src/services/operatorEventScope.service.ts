@@ -4,6 +4,7 @@ import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { Event } from '@models/event.model';
+import { ICashier } from '@interfaces/cashier.interface';
 
 /**
  * Resolves which events the caller is allowed to work.
@@ -16,7 +17,19 @@ import { Event } from '@models/event.model';
  * VIEW_EVENTS). A findById on an indexed _id is cheap enough to avoid both.
  */
 
-type OperatorRef = { model: typeof GateOperator | typeof Cashier | typeof ResellerOperator; id: string };
+/**
+ * The two shapes an operator's event assignment can take.
+ *
+ * Gate and reseller operators are genuinely multi-event and carry the shared
+ * `eventIds` set (see operatorEventScope.schema.ts). A cashier is hired for
+ * exactly ONE event and carries a singular, immutable `eventId` instead —
+ * reading `eventIds` off a cashier finds nothing and would resolve to "no
+ * assignment", i.e. UNRESTRICTED. That is the wrong way to fail, so the two
+ * populations are discriminated here rather than read through one field name.
+ */
+type OperatorRef =
+  | { assignment: 'many'; model: typeof GateOperator | typeof ResellerOperator; id: string }
+  | { assignment: 'one'; model: typeof Cashier; id: string };
 
 /**
  * Which operator row (if any) this request is acting as.
@@ -29,17 +42,17 @@ type OperatorRef = { model: typeof GateOperator | typeof Cashier | typeof Resell
 function operatorRefOf(req: Request): OperatorRef | null {
   const ticketsUser = (req as any).ticketsUser;
   if (ticketsUser?.userType === 'gate-operator' && ticketsUser.userId) {
-    return { model: GateOperator, id: String(ticketsUser.userId) };
+    return { assignment: 'many', model: GateOperator, id: String(ticketsUser.userId) };
   }
 
   const cashier = (req as any).cashier;
   if (cashier?.cashierId) {
-    return { model: Cashier, id: String(cashier.cashierId) };
+    return { assignment: 'one', model: Cashier, id: String(cashier.cashierId) };
   }
 
   const reseller = (req as any).reseller;
   if (reseller?.operatorId && String(reseller.operatorId) !== String(reseller.resellerId)) {
-    return { model: ResellerOperator, id: String(reseller.operatorId) };
+    return { assignment: 'many', model: ResellerOperator, id: String(reseller.operatorId) };
   }
 
   return null;
@@ -48,17 +61,30 @@ function operatorRefOf(req: Request): OperatorRef | null {
 /**
  * The events this caller may act on, or null when they are unrestricted.
  *
- * null means "no restriction" and covers three cases: the caller is not an
- * operator at all, the operator has no assignment (empty set = every event,
- * the pre-assignment behaviour), or the token names an operator row that no
- * longer exists. A DB failure is NOT swallowed into null — it propagates, so
- * an outage surfaces as a 500 instead of silently widening access.
+ * null means "no restriction" and covers four cases: the caller is not an
+ * operator at all, a multi-event operator has no assignment (empty set =
+ * every event, the pre-assignment behaviour), the caller is a PLATFORM
+ * cashier (Carrot's own staff, legitimately global), or the token names an
+ * operator row that no longer exists. A DB failure is NOT swallowed into
+ * null — it propagates, so an outage surfaces as a 500 instead of silently
+ * widening access.
  */
 export async function resolveOperatorEventScope(req: Request): Promise<string[] | null> {
   const ref = operatorRefOf(req);
   if (!ref) return null;
 
-  const operator = await (ref.model as any).findById(ref.id).select('eventIds').lean();
+  if (ref.assignment === 'one') {
+    // Read the SINGULAR eventId — a cashier has no eventIds set at all. The
+    // Pick<ICashier, 'eventId'> annotation is load-bearing: if that field is
+    // ever renamed or dropped, this breaks the build instead of quietly
+    // resolving every cashier to "unrestricted".
+    const cashier = await Cashier.findById(ref.id).select('eventId').lean<Pick<ICashier, 'eventId'> | null>();
+    // Only a PLATFORM cashier legitimately has no event — organizer cashiers
+    // are required to carry one at the schema level.
+    return cashier?.eventId ? [String(cashier.eventId)] : null;
+  }
+
+  const operator: { eventIds?: unknown[] } | null = await (ref.model as any).findById(ref.id).select('eventIds').lean();
   const eventIds: unknown[] = operator?.eventIds ?? [];
   if (!eventIds.length) return null;
 

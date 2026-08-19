@@ -41,8 +41,11 @@ describe('an operator with no assignment is unrestricted (empty = every event)',
     expect(await resolveOperatorEventScope(req as any)).toBeNull();
   });
 
-  it('cashier', async () => {
-    const c = await Cashier.create({ fullName: 'C', loginCode: '820002', pin: '222222', scope: 'organizer', vendorId: oid() });
+  // An ORGANIZER cashier can no longer exist without an event (the schema
+  // requires one), so the only unrestricted cashier is a PLATFORM one —
+  // Carrot's own staff, legitimately global.
+  it('platform cashier', async () => {
+    const c = await Cashier.create({ fullName: 'C', loginCode: '820002', pin: '222222', scope: 'platform' });
     const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
     expect(await resolveOperatorEventScope(req as any)).toBeNull();
   });
@@ -64,9 +67,13 @@ describe('an assigned operator resolves to exactly their events', () => {
     expect(await resolveOperatorEventScope(req as any)).toEqual([a.toString(), b.toString()]);
   });
 
-  it('cashier', async () => {
+  // The cashier's assignment lives in the SINGULAR eventId, not the shared
+  // eventIds set. Reading eventIds here would find nothing and resolve to
+  // null — i.e. every cashier silently unrestricted — so this is the case
+  // that proves the scope resolver reads the right field.
+  it('cashier, off her singular eventId', async () => {
     const a = oid();
-    const c = await Cashier.create({ fullName: 'C', loginCode: '820005', pin: '222222', scope: 'organizer', vendorId: oid(), eventIds: [a] });
+    const c = await Cashier.create({ fullName: 'C', loginCode: '820005', pin: '222222', scope: 'organizer', vendorId: oid(), eventId: a });
     const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
 
     expect(await resolveOperatorEventScope(req as any)).toEqual([a.toString()]);
@@ -100,6 +107,26 @@ describe('operatorMayActOnEvent', () => {
   it('allows any event for an unassigned operator', async () => {
     const op = await GateOperator.create({ fullName: 'G', loginCode: '820008', pin: '111111', scope: 'organizer', vendorId: oid() });
     const req = { ticketsUser: { userType: 'gate-operator', userId: (op._id as any).toString() } };
+
+    expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(true);
+  });
+
+  it('holds a cashier to her own event and refuses every other one', async () => {
+    const hers = oid(), someoneElses = oid();
+    const c = await Cashier.create({ fullName: 'C', loginCode: '820010', pin: '222222', scope: 'organizer', vendorId: oid(), eventId: hers });
+    const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
+
+    expect(await operatorMayActOnEvent(req as any, hers.toString())).toBe(true);
+    // The refusal is the whole point: a cashier hired for one show must not
+    // be able to take money at another organizer's gate.
+    expect(await operatorMayActOnEvent(req as any, someoneElses.toString())).toBe(false);
+    // …and neither may she act with no event named at all.
+    expect(await operatorMayActOnEvent(req as any, undefined)).toBe(false);
+  });
+
+  it('lets a PLATFORM cashier work any event', async () => {
+    const c = await Cashier.create({ fullName: 'Carrot Staff', loginCode: '820011', pin: '222222', scope: 'platform' });
+    const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
 
     expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(true);
   });

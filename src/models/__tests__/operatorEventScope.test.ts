@@ -28,13 +28,21 @@ describe('eventIds defaults to an empty set (= every event)', () => {
     expect((await newGate()).eventIds).toEqual([]);
   });
 
-  it('on a cashier', async () => {
-    expect((await newCashier()).eventIds).toEqual([]);
-  });
-
   it('on a reseller operator', async () => {
     expect((await newResellerOperator()).eventIds).toEqual([]);
   });
+});
+
+// A cashier deliberately does NOT use the shared mixin — she is hired for one
+// event and carries a singular, immutable `eventId` (see
+// cashier.eventScope.test.ts). Asserted here so re-applying
+// applyOperatorEventScope to Cashier — which would hand every cashier the
+// "empty = every event" default and silently unscope her — fails loudly.
+it('a cashier carries no eventIds set at all', async () => {
+  const cashier = await newCashier({ eventId: new mongoose.Types.ObjectId() });
+
+  expect((cashier as unknown as { eventIds?: unknown }).eventIds).toBeUndefined();
+  expect(cashier.eventId).toBeDefined();
 });
 
 describe('eventIds round-trips an assignment', () => {
@@ -50,7 +58,7 @@ describe('eventIds round-trips an assignment', () => {
 
   it('is serialized to JSON (it is assignment metadata, not a secret like the pin)', async () => {
     const a = new mongoose.Types.ObjectId();
-    const serialized = JSON.parse(JSON.stringify(await newCashier({ eventIds: [a] })));
+    const serialized = JSON.parse(JSON.stringify(await newResellerOperator({ eventIds: [a] })));
 
     expect(serialized.eventIds).toEqual([a.toString()]);
     expect(serialized.pin).toBeUndefined();

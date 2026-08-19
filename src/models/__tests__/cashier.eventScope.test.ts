@@ -33,6 +33,14 @@ it('allows a platform cashier with no event', async () => {
   expect(c.eventId).toBeUndefined();
 });
 
+it('serializes the owning event (assignment metadata, unlike the pin)', async () => {
+  const eventId = new mongoose.Types.ObjectId();
+  const serialized = JSON.parse(JSON.stringify(await new Cashier({ ...organizer(), eventId }).save()));
+
+  expect(serialized.eventId).toBe(eventId.toString());
+  expect(serialized.pin).toBeUndefined();
+});
+
 it('refuses to move a cashier to another event', async () => {
   const eventId = new mongoose.Types.ObjectId();
   const c = await new Cashier({ ...organizer(), eventId }).save();

@@ -5,7 +5,6 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { GateOperator } from '@models/gateOperator.model';
-import { Cashier } from '@models/cashier.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 
@@ -33,11 +32,13 @@ beforeAll(connectTestDb);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-// The two PIN-login populations behave identically here, so the same contract
-// is asserted against both rather than duplicated by hand.
+// This is the contract for the MULTI-event operator populations. Cashiers
+// used to be asserted here too, but a cashier is now hired for exactly ONE
+// event and has her own, deliberately different contract — see
+// cashierAdmin.route.test.ts. Kept as a table so the remaining multi-event
+// populations can be added back without restructuring.
 const POPULATIONS = [
   { label: 'gate operator', path: '/api/tickets/gate-operators', model: GateOperator, key: 'operator' },
-  { label: 'cashier', path: '/api/tickets/cashiers', model: Cashier, key: 'cashier' },
 ] as const;
 
 describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => {

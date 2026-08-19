@@ -21,7 +21,12 @@ function scopeFilter(req: Request): Record<string, unknown> {
 export class CashierAdminController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const cashiers = await Cashier.find(scopeFilter(req)).sort({ createdAt: -1 });
+      // The dashboard panel lives inside one event, so it scopes to it; the
+      // super-admin platform page passes no eventId and still sees the
+      // unscoped list.
+      const eventId = req.query['eventId'] ? String(req.query['eventId']) : undefined;
+      const filter = { ...scopeFilter(req), ...(eventId ? { eventId } : {}) };
+      const cashiers = await Cashier.find(filter).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, cashiers);
     } catch (err) { next(err); }
   }
@@ -47,16 +52,25 @@ export class CashierAdminController {
         ApiResponseUtil.badRequest(res, 'fullName is required'); return;
       }
 
-      // Validated against the cashier's OWN vendor — see the gate-operator
-      // controller for why the caller's vendor is the wrong thing to check.
-      const assignment = await validateEventAssignment(req.body.eventIds ?? [], vendorId);
-      if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+      // A cashier is hired for ONE event and ends with it; platform cashiers
+      // are Carrot's own staff and are legitimately global, so they take none.
+      let eventId: string | undefined;
+      if (scope === 'organizer') {
+        if (!req.body.eventId) { ApiResponseUtil.badRequest(res, 'eventId is required'); return; }
+        // Validated against the cashier's OWN vendor, not the caller's — a
+        // super-admin creating staff for an organizer is still held to that
+        // organizer's catalogue. The shared multi-event validator takes an
+        // array, so the one event is passed as a one-element one.
+        const assignment = await validateEventAssignment([req.body.eventId], vendorId);
+        if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+        eventId = String(assignment.eventIds[0]);
+      }
 
       const loginCode = await generateUniqueLoginCode();
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
-      const cashier = await Cashier.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventIds: assignment.eventIds, loginCode, pin });
+      const cashier = await Cashier.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventId, loginCode, pin });
       // loginCode + pin are returned ONCE here (the pin is never serialized again).
       ApiResponseUtil.created(res, { cashier, loginCode, pin });
     } catch (err) { next(err); }
@@ -83,11 +97,9 @@ export class CashierAdminController {
       if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
       if ('fullName' in req.body) cashier.fullName = req.body.fullName;
       if ('isActive' in req.body) cashier.isActive = !!req.body.isActive;
-      if ('eventIds' in req.body) {
-        const assignment = await validateEventAssignment(req.body.eventIds, cashier.vendorId?.toString());
-        if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
-        cashier.eventIds = assignment.eventIds as any;
-      }
+      // The owning event is deliberately NOT patchable — it is immutable at
+      // the schema level, so a body carrying one is ignored. Moving a cashier
+      // to another event means hiring a new one for that event.
       await cashier.save();
       ApiResponseUtil.success(res, cashier);
     } catch (err) { next(err); }

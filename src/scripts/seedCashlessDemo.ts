@@ -208,7 +208,14 @@ async function main() {
   console.log(`🎪 Event: ${event.name} (${eventId}) — organizer(Vendor)=${vendorId ?? 'none → platform-scoped cashier'}`);
 
   // ── Upsert the demo cashier (organizer-scoped to the event owner) ──────────
-  let cashier = await Cashier.findOne({ fullName: DEMO_CASHIER_NAME, ...(vendorId ? { vendorId } : { scope: 'platform' }) }).select('+pin');
+  // Matched on the EVENT too for an organizer cashier: she is hired for one
+  // event and her eventId is immutable, so a cashier left over from a
+  // previous demo event can never be re-pointed at this one — she has to be
+  // a different hire.
+  let cashier = await Cashier.findOne({
+    fullName: DEMO_CASHIER_NAME,
+    ...(vendorId ? { vendorId, eventId } : { scope: 'platform' }),
+  }).select('+pin');
   const loginCode = (await codeTakenElsewhere(PREFERRED_LOGIN_CODE)) ? undefined : PREFERRED_LOGIN_CODE;
   if (!loginCode) console.warn(`⚠️  ${PREFERRED_LOGIN_CODE} is taken by another operator — generating a fresh code for the cashier.`);
 
@@ -216,7 +223,9 @@ async function main() {
     cashier = await Cashier.create({
       fullName: DEMO_CASHIER_NAME,
       scope: vendorId ? 'organizer' : 'platform',
-      ...(vendorId ? { vendorId } : {}),
+      // An organizer cashier is hired for ONE event and is required to carry
+      // it; a platform cashier is Carrot's own staff and stays global.
+      ...(vendorId ? { vendorId, eventId } : {}),
       loginCode: loginCode ?? String(500000 + Math.floor(Math.random() * 400000)),
       pin: DEMO_PIN,
       isActive: true,
