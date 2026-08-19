@@ -19,6 +19,7 @@ import { OrganizerCashlessController } from '@controllers/organizerCashless.cont
 import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
 import { TagReportController } from '@controllers/tagReport.controller';
+import { TagAdminController } from '@controllers/tagAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { AdminServiceCategoriesController } from '@controllers/adminServiceCategories.controller';
@@ -601,6 +602,8 @@ router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(Ti
 router.get('/events/:eventId/tags/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.summary);
 router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.list);
 router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
+router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);
+router.post('/events/:eventId/tags/:walletId/reissue', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.reissue);
 
 router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
 router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
