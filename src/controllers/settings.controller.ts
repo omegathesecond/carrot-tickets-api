@@ -11,6 +11,7 @@ const patchSchema = Joi.object({
   mtnMomoEnabled: Joi.boolean(),
   cashEnabled: Joi.boolean(),
   peachCardEnabled: Joi.boolean(),
+  yocoEnabled: Joi.boolean(),
   deltapayEnabled: Joi.boolean(),
   defaultResellerCommissionPercent: Joi.number().min(0).max(100),
   platformFeePercent: Joi.number().min(0).max(100),
@@ -19,6 +20,7 @@ const patchSchema = Joi.object({
   momoServiceFee: Joi.number().min(0).max(100000),
   cardServiceFee: Joi.number().min(0).max(100000),
   deltapayServiceFee: Joi.number().min(0).max(100000),
+  yocoServiceFee: Joi.number().min(0).max(100000),
 }).min(1);
 
 export class SettingsController {

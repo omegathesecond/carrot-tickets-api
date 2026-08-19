@@ -1,7 +1,7 @@
 import { computeServiceFee, serviceFeeFor, MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 import { PaymentMethod } from '@interfaces/ticket.interface';
 
-const cfg = { keshlessServiceFee: 0, momoServiceFee: 5, cardServiceFee: 10, deltapayServiceFee: 5 };
+const cfg = { keshlessServiceFee: 0, momoServiceFee: 5, cardServiceFee: 10, deltapayServiceFee: 5, yocoServiceFee: 0 };
 
 describe('serviceFeeFor', () => {
   it('returns the configured per-ticket amount per method', () => {
@@ -37,7 +37,7 @@ describe('computeServiceFee — per ticket', () => {
   });
 
   it('rounds the multiplied fee to 2 decimals', () => {
-    const frac = { keshlessServiceFee: 0, momoServiceFee: 0.1, cardServiceFee: 0, deltapayServiceFee: 0 };
+    const frac = { keshlessServiceFee: 0, momoServiceFee: 0.1, cardServiceFee: 0, deltapayServiceFee: 0, yocoServiceFee: 0 };
     // 0.1 * 3 = 0.30000000000000004 in float — must round to 0.3
     expect(computeServiceFee(10, 3, PaymentMethod.MTN_MOMO, frac)).toEqual({ serviceFeeAmount: 0.3, amountCharged: 10.3 });
   });
@@ -46,5 +46,11 @@ describe('computeServiceFee — per ticket', () => {
 describe('MAX_TICKETS_PER_ORDER', () => {
   it('is 10', () => {
     expect(MAX_TICKETS_PER_ORDER).toBe(10);
+  });
+});
+
+describe('serviceFeeFor — Yoco', () => {
+  it('returns the configured Yoco fee', () => {
+    expect(serviceFeeFor(PaymentMethod.YOCO, { ...cfg, yocoServiceFee: 7 })).toBe(7);
   });
 });

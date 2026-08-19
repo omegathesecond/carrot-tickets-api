@@ -12,6 +12,7 @@ import { buyerTicketOr } from '@utils/ticketHolder.util';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
 import { DeltapayClient, classifySessionStatus } from '@services/payments/deltapay.client';
+import { YocoClient, classifyEventType, toCents } from '@services/payments/yoco.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -1124,6 +1125,11 @@ export class TicketService {
   // 12 min — deliberately LONGER than DeltaPay's hard 10-min session expiry, so the
   // inventory hold never lapses while a payment could still legitimately land.
   private static DELTAPAY_TTL_MS = 12 * 60_000;
+  // ── Yoco hosted-checkout client (mocked in tests via jest.mock at module level) ──
+  private static yocoClient = new YocoClient();
+  // 15 min — matches the Peach card hold: a hosted card page plus 3-D Secure
+  // takes appreciably longer than a wallet approval.
+  private static YOCO_TTL_MS = 15 * 60_000;
 
   /**
    * Initiate an async MTN MoMo purchase:
@@ -2139,6 +2145,358 @@ export class TicketService {
       console.log(`[deltapay-reconcile] finalised ${finalized}/${stuck.length} stuck DeltaPay sale(s)`);
     }
     return finalized;
+  }
+
+  /**
+   * Initiate an async Yoco hosted-checkout purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Create the Yoco checkout — on failure, release reservation + fail sale + rethrow.
+   *
+   * Mirrors initiateDeltapayPurchase; differences: paymentMethod = YOCO, the
+   * provider call is yocoClient.createCheckout, and Yoco takes THREE distinct
+   * return URLs (success / cancel / failure) rather than one.
+   */
+  static async initiateYocoPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone?: string;
+    customerName?: string;
+    // Buyer identity, when purchasing while logged in — persisted on the
+    // PENDING sale so finalizeYocoSale can stamp it onto the minted tickets.
+    customerEmail?: string;
+    buyerId?: string;
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
+    channel?: SalesChannel;
+  }): Promise<{ checkoutId: string; redirectUrl: string; saleId: string; expiresAt: Date }> {
+    if (!this.yocoClient.isConfigured()) throw new Error('Yoco is not available');
+
+    // Checked up-front, BEFORE any sale row or inventory hold exists — a throw
+    // after the reserve would strand held tickets until the expiry sweep.
+    const returnUrl = process.env['YOCO_RETURN_URL'];
+    if (!returnUrl) throw new Error('YOCO_RETURN_URL is not configured');
+
+    const cfg = await PaymentConfigService.get();
+    if (!cfg.yocoEnabled) throw new Error('Yoco is not available');
+
+    const avail = await EventService.checkTicketAvailability(
+      p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.YOCO,
+      { buyerId: p.buyerId, phone: p.customerPhone }
+    );
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+    assertCarrotTicketing(event);
+
+    // Attribution: mirror initiateDeltapayPurchase defaults exactly.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const channel = p.channel ?? deriveChannel(mappedSoldByType);
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Immutable economic snapshot — Yoco is electronic so custody derives to 'carrot'.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.YOCO,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+      displayCurrency: event.currency ?? 'SZL',
+    });
+    const saleResellerId = resolveSaleResellerId(tt, p.resellerId ? String(p.resellerId) : undefined);
+    const resellerAttribution = {
+      ...(saleResellerId ? { resellerId: saleResellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+      ...(tt.isAllocation ? { isAllocation: true } : {}),
+    };
+
+    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
+    const { serviceFeeAmount, amountCharged } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.YOCO, cfg, { waiveServiceFee: tt.waiveServiceFee })
+        : { serviceFeeAmount: 0, amountCharged: totalAmount };
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
+      ...(p.buyerId ? { buyerId: p.buyerId } : {}),
+      totalAmount,
+      paymentMethod: PaymentMethod.YOCO,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy,
+      soldByType: mappedSoldByType,
+      channel,
+      ...resellerAttribution,
+      ...econ,
+      serviceFeeAmount,
+      amountCharged,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.YOCO_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Create the Yoco checkout; on failure release + fail + rethrow
+    try {
+      // Thread OUR reference through each return URL so the return handler can
+      // tell which sale the buyer came back from.
+      //
+      // This is a LOOKUP HINT ONLY — never proof of anything. Unlike the Peach
+      // and DeltaPay return handlers, this one does NOT finalise: Yoco offers no
+      // status-query endpoint, so the ONLY thing that can move a sale to
+      // COMPLETED is a signature-verified webhook. A forged or guessed ref on
+      // the return URL therefore grants nothing beyond a status read.
+      const withRef = (outcome: 'success' | 'cancel' | 'failure') => {
+        const u = new URL(returnUrl);
+        u.searchParams.set('ref', sale.saleId);
+        u.searchParams.set('outcome', outcome);
+        return u.toString();
+      };
+
+      const checkout = await this.yocoClient.createCheckout({
+        amount: amountCharged,
+        // Yoco is ZAR-only; Carrot prices in SZL at 1:1 (same basis as Peach).
+        currency: settlementCurrencyForMethod(PaymentMethod.YOCO),
+        successUrl: withRef('success'),
+        cancelUrl: withRef('cancel'),
+        failureUrl: withRef('failure'),
+        metadata: { saleRef: sale.saleId, eventId: String(p.eventId) },
+        externalId: sale.saleId,
+        // Stable per sale: a retried initiate returns Yoco's EXISTING checkout
+        // rather than creating a second one the buyer could pay twice.
+        idempotencyKey: sale.saleId,
+      });
+
+      sale.yocoCheckoutId = checkout.id;
+      await sale.save();
+      return {
+        checkoutId: checkout.id,
+        redirectUrl: checkout.redirectUrl,
+        saleId: sale._id.toString(),
+        expiresAt,
+      };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Look up a Yoco sale by its checkout ID. Returns null if not found. Never throws.
+   */
+  static async getYocoSaleByCheckoutId(
+    checkoutId: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ yocoCheckoutId: checkoutId });
+  }
+
+  /**
+   * Look up a Yoco sale by OUR OWN reference (sale.saleId), for the return
+   * redirect. A lookup hint only — see initiateYocoPurchase.
+   */
+  static async getYocoSaleByRef(
+    saleRef: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ saleId: saleRef, paymentMethod: PaymentMethod.YOCO });
+  }
+
+  /**
+   * Finalize a Yoco sale from an ALREADY-VERIFIED webhook payload. Idempotent.
+   *
+   * WHY THE SIGNATURE DIFFERS FROM ITS PEACH/DELTAPAY TWINS: Yoco publishes no
+   * status-query endpoint, so there is nothing to ask "is this paid?". The
+   * caller (YocoController.webhook) MUST have already checked the Standard-
+   * Webhooks signature; this method then treats the payload as authoritative.
+   * Never call it with an unverified body — that is the whole security boundary.
+   *
+   * - Sale not PENDING → return current status immediately (no re-mint).
+   * - Unknown event type → 'pending', hold left intact (never mints).
+   * - payment.failed → release + fail.
+   * - payment.succeeded → AMOUNT/CURRENCY GUARD (cents, against
+   *   `amountCharged ?? totalAmount`) → ATOMIC claim → mint.
+   */
+  static async finalizeYocoSale(
+    checkoutId: string,
+    event: { type: string; amountCents: number; currency: string }
+  ): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ yocoCheckoutId: checkoutId });
+    if (!sale) throw new Error('Sale not found for checkout id');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const outcome = classifyEventType(event.type);
+
+    // 'ignore' covers refund events and anything Yoco adds later. Leaving the
+    // sale PENDING (rather than failing it) keeps the inventory hold alive so a
+    // genuine payment.succeeded arriving afterwards can still mint.
+    if (outcome === 'ignore') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (outcome === 'rejected') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // succeeded — verify the EXACT amount + currency Yoco reports before minting.
+    // Compare in CENTS: Yoco reports integer cents, and comparing integers avoids
+    // the float-equality trap that `50.00 !== 49.999999` would otherwise create.
+    const expectedCents = toCents(sale.amountCharged ?? sale.totalAmount);
+    const expectedCurrency = settlementCurrencyForMethod(PaymentMethod.YOCO);
+    if (
+      !Number.isFinite(event.amountCents) ||
+      event.amountCents !== expectedCents ||
+      event.currency !== expectedCurrency
+    ) {
+      console.error('[yoco finalize] amount/currency mismatch — refusing to mint', {
+        checkoutId,
+        expected: { amountCents: expectedCents, currency: expectedCurrency },
+        confirmed: { amountCents: event.amountCents, currency: event.currency },
+      });
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // Atomically CLAIM the sale so a retried webhook + the poll can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized
+
+    // Mint tickets, confirm reservation (reserved→sold), best-effort SMS/email
+    const eventDoc = await Event.findById(sale.eventId);
+    const ticketTypeDoc = eventDoc?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = this.buildTicket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        customerEmail: sale.customerEmail,
+        buyerId: sale.buyerId,
+        saleId: sale._id,
+        // The sale already carries the currency stamped at initiate time
+        // (buildSaleSnapshot) — reuse it rather than re-deriving from event.
+        currency: sale.currency ?? 'SZL',
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (eventDoc) {
+      const summaries = tickets.map(t => ({
+        ticketId: t.ticketId,
+        eventName: eventDoc.name,
+        eventDate: eventDoc.eventDate.toISOString(),
+        startTime: eventDoc.startTime?.toISOString(),
+        venue: eventDoc.venue,
+      }));
+      if (sale.customerPhone) {
+        SmsService.sendTicketConfirmation(sale.customerPhone, summaries)
+          .catch(err => console.error('[SMS] yoco confirmation threw', err));
+      }
+      if (sale.customerEmail) {
+        EmailService.sendTicketConfirmation(sale.customerEmail, summaries)
+          .catch(err => console.error('[Email] yoco confirmation threw', err));
+      }
+    }
+
+    await this.autoFollowOrganizerForSale(claimed);
+
+    return { status: 'completed' };
+  }
+
+  /**
+   * Visibility backstop for stuck Yoco sales.
+   *
+   * WHY THIS IS A REPORTER, NOT A RECONCILER: reconcilePendingCardSales and
+   * reconcilePendingDeltapaySales RESOLVE stuck sales by asking the provider for
+   * the true status. Yoco publishes no status-query endpoint, so there is
+   * nothing to ask — the signed webhook is the only source of truth. Rather
+   * than guess (failing a paid sale loses the buyer their ticket; completing an
+   * unpaid one mints for free), this job makes the sale LOUD for manual recovery
+   * and changes nothing.
+   *
+   * It pairs with the ReservationService.sweepExpired carve-out, which leaves
+   * Yoco sales PENDING precisely so a late webhook can still mint them.
+   */
+  static async reportStuckYocoSales(olderThanMs = 20 * 60_000): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await TicketSale.find({
+      paymentMethod: PaymentMethod.YOCO,
+      paymentStatus: PaymentStatus.PENDING,
+      yocoCheckoutId: { $exists: true, $nin: [null, ''] },
+      createdAt: { $lt: cutoff },
+    }).limit(50);
+
+    for (const sale of stuck) {
+      console.error(
+        '[yoco-stuck] PENDING past threshold — no webhook received; needs manual check',
+        {
+          saleId: sale.saleId,
+          checkoutId: sale.yocoCheckoutId,
+          amountCharged: sale.amountCharged ?? sale.totalAmount,
+          createdAt: sale.createdAt,
+        }
+      );
+    }
+    if (stuck.length > 0) {
+      console.error(`[yoco-stuck] ${stuck.length} Yoco sale(s) awaiting a webhook that never arrived`);
+    }
+    return stuck.length;
   }
 
   /**

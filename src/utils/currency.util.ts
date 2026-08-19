@@ -6,11 +6,12 @@ export type EventCurrency = 'SZL' | 'ZAR';
 export const EVENT_CURRENCIES: readonly EventCurrency[] = ['SZL', 'ZAR'] as const;
 
 /**
- * The currency a payment rail natively settles in. Card (Peach) settles in ZAR;
- * every other rail (MoMo, DeltaPay, Keshless wallet, cash/POS) settles in SZL.
+ * The currency a payment rail natively settles in. Both card rails (Peach and
+ * Yoco) settle in ZAR; every other rail (MoMo, DeltaPay, Keshless wallet,
+ * cash/POS) settles in SZL.
  * This is what the existing MoMo/card verify guards already assert — we only
  * persist it per sale, we do NOT change what the guards check.
  */
 export function settlementCurrencyForMethod(method: PaymentMethod): EventCurrency {
-  return method === PaymentMethod.PEACH_CARD ? 'ZAR' : 'SZL';
+  return method === PaymentMethod.PEACH_CARD || method === PaymentMethod.YOCO ? 'ZAR' : 'SZL';
 }

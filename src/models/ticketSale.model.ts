@@ -124,6 +124,15 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     index: true,
     trim: true
   },
+  // Yoco checkout ID (ch_…). Sole lookup key for the signed webhook, the return
+  // redirect and the buyer poll. Yoco has NO status-query endpoint, so unlike
+  // peachPaymentId there is no reconcile-by-asking-the-provider path off this.
+  yocoCheckoutId: {
+    type: String,
+    sparse: true,
+    index: true,
+    trim: true
+  },
   reservationExpiresAt: {
     type: Date,
     index: true

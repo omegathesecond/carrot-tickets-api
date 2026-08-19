@@ -12,3 +12,9 @@ describe('settlementCurrencyForMethod', () => {
     expect(settlementCurrencyForMethod(PaymentMethod.CASH)).toBe('SZL');
   });
 });
+
+describe('settlementCurrencyForMethod — Yoco', () => {
+  it('settles Yoco in ZAR (Yoco is ZAR-only)', () => {
+    expect(settlementCurrencyForMethod(PaymentMethod.YOCO)).toBe('ZAR');
+  });
+});

@@ -1,7 +1,7 @@
 import { TicketReservation } from '@models/ticketReservation.model';
 import { Event } from '@models/event.model';
 import { TicketSale } from '@models/ticketSale.model';
-import { PaymentStatus } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 
 async function adjustReserved(eventId: unknown, ticketTypeId: string, delta: number): Promise<void> {
   const event = await Event.findById(eventId);
@@ -49,6 +49,22 @@ export class ReservationService {
     await r.save();
   }
 
+  /**
+   * Rails whose lapsed PENDING sale must NOT be auto-failed by the sweep.
+   *
+   * Every other async rail can be reconciled by asking the provider whether the
+   * payment actually landed (Peach getPaymentStatus, DeltaPay verify-return,
+   * MoMo requestToPay status), so failing early is recoverable. Yoco publishes
+   * NO status-query endpoint: once its sale is FAILED, a webhook arriving
+   * afterwards finds a non-PENDING sale and idempotently reports 'failed',
+   * leaving the buyer charged with no ticket and no way back. Leaving the sale
+   * PENDING keeps that late webhook able to mint.
+   *
+   * The inventory hold is still released for these rails — only the sale status
+   * is left alone.
+   */
+  private static readonly NO_AUTO_FAIL_METHODS: readonly PaymentMethod[] = [PaymentMethod.YOCO];
+
   static async sweepExpired(): Promise<number> {
     const lapsed = await TicketReservation.find({ status: 'held', expiresAt: { $lt: new Date() } });
     let n = 0;
@@ -58,7 +74,11 @@ export class ReservationService {
         r.status = 'released';
         await r.save();
         await TicketSale.updateOne(
-          { _id: r.saleId, paymentStatus: PaymentStatus.PENDING },
+          {
+            _id: r.saleId,
+            paymentStatus: PaymentStatus.PENDING,
+            paymentMethod: { $nin: this.NO_AUTO_FAIL_METHODS },
+          },
           { $set: { paymentStatus: PaymentStatus.FAILED } }
         );
         n++;
