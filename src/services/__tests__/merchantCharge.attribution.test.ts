@@ -1,8 +1,9 @@
 import mongoose from 'mongoose';
-import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { MerchantCharge } from '@models/merchantCharge.model';
 
 beforeAll(connectTestDb);
+afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 const base = () => ({

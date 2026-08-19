@@ -20,8 +20,17 @@ const merchantSchema = new Schema<IMerchant>({
   status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
 }, {
   timestamps: true,
-  toJSON: { transform: (_doc, ret) => { const { __v, ...rest } = ret; return rest; } },
-  toObject: { transform: (_doc, ret) => { const { __v, ...rest } = ret; return rest; } },
+  // `pin` and `loginCode` are NOT declared above — a stall holds no
+  // credentials any more — and they are stripped here precisely because of
+  // that. Mongoose HYDRATES fields that exist in the DATABASE but not in the
+  // schema and serializes them, so until migrate-merchant-credentials.ts has
+  // run, a legacy stall round-trips its old loginCode and its bcrypt PIN HASH
+  // straight through every admin response that returns a merchant document
+  // (MerchantAdminController.list / .transactions). Stripping them regardless
+  // of what the schema declares takes deploy ORDER out of a credential-hash
+  // exposure: the response is clean whether or not the migration has run.
+  toJSON: { transform: (_doc, ret) => { const { pin, loginCode, __v, ...rest } = ret; return rest; } },
+  toObject: { transform: (_doc, ret) => { const { pin, loginCode, __v, ...rest } = ret; return rest; } },
 });
 
 merchantSchema.index({ eventId: 1, status: 1 });

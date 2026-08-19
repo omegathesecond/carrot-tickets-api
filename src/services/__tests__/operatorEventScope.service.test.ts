@@ -165,6 +165,44 @@ describe('operatorMayActOnEvent', () => {
     expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
   });
 
+  // Deactivation is the dashboard's only revocation control for a cashier
+  // (PATCH /cashiers/:id {isActive:false}). authenticateCashier does no DB
+  // lookup and CashierAuthService mints 7-day tokens, so without this the
+  // switch would only stop her NEXT LOGIN — the token in her hand would keep
+  // topping up and cashing out at the desk for the rest of the week.
+  it('DENIES a DEACTIVATED cashier, whose token still has days to run', async () => {
+    const hers = oid();
+    const c = await Cashier.create({
+      fullName: 'Revoked', loginCode: '820014', pin: '222222',
+      scope: 'organizer', vendorId: oid(), eventId: hers,
+    });
+    const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
+    // Scoped to her own event while she is active…
+    expect(await resolveOperatorEventScope(req as any)).toEqual([hers.toString()]);
+    expect(await operatorMayActOnEvent(req as any, hers.toString())).toBe(true);
+
+    await Cashier.updateOne({ _id: c._id }, { $set: { isActive: false } });
+
+    // …and denied everywhere the moment she is deactivated. An EMPTY array,
+    // not null — null would mean unrestricted, i.e. the exact opposite.
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+    expect(await operatorMayActOnEvent(req as any, hers.toString())).toBe(false);
+  });
+
+  // The check has to sit BEFORE the platform branch: platform scope returns
+  // null (legitimately global), so checking isActive after it would hand a
+  // revoked Carrot staffer every cashless event instead of none.
+  it('DENIES a deactivated PLATFORM cashier rather than handing her every event', async () => {
+    const c = await Cashier.create({
+      fullName: 'Revoked Staff', loginCode: '820015', pin: '222222',
+      scope: 'platform', isActive: false,
+    });
+    const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
+
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+    expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
+  });
+
   it('lets a PLATFORM cashier work any event', async () => {
     const c = await Cashier.create({ fullName: 'Carrot Staff', loginCode: '820011', pin: '222222', scope: 'platform' });
     const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };

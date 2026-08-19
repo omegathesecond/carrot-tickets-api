@@ -68,9 +68,9 @@ function operatorRefOf(req: Request): OperatorRef | null {
  * multi-event operator row that no longer exists.
  *
  * An EMPTY ARRAY is the opposite — it denies every event — and is returned
- * only on the cashier path, for the two rows that must not be trusted: an
- * organizer cashier carrying no event, and a row that has been deleted. See
- * the branch itself for why each fails closed.
+ * only on the cashier path, for the three rows that must not be trusted: an
+ * organizer cashier carrying no event, a row that has been deleted, and a row
+ * that has been DEACTIVATED. See the branch itself for why each fails closed.
  *
  * A DB failure is NOT swallowed into null — it propagates, so an outage
  * surfaces as a 500 instead of silently widening access.
@@ -86,8 +86,8 @@ export async function resolveOperatorEventScope(req: Request): Promise<string[] 
     // the field from the SCHEMA while leaving it on ICashier would still
     // compile. It is a help, not a guarantee — the fail-closed branch below
     // is what actually holds the line.
-    const cashier = await Cashier.findById(ref.id).select('eventId scope')
-      .lean<Pick<ICashier, 'eventId' | 'scope'> | null>();
+    const cashier = await Cashier.findById(ref.id).select('eventId scope isActive')
+      .lean<Pick<ICashier, 'eventId' | 'scope' | 'isActive'> | null>();
 
     // A VANISHED row denies too, unlike the 'many' path below which reads a
     // missing operator as unrestricted. A cashier token always names a real
@@ -101,9 +101,16 @@ export async function resolveOperatorEventScope(req: Request): Promise<string[] 
     // and since loadCashlessEvent does no vendor comparison of its own and
     // event ids are public (they sit in /event/<slug>-<24hex> URLs), she
     // could top up and cash out at any published cashless event of any
-    // organizer. Deactivating instead of deleting would not help either;
-    // isActive is not re-checked at request time.
+    // organizer.
     if (!cashier) return [];
+
+    // A DEACTIVATED row denies too, for the same reason a vanished one does:
+    // authenticateCashier does no database lookup and CashierAuthService
+    // mints 7-day tokens, so PATCH /cashiers/:id {isActive:false} would
+    // otherwise only stop her NEXT LOGIN while the token in her hand kept
+    // topping up and cashing out for the rest of the week. The row is already
+    // being read here, so this costs nothing beyond one more selected field.
+    if (!cashier.isActive) return [];
 
     // `scope` is selected precisely so the two no-event cases can be told
     // apart. An ORGANIZER cashier is REQUIRED to carry an event, so a row

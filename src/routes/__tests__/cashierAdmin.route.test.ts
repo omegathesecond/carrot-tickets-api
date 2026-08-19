@@ -249,6 +249,28 @@ describe('PATCH /api/tickets/cashiers/:id', () => {
     expect(reloaded!.eventId!.toString()).toBe(myEventId);
   });
 
+  it('400s a fullName that is not a non-empty string, rather than renaming her to it', async () => {
+    const created = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .send({ fullName: 'Nomsa', eventId: myEventId });
+    const id = created.body.data.cashier._id;
+
+    for (const fullName of [123, null, '', '   ']) {
+      const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
+        .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+        .send({ fullName });
+
+      // 400 — not the 200 that used to rename her to the string "123", and
+      // not the 500 that `null` used to produce by throwing a Mongoose
+      // ValidationError into next(err).
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('fullName must be a non-empty string');
+    }
+
+    const reloaded = await Cashier.findById(id);
+    expect(reloaded!.fullName).toBe('Nomsa');
+  });
+
   it('still updates the fields that ARE mutable', async () => {
     const created = await request(app).post('/api/tickets/cashiers')
       .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)

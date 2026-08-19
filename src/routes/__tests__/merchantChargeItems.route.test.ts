@@ -10,12 +10,12 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
 import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { Product } from '@models/product.model';
 import { ProductCategory, StockMovementReason } from '@interfaces/stock.interface';
 import { StockService } from '@services/stock.service';
 import { MerchantPermission } from '@interfaces/merchant.interface';
-import mongoose from 'mongoose';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
@@ -23,9 +23,9 @@ afterAll(disconnectTestDb);
 
 // A merchant token names the STALL and the PERSON on its till; without the
 // person authenticateMerchant rejects it.
-const token = (merchantId: string, eventId: string) =>
+const token = (merchantId: string, eventId: string, merchantOperatorId: string) =>
   jwt.sign({
-    scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+    scope: 'merchant', merchantId, merchantOperatorId,
     operatorName: 'Thabo Dlamini', eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE],
   }, JWT_SECRET);
 
@@ -38,6 +38,11 @@ async function setup({ beerStock = 100 }: { beerStock?: number } = {}) {
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
   await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: 100000, recordedBy: 'op1', clientTxnId: 'seed' });
   const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0 });
+  // The charge transaction re-reads the operator and refuses a missing or
+  // deactivated one, so the token has to name a row that really exists.
+  const operator = await MerchantOperator.create({
+    fullName: 'Thabo Dlamini', merchantId: merchant._id, eventId, loginCode: '4KZ901', pin: '111111',
+  });
   const beer = await Product.create({ eventId, name: 'Castle Lite', category: ProductCategory.BEER, price: 2500 });
   if (beerStock) {
     await StockService.applyMovement({
@@ -45,13 +50,16 @@ async function setup({ beerStock = 100 }: { beerStock?: number } = {}) {
       reason: StockMovementReason.RECEIVE, byType: 'Merchant', by: String(merchant._id),
     });
   }
-  return { eventId: String(eventId), bandUid, merchantId: String(merchant._id), beerId: String(beer._id) };
+  return {
+    eventId: String(eventId), bandUid, merchantId: String(merchant._id),
+    merchantOperatorId: String(operator._id), beerId: String(beer._id),
+  };
 }
 
 it('itemised charge returns 200 with the priced breakdown and new balance', async () => {
-  const { eventId, bandUid, merchantId, beerId } = await setup();
+  const { eventId, bandUid, merchantId, beerId, merchantOperatorId } = await setup();
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     // A stale POS may still send staffName in the body. It must NOT cause a
     // validation rejection (200, not 400) and must NOT reach the record —
     // the token's operatorName ('Thabo Dlamini') is what gets stored.
@@ -67,9 +75,9 @@ it('itemised charge returns 200 with the priced breakdown and new balance', asyn
 });
 
 it('an out-of-stock line declines with 409 out_of_stock, wallet untouched', async () => {
-  const { eventId, bandUid, merchantId, beerId } = await setup({ beerStock: 1 });
+  const { eventId, bandUid, merchantId, beerId, merchantOperatorId } = await setup({ beerStock: 1 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, clientTxnId: 'c2', items: [{ productId: beerId, qty: 5 }] });
   expect(res.status).toBe(409);
   // Standard ApiResponseUtil envelope stringifies the 4th arg into `error`
@@ -79,17 +87,17 @@ it('an out-of-stock line declines with 409 out_of_stock, wallet untouched', asyn
 });
 
 it('rejects sending both amount and items with 400', async () => {
-  const { eventId, bandUid, merchantId, beerId } = await setup();
+  const { eventId, bandUid, merchantId, beerId, merchantOperatorId } = await setup();
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, clientTxnId: 'c3', amount: 300, items: [{ productId: beerId, qty: 1 }] });
   expect(res.status).toBe(400);
 });
 
 it('still accepts an amount-only charge (200, un-itemised)', async () => {
-  const { eventId, bandUid, merchantId } = await setup();
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await setup();
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, clientTxnId: 'c4', amount: 300 });
   expect(res.status).toBe(200);
   expect(res.body.data.items).toBeUndefined();

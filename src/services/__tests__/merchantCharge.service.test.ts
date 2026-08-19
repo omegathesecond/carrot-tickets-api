@@ -39,6 +39,52 @@ async function seedOperatorFor(merchantId: string, eventId: string, fullName = '
   return String(op._id);
 }
 
+// Deactivating a person is the ONLY revocation control the dashboard offers
+// (PATCH /merchant-operators/:id {isActive:false}), and authenticateMerchant
+// is pure JWT verification with no DB read against tokens that live for days.
+// If the charge transaction did not re-read the operator, revoking someone
+// would leave them debiting attendee wallets for the rest of the week.
+it('REFUSES a charge by a DEACTIVATED operator, and writes nothing at all', async () => {
+  const { eventId, walletId, bandUid } = await seedFundedWallet(1000);
+  const merchantId = await seedMerchant(eventId, 0);
+  const merchantOperatorId = await seedOperatorFor(merchantId, eventId);
+  await MerchantOperator.updateOne({ _id: merchantOperatorId }, { $set: { isActive: false } });
+
+  await expect(
+    MerchantService.charge({
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, amount: 300, clientTxnId: 'chg-revoked',
+    }),
+  ).rejects.toThrow(/^merchant operator not found or not active$/);
+
+  // Nothing partial: no record of the sale, no debit, no postings. The stall
+  // itself is untouched and still active — only the person was revoked.
+  expect(await MerchantCharge.countDocuments({ clientTxnId: 'chg-revoked' })).toBe(0);
+  expect((await Wallet.findById(walletId))!.balance).toBe(1000);
+  expect(await LedgerEntry.countDocuments({ refType: 'merchant_charge', refId: 'chg-revoked' })).toBe(0);
+});
+
+// The other half of the same guard, mirroring how a vanished MERCHANT is
+// treated: a token naming an operator row that is gone fails closed rather
+// than charging as an operator nobody can name.
+it('REFUSES a charge naming an operator row that no longer exists', async () => {
+  const { eventId, walletId, bandUid } = await seedFundedWallet(1000);
+  const merchantId = await seedMerchant(eventId, 0);
+  const merchantOperatorId = await seedOperatorFor(merchantId, eventId);
+  await MerchantOperator.deleteOne({ _id: merchantOperatorId });
+
+  await expect(
+    MerchantService.charge({
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, amount: 300, clientTxnId: 'chg-vanished',
+    }),
+  ).rejects.toThrow(/^merchant operator not found or not active$/);
+
+  expect(await MerchantCharge.countDocuments({ clientTxnId: 'chg-vanished' })).toBe(0);
+  expect((await Wallet.findById(walletId))!.balance).toBe(1000);
+  expect(await LedgerEntry.countDocuments({ refType: 'merchant_charge', refId: 'chg-vanished' })).toBe(0);
+});
+
 it('debits the wallet by amount and posts a balanced ledger txn + a MerchantCharge (no commission)', async () => {
   const { eventId, walletId, bandUid } = await seedFundedWallet(1000);
   const merchantId = await seedMerchant(eventId, 0);

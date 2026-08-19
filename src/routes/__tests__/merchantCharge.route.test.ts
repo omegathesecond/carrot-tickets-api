@@ -11,8 +11,8 @@ import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
 import { Wallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantPermission } from '@interfaces/merchant.interface';
-import mongoose from 'mongoose';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
@@ -36,25 +36,34 @@ async function seedMerchantAndFundedBand(opts: { cashless?: boolean; balance?: n
 
   const merchant = await Merchant.create({
     name: 'Fixture Merchant', eventId, commissionPercent: opts.commissionPercent ?? 0,
+  });
+  // A real person on the till. Not decoration: the charge transaction re-reads
+  // this row and refuses a charge whose operator is missing or deactivated, so
+  // a fabricated id in the token would fail closed.
+  const operator = await MerchantOperator.create({
+    fullName: 'Thabo Dlamini', merchantId: merchant._id, eventId,
     loginCode: String(__loginCodeSeq++), pin: '111111',
   });
 
-  return { eventId: String(eventId), bandUid, walletId: String(w._id), merchantId: String(merchant._id) };
+  return {
+    eventId: String(eventId), bandUid, walletId: String(w._id),
+    merchantId: String(merchant._id), merchantOperatorId: String(operator._id),
+  };
 }
 
 // A merchant token names the STALL and the PERSON on its till. The person is
 // not optional: authenticateMerchant rejects a token without one rather than
 // letting an unattributable charge through.
-const token = (merchantId: string, eventId: string, perms = [MerchantPermission.CHARGE], over = {}) =>
+const token = (merchantId: string, eventId: string, merchantOperatorId: string, perms = [MerchantPermission.CHARGE], over = {}) =>
   jwt.sign({
-    scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+    scope: 'merchant', merchantId, merchantOperatorId,
     operatorName: 'Thabo Dlamini', eventId, name: 'Fixture Merchant', permissions: perms, ...over,
   }, JWT_SECRET);
 
 it('charges a wallet by band uid and credits the merchant', async () => {
-  const { eventId, bandUid, merchantId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, amount: 300, clientTxnId: 'c1' });
 
   expect(res.status).toBe(200);
@@ -66,9 +75,9 @@ it('charges a wallet by band uid and credits the merchant', async () => {
 });
 
 it('splits the fee when the merchant has a commissionPercent', async () => {
-  const { eventId, bandUid, merchantId } = await seedMerchantAndFundedBand({ balance: 1000, commissionPercent: 10 });
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000, commissionPercent: 10 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, amount: 300, clientTxnId: 'c-fee' });
 
   expect(res.status).toBe(200);
@@ -77,9 +86,9 @@ it('splits the fee when the merchant has a commissionPercent', async () => {
 });
 
 it('declines with 402 on insufficient balance, leaving the wallet unchanged (standard ApiResponseUtil envelope)', async () => {
-  const { eventId, bandUid, merchantId, walletId } = await seedMerchantAndFundedBand({ balance: 100 });
+  const { eventId, bandUid, merchantId, walletId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 100 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, amount: 500, clientTxnId: 'c-decline' });
 
   expect(res.status).toBe(402);
@@ -95,9 +104,9 @@ it('declines with 402 on insufficient balance, leaving the wallet unchanged (sta
 });
 
 it('rejects a non-cashless event with 400', async () => {
-  const { eventId, bandUid, merchantId } = await seedMerchantAndFundedBand({ cashless: false, balance: 1000 });
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ cashless: false, balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, amount: 300, clientTxnId: 'c-noncashless' });
 
   expect(res.status).toBe(400);
@@ -109,11 +118,11 @@ it('rejects a non-cashless event with 400', async () => {
 // guard. Without this, a merchant whose event got cancelled after their JWT
 // was issued could keep charging.
 it('rejects a charge against a cancelled (non-published) cashless event with 400, wallet unchanged', async () => {
-  const { eventId, bandUid, merchantId, walletId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  const { eventId, bandUid, merchantId, walletId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   await Event.updateOne({ _id: eventId }, { $set: { status: EventStatus.CANCELLED } });
 
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid, amount: 300, clientTxnId: 'c-cancelled' });
 
   expect(res.status).toBe(400);
@@ -124,9 +133,9 @@ it('rejects a charge against a cancelled (non-published) cashless event with 400
 });
 
 it('rejects a token missing merchant:charge with 403', async () => {
-  const { eventId, bandUid, merchantId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId, [])}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId, [])}`)
     .send({ bandUid, amount: 300, clientTxnId: 'c-forbidden' });
 
   expect(res.status).toBe(403);
@@ -138,19 +147,19 @@ it('rejects an unauthenticated request with 401', async () => {
 });
 
 it('404s an unknown band uid', async () => {
-  const { eventId, merchantId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  const { eventId, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`)
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
     .send({ bandUid: 'aaaaaaaaaaaaaa', amount: 300, clientTxnId: 'c-unknownband' });
 
   expect(res.status).toBe(404);
 });
 
 it('is idempotent on clientTxnId at the HTTP layer', async () => {
-  const { eventId, bandUid, merchantId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const body = { bandUid, amount: 300, clientTxnId: 'dup-http' };
-  const first = await request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token(merchantId, eventId)}`).send(body);
-  const second = await request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token(merchantId, eventId)}`).send(body);
+  const first = await request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`).send(body);
+  const second = await request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`).send(body);
 
   expect(first.status).toBe(200);
   expect(second.status).toBe(200);

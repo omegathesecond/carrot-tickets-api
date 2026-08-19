@@ -2,6 +2,7 @@
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantCharge, IMerchantCharge } from '@models/merchantCharge.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
@@ -131,6 +132,20 @@ export class MerchantService {
         const merchant = await Merchant.findById(merchantId).session(session);
         if (!merchant || merchant.status !== 'active') {
           throw new Error('merchant not found or not active');
+        }
+
+        // The PERSON on the till is re-read for the same reason as the STALL
+        // above, and rejected the same way. authenticateMerchant is pure JWT
+        // verification with no database read and merchant tokens live for
+        // days, so PATCH /merchant-operators/:id {isActive:false} — the only
+        // revocation control the dashboard offers — would otherwise leave a
+        // sacked or compromised operator debiting attendee wallets until
+        // their token expired. Revoking ONE person without rotating the whole
+        // stall's PIN is the entire point of per-person operators, so it has
+        // to bite at charge time, not just at next login.
+        const operator = await MerchantOperator.findById(merchantOperatorId).session(session);
+        if (!operator || !operator.isActive) {
+          throw new Error('merchant operator not found or not active');
         }
 
         // Atomic CAS debit: the guard (status active + sufficient balance)

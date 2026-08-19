@@ -72,7 +72,16 @@ export class MerchantOperatorAdminController {
       const event = await loadOwnedEvent(req, res, String(merchant.eventId));
       if (!event) return;
 
-      if ('fullName' in req.body) operator.fullName = req.body.fullName;
+      if ('fullName' in req.body) {
+        // Unvalidated, this assignment took whatever arrived: a number renamed
+        // the person to "123" (Mongoose casts it), and null threw a
+        // ValidationError into next(err) that surfaced as a 500 where a 400
+        // belongs. Mirrors the create handler's own fullName check.
+        if (typeof req.body.fullName !== 'string' || !req.body.fullName.trim()) {
+          ApiResponseUtil.badRequest(res, 'fullName must be a non-empty string'); return;
+        }
+        operator.fullName = req.body.fullName;
+      }
       if ('isActive' in req.body) operator.isActive = !!req.body.isActive;
       await operator.save();
       ApiResponseUtil.success(res, { operator });

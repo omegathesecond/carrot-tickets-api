@@ -127,7 +127,16 @@ export class CashierAdminController {
     try {
       const cashier = await Cashier.findOne({ _id: req.params['id'], ...scopeFilter(req) });
       if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
-      if ('fullName' in req.body) cashier.fullName = req.body.fullName;
+      if ('fullName' in req.body) {
+        // Unvalidated, this assignment took whatever arrived: a number renamed
+        // the person to "123" (Mongoose casts it), and null threw a
+        // ValidationError into next(err) that surfaced as a 500 where a 400
+        // belongs. Mirrors the create handler's own fullName check.
+        if (typeof req.body.fullName !== 'string' || !req.body.fullName.trim()) {
+          ApiResponseUtil.badRequest(res, 'fullName must be a non-empty string'); return;
+        }
+        cashier.fullName = req.body.fullName;
+      }
       if ('isActive' in req.body) cashier.isActive = !!req.body.isActive;
       // The owning event is deliberately NOT patchable — it is immutable at
       // the schema level, so a body carrying one is ignored. Moving a cashier

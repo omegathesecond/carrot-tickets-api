@@ -138,6 +138,29 @@ it('PATCH updates fullName and isActive', async () => {
   expect(stored!.isActive).toBe(false);
 });
 
+it('PATCH 400s a fullName that is not a non-empty string, leaving the name alone', async () => {
+  const { merchantId } = await seedMerchant();
+  const admin = superAdminToken();
+  const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Thabo Dlamini' });
+  const operatorId = created.body.data.operator._id;
+
+  for (const fullName of [123, null, '', '   ']) {
+    const res = await request(app).patch(`/api/tickets/merchant-operators/${operatorId}`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ fullName });
+
+    // 400 — not the 200 that used to rename the person to the string "123",
+    // and not the 500 that `null` used to produce by throwing a Mongoose
+    // ValidationError into next(err).
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('fullName must be a non-empty string');
+  }
+
+  const stored = await MerchantOperator.findById(operatorId);
+  expect(stored!.fullName).toBe('Thabo Dlamini');
+});
+
 it('PATCH 404s for an operator that does not exist', async () => {
   const admin = superAdminToken();
   const res = await request(app).patch(`/api/tickets/merchant-operators/${new mongoose.Types.ObjectId()}`)
