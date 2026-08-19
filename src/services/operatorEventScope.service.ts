@@ -64,10 +64,16 @@ function operatorRefOf(req: Request): OperatorRef | null {
  * null means "no restriction" and covers four cases: the caller is not an
  * operator at all, a multi-event operator has no assignment (empty set =
  * every event, the pre-assignment behaviour), the caller is a PLATFORM
- * cashier (Carrot's own staff, legitimately global), or the token names an
- * operator row that no longer exists. A DB failure is NOT swallowed into
- * null — it propagates, so an outage surfaces as a 500 instead of silently
- * widening access.
+ * cashier (Carrot's own staff, legitimately global), or the token names a
+ * multi-event operator row that no longer exists.
+ *
+ * An EMPTY ARRAY is the opposite — it denies every event — and is returned
+ * only on the cashier path, for the two rows that must not be trusted: an
+ * organizer cashier carrying no event, and a row that has been deleted. See
+ * the branch itself for why each fails closed.
+ *
+ * A DB failure is NOT swallowed into null — it propagates, so an outage
+ * surfaces as a 500 instead of silently widening access.
  */
 export async function resolveOperatorEventScope(req: Request): Promise<string[] | null> {
   const ref = operatorRefOf(req);
@@ -82,7 +88,22 @@ export async function resolveOperatorEventScope(req: Request): Promise<string[] 
     // is what actually holds the line.
     const cashier = await Cashier.findById(ref.id).select('eventId scope')
       .lean<Pick<ICashier, 'eventId' | 'scope'> | null>();
-    if (!cashier) return null;
+
+    // A VANISHED row denies too, unlike the 'many' path below which reads a
+    // missing operator as unrestricted. A cashier token always names a real
+    // row, so nothing here means a deleted or unknown actor.
+    //
+    // This is not hypothetical: cleanup-eventless-cashiers.ts DELETES legacy
+    // rows, and authenticateCashier verifies the JWT with no database lookup
+    // at all while CashierAuthService mints 7-day tokens. Resolving to null
+    // would therefore flip a deleted cashier from "denied everywhere" (the
+    // empty-array case below) to "allowed everywhere" for up to a week —
+    // and since loadCashlessEvent does no vendor comparison of its own and
+    // event ids are public (they sit in /event/<slug>-<24hex> URLs), she
+    // could top up and cash out at any published cashless event of any
+    // organizer. Deactivating instead of deleting would not help either;
+    // isActive is not re-checked at request time.
+    if (!cashier) return [];
 
     // `scope` is selected precisely so the two no-event cases can be told
     // apart. An ORGANIZER cashier is REQUIRED to carry an event, so a row

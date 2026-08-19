@@ -144,6 +144,27 @@ describe('operatorMayActOnEvent', () => {
     expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
   });
 
+  // The state cleanup-eventless-cashiers.ts manufactures. Seeded and then
+  // DELETED rather than merely fabricating an unknown id, so the test walks
+  // the exact path a real cleanup run produces.
+  it('DENIES a cashier whose row has been deleted, whose token still has days to run', async () => {
+    const c = await Cashier.create({
+      fullName: 'Deleted', loginCode: '820013', pin: '222222',
+      scope: 'organizer', vendorId: oid(), eventId: oid(),
+    });
+    const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
+    // Scoped to her own event while she exists…
+    expect(await resolveOperatorEventScope(req as any)).toHaveLength(1);
+
+    await Cashier.deleteOne({ _id: c._id });
+
+    // …and DENIED once the row is gone, not freed. authenticateCashier does no
+    // DB lookup and tokens last 7 days, so her token keeps authenticating —
+    // resolving to null here would hand her every event instead of none.
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+    expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
+  });
+
   it('lets a PLATFORM cashier work any event', async () => {
     const c = await Cashier.create({ fullName: 'Carrot Staff', loginCode: '820011', pin: '222222', scope: 'platform' });
     const req = { cashier: { scope: 'cashier', cashierId: (c._id as any).toString() } };
