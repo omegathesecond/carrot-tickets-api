@@ -18,6 +18,7 @@ import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAd
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
 import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
+import { TagReportController } from '@controllers/tagReport.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
 import { AdminOrganizersController } from '@controllers/adminOrganizers.controller';
 import { AdminServiceCategoriesController } from '@controllers/adminServiceCategories.controller';
@@ -592,6 +593,13 @@ router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(Ti
  * movements audit. Stock figures are revenue-adjacent → VIEW_REVENUE; ownership
  * (own cashless event only) enforced by the shared guard in the controller.
  */
+/**
+ * Tag management — the wallets behind the NFC tags at a cashless event.
+ * ORDER MATTERS: the literal /tags/summary must stay above /tags/:walletId,
+ * or Express matches "summary" as a wallet id.
+ */
+router.get('/events/:eventId/tags/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.summary);
+
 router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
 router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
 router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
