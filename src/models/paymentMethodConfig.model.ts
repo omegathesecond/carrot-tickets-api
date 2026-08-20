@@ -17,6 +17,10 @@ export interface IPaymentMethodConfig extends mongoose.Document {
   cardServiceFee: number;
   deltapayServiceFee: number;
   yocoServiceFee: number;
+  // Buyer-paid PERCENTAGE service charge on Menu (bar/vendor preorder) cart
+  // subtotals — the fee for ordering ahead through Carrot instead of queueing.
+  // Distinct from the flat per-ticket *ServiceFee fields above.
+  menuServiceFeePercent: number;
   updatedAt: Date;
 }
 
@@ -35,6 +39,7 @@ const schema = new Schema<IPaymentMethodConfig>({
   cardServiceFee: { type: Number, default: 0 },
   deltapayServiceFee: { type: Number, default: 0 },
   yocoServiceFee: { type: Number, default: 0 },
+  menuServiceFeePercent: { type: Number, default: 8 },
 }, { timestamps: true });
 
 export const PaymentMethodConfig = mongoose.model<IPaymentMethodConfig>('PaymentMethodConfig', schema);
