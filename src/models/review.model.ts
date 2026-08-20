@@ -55,7 +55,22 @@ const reviewSchema = new Schema<IReview>(
       ),
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    // Mongoose's default (connection-level) autoIndex would otherwise race
+    // migrateReviewIndexes() (called at app.ts boot, non-test envs only) to
+    // (re)build this collection's indexes the instant this model registers
+    // on an open connection — if that background build wins while the
+    // legacy pre-migration eventId_1_buyerId_1 index (non-partial) still
+    // exists in the target DB, it throws IndexKeySpecsConflict instead of
+    // ever landing the partial version below. Left on for NODE_ENV==='test'
+    // — the test suite's ephemeral in-memory Mongo relies on autoIndex to
+    // build these before assertions run (see review.serviceGate.test.ts's
+    // explicit Review.init() for a DB where that ordering is asserted, not
+    // just assumed). migrateReviewIndexes() is the sole authority for these
+    // indexes everywhere else. See src/scripts/migrate-review-indexes.ts.
+    autoIndex: process.env['NODE_ENV'] === 'test',
+  }
 );
 
 // Exactly one reviewer: a buyer XOR a fellow organizer. Event reviews are
