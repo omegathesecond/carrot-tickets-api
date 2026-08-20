@@ -32,6 +32,7 @@
     "test": "jest",
     "seed:dev": "ts-node -r tsconfig-paths/register src/scripts/seedDevEnvironment.ts",
     "seed:cashless": "ts-node -r tsconfig-paths/register src/scripts/seedCashlessDemo.ts",
+    "seed:menu-demo": "ts-node -r tsconfig-paths/register src/scripts/seedMenuDemo.ts",
     "yoco:register-webhook": "ts-node -r tsconfig-paths/register src/scripts/yocoRegisterWebhook.ts"
   },
   "keywords": [
