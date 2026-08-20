@@ -26,6 +26,18 @@ async function loadRegisterableEvent(req: Request, res: Response): Promise<any |
   return event;
 }
 
+/**
+ * A bad uid, or a tag that isn't in this register, is the operator's problem to
+ * fix and gets a 400 carrying the reader's own words. Anything else — the
+ * database being unreachable, say — is ours, and must not be dressed up as
+ * "your input was wrong": the desk would sit there re-typing a uid that was
+ * fine all along.
+ */
+function statusFor(err: unknown): number {
+  const msg = (err as { message?: string })?.message ?? '';
+  return /invalid band uid|not in this event/i.test(msg) ? 400 : 500;
+}
+
 /** Who enrolled it — the operator row when there is one, else the organizer. */
 function actorIdOf(req: Request): string | undefined {
   const ticketsUser = (req as any).ticketsUser;
@@ -115,10 +127,8 @@ export class EventTagController {
         counts: await EventTagService.counts(eventId),
       });
     } catch (err: any) {
-      // A malformed uid is the operator's problem to fix, not a server fault —
-      // 400 with the reader's own message rather than a blanket 500.
       console.error('Tag register error:', err);
-      return ApiResponseUtil.error(res, err?.message || 'Failed to register the tag', 400);
+      return ApiResponseUtil.error(res, err?.message || 'Failed to register the tag', statusFor(err));
     }
   }
 
@@ -146,7 +156,7 @@ export class EventTagController {
       });
     } catch (err: any) {
       console.error('Tag retire error:', err);
-      return ApiResponseUtil.error(res, err?.message || 'Failed to retire the tag', 400);
+      return ApiResponseUtil.error(res, err?.message || 'Failed to retire the tag', statusFor(err));
     }
   }
 }
