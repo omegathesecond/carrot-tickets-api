@@ -45,10 +45,16 @@ export interface UpdateEventParams {
   isMultiDay?: boolean;
   capacity?: number;
   ticketTypes?: Array<{
+    // The tier being edited, echoed back from the event. Absent = a brand-new
+    // tier, or an older caller that only knows names. Sending it is what lets a
+    // tier be RENAMED without reading as delete-then-recreate (which would
+    // reset its sold count); see updateEvent.
+    _id?: string;
     name: string;
     description?: string;
     price: number;
     quantity: number;
+    isSoldOut?: boolean;
   }>;
   category?: EventCategory;
   ticketing?: 'carrot' | 'external';
@@ -335,25 +341,107 @@ export class EventService {
       if (updates.priceMin !== undefined) event.priceMin = updates.priceMin;
       if (updates.priceMax !== undefined) event.priceMax = updates.priceMax;
 
-      // Update ticket types if provided
+      // Update ticket types if provided.
+      //
+      // A tier is EDITED IN PLACE, never rebuilt. Replacing the array (which
+      // this used to do) mints fresh subdocument _ids, and every tier lookup in
+      // the codebase resolves by _id — `ticketTypes.find(tt => tt._id === ...)`
+      // in checkTicketAvailability, reserveTickets, the purchase paths — so a
+      // rebuild silently orphans every ticket already issued against the tier.
+      // It also dropped each tier's reseller-allocation fields (resellerId,
+      // isAllocation, allocationUnitCost, restrictToMethod, waiveServiceFee),
+      // quietly turning a partner's exclusive block into an ordinary tier.
+      // Mutating the existing subdocument keeps both intact by construction:
+      // only the fields the caller actually sent are touched.
       if (updates.ticketTypes) {
-        // Preserve sold counts when updating ticket types
-        const oldTicketTypes = event.ticketTypes;
-        event.ticketTypes = updates.ticketTypes.map(tt => {
-          const existing = oldTicketTypes.find(old => old.name === tt.name);
-          const sold = existing ? existing.sold : 0;
-          const isSoldOut = existing ? existing.isSoldOut : false;
-          return {
-            name: tt.name,
-            description: tt.description,
-            price: tt.price,
-            quantity: tt.quantity,
-            sold,
-            reserved: existing ? (existing.reserved || 0) : 0,
-            available: computeAvailable({ quantity: tt.quantity, sold, reserved: existing ? (existing.reserved || 0) : 0 }),
-            isSoldOut
-          };
+        const incoming = updates.ticketTypes;
+
+        // Identity, best signal first: the tier's own _id when the caller
+        // echoes it back, else its name. Name-matching alone cannot survive a
+        // rename — it reads as "delete tier A, create tier B", resetting the
+        // sold count — so a caller that wants to rename a tier MUST send _id.
+        const matchExisting = (tt: (typeof incoming)[number]) =>
+          tt._id
+            ? event.ticketTypes.find(existing => existing._id?.toString() === tt._id)
+            : event.ticketTypes.find(existing => existing.name === tt.name);
+
+        // Resolve every incoming tier to its existing subdocument (or null for a
+        // new one) ONCE, up front, so the membership check below and the rebuild
+        // that follows can never disagree about what matched.
+        const matched = new Set<string>();
+        const resolved = incoming.map(tt => {
+          const existing = matchExisting(tt);
+          // An _id the caller made up (or one belonging to a different event)
+          // must not quietly become a brand-new tier — that is how an "edit"
+          // turns into a duplicate nobody asked for.
+          if (tt._id && !existing) {
+            throw new HttpError(400, `Unknown ticket type: ${tt._id}`);
+          }
+          if (existing) {
+            const key = existing._id!.toString();
+            // Two payload entries pointing at one tier would put the same
+            // subdocument in the array twice.
+            if (matched.has(key)) {
+              throw new HttpError(400, `Duplicate ticket type in update: ${existing.name}`);
+            }
+            matched.add(key);
+          }
+          return { tt, existing };
         });
+
+        // Dropping a tier that has already moved tickets would strand the
+        // holders of those tickets — their tier simply ceases to exist. Refuse
+        // loudly rather than deleting the record out from under them. (A tier
+        // nobody has bought into is free to go.)
+        const stranded = event.ticketTypes.filter(
+          existing =>
+            !matched.has(existing._id!.toString()) &&
+            (existing.sold > 0 || (existing.reserved || 0) > 0)
+        );
+        if (stranded.length > 0) {
+          throw new HttpError(
+            400,
+            `Cannot remove ticket type${stranded.length > 1 ? 's' : ''} with tickets already sold: ${stranded
+              .map(t => t.name)
+              .join(', ')}`
+          );
+        }
+
+        // Rebuild the ARRAY (order + membership follow the caller) out of the
+        // EXISTING subdocuments, so identity and every untouched field ride
+        // along. Only genuinely new tiers are constructed from scratch.
+        const next = resolved.map(({ tt, existing }) => {
+          if (!existing) {
+            return {
+              name: tt.name,
+              description: tt.description,
+              price: tt.price,
+              quantity: tt.quantity,
+              sold: 0,
+              reserved: 0,
+              available: tt.quantity,
+              isSoldOut: tt.isSoldOut ?? false
+            } as ITicketType;
+          }
+          existing.name = tt.name;
+          existing.price = tt.price;
+          existing.quantity = tt.quantity;
+          // description is optional in the payload, so an absent one means
+          // "leave it alone", not "erase it" — the caller that never sends
+          // descriptions must not silently strip them off every tier.
+          if (tt.description !== undefined) existing.description = tt.description;
+          // sold/reserved are ledger state owned by the purchase paths — the
+          // caller never gets to set them, only to have `available` re-derived.
+          existing.available = computeAvailable({
+            quantity: tt.quantity,
+            sold: existing.sold,
+            reserved: existing.reserved || 0
+          });
+          if (tt.isSoldOut !== undefined) existing.isSoldOut = tt.isSoldOut;
+          return existing;
+        });
+
+        event.ticketTypes = next as any;
       }
 
       await event.save();
