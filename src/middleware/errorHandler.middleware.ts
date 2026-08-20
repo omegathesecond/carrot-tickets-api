@@ -265,12 +265,41 @@ export const errorHandler = (
   res.status(appError.statusCode).json(response);
 };
 
+/** Where a browsing human is sent instead of being shown a raw JSON 404. */
+function publicSiteUrl(): string {
+  return process.env['PUBLIC_SITE_URL'] || 'https://carrottickets.com';
+}
+
 /**
- * Handle 404 errors
+ * True only for a real browser NAVIGATION to an unknown path.
+ *
+ * Deliberately tests for `text/html` in Accept rather than using
+ * `req.accepts(['html','json'])`: that helper resolves a wildcard Accept — what curl
+ * and many HTTP clients send by default — to 'html', which would silently turn
+ * genuine API 404s into redirects. A client expecting a JSON error would instead
+ * follow a 302 to an HTML page and misreport the failure. Browsers always send
+ * `text/html` when navigating; API clients essentially never do.
  */
-export const notFoundHandler = (req: Request, _res: Response, next: NextFunction) => {
+function isBrowserNavigation(req: Request): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  return String(req.headers['accept'] || '').includes('text/html');
+}
+
+/**
+ * Handle 404 errors.
+ *
+ * A person who browses the API host is bounced to the public site — the API
+ * domain is not something to poke around in, and the JSON 404 body otherwise
+ * advertises the framework, the error shape and a request id. Machine clients
+ * still get the loud JSON 404 they depend on; the redirect carries no path
+ * detail back to the caller.
+ */
+export const notFoundHandler = (req: Request, res: Response, next: NextFunction) => {
+  if (isBrowserNavigation(req)) {
+    return res.redirect(302, publicSiteUrl());
+  }
   const error = new NotFoundError(`Route not found: ${req.method} ${req.originalUrl}`);
-  next(error);
+  return next(error);
 };
 
 /**

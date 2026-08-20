@@ -342,6 +342,15 @@ router.post('/purchase/deltapay', authenticateBuyer, PublicController.initiateDe
 router.post('/purchase/yoco', authenticateBuyer, PublicController.initiateYocoPurchase);
 
 /**
+ * @route   GET /api/public/purchase/yoco/latest/status
+ * @desc    Outcome of the buyer's most recent Yoco payment, with no identifier
+ *          on the URL. Declared BEFORE the /:checkoutId/status route so that
+ *          "latest" is not captured as a checkout id.
+ * @access  Buyer (authenticated)
+ */
+router.get('/purchase/yoco/latest/status', authenticateBuyer, PublicController.getLatestYocoStatus);
+
+/**
  * @route   GET /api/public/purchase/yoco/:checkoutId/status
  * @desc    Read the status of a Yoco purchase. READ-ONLY — unlike the card and
  *          DeltaPay pollers this does NOT finalise, because Yoco exposes no

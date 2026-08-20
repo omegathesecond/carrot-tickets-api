@@ -123,55 +123,9 @@ describe('POST /api/public/purchase/yoco/webhook', () => {
   });
 });
 
-describe('Yoco return redirect', () => {
-  const PAGE = 'https://carrottickets.com/payment-result';
-
-  it('302s to the SPA result page carrying the checkout id and method', async () => {
-    mockGetByRef.mockResolvedValueOnce({
-      yocoCheckoutId: 'ch_9', paymentStatus: 'pending',
-    } as any);
-
-    const res = await request(app).get('/api/public/purchase/yoco/return?ref=TKT-9&outcome=success');
-
-    expect(res.status).toBe(302);
-    expect(res.headers['location']).toBe(`${PAGE}?id=ch_9&status=pending&method=yoco`);
-  });
-
-  it('NEVER finalises from the return redirect — only the signed webhook may mint', async () => {
-    mockGetByRef.mockResolvedValueOnce({
-      yocoCheckoutId: 'ch_9', paymentStatus: 'pending',
-    } as any);
-
-    const res = await request(app).get('/api/public/purchase/yoco/return?ref=TKT-9&outcome=success');
-
-    // Assert the route actually handled it — without this the test would pass
-    // vacuously against a 404, i.e. it would not notice the route disappearing.
-    expect(res.status).toBe(302);
-    expect(mockFinalize).not.toHaveBeenCalled();
-  });
-
-  it('reports the sale as failed when the buyer cancelled and nothing has been paid', async () => {
-    mockGetByRef.mockResolvedValueOnce({
-      yocoCheckoutId: 'ch_c', paymentStatus: 'failed',
-    } as any);
-
-    const res = await request(app).get('/api/public/purchase/yoco/return?ref=TKT-C&outcome=cancel');
-
-    expect(res.status).toBe(302);
-    expect(res.headers['location']).toBe(`${PAGE}?id=ch_c&status=failed&method=yoco`);
-  });
-
-  it('302s to the bare result page when no ref is supplied', async () => {
-    const res = await request(app).get('/api/public/purchase/yoco/return');
-
-    expect(res.status).toBe(302);
-    expect(res.headers['location']).toBe(PAGE);
-  });
-
-  it('302s to the bare result page when the ref matches no sale', async () => {
-    const res = await request(app).get('/api/public/purchase/yoco/return?ref=TKT-NOPE');
-
-    expect(res.status).toBe(302);
-    expect(res.headers['location']).toBe(PAGE);
-  });
-});
+// The return redirect's behaviour now lives in yocoReturnOracle.test.ts, which
+// covers it far more strictly: it must be byte-identical for a real ref, a
+// forged ref and no ref at all, so that an unauthenticated caller cannot use it
+// to discover whether a sale exists or whether it was paid. The assertions that
+// used to live here encoded the OLD, leaking contract (id + status echoed into
+// the redirect) and were deliberately removed rather than relaxed.

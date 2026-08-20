@@ -1,14 +1,7 @@
 import { Request, Response } from 'express';
 import { YocoClient, classifyEventType } from '@services/payments/yoco.client';
 import { TicketService } from '@services/ticket.service';
-import { paymentResultPageUrl, paymentResultRedirect } from '@utils/paymentResult.util';
-
-/** Map a stored sale status onto the display hint the result page understands. */
-function displayStatus(paymentStatus?: string): 'completed' | 'failed' | 'pending' {
-  if (paymentStatus === 'completed') return 'completed';
-  if (paymentStatus === 'failed' || paymentStatus === 'refunded') return 'failed';
-  return 'pending';
-}
+import { paymentResultPageUrl } from '@utils/paymentResult.util';
 
 export class YocoController {
   /**
@@ -75,30 +68,23 @@ export class YocoController {
    * Yoco successUrl / cancelUrl / failureUrl target — the buyer's BROWSER lands
    * here after the hosted checkout page.
    *
-   * Deliberately does NOT finalise. Peach and DeltaPay finalise on return
-   * because they expose a server-side status query to re-verify against; Yoco
-   * does not, so the only trustworthy outcome is the signed webhook. This
-   * handler therefore just READS our own sale record and 302s to the SPA result
-   * page with a display hint. The `ref` is a lookup hint only — a forged one
-   * reveals nothing it wasn't already given and can mint nothing.
+   * Deliberately does NOTHING but redirect. Two separate reasons:
+   *
+   * 1. It cannot finalise. Peach and DeltaPay finalise on return because they
+   *    expose a server-side status query to re-verify against; Yoco does not, so
+   *    the signed webhook is the only thing that may move a sale.
+   * 2. It must not REPORT either. This endpoint is unauthenticated and the `ref`
+   *    is not secret — it is sent to Yoco as `externalId` and appears on
+   *    receipts. Echoing the sale's checkout id or payment status back would let
+   *    anyone turn a known or guessed ref into "does this sale exist, and was it
+   *    paid?". So the response is byte-identical for a real ref, a forged ref and
+   *    no ref at all.
+   *
+   * The buyer's actual outcome comes from the authenticated
+   * `GET /api/public/purchase/yoco/latest/status`, which reads THEIR OWN most
+   * recent Yoco sale — the same approach the DeltaPay result page already uses.
    */
-  static async returnRedirect(req: Request, res: Response): Promise<any> {
-    const raw = req.query['ref'];
-    const ref = typeof raw === 'string' && raw ? raw : undefined;
-    if (!ref) return res.redirect(302, paymentResultPageUrl());
-
-    try {
-      const sale = await TicketService.getYocoSaleByRef(ref);
-      if (!sale?.yocoCheckoutId) return res.redirect(302, paymentResultPageUrl());
-
-      return res.redirect(
-        302,
-        paymentResultRedirect(sale.yocoCheckoutId, displayStatus(sale.paymentStatus), 'yoco')
-      );
-    } catch (e) {
-      // Best-effort display only — the page's authenticated poll is the backstop.
-      console.error('[yoco return] lookup', e);
-      return res.redirect(302, paymentResultPageUrl());
-    }
+  static returnRedirect(_req: Request, res: Response): any {
+    return res.redirect(302, `${paymentResultPageUrl()}?method=yoco`);
   }
 }

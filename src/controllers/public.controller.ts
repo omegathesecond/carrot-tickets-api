@@ -1184,6 +1184,43 @@ export class PublicController {
   }
 
   /**
+   * Outcome of the signed-in buyer's MOST RECENT Yoco payment. Buyer-authed.
+   *
+   * This is what replaced the identifiers the return URL used to carry. That URL
+   * is unauthenticated and its `ref` is not secret, so echoing a checkout id or
+   * status there let anyone probe whether a sale existed and was paid. Asking
+   * here instead means the answer is scoped to the caller's own purchases.
+   *
+   * READ-ONLY, like getYocoStatus: Yoco has no status-query endpoint, so the
+   * server can only report what the signed webhook already recorded. Returns
+   * `{ status: 'none' }` when the buyer has no Yoco purchase at all, so the page
+   * can tell "nothing to show" apart from "failed".
+   */
+  static async getLatestYocoStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const sale = await TicketService.getLatestYocoSaleForBuyer(buyer);
+      if (!sale?.yocoCheckoutId) {
+        return ApiResponseUtil.success(res, { status: 'none' });
+      }
+
+      const status =
+        sale.paymentStatus === 'completed'
+          ? 'completed'
+          : sale.paymentStatus === 'pending'
+          ? 'pending'
+          : 'failed';
+      return ApiResponseUtil.success(res, { status, checkoutId: sale.yocoCheckoutId });
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
    * Initiate an async DeltaPay hosted-checkout purchase. Buyer-authed.
    * Returns the checkout URL for the SPA to redirect to.
    */

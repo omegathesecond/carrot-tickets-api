@@ -1641,6 +1641,24 @@ export class TicketService {
    * sale. Ordered by createdAt (not soldAt, which is set at initiation for every
    * pending sale and would tie) so "most recent attempt" is unambiguous.
    */
+  /**
+   * The signed-in buyer's most recent Yoco sale.
+   *
+   * Exists so the result page can report an outcome WITHOUT the return URL
+   * having to carry an identifier — that URL is unauthenticated, so anything it
+   * echoed would be readable by anyone holding a sale ref. Matching on the
+   * buyer's own handles makes the answer unambiguous and unguessable.
+   */
+  static async getLatestYocoSaleForBuyer(
+    buyer: { _id?: unknown; phone?: string; email?: string }
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({
+      $or: buyerTicketOr(buyer),
+      paymentMethod: PaymentMethod.YOCO,
+      yocoCheckoutId: { $exists: true, $nin: [null, ''] },
+    }).sort({ createdAt: -1 });
+  }
+
   static async getLatestDeltapaySaleForBuyer(
     buyer: { _id?: unknown; phone?: string; email?: string }
   ): Promise<InstanceType<typeof TicketSale> | null> {
