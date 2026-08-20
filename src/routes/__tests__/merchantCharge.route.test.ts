@@ -9,6 +9,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
 import { Wallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
@@ -29,6 +30,7 @@ async function seedMerchantAndFundedBand(opts: { cashless?: boolean; balance?: n
   const t = await Ticket.create({ eventId, vendorId, ticketType: 'General', price: 100, status: TicketStatus.SOLD });
   const w = await WalletService.ensureWalletForTicket({ ticketId: String(t._id), eventId: String(eventId) });
   const bandUid = '04a22b1c3d4e5f';
+  await enrolTags(eventId, bandUid, 'aaaaaaaaaaaaaa');
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
   if (balance > 0) {
     await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: balance, recordedBy: 'op1', clientTxnId: 'seed-topup' });

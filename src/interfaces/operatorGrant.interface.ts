@@ -14,7 +14,13 @@ import { CashierPermission } from '@interfaces/cashier.interface';
  * service translates a grant into its own namespace when minting the token.
  */
 export enum OperatorGrant {
-  /** Bind a blank tag to an attendee's ticket (the tag desk). */
+  /**
+   * The REGISTER desk. Two jobs, one capability because they are the same
+   * person at the same table: enrol the organizer's physical tags into an
+   * event's register (see EventTag), and bind one of those tags to an
+   * attendee's ticket. Whoever holds this grant logs into the POS as
+   * `type: 'register'` rather than `type: 'gate'`.
+   */
   ISSUE_TAGS = 'issue_tags',
 }
 

@@ -38,7 +38,12 @@ export class OperatorAuthController {
       try {
         if (gate) {
           const result = await GateOperatorAuthService.login(code, pin);
-          ApiResponseUtil.success(res, { type: 'gate', ...result });
+          // Register and Gate share one credential/lockout stack — the desk is a
+          // gate operator carrying the tag grant, not a fifth actor collection —
+          // but they are DIFFERENT JOBS and the POS opens a different screen for
+          // each, so the login has to say which one this person is.
+          const type = result.operator.isRegisterDesk ? 'register' : 'gate';
+          ApiResponseUtil.success(res, { type, ...result });
           return;
         }
         if (cashier) {

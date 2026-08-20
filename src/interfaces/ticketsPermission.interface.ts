@@ -43,9 +43,12 @@ export enum TicketsPermission {
   // vertical, same reasoning as MANAGE_STOCK, so it lives in
   // EVENT_PERMISSIONS below.
   MANAGE_MENU = 'tickets:manage_menu',
-  // Bind a blank tag to an attendee's ticket at the tag desk. Granted per
-  // operator (see OperatorGrant), never part of a role's default set — issuing
-  // tags is a distinct job from scanning people in.
+  // The Register desk: enrol the organizer's physical tags into an event's
+  // register, and bind one of those tags to an attendee's ticket. Granted per
+  // operator (see OperatorGrant), never part of a SCANNER's default set —
+  // running the register is a distinct job from scanning people in. OWNER holds
+  // it via EVENT_PERMISSIONS, which is what lets the organizer register a whole
+  // tag order from the dashboard without creating a desk account first.
   ISSUE_TAGS = 'tickets:issue_tags',
 
   // Platform User Management (Carrot admins/team only) — see the platform-wide

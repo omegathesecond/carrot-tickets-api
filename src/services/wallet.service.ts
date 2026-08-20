@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
+import { EventTagService } from '@services/eventTag.service';
 import { WalletTopup, IWalletTopup, TopupRecordedByType } from '@models/walletTopup.model';
 import { WalletWithdrawal, IWalletWithdrawal } from '@models/walletWithdrawal.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
@@ -12,8 +13,8 @@ import { WalletDeclinedError } from '@services/merchant.service';
  * Safety ceiling on a single cash top-up, in minor units (cents): R100,000.
  * This is an adjustable defense-in-depth limit against ledger inflation from a
  * fat-fingered or malicious amount — NOT a business rule. Enforced both in the
- * reseller Joi schemas (cashTopupSchema.amount / sellBandSchema.cashAmount) and
- * here in topUpCash, so a caller that bypasses validation still cannot inflate.
+ * reseller Joi schema (cashTopupSchema.amount) and here in topUpCash, so a
+ * caller that bypasses validation still cannot inflate.
  */
 export const MAX_TOPUP_CENTS = 10_000_000;
 
@@ -77,6 +78,23 @@ export class WalletService {
   static async bindBand(walletId: string, bandUid: string, boundBy?: string): Promise<IWallet> {
     const uid = bandUid.trim();
     if (!uid) throw new Error('bandUid is required');
+
+    // THE ALLOWLIST GATE. A tag only carries money at an event its organizer
+    // enrolled it into (see EventTag) — otherwise anyone could arrive with a
+    // tag bought elsewhere, or one left over from last night's show, and spend
+    // against this organizer's float.
+    //
+    // This is deliberately THE choke point rather than one check per caller:
+    // binding is the only way a uid ever lands on a wallet, so gating it here
+    // means check-in-by-tag, vendor charges and wallet lookups are all covered
+    // for free — they can only ever find a wallet whose uid passed through
+    // this line. Reissue-onto-a-fresh-tag comes through here too.
+    //
+    // The wallet is read first purely for its eventId: the register is
+    // per-event, and bindBand is addressed by walletId.
+    const target = await Wallet.findById(walletId).select('eventId').lean<{ eventId: unknown } | null>();
+    if (!target) throw new Error('wallet not found');
+    await EventTagService.assertTagRegistered(String(target.eventId), uid);
 
     // Race 1: claim the wallet. Precondition in the filter => one winner.
     const claimed = await Wallet.findOneAndUpdate(

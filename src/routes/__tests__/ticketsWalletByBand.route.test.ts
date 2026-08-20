@@ -8,6 +8,7 @@ import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
 
 beforeAll(connectTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
 const gate = (perms = [TicketsPermission.SCAN_TICKETS], vendorId = 'v1') =>
@@ -17,6 +18,7 @@ it('returns the wallet view for a bound band', async () => {
   const { eventId, vendorId } = await seedPublishedEvent({});
   const t = await Ticket.create({ eventId, vendorId, ticketType:'General', price:100, status: TicketStatus.SOLD });
   const w = await WalletService.ensureWalletForTicket({ ticketId: String(t._id), eventId: String(eventId) });
+  await enrolTags(eventId, '04a22b1c3d4e5f');
   await WalletService.bindBand(String(w._id), '04a22b1c3d4e5f', 'op1');
 
   const res = await request(app).get(`/api/tickets/wallets/by-band/04a22b1c3d4e5f?eventId=${eventId}`)
@@ -47,6 +49,7 @@ it('rejects Vendor A reading Vendor B\'s event band with 403 (no wallet leak)', 
   const { eventId, vendorId } = await seedPublishedEvent({}); // vendorId = Vendor B
   const t = await Ticket.create({ eventId, vendorId, ticketType: 'General', price: 100, status: TicketStatus.SOLD });
   const w = await WalletService.ensureWalletForTicket({ ticketId: String(t._id), eventId: String(eventId) });
+  await enrolTags(eventId, '04a22b1c3d4e5f');
   await WalletService.bindBand(String(w._id), '04a22b1c3d4e5f', 'op1');
 
   const res = await request(app).get(`/api/tickets/wallets/by-band/04a22b1c3d4e5f?eventId=${eventId}`)
