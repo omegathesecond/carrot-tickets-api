@@ -50,6 +50,7 @@ if (isSentryEnabled()) {
 // Background sweeps (reservation expiry, card-sale reconciliation, event
 // reminders, stuck-update reconciliation) — consolidated in src/tasks.
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
+import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -241,6 +242,24 @@ if (process.env['NODE_ENV'] !== 'test') {
       console.log(`📦 Database: ${mongoose.connection.name}`);
       // Log detailed database configuration
       logDatabaseConfig();
+
+      // One-time (safe-to-repeat) index migration for the `reviews`
+      // collection — see src/scripts/migrate-review-indexes.ts. This was
+      // previously a manual `npm run migrate:review-indexes` step; running it
+      // here instead means an environment nobody remembered to run it
+      // against (e.g. dev) self-heals on its next deploy rather than staying
+      // broken indefinitely. Without it, the legacy non-partial
+      // eventId_1_buyerId_1 unique index stays in place, and a SECOND
+      // service-business review from any reviewer with no eventId/buyerId
+      // (an organizer reviewing a business) collides on that index and 409s
+      // as "You have already reviewed this business" even when they haven't.
+      // Logged, not fatal — a failed migration must not block the API from
+      // serving everything else. review.model.ts turns the Review schema's
+      // own autoIndex off outside tests so this call is the only thing that
+      // ever builds indexes for this collection.
+      migrateReviewIndexes().catch((err) => {
+        console.error('❌ migrateReviewIndexes failed (review submission may still 409 spuriously):', err);
+      });
 
       // Background sweeps: reservation expiry, card-sale reconciliation,
       // event reminders, stuck-update reconciliation. Same functions, same
