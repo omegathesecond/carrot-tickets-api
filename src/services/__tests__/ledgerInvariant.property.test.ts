@@ -67,6 +67,10 @@ describe('ledger invariant (property)', () => {
     const floatByTag: Record<FloatTag, number> = {
       [FloatTag.KESHLESS]: 0,
       [FloatTag.CASH_DESK]: 0,
+      // Office refunds are not among this test's movements, but the record is
+      // keyed by the enum on purpose: adding a tag breaks the BUILD here
+      // rather than silently dropping out of the totals below.
+      [FloatTag.OFFICE]: 0,
     };
 
     // A guard that silently stops matching (a refactor, a flipped comparison)
@@ -168,7 +172,7 @@ describe('ledger invariant (property)', () => {
       expect(r.walletsOwed).toBe(sum(owed));
       expect(r.merchantsOwed).toBe(sum(earned));
       expect(r.feesEarned).toBe(fees);
-      expect(r.float).toBe(floatByTag[FloatTag.KESHLESS] + floatByTag[FloatTag.CASH_DESK]);
+      expect(r.float).toBe(sum(floatByTag));
 
       // Near-tautological: LedgerAccountType has exactly these four members and
       // drift sums all four, so drift === Σ(every delta) — which post() already
@@ -181,10 +185,10 @@ describe('ledger invariant (property)', () => {
 
     // Money must reconcile per LOCATION, not only in total: a bug that credited
     // the cash drawer for a card top-up nets out of `float` and hides here.
-    expect(await LedgerService.floatBalance(eventId, FloatTag.KESHLESS))
-      .toBe(floatByTag[FloatTag.KESHLESS]);
-    expect(await LedgerService.floatBalance(eventId, FloatTag.CASH_DESK))
-      .toBe(floatByTag[FloatTag.CASH_DESK]);
+    for (const tag of Object.values(FloatTag)) {
+      expect(await LedgerService.floatBalance(eventId, tag))
+        .toBe(floatByTag[tag]);
+    }
 
     // Per-account, not just the type-wide totals the invariant sums: crossed
     // wallets (w1 debited for w2's spend) cancel inside walletsOwed.
