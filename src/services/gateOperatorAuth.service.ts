@@ -5,7 +5,7 @@ import {
   TicketsRole,
   TICKETS_ROLE_PERMISSIONS,
 } from '@interfaces/ticketsPermission.interface';
-import { grantedTicketsPermissions } from '@interfaces/operatorGrant.interface';
+import { grantedTicketsPermissions, OperatorGrant } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
@@ -60,6 +60,8 @@ export class GateOperatorAuthService {
 
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 
+    const grants: string[] = ((operator as any).grants ?? []).map(String);
+
     return {
       accessToken,
       operator: {
@@ -67,6 +69,15 @@ export class GateOperatorAuthService {
         fullName: operator.fullName,
         scope: operator.scope,
         vendorId: operator.vendorId ? operator.vendorId.toString() : null,
+        grants,
+        /**
+         * The Register desk is a gate operator carrying the tag grant — the
+         * organizer's own person who enrols the event's tags and hands them
+         * out. It is surfaced here rather than left for the client to derive
+         * from `grants`, so the POS routes to the right screen off ONE field
+         * and every client agrees on what "Register" means.
+         */
+        isRegisterDesk: grants.includes(OperatorGrant.ISSUE_TAGS),
       },
     };
   }

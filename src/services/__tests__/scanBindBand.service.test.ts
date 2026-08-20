@@ -4,6 +4,21 @@ import { ScanService } from '@services/scan.service';
 import { Ticket } from '@models/ticket.model';
 import { Wallet } from '@models/wallet.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
+
+/**
+ * Every uid this file binds. A tag only binds if its event's register holds it
+ * (see EventTag), and every test here mints its own event, so the box has to be
+ * stocked alongside the ticket rather than once for the suite. Enrolling the
+ * whole list is harmless: the tests that expect a bind to FAIL fail for their
+ * own reasons (wrong vendor, wrong event, uid already live, ticket refunded),
+ * none of which the register can mask.
+ */
+const TAGS = [
+  'BAND0001', 'BAND0002', 'BAND0003', 'BAND0004', 'BAND0005', 'BAND0006', 'BAND0007', 'BAND0008',
+  'CROSS001', 'CROSS002', 'DUPUID01', 'LOST0001', 'NEW00001', 'REFD0001', 'REFD0002', 'TEMP0001',
+  'X1', 'X2',
+];
 
 async function seedTicket(
   eventId: mongoose.Types.ObjectId,
@@ -17,6 +32,7 @@ async function seedTicket(
     price: 100,
     status,
   });
+  await enrolTags(eventId, ...TAGS);
   return t; // t.ticketId is the auto-generated short code
 }
 

@@ -9,6 +9,7 @@ import { Event } from '@models/event.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
@@ -35,6 +36,7 @@ async function setup({ beerStock = 100 }: { beerStock?: number } = {}) {
   const t = await Ticket.create({ eventId, vendorId, ticketType: 'GA', price: 100, status: TicketStatus.SOLD });
   const w = await WalletService.ensureWalletForTicket({ ticketId: String(t._id), eventId: String(eventId) });
   const bandUid = '04a1b2c3d4e5';
+  await enrolTags(eventId, bandUid);
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
   await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: 100000, recordedBy: 'op1', clientTxnId: 'seed' });
   const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0 });

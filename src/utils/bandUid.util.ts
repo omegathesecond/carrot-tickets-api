@@ -1,7 +1,7 @@
 // A band's UID is the physical NFC chip identifier (cashless spec §5.1) —
 // callers may hand it in with `:`-separated bytes or mixed case (however a
 // scanner/reader library happens to format it). Normalize once here so every
-// consumer (bind, reissue, sell-band, check-in, wallet-by-band) compares the
+// consumer (register, bind, reissue, check-in, wallet-by-band) compares the
 // same canonical lowercase hex string.
 export function normalizeBandUid(raw: string): string {
   return String(raw ?? '').replace(/[\s:]/g, '').toLowerCase();
