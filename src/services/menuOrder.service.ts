@@ -3,7 +3,7 @@ import { MenuItem } from '@models/menuItem.model';
 import { MenuOrder, IMenuOrderItem } from '@models/menuOrder.model';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import { PaymentConfigService } from '@services/paymentConfig.service';
-import { computeMenuServiceFee } from '@utils/menuServiceFee.util';
+import { computeMenuServiceFee, centsToMajorUnits } from '@utils/menuServiceFee.util';
 import { KeshlessPaymentService } from '@services/keshlessPayment.service';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { normalizePhone } from '@utils/phone.util';
@@ -60,8 +60,10 @@ export class MenuOrderService {
 
     const { items, subtotal } = await this.buildLineItems(p.eventId, p.items);
 
-    // PIN threshold keys off the face subtotal — same rule as ticket purchase.
-    if (subtotal >= 50 && !p.keshlessPin) {
+    // PIN threshold keys off the face subtotal, same rule as ticket purchase —
+    // but subtotal here is integer cents, so convert to major units (E) before
+    // comparing against the E50 Keshless PIN threshold.
+    if (centsToMajorUnits(subtotal) >= 50 && !p.keshlessPin) {
       throw new Error('PIN required for orders of E50 or more');
     }
 
@@ -84,9 +86,10 @@ export class MenuOrderService {
       notes: p.notes,
     });
 
+    // Keshless wallet expects major units (E) — amountCharged is stored in cents.
     const payment = await KeshlessPaymentService.acceptPayment({
       cardNumber: p.keshlessCardNumber,
-      amount: amountCharged,
+      amount: centsToMajorUnits(amountCharged),
       pin: p.keshlessPin,
       description: `Carrot Tickets - Menu order ${order.orderId}`,
     });
@@ -143,8 +146,9 @@ export class MenuOrderService {
     const expiresAt = new Date(Date.now() + MOMO_TTL_MS);
     try {
       const payerMsisdn = normalizePhone(p.momoPhone).replace(/^\+/, '');
+      // MTN MoMo expects major units (E) — amountCharged is stored in cents.
       const { referenceId } = await this.momoClient.requestToPay({
-        amount: amountCharged,
+        amount: centsToMajorUnits(amountCharged),
         currency: process.env['MTN_MOMO_CURRENCY'] || 'SZL',
         payerMsisdn,
         externalId: order.orderId,
@@ -184,9 +188,10 @@ export class MenuOrderService {
 
     // SUCCESSFUL — verify MTN confirms the EXACT amount + currency requested
     // before marking paid. Same amount-guard as ticket MoMo finalization.
+    // MTN reports major units; order.amountCharged is stored in cents.
     const expectedCurrency = process.env['MTN_MOMO_CURRENCY'] || 'SZL';
     const confirmedAmount = Number(raw?.amount);
-    if (!Number.isFinite(confirmedAmount) || confirmedAmount !== order.amountCharged || raw?.currency !== expectedCurrency) {
+    if (!Number.isFinite(confirmedAmount) || confirmedAmount !== centsToMajorUnits(order.amountCharged) || raw?.currency !== expectedCurrency) {
       order.paymentStatus = PaymentStatus.FAILED;
       order.momoFailureReason = 'AMOUNT_MISMATCH';
       await order.save();
