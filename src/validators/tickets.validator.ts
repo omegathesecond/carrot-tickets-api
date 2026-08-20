@@ -310,6 +310,11 @@ export const updateEventSchema = Joi.object({
   ticketTypes: Joi.array()
     .items(
       Joi.object({
+        // Echo back the tier's own id to edit it in place. Without it a tier is
+        // matched by name, so a rename reads as delete-then-recreate and the
+        // tier loses its sold count (and its identity, which issued tickets
+        // point at). Omit only for a genuinely new tier.
+        _id: Joi.string().hex().length(24).optional(),
         name: Joi.string().required().trim().max(100),
         description: Joi.string().optional().max(500),
         price: Joi.number().required().min(0),
