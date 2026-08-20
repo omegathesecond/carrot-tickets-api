@@ -17,6 +17,7 @@ import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
 import { StockAdminController } from '@controllers/stockAdmin.controller';
+import { MenuAdminController } from '@controllers/menuAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
 import { TagReportController } from '@controllers/tagReport.controller';
 import { TagAdminController } from '@controllers/tagAdmin.controller';
@@ -625,5 +626,17 @@ router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPe
 router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setThreshold);
 router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.transferStock);
 router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.recordCount);
+
+/**
+ * Event Menu — organiser manages the bar/vendor preorder catalogue shown on
+ * the public event page's "Menu" tab, and reviews incoming preorders.
+ * MANAGE_MENU gate + event-ownership enforced in the controller.
+ */
+router.post('/events/:eventId/menu-items', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.createItem);
+router.get('/events/:eventId/menu-items', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.listItems);
+router.patch('/menu-items/:id', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.updateItem);
+router.delete('/menu-items/:id', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.deleteItem);
+router.get('/events/:eventId/menu-orders', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.listOrders);
+router.patch('/menu-orders/:id', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.updateOrderFulfillment);
 
 export default router;

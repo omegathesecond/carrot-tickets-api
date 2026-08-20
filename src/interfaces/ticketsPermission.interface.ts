@@ -38,6 +38,11 @@ export enum TicketsPermission {
   // catalogue, per-bar stock, transfers and counts. Events-vertical (a bus
   // operator has no bar stock), so it lives in EVENT_PERMISSIONS below.
   MANAGE_STOCK = 'tickets:manage_stock',
+  // Event Menu (bar + vendor preorder catalogue) management — organizer
+  // manages the menu items and views/updates incoming preorders. Events-
+  // vertical, same reasoning as MANAGE_STOCK, so it lives in
+  // EVENT_PERMISSIONS below.
+  MANAGE_MENU = 'tickets:manage_menu',
   // Bind a blank tag to an attendee's ticket at the tag desk. Granted per
   // operator (see OperatorGrant), never part of a role's default set — issuing
   // tags is a distinct job from scanning people in.
@@ -108,6 +113,7 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
     TicketsPermission.VIEW_REVENUE,
     TicketsPermission.EXPORT_REPORTS,
     TicketsPermission.MANAGE_STOCK,
+    TicketsPermission.MANAGE_MENU,
     TicketsPermission.EDIT_BRAND
   ],
 
@@ -165,6 +171,7 @@ export const EVENT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.EXPORT_REPORTS,
   TicketsPermission.MANAGE_ACCESS,
   TicketsPermission.MANAGE_STOCK,
+  TicketsPermission.MANAGE_MENU,
   TicketsPermission.ISSUE_TAGS,
 ];
 

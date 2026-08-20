@@ -16,6 +16,9 @@ const DEFAULTS = {
   cardServiceFee: 10,
   deltapayServiceFee: 5, // wallet rail — priced like MoMo
   yocoServiceFee: 0, // set at launch alongside the toggle
+  // Menu (bar/vendor preorder) convenience charge — a PERCENTAGE of the cart
+  // subtotal, not a flat per-ticket fee. See @utils/menuServiceFee.util.
+  menuServiceFeePercent: 8,
 };
 
 type PaymentConfig = typeof DEFAULTS;
