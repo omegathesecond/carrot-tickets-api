@@ -50,6 +50,16 @@ interface SeedMenuItem {
   displayOrder: number;
 }
 
+// Placeholder art only — no real product photography exists for the demo
+// catalogue yet. placehold.co renders deterministically from the URL itself
+// (no lookup, so it can never 404), which is why it's safe to reference here
+// instead of guessing at a real photo host. Swap for real vendor photos once
+// they exist; the imageUrl field is just a plain URL either way.
+function placeholderImage(name: string, section: MenuSection): string {
+  const [bg, fg] = section === MenuSection.BAR ? ['f5deb3', '5c3a21'] : ['d9f2d9', '1a4d1a'];
+  return `https://placehold.co/400x300/${bg}/${fg}?text=${encodeURIComponent(name)}`;
+}
+
 const BAR_ITEMS: SeedMenuItem[] = [
   { section: MenuSection.BAR, category: 'Beer', name: 'Castle Lite 330ml', price: 2500, displayOrder: 1 },
   { section: MenuSection.BAR, category: 'Beer', name: 'Heineken 330ml', price: 3000, displayOrder: 2 },
@@ -73,17 +83,23 @@ async function seedMenuItems(eventId: mongoose.Types.ObjectId): Promise<Map<stri
   const all = [...BAR_ITEMS, ...VENDOR_ITEMS];
   const byKey = new Map<string, any>();
   let created = 0;
+  let imaged = 0;
   for (const item of all) {
     const key = `${item.section}::${item.vendorName ?? ''}::${item.category}::${item.name}`;
     const filter = { eventId, section: item.section, vendorName: item.vendorName, category: item.category, name: item.name };
+    const imageUrl = placeholderImage(item.name, item.section);
     let doc = await MenuItem.findOne(filter);
     if (!doc) {
-      doc = await MenuItem.create({ ...item, eventId, active: true });
+      doc = await MenuItem.create({ ...item, eventId, imageUrl, active: true });
       created++;
+    } else if (!doc.imageUrl) {
+      doc.imageUrl = imageUrl;
+      await doc.save();
+      imaged++;
     }
     byKey.set(key, doc);
   }
-  console.log(`🍔 ${created} menu item(s) created (${all.length - created} already present); ${all.length} total.`);
+  console.log(`🍔 ${created} menu item(s) created (${all.length - created} already present); ${all.length} total; ${imaged} backfilled with a placeholder image.`);
   return byKey;
 }
 
