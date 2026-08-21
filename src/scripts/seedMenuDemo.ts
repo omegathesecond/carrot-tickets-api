@@ -10,11 +10,15 @@
  * idempotent (upserts MenuItems by natural key, orders by a fixed orderId) —
  * safe to re-run.
  *
- * Requires the event created by `npm run seed:dev` to already exist (it needs
- * a vendor to own the menu). Run that first if this can't find an event.
+ * Requires the target event to already exist and own a vendor (it needs one
+ * to own the menu) — e.g. the `npm run seed:dev` event, or any other
+ * published demo event such as the cashless one from `npm run seed:cashless`.
+ * Defaults to the Bushfire dev demo; point it at a different event with
+ * MENU_DEMO_EVENT_NAME (case-insensitive substring match).
  *
  * Usage:
  *   MONGODB_URI='<dev uri>' npx ts-node -r tsconfig-paths/register src/scripts/seedMenuDemo.ts
+ *   MONGODB_URI='<dev uri>' MENU_DEMO_EVENT_NAME='Cashless NFC Tap Test Fest' npx ts-node -r tsconfig-paths/register src/scripts/seedMenuDemo.ts
  */
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
@@ -32,8 +36,9 @@ dotenv.config();
 /** The ONLY database this script may touch. */
 const ALLOWED_DB_NAME = 'carrot-tickets-dev';
 
-const DEMO_EVENT_NAME = /Bushfire Warm-Up Session/i;
-const DEMO_BUYER_PHONE = '+26878000099';
+const DEMO_EVENT_NAME = process.env['MENU_DEMO_EVENT_NAME']
+  ? new RegExp(process.env['MENU_DEMO_EVENT_NAME'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+  : /Bushfire Warm-Up Session/i;
 
 interface SeedMenuItem {
   section: MenuSection;
@@ -154,15 +159,22 @@ async function seed(): Promise<void> {
   }
   console.log(`🎪 Event: ${event.name} (${event._id})`);
 
+  // Per-event so seeding two different demo events never collides on a
+  // shared buyer phone or fixed orderId (both must stay globally unique).
+  const eventIdSuffix = String(event._id).slice(-4);
+  const eventIdDigits = String(parseInt(eventIdSuffix, 16)).padStart(5, '0').slice(-5);
+  const demoBuyerPhone = `+2687800${eventIdDigits}`;
+  const orderIdPrefix = `MENU-SEED-${eventIdSuffix}`;
+
   const byKey = await seedMenuItems(event._id as mongoose.Types.ObjectId);
 
   // ── Demo buyer (find-or-create, no login creds needed for a seeded order) ──
-  let buyer = await Buyer.findOne({ phone: DEMO_BUYER_PHONE });
+  let buyer = await Buyer.findOne({ phone: demoBuyerPhone });
   if (!buyer) {
-    buyer = await Buyer.create({ phone: DEMO_BUYER_PHONE, name: 'Menu Demo Buyer', password: 'seed-only-not-a-real-login' });
-    console.log(`🎟️  Buyer ready: ${DEMO_BUYER_PHONE} (id ${buyer._id})`);
+    buyer = await Buyer.create({ phone: demoBuyerPhone, name: 'Menu Demo Buyer', password: 'seed-only-not-a-real-login' });
+    console.log(`🎟️  Buyer ready: ${demoBuyerPhone} (id ${buyer._id})`);
   } else {
-    console.log(`🎟️  Buyer reused: ${DEMO_BUYER_PHONE} (id ${buyer._id})`);
+    console.log(`🎟️  Buyer reused: ${demoBuyerPhone} (id ${buyer._id})`);
   }
 
   const config = await PaymentConfigService.get();
@@ -175,14 +187,14 @@ async function seed(): Promise<void> {
 
   if (wings && burger && castle && ribs) {
     await seedOrder({
-      orderId: 'MENU-SEED-DEMO-1',
+      orderId: `${orderIdPrefix}-1`,
       event, buyerId: buyer._id as mongoose.Types.ObjectId, buyerName: buyer.name || 'Menu Demo Buyer',
       lines: [{ item: wings, quantity: 1 }, { item: burger, quantity: 1 }, { item: castle, quantity: 2 }],
       fulfillmentStatus: MenuOrderFulfillmentStatus.NEW,
       serviceFeePercent: percent,
     });
     await seedOrder({
-      orderId: 'MENU-SEED-DEMO-2',
+      orderId: `${orderIdPrefix}-2`,
       event, buyerId: buyer._id as mongoose.Types.ObjectId, buyerName: buyer.name || 'Menu Demo Buyer',
       lines: [{ item: ribs, quantity: 1 }],
       fulfillmentStatus: MenuOrderFulfillmentStatus.READY,
