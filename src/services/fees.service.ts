@@ -7,6 +7,7 @@ import type { EventCurrency } from '@utils/currency.util';
 export interface FeeMethodBreakdown {
   method: string;
   bookingFees: number;
+  absorbedFees: number;
   platformFees: number;
   totalFees: number;
   ticketsSold: number;
@@ -20,8 +21,9 @@ export interface FeeByEventRow {
   ticketsSold: number;
   faceValue: number;    // Σ totalAmount — the organizer's revenue
   bookingFees: number;  // Σ serviceFeeAmount — buyer-paid booking fee
+  absorbedFees: number; // Σ absorbedServiceFeeAmount — booking fee the ORGANIZER covered
   platformFees: number; // Σ platformFeeAmount — platform commission
-  totalFees: number;    // bookingFees + platformFees — Carrot's take
+  totalFees: number;    // bookingFees + absorbedFees + platformFees — Carrot's take
   byMethod: FeeMethodBreakdown[];
 }
 
@@ -30,6 +32,7 @@ export interface FeeTotals {
   ticketsSold: number;
   faceValue: number;
   bookingFees: number;
+  absorbedFees: number;
   platformFees: number;
   totalFees: number;
 }
@@ -50,14 +53,15 @@ export interface GetFeesByEventParams {
 }
 
 const EMPTY_TOTALS: FeeTotals = {
-  eventCount: 0, ticketsSold: 0, faceValue: 0, bookingFees: 0, platformFees: 0, totalFees: 0,
+  eventCount: 0, ticketsSold: 0, faceValue: 0, bookingFees: 0, absorbedFees: 0, platformFees: 0, totalFees: 0,
 };
 
 export class FeesService {
   /**
    * Per-event fees Carrot has collected — booking fee (serviceFeeAmount, buyer-paid
-   * online, on top of face) + platform commission (platformFeeAmount, % of face,
-   * all channels). Completed sales only. `totals` summarise the whole filtered set
+   * online, on top of face) + absorbed booking fee (absorbedServiceFeeAmount, the
+   * same fee where the ORGANIZER agreed to cover it, netted out of their proceeds)
+   * + platform commission (platformFeeAmount, % of face, all channels). Completed sales only. `totals` summarise the whole filtered set
    * (all pages); `events` is one page, highest total fee first.
    */
   static async getFeesByEvent(params: GetFeesByEventParams): Promise<FeesByEventResult> {
@@ -84,6 +88,7 @@ export class FeesService {
         $group: {
           _id: { eventId: '$eventId', method: '$paymentMethod' },
           bookingFees: { $sum: { $ifNull: ['$serviceFeeAmount', 0] } },
+          absorbedFees: { $sum: { $ifNull: ['$absorbedServiceFeeAmount', 0] } },
           platformFees: { $sum: { $ifNull: ['$platformFeeAmount', 0] } },
           faceValue: { $sum: { $ifNull: ['$totalAmount', 0] } },
           ticketsSold: { $sum: '$quantity' },
@@ -95,6 +100,7 @@ export class FeesService {
         $group: {
           _id: '$_id.eventId',
           bookingFees: { $sum: '$bookingFees' },
+          absorbedFees: { $sum: '$absorbedFees' },
           platformFees: { $sum: '$platformFees' },
           faceValue: { $sum: '$faceValue' },
           ticketsSold: { $sum: '$ticketsSold' },
@@ -102,15 +108,16 @@ export class FeesService {
             $push: {
               method: '$_id.method',
               bookingFees: '$bookingFees',
+              absorbedFees: '$absorbedFees',
               platformFees: '$platformFees',
-              totalFees: { $add: ['$bookingFees', '$platformFees'] },
+              totalFees: { $add: ['$bookingFees', '$absorbedFees', '$platformFees'] },
               ticketsSold: '$ticketsSold',
               salesCount: '$salesCount',
             },
           },
         },
       },
-      { $addFields: { totalFees: { $add: ['$bookingFees', '$platformFees'] } } },
+      { $addFields: { totalFees: { $add: ['$bookingFees', '$absorbedFees', '$platformFees'] } } },
       // 3) attach event name
       { $lookup: { from: 'events', localField: '_id', foreignField: '_id', as: 'event' } },
       { $unwind: '$event' },
@@ -129,6 +136,7 @@ export class FeesService {
                 ticketsSold: { $sum: '$ticketsSold' },
                 faceValue: { $sum: '$faceValue' },
                 bookingFees: { $sum: '$bookingFees' },
+                absorbedFees: { $sum: '$absorbedFees' },
                 platformFees: { $sum: '$platformFees' },
                 totalFees: { $sum: '$totalFees' },
               },
@@ -146,6 +154,7 @@ export class FeesService {
       ticketsSold: t.ticketsSold ?? 0,
       faceValue: round2(t.faceValue ?? 0),
       bookingFees: round2(t.bookingFees ?? 0),
+      absorbedFees: round2(t.absorbedFees ?? 0),
       platformFees: round2(t.platformFees ?? 0),
       totalFees: round2(t.totalFees ?? 0),
     };
@@ -157,12 +166,14 @@ export class FeesService {
       ticketsSold: r.ticketsSold ?? 0,
       faceValue: round2(r.faceValue ?? 0),
       bookingFees: round2(r.bookingFees ?? 0),
+      absorbedFees: round2(r.absorbedFees ?? 0),
       platformFees: round2(r.platformFees ?? 0),
       totalFees: round2(r.totalFees ?? 0),
       byMethod: (r.byMethod as any[])
         .map((m) => ({
           method: m.method,
           bookingFees: round2(m.bookingFees ?? 0),
+          absorbedFees: round2(m.absorbedFees ?? 0),
           platformFees: round2(m.platformFees ?? 0),
           totalFees: round2(m.totalFees ?? 0),
           ticketsSold: m.ticketsSold ?? 0,

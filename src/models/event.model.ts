@@ -167,6 +167,11 @@ const eventSchema = new Schema<IEvent>({
     enum: ['SZL', 'ZAR'],
     default: 'SZL'
   },
+  // Organizer covers the buyer's booking fee: online checkout charges exactly
+  // face, and the fee is deducted from organizerProceeds instead. Deliberately
+  // has NO schema default so existing events read `undefined` (falsy) rather
+  // than being rewritten — only events explicitly flagged absorb anything.
+  organizerAbsorbsServiceFee: { type: Boolean },
   priceMin: {
     type: Number,
     min: [0, 'Price cannot be negative']

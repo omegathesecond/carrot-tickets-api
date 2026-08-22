@@ -85,6 +85,13 @@ export interface IEvent extends Document {
   // Display currency for the event price. 'SZL' shows 'E', 'ZAR' shows 'R'.
   // Snapshotted onto every Ticket/TicketSale minted for this event.
   currency: 'SZL' | 'ZAR';
+
+  /**
+   * Organizer covers the buyer's booking fee on this event: online checkout
+   * charges exactly face, and the same per-method fee is deducted from the
+   * organizer's proceeds instead. Absent/false = the buyer pays it on top.
+   */
+  organizerAbsorbsServiceFee?: boolean;
   // Organizer-entered display price range for external events (Carrot isn't
   // selling, so there are no ticket tiers to derive a range from).
   priceMin?: number;

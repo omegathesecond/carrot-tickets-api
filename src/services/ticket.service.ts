@@ -51,6 +51,10 @@ export interface SellTicketsParams {
   // debited totalAmount + serviceFeeAmount, and the fee is recorded on the sale.
   // POS/reseller callers omit it, so face value is charged unchanged.
   serviceFeeAmount?: number;
+  // Booking fee the ORGANIZER covers (events flagged organizerAbsorbsServiceFee).
+  // Mutually exclusive with serviceFeeAmount: the buyer is charged face, and
+  // this is netted out of organizerProceeds instead.
+  absorbedServiceFeeAmount?: number;
 }
 
 /**
@@ -154,6 +158,8 @@ export class TicketService {
     mappedSoldByType: SaleSoldByType;
     resellerCommissionPercent?: number;
     displayCurrency: EventCurrency;
+    /** Booking fee the organizer covers on this sale (absorbing events only). */
+    absorbedServiceFeeAmount?: number;
   }): Promise<SaleEconomics & { currency: EventCurrency; settlementCurrency: EventCurrency }> {
     const cfg = await PaymentConfigService.get();
     return {
@@ -163,6 +169,7 @@ export class TicketService {
         soldByType: p.mappedSoldByType,
         resellerCommissionPercent: p.resellerCommissionPercent ?? 0,
         platformFeePercent: cfg.platformFeePercent,
+        absorbedServiceFeeAmount: p.absorbedServiceFeeAmount ?? 0,
       }),
       currency: p.displayCurrency,
       settlementCurrency: settlementCurrencyForMethod(p.paymentMethod),
@@ -298,6 +305,7 @@ export class TicketService {
       const serviceFeeAmount = round2(params.serviceFeeAmount ?? 0);
       const amountCharged = round2(totalAmount + serviceFeeAmount);
       const feeSnapshot = { serviceFeeAmount, amountCharged };
+      const absorbedServiceFeeAmount = round2(params.absorbedServiceFeeAmount ?? 0);
 
       // Process payment based on method
       const proc = getProcessor(paymentMethod);
@@ -339,6 +347,7 @@ export class TicketService {
         mappedSoldByType,
         resellerCommissionPercent: params.resellerCommissionPercent,
         displayCurrency,
+        absorbedServiceFeeAmount,
       });
       // Allocation tiers are attributed to the tier's owning reseller regardless
       // of who rang the sale (same rule as the online buyer paths).
@@ -869,12 +878,15 @@ export class TicketService {
     }
 
     const feeCfg = await PaymentConfigService.get();
-    const { serviceFeeAmount } = computeServiceFee(
+    const { serviceFeeAmount, absorbedServiceFeeAmount } = computeServiceFee(
       totalAmount,
       quantity,
       PaymentMethod.KESHLESS_WALLET,
       feeCfg,
-      { waiveServiceFee: ticketType.waiveServiceFee },
+      {
+        waiveServiceFee: ticketType.waiveServiceFee,
+        absorbedByOrganizer: event.organizerAbsorbsServiceFee,
+      },
     );
 
     // sellTickets debits the wallet (face + service fee) and mints tickets.
@@ -894,6 +906,7 @@ export class TicketService {
       soldByType: 'vendor',
       channel: SalesChannel.ONLINE,
       serviceFeeAmount,
+      absorbedServiceFeeAmount,
     });
 
     this.sendTicketConfirmations(event, result.tickets, customerPhone, customerEmail);
@@ -1189,6 +1202,19 @@ export class TicketService {
     // Immutable economic snapshot — an electronic (mtn_momo) sale, so custody
     // derives to 'carrot'. Computed via the SAME DRY helper used everywhere so
     // a reseller MoMo initiate yields organizerProceeds = face − commission −
+    // Service fee — ONLINE checkout only (reseller/POS stay at face). Computed
+    // BEFORE the economic snapshot because on an event whose organizer absorbs
+    // the fee, the buyer is charged face and the fee becomes a deduction from
+    // organizerProceeds — so the snapshot below needs the amount.
+    const feeCfg = await PaymentConfigService.get();
+    const { serviceFeeAmount, amountCharged, absorbedServiceFeeAmount } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.MTN_MOMO, feeCfg, {
+            waiveServiceFee: tt.waiveServiceFee,
+            absorbedByOrganizer: event.organizerAbsorbsServiceFee,
+          })
+        : { serviceFeeAmount: 0, amountCharged: totalAmount, absorbedServiceFeeAmount: 0 };
+
     // fee with soldByType 'ResellerOperator'. Written now so the sale is
     // ledger-visible even before tickets are minted at finalize.
     const econ = await this.buildSaleSnapshot({
@@ -1197,6 +1223,7 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
       displayCurrency: event.currency ?? 'SZL',
+      absorbedServiceFeeAmount,
     });
     // An allocation tier's sale is always attributed to the tier's owning
     // reseller (kept off the organizer's revenue, held for their settlement),
@@ -1207,13 +1234,6 @@ export class TicketService {
       ...(p.hubId ? { hubId: p.hubId } : {}),
       ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
-
-    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
-    const feeCfg = await PaymentConfigService.get();
-    const { serviceFeeAmount, amountCharged } =
-      channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.MTN_MOMO, feeCfg, { waiveServiceFee: tt.waiveServiceFee })
-        : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
@@ -1344,6 +1364,18 @@ export class TicketService {
     const vendorId = p.vendorId ?? event.vendorId;
     const soldBy = p.soldBy ?? event.vendorId;
 
+    // Service fee — ONLINE checkout only (reseller/POS stay at face). Computed
+    // BEFORE the economic snapshot because on an event whose organizer absorbs
+    // the fee, the buyer is charged face and the fee becomes a deduction from
+    // organizerProceeds — so the snapshot below needs the amount.
+    const { serviceFeeAmount, amountCharged, absorbedServiceFeeAmount } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.PEACH_CARD, cardCfg, {
+            waiveServiceFee: tt.waiveServiceFee,
+            absorbedByOrganizer: event.organizerAbsorbsServiceFee,
+          })
+        : { serviceFeeAmount: 0, amountCharged: totalAmount, absorbedServiceFeeAmount: 0 };
+
     // Immutable economic snapshot — card is electronic so custody derives to 'carrot'.
     const econ = await this.buildSaleSnapshot({
       totalAmount,
@@ -1351,6 +1383,7 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
       displayCurrency: event.currency ?? 'SZL',
+      absorbedServiceFeeAmount,
     });
     // An allocation tier's sale is always attributed to the tier's owning
     // reseller (kept off the organizer's revenue, held for their settlement),
@@ -1361,12 +1394,6 @@ export class TicketService {
       ...(p.hubId ? { hubId: p.hubId } : {}),
       ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
-
-    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
-    const { serviceFeeAmount, amountCharged } =
-      channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.PEACH_CARD, cardCfg, { waiveServiceFee: tt.waiveServiceFee })
-        : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
@@ -1492,6 +1519,18 @@ export class TicketService {
     const vendorId = p.vendorId ?? event.vendorId;
     const soldBy = p.soldBy ?? event.vendorId;
 
+    // Service fee — ONLINE checkout only (reseller/POS stay at face). Computed
+    // BEFORE the economic snapshot because on an event whose organizer absorbs
+    // the fee, the buyer is charged face and the fee becomes a deduction from
+    // organizerProceeds — so the snapshot below needs the amount.
+    const { serviceFeeAmount, amountCharged, absorbedServiceFeeAmount } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.DELTAPAY, cfg, {
+            waiveServiceFee: tt.waiveServiceFee,
+            absorbedByOrganizer: event.organizerAbsorbsServiceFee,
+          })
+        : { serviceFeeAmount: 0, amountCharged: totalAmount, absorbedServiceFeeAmount: 0 };
+
     // Immutable economic snapshot — DeltaPay is electronic so custody derives to 'carrot'.
     const econ = await this.buildSaleSnapshot({
       totalAmount,
@@ -1499,6 +1538,7 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
       displayCurrency: event.currency ?? 'SZL',
+      absorbedServiceFeeAmount,
     });
     // An allocation tier's sale is always attributed to the tier's owning
     // reseller (kept off the organizer's revenue, held for their settlement),
@@ -1509,12 +1549,6 @@ export class TicketService {
       ...(p.hubId ? { hubId: p.hubId } : {}),
       ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
-
-    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
-    const { serviceFeeAmount, amountCharged } =
-      channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.DELTAPAY, cfg, { waiveServiceFee: tt.waiveServiceFee })
-        : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({
@@ -2223,6 +2257,18 @@ export class TicketService {
     const vendorId = p.vendorId ?? event.vendorId;
     const soldBy = p.soldBy ?? event.vendorId;
 
+    // Service fee — ONLINE checkout only (reseller/POS stay at face). Computed
+    // BEFORE the economic snapshot because on an event whose organizer absorbs
+    // the fee, the buyer is charged face and the fee becomes a deduction from
+    // organizerProceeds — so the snapshot below needs the amount.
+    const { serviceFeeAmount, amountCharged, absorbedServiceFeeAmount } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.YOCO, cfg, {
+            waiveServiceFee: tt.waiveServiceFee,
+            absorbedByOrganizer: event.organizerAbsorbsServiceFee,
+          })
+        : { serviceFeeAmount: 0, amountCharged: totalAmount, absorbedServiceFeeAmount: 0 };
+
     // Immutable economic snapshot — Yoco is electronic so custody derives to 'carrot'.
     const econ = await this.buildSaleSnapshot({
       totalAmount,
@@ -2230,6 +2276,7 @@ export class TicketService {
       mappedSoldByType,
       resellerCommissionPercent: p.resellerCommissionPercent,
       displayCurrency: event.currency ?? 'SZL',
+      absorbedServiceFeeAmount,
     });
     const saleResellerId = resolveSaleResellerId(tt, p.resellerId ? String(p.resellerId) : undefined);
     const resellerAttribution = {
@@ -2237,12 +2284,6 @@ export class TicketService {
       ...(p.hubId ? { hubId: p.hubId } : {}),
       ...(tt.isAllocation ? { isAllocation: true } : {}),
     };
-
-    // Buyer-paid service fee — ONLINE checkout only (reseller/POS stay at face).
-    const { serviceFeeAmount, amountCharged } =
-      channel === SalesChannel.ONLINE
-        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.YOCO, cfg, { waiveServiceFee: tt.waiveServiceFee })
-        : { serviceFeeAmount: 0, amountCharged: totalAmount };
 
     // 1) PENDING sale, no tickets yet
     const sale = new TicketSale({

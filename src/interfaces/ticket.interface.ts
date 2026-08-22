@@ -131,6 +131,8 @@ export interface ITicketSale extends Document {
   platformFeePercent?: number;
   platformFeeAmount?: number;
   serviceFeeAmount?: number;
+  /** Booking fee billed to the ORGANIZER instead of the buyer (absorbing events). */
+  absorbedServiceFeeAmount?: number;
   amountCharged?: number;
   organizerProceeds?: number;
   fundsCustody?: 'carrot' | 'reseller' | 'vendor';

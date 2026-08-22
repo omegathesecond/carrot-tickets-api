@@ -175,6 +175,10 @@ const ticketSaleSchema = new Schema<ITicketSale>({
   // stays face value; amountCharged = totalAmount + serviceFeeAmount is what the
   // buyer was actually charged and what the MoMo/card callback guards verify.
   serviceFeeAmount: { type: Number, default: 0 },
+  // Non-zero only for events flagged organizerAbsorbsServiceFee: the buyer paid
+  // face, and this is the booking fee the organizer covers — already netted out
+  // of organizerProceeds, so settlement needs no special case.
+  absorbedServiceFeeAmount: { type: Number, default: 0 },
   amountCharged: { type: Number },
   organizerProceeds: { type: Number },
   fundsCustody: { type: String, enum: ['carrot', 'reseller', 'vendor'] },

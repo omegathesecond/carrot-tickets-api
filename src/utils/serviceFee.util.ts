@@ -47,24 +47,45 @@ export function serviceFeeFor(method: PaymentMethod, cfg: ServiceFeeConfig): num
 export interface ServiceFeeBreakdown {
   serviceFeeAmount: number;
   amountCharged: number; // subtotal + serviceFeeAmount — what the gateway charges
+  /**
+   * The fee the ORGANIZER owes on this sale. Non-zero only when the event is
+   * flagged `organizerAbsorbsServiceFee`: the buyer is charged face, and this
+   * amount is deducted from organizerProceeds at settlement instead. It is
+   * Carrot revenue either way — only the payer changes.
+   */
+  absorbedServiceFeeAmount: number;
 }
 
 /** Compute the fee + total charged for a subtotal + method + ticket quantity.
- *  `opts.waiveServiceFee` (allocation tiers) forces a zero fee so the buyer
- *  pays exactly face — the promo the reseller runs on their pre-bought block. */
+ *
+ *  Two independent overrides, deliberately different in who ends up paying:
+ *  - `opts.waiveServiceFee` (allocation tiers) — NOBODY pays. The fee simply
+ *    does not exist; Carrot earns nothing on the reseller's pre-bought block.
+ *  - `opts.absorbedByOrganizer` (event-level) — the ORGANIZER pays. The buyer
+ *    is charged exactly face, and the same per-method fee is booked against
+ *    the organizer's proceeds.
+ *
+ *  Waiving wins when both are set: a tier that was sold with no fee attached
+ *  must not quietly generate a bill for the organizer after the fact.
+ */
 export function computeServiceFee(
   subtotal: number,
   quantity: number,
   method: PaymentMethod,
   cfg: ServiceFeeConfig,
-  opts: { waiveServiceFee?: boolean } = {}
+  opts: { waiveServiceFee?: boolean; absorbedByOrganizer?: boolean } = {}
 ): ServiceFeeBreakdown {
   // A free ticket (subtotal 0) carries NO service fee, on any method — there's
   // nothing to book, so there's nothing to surcharge. Charging a fee would turn
-  // a "Free" ticket into a paid one, which is exactly what we don't want.
+  // a "Free" ticket into a paid one, which is exactly what we don't want. That
+  // holds for the organizer too: absorbing a fee on a free ticket would bill
+  // them for giving something away.
   if (subtotal <= 0) {
-    return { serviceFeeAmount: 0, amountCharged: round2(subtotal) };
+    return { serviceFeeAmount: 0, amountCharged: round2(subtotal), absorbedServiceFeeAmount: 0 };
   }
-  const serviceFeeAmount = opts.waiveServiceFee ? 0 : round2(serviceFeeFor(method, cfg) * quantity);
-  return { serviceFeeAmount, amountCharged: round2(subtotal + serviceFeeAmount) };
+  const fee = opts.waiveServiceFee ? 0 : round2(serviceFeeFor(method, cfg) * quantity);
+  if (opts.absorbedByOrganizer) {
+    return { serviceFeeAmount: 0, amountCharged: round2(subtotal), absorbedServiceFeeAmount: fee };
+  }
+  return { serviceFeeAmount: fee, amountCharged: round2(subtotal + fee), absorbedServiceFeeAmount: 0 };
 }

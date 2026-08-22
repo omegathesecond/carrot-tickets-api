@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
@@ -969,9 +970,19 @@ export class PublicController {
    * MTN_MOMO_ENABLED env var is 'true' (processor-configured guard for Task 6).
    * Cash is excluded — not a buyer-online method.
    */
-  static async getPaymentMethods(_req: Request, res: Response): Promise<any> {
+  static async getPaymentMethods(req: Request, res: Response): Promise<any> {
     try {
       const cfg = await PaymentConfigService.get();
+      // Optional event scope. An event whose organizer covers the booking fee
+      // charges the buyer face, so checkout must not display a fee it will
+      // never collect — the amount shown has to equal the amount charged.
+      // An unknown/malformed id falls through to the configured fees rather
+      // than silently zeroing them: showing E0 and then charging E5 is the
+      // one outcome worse than showing the fee.
+      const eventId = typeof req.query['eventId'] === 'string' ? req.query['eventId'] : undefined;
+      const absorbed = !!eventId
+        && mongoose.Types.ObjectId.isValid(eventId)
+        && !!(await Event.findById(eventId).select('organizerAbsorbsServiceFee').lean())?.organizerAbsorbsServiceFee;
       const methods: string[] = [];
       if (cfg.keshlessWalletEnabled) methods.push('keshless_wallet');
       if (cfg.mtnMomoEnabled && process.env['MTN_MOMO_ENABLED'] === 'true') methods.push('mtn_momo');
@@ -983,13 +994,15 @@ export class PublicController {
       if (cfg.yocoEnabled && new YocoClient().isConfigured()) methods.push('yoco');
       // Per-method flat buyer service fee (E) so checkout can show a live
       // breakdown. The charge is recomputed server-side on purchase (display only).
-      const serviceFees = {
-        keshless_wallet: cfg.keshlessServiceFee,
-        mtn_momo: cfg.momoServiceFee,
-        peach_card: cfg.cardServiceFee,
-        deltapay: cfg.deltapayServiceFee,
-        yoco: cfg.yocoServiceFee,
-      };
+      const serviceFees = absorbed
+        ? { keshless_wallet: 0, mtn_momo: 0, peach_card: 0, deltapay: 0, yoco: 0 }
+        : {
+            keshless_wallet: cfg.keshlessServiceFee,
+            mtn_momo: cfg.momoServiceFee,
+            peach_card: cfg.cardServiceFee,
+            deltapay: cfg.deltapayServiceFee,
+            yoco: cfg.yocoServiceFee,
+          };
       return ApiResponseUtil.success(res, { methods, serviceFees });
     } catch (error: any) {
       console.error('Get public payment methods error:', error);

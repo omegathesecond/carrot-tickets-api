@@ -42,3 +42,34 @@ describe('computeSaleEconomics', () => {
     expect(r.organizerProceeds).toBe(30.83);        // 33.33 - 2.5
   });
 });
+
+describe('computeSaleEconomics — organizer-absorbed service fee', () => {
+  it('deducts the absorbed fee from organizer proceeds', () => {
+    const r = computeSaleEconomics({
+      faceAmount: 100, paymentMethod: 'mtn_momo', soldByType: 'Vendor',
+      resellerCommissionPercent: 0, platformFeePercent: 0,
+      absorbedServiceFeeAmount: 5,
+    });
+    expect(r.absorbedServiceFeeAmount).toBe(5);
+    expect(r.organizerProceeds).toBe(95);
+  });
+
+  it('stacks with reseller commission and platform fee', () => {
+    const r = computeSaleEconomics({
+      faceAmount: 200, paymentMethod: 'mtn_momo', soldByType: 'ResellerOperator',
+      resellerCommissionPercent: 10, platformFeePercent: 5,
+      absorbedServiceFeeAmount: 10,
+    });
+    // 200 − 20 commission − 10 platform − 10 absorbed
+    expect(r.organizerProceeds).toBe(160);
+  });
+
+  it('leaves proceeds untouched when nothing is absorbed', () => {
+    const r = computeSaleEconomics({
+      faceAmount: 100, paymentMethod: 'mtn_momo', soldByType: 'Vendor',
+      resellerCommissionPercent: 0, platformFeePercent: 0,
+    });
+    expect(r.absorbedServiceFeeAmount).toBe(0);
+    expect(r.organizerProceeds).toBe(100);
+  });
+});
