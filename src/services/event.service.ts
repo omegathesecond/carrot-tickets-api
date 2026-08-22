@@ -145,7 +145,10 @@ export class EventService {
       // Build query - skip vendorId filter for superadmin
       const filter: any = {};
       if (!isSuperAdmin) {
-        filter.vendorId = vendorId;
+        // The listing runs through aggregate() below, which bypasses Mongoose's
+        // schema-aware casting — a raw string here matches zero documents
+        // instead of erroring, so cast to ObjectId explicitly.
+        filter.vendorId = new mongoose.Types.ObjectId(vendorId);
       }
 
       if (status) {
@@ -166,14 +169,55 @@ export class EventService {
         ];
       }
 
-      // Execute query with pagination
+      // Execute query with pagination.
+      //
+      // Ordering is relevance-first, not newest-first. The sort runs BEFORE the
+      // limit, so it decides which events are in the response at all, not just
+      // how they're arranged — under the old `eventDate: -1` a gate operator
+      // whose organizer had 20+ future events never saw today's event in the
+      // POS scanner list, because it sat below every future one on page 2.
+      //
+      // Two buckets, both keyed off event date:
+      //   0 - live or still to come (anything whose end hasn't passed), soonest
+      //       first, which puts today's event - and any multi-day event still
+      //       running - at the top
+      //   1 - finished, most recent first
+      const startOfToday = new Date();
+      startOfToday.setUTCHours(0, 0, 0, 0);
+
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
-        Event.find(filter)
-          .sort({ eventDate: -1, createdAt: -1 })
-          .skip(skip)
-          .limit(limit)
-          .lean(),
+        Event.aggregate([
+          { $match: filter },
+          {
+            $addFields: {
+              _finished: {
+                $cond: [
+                  { $gte: [{ $ifNull: ['$endTime', '$eventDate'] }, startOfToday] },
+                  0,
+                  1
+                ]
+              }
+            }
+          },
+          {
+            $addFields: {
+              // Finished events read best newest-first; negating their key flips
+              // that bucket's direction inside a single ascending sort.
+              _order: {
+                $cond: [
+                  { $eq: ['$_finished', 1] },
+                  { $multiply: [{ $toLong: '$eventDate' }, -1] },
+                  { $toLong: '$eventDate' }
+                ]
+              }
+            }
+          },
+          { $sort: { _finished: 1, _order: 1, createdAt: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+          { $project: { _finished: 0, _order: 0 } }
+        ]),
         Event.countDocuments(filter)
       ]);
 
