@@ -1107,9 +1107,10 @@ export class TicketsController {
         ticketsUser.isSuperAdmin || false
       );
 
-      ApiResponseUtil.success(res, financials);
+      return ApiResponseUtil.success(res, financials);
     } catch (error: any) {
-      // Preserve the service's 404 for an event this vendor doesn't own.
+      // failWithHttpError, not a bare 500 — the service's 404 for an event this
+      // vendor doesn't own has to survive, or a missing event reads as an outage.
       return failWithHttpError(res, error, 'Failed to fetch event financials');
     }
   }
