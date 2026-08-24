@@ -82,7 +82,9 @@ describe('EventFinancialsService.getEventFinancials — payment method breakdown
     await sale(ev._id, { method: PaymentMethod.PEACH_CARD, channel: SalesChannel.ONLINE, face: 15020, quantity: 68, bookingFee: 1020, custody: 'carrot' });
     await sale(ev._id, { method: PaymentMethod.CASH, face: 1850, quantity: 11 });
 
-    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), false);
+    // Read as a super-admin: this asserts on booking fees, which are withheld
+    // from organizers.
+    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), true);
 
     const methods = fin.byMethod.map((m) => m.method).sort();
     expect(methods).toEqual(['cash', 'mtn_momo', 'peach_card']);
@@ -149,7 +151,8 @@ describe('EventFinancialsService.getEventFinancials — sales channels', () => {
     await sale(ev._id, { channel: SalesChannel.RESELLER_POS, face: 41800, quantity: 185, resellerCommission: 836, custody: 'reseller' });
     await sale(ev._id, { face: 1850, quantity: 11 });
 
-    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), false);
+    // Super-admin — the online row's booking-fee assertion needs fee data.
+    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), true);
 
     const online = fin.byChannel.find((c) => c.channel === 'online')!;
     expect(online.face).toBe(22510);
@@ -174,7 +177,8 @@ describe('EventFinancialsService.getEventFinancials — totals', () => {
     // Organizer covered this buyer's booking fee instead of charging it on top.
     await sale(ev._id, { method: PaymentMethod.PEACH_CARD, channel: SalesChannel.ONLINE, face: 1000, quantity: 5, absorbedFee: 75, custody: 'carrot' });
 
-    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), false);
+    // Super-admin — the ladder includes the fee legs.
+    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), true);
 
     expect(fin.totals.face).toBe(50290);
     expect(fin.totals.bookingFees).toBe(320);
@@ -226,5 +230,60 @@ describe('EventFinancialsService.getEventFinancials — access', () => {
     const fin = await EventFinancialsService.getEventFinancials(String(ev._id), otherVendor, true);
 
     expect(fin.totals.face).toBe(1850);
+  });
+});
+
+describe('EventFinancialsService.getEventFinancials — fee visibility', () => {
+  /** An event taking online money, so there is a real fee to hide. */
+  async function eventWithFees() {
+    const ev = await makeEvent();
+    await sale(ev._id, { method: PaymentMethod.MTN_MOMO, channel: SalesChannel.ONLINE, face: 7490, quantity: 40, bookingFee: 320, custody: 'carrot' });
+    // An absorbing event bills the same fee to the ORGANIZER. Per product
+    // decision this is hidden from them too — nothing fee-shaped reaches an
+    // organizer, only a super-admin.
+    await sale(ev._id, { method: PaymentMethod.PEACH_CARD, channel: SalesChannel.ONLINE, face: 1000, quantity: 5, absorbedFee: 75, custody: 'carrot' });
+    return ev;
+  }
+
+  it('withholds every fee figure from an organizer', async () => {
+    const ev = await eventWithFees();
+
+    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), false);
+
+    for (const row of [...fin.byMethod, ...fin.byChannel]) {
+      expect(row.bookingFee).toBeUndefined();
+      expect(row.absorbedFee).toBeUndefined();
+      // `charged` is face + booking fee — leaving it in hands over the fee
+      // by subtraction, so it has to go too.
+      expect(row.charged).toBeUndefined();
+    }
+    expect(fin.totals.bookingFees).toBeUndefined();
+    expect(fin.totals.absorbedFees).toBeUndefined();
+    expect(fin.totals.charged).toBeUndefined();
+    expect(fin.totals.carrotEarned).toBeUndefined();
+  });
+
+  it('still shows an organizer their own money', async () => {
+    const ev = await eventWithFees();
+
+    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), false);
+
+    expect(fin.totals.face).toBe(8490);
+    // Proceeds are still net of the absorbed fee — the organizer sees the
+    // reduced figure, just not the line item that caused it.
+    expect(fin.totals.organizerProceeds).toBe(8415);
+    expect(fin.byMethod.find((m) => m.method === 'mtn_momo')!.face).toBe(7490);
+  });
+
+  it('reports every fee figure to a super-admin', async () => {
+    const ev = await eventWithFees();
+
+    const fin = await EventFinancialsService.getEventFinancials(String(ev._id), String(VENDOR), true);
+
+    expect(fin.totals.bookingFees).toBe(320);
+    expect(fin.totals.absorbedFees).toBe(75);
+    expect(fin.totals.charged).toBe(8810);
+    expect(fin.totals.carrotEarned).toBe(395);
+    expect(fin.byMethod.find((m) => m.method === 'mtn_momo')!.bookingFee).toBe(320);
   });
 });

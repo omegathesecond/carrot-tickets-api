@@ -48,7 +48,7 @@ it('returns the financials payload wrapped in the success envelope', async () =>
   expect(res.body.success).toBe(true);
   expect(res.body.data.currency).toBe('SZL');
   expect(res.body.data.byMethod).toEqual([
-    expect.objectContaining({ method: 'mtn_momo', face: 7490, bookingFee: 320, charged: 7810 }),
+    expect.objectContaining({ method: 'mtn_momo', face: 7490, tickets: 40 }),
   ]);
   expect(res.body.data.custody.withCarrot).toBe(7490);
 });
@@ -67,4 +67,25 @@ it('lets a super-admin read any event', async () => {
 
   expect(res.body.success).toBe(true);
   expect(res.body.data.totals.face).toBe(7490);
+});
+
+it('does not put booking fees on the wire for an organizer', async () => {
+  const res = mockRes();
+  await TicketsController.getEventFinancials(reqAs(vendor), res);
+
+  // Asserted on the serialised body, not the service return: a UI-only hide
+  // would still pass a service test while shipping the fee to the browser.
+  const wire = JSON.stringify(res.body);
+  expect(wire).not.toContain('bookingFee');
+  expect(wire).not.toContain('absorbedFee');
+  expect(wire).not.toContain('carrotEarned');
+  expect(wire).not.toContain('320');
+});
+
+it('does put booking fees on the wire for a super-admin', async () => {
+  const res = mockRes();
+  await TicketsController.getEventFinancials(reqAs(otherVendor, true), res);
+
+  expect(res.body.data.totals.bookingFees).toBe(320);
+  expect(res.body.data.byMethod[0].charged).toBe(7810);
 });

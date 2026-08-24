@@ -20,12 +20,15 @@ export interface FinancialsMethodRow {
   sales: number;
   tickets: number;
   face: number;               // Σ totalAmount — ticket face value
-  bookingFee: number;         // Σ serviceFeeAmount — buyer-paid, on top of face
-  absorbedFee: number;        // Σ absorbedServiceFeeAmount — organizer covered it instead
-  charged: number;            // face + bookingFee — what the buyer actually paid
   platformFee: number;        // Σ platformFeeAmount — Carrot's commission
   resellerCommission: number; // Σ resellerCommissionAmount
   organizerProceeds: number;  // Σ organizerProceeds — what the organizer keeps
+
+  // SUPER-ADMIN ONLY — absent entirely for an organizer. Optional in the type
+  // rather than zeroed, so a reader can't mistake "withheld" for "no fee".
+  bookingFee?: number;        // Σ serviceFeeAmount — buyer-paid, on top of face
+  absorbedFee?: number;       // Σ absorbedServiceFeeAmount — organizer covered it instead
+  charged?: number;           // face + bookingFee — what the buyer actually paid
 }
 
 /** Tickets that changed hands for money, and what they averaged. */
@@ -66,14 +69,16 @@ export interface FinancialsChannelRow extends Omit<FinancialsMethodRow, 'method'
 
 export interface FinancialsTotals {
   face: number;
-  bookingFees: number;
-  absorbedFees: number;
   platformFees: number;
   resellerCommission: number;
-  charged: number;
   organizerProceeds: number;
+
+  // SUPER-ADMIN ONLY — see FinancialsMethodRow.
+  bookingFees?: number;
+  absorbedFees?: number;
+  charged?: number;
   /** bookingFees + absorbedFees + platformFees — Carrot's take on this event. */
-  carrotEarned: number;
+  carrotEarned?: number;
 }
 
 /** Attempted sales that never completed — money the event tried and failed to take. */
@@ -106,19 +111,31 @@ const MONEY_SUMS = {
   organizerProceeds: { $sum: { $ifNull: ['$organizerProceeds', 0] } },
 } as const;
 
-function toRow(raw: any): Omit<FinancialsMethodRow, 'method'> {
+/**
+ * `showFees` false OMITS the fee keys rather than zeroing them. Zeroes would be
+ * a lie an organizer could act on ("no booking fee was charged"); absence is
+ * merely silence. It also means the client can decide what to render purely
+ * from the payload's shape, with no second permission check to keep in sync.
+ */
+function toRow(raw: any, showFees: boolean): Omit<FinancialsMethodRow, 'method'> {
   const face = round2(raw.face ?? 0);
   const bookingFee = round2(raw.bookingFee ?? 0);
   return {
     sales: raw.sales ?? 0,
     tickets: raw.tickets ?? 0,
     face,
-    bookingFee,
-    absorbedFee: round2(raw.absorbedFee ?? 0),
-    charged: round2(face + bookingFee),
     platformFee: round2(raw.platformFee ?? 0),
     resellerCommission: round2(raw.resellerCommission ?? 0),
     organizerProceeds: round2(raw.organizerProceeds ?? 0),
+    ...(showFees
+      ? {
+          bookingFee,
+          absorbedFee: round2(raw.absorbedFee ?? 0),
+          // face + bookingFee. Withheld alongside the fee itself — publishing
+          // it would hand the fee back by simple subtraction.
+          charged: round2(face + bookingFee),
+        }
+      : {}),
   };
 }
 
@@ -135,6 +152,11 @@ export class EventFinancialsService {
     isSuperAdmin = false
   ): Promise<EventFinancials> {
     const eventOid = new mongoose.Types.ObjectId(eventId);
+
+    // Booking fees are Carrot's margin on the buyer, not the organizer's money.
+    // Withheld at the API, not merely hidden in the dashboard — a UI-only hide
+    // still ships the number to anyone who opens the network tab.
+    const showFees = isSuperAdmin;
 
     const eventQuery: Record<string, unknown> = { _id: eventOid };
     if (!isSuperAdmin) eventQuery['vendorId'] = new mongoose.Types.ObjectId(vendorId);
@@ -198,25 +220,33 @@ export class EventFinancialsService {
     ]);
 
     const byMethod: FinancialsMethodRow[] = (facet?.byMethod ?? [])
-      .map((r: any) => ({ method: r._id as string, ...toRow(r) }))
+      .map((r: any) => ({ method: r._id as string, ...toRow(r, showFees) }))
       .sort((a: FinancialsMethodRow, b: FinancialsMethodRow) => b.face - a.face);
 
     const byChannel: FinancialsChannelRow[] = (facet?.byChannel ?? [])
-      .map((r: any) => ({ channel: r._id as string, ...toRow(r) }))
+      .map((r: any) => ({ channel: r._id as string, ...toRow(r, showFees) }))
       .sort((a: FinancialsChannelRow, b: FinancialsChannelRow) => b.face - a.face);
 
-    const totalsRow = toRow(facet?.totals?.[0] ?? {});
+    // Built with showFees ALWAYS true so the fee sums exist locally, then
+    // dropped below — keeping the arithmetic in one place regardless of who asks.
+    const totalsRow = toRow(facet?.totals?.[0] ?? {}, true);
     const totals: FinancialsTotals = {
       face: totalsRow.face,
-      bookingFees: totalsRow.bookingFee,
-      absorbedFees: totalsRow.absorbedFee,
       platformFees: totalsRow.platformFee,
       resellerCommission: totalsRow.resellerCommission,
-      // Absorbed fees deliberately excluded — the organizer covered them, so
-      // they were never added on top of what the buyer handed over.
-      charged: totalsRow.charged,
       organizerProceeds: totalsRow.organizerProceeds,
-      carrotEarned: round2(totalsRow.bookingFee + totalsRow.absorbedFee + totalsRow.platformFee),
+      ...(showFees
+        ? {
+            bookingFees: totalsRow.bookingFee,
+            absorbedFees: totalsRow.absorbedFee,
+            // Absorbed fees deliberately excluded — the organizer covered them,
+            // so they were never added on top of what the buyer handed over.
+            charged: totalsRow.charged,
+            carrotEarned: round2(
+              (totalsRow.bookingFee ?? 0) + (totalsRow.absorbedFee ?? 0) + totalsRow.platformFee
+            ),
+          }
+        : {}),
     };
 
     const failedRow = facet?.failed?.[0];
