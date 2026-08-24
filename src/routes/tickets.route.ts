@@ -464,6 +464,14 @@ router.get(
   TicketsController.getEventAnalytics
 );
 
+// Money breakdown for one event — VIEW_REVENUE, not VIEW_STATS: this returns
+// proceeds and custody, which VIEW_STATS holders are not entitled to see.
+router.get(
+  '/stats/events/:eventId/financials',
+  requireTicketsPermission(TicketsPermission.VIEW_REVENUE),
+  TicketsController.getEventFinancials
+);
+
 /**
  * Export Routes
  */

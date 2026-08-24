@@ -8,6 +8,7 @@ import { EventService } from '@services/event.service';
 import { TicketService } from '@services/ticket.service';
 import { ScanService } from '@services/scan.service';
 import { AnalyticsService } from '@services/analytics.service';
+import { EventFinancialsService } from '@services/eventFinancials.service';
 import { ExportService } from '@services/export.service';
 import { EventStatus } from '@interfaces/event.interface';
 import {
@@ -1086,6 +1087,30 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Get event analytics error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to fetch event analytics');
+    }
+  }
+
+  /**
+   * Analytics: Full money breakdown for one event — per payment method, per
+   * sales channel, and where the proceeds physically are. Behind VIEW_REVENUE
+   * rather than VIEW_STATS because it exposes proceeds and custody, not just
+   * counts.
+   */
+  static async getEventFinancials(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const financials = await EventFinancialsService.getEventFinancials(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
+
+      ApiResponseUtil.success(res, financials);
+    } catch (error: any) {
+      // Preserve the service's 404 for an event this vendor doesn't own.
+      return failWithHttpError(res, error, 'Failed to fetch event financials');
     }
   }
 
