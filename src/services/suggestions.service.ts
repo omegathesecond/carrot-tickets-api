@@ -16,11 +16,11 @@ export interface SuggestionsPageOptions {
   seed?: number;
 }
 
-// Safety cap on the "follows no one" fallback candidate pool — big enough to
-// never matter for a real friends-of-friends graph, small enough to keep a
-// full-collection scan off the table. Ranking then happens across this whole
-// pool (not just the first page), same "don't cap before ranking" reasoning
-// as organizersToFollow below.
+// Safety cap on the recently-active top-up pool — big enough to never matter
+// for a real friends-of-friends graph, small enough to keep a full-collection
+// scan off the table. Ranking then happens across this whole pool (not just
+// the first page), same "don't cap before ranking" reasoning as
+// organizersToFollow below.
 const FALLBACK_CANDIDATE_POOL_CAP = 1000;
 
 // Cap on how many candidates get scored (shared-event resolution + the full
@@ -73,11 +73,13 @@ export class SuggestionsService {
   /** Friends-of-friends the buyer doesn't already follow, ranked by a
    *  composite score: mutual-connection count (primary) blended with shared
    *  event attendance, same city, and recency (in that priority order — see
-   *  suggestionCompositeScore). Falls back to the same composite ranking
-   *  over recently-active handled buyers when the buyer follows no one yet
-   *  (mutualCount 0 for all of them). Excludes self, already-followed and
-   *  socially-suspended buyers. Paginated via `page`/`limit` over the fully
-   *  ranked candidate set, so pagination is deterministic. */
+   *  suggestionCompositeScore). Tops the candidate set up with recently-active
+   *  handled buyers (mutualCount 0) whenever friends-of-friends alone does not
+   *  fill the scoring pool, so a buyer who follows nobody — or who follows
+   *  only people who follow nobody — still gets suggestions. Excludes self,
+   *  already-followed and socially-suspended buyers. Paginated via
+   *  `page`/`limit` over the fully ranked candidate set, so pagination is
+   *  deterministic. */
   static async peopleYouMayKnow(
     actor: SocialActor,
     { limit = 20, page = 1, seed }: SuggestionsPageOptions = {}
@@ -92,21 +94,43 @@ export class SuggestionsService {
     // for a buyer viewer.
     const exclude = new Set<string>(actor.type === 'buyer' ? [actor.id, ...iFollow] : iFollow);
 
-    let candidates: Array<{ id: string; mutualCount: number }>;
-    if (iFollow.length === 0) {
-      const recent = await Buyer.find({ _id: { $nin: [...exclude] }, username: { $exists: true, $ne: null }, socialSuspendedAt: null })
-        .select('_id')
-        .sort({ lastLoginAt: -1 })
-        .limit(FALLBACK_CANDIDATE_POOL_CAP);
-      candidates = recent.map((b) => ({ id: String(b._id), mutualCount: 0 }));
-    } else {
+    const candidates: Array<{ id: string; mutualCount: number }> = [];
+    // Everyone already spoken for: self, already-followed, and (below) every
+    // friend-of-friend we have already queued — so the top-up can never
+    // duplicate a candidate we are about to rank.
+    const claimed = new Set<string>(exclude);
+
+    if (iFollow.length > 0) {
       const secondDegree = await Follow.find({ followerType: 'buyer', followerId: { $in: iFollow }, targetType: 'buyer' }).select('targetId');
       const counts = new Map<string, number>();
       for (const r of secondDegree) {
         const id = String(r.targetId);
         if (!exclude.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
       }
-      candidates = [...counts.entries()].map(([id, mutualCount]) => ({ id, mutualCount }));
+      for (const [id, mutualCount] of counts) {
+        candidates.push({ id, mutualCount });
+        claimed.add(id);
+      }
+    }
+
+    // Top up a short friends-of-friends set with recently-active buyers rather
+    // than returning a thin (or empty) list. Gating this on
+    // `iFollow.length === 0` — as it used to — meant following your very first
+    // person moved you OFF the recently-active pool and onto a
+    // friends-of-friends graph that is empty until someone you follow follows
+    // someone else, so suggestions collapsed to [] right after signup. These
+    // carry mutualCount 0, and MUTUAL_WEIGHT dominates the composite score, so
+    // a genuine friend-of-friend always outranks a top-up.
+    //
+    // The threshold is CANDIDATE_SCORE_CAP, not the caller's page — a
+    // page-dependent top-up would rank page 2 over a different candidate set
+    // than page 1 and let the two pages overlap under `seed`.
+    if (candidates.length < CANDIDATE_SCORE_CAP) {
+      const recent = await Buyer.find({ _id: { $nin: [...claimed] }, username: { $exists: true, $ne: null }, socialSuspendedAt: null })
+        .select('_id')
+        .sort({ lastLoginAt: -1 })
+        .limit(FALLBACK_CANDIDATE_POOL_CAP);
+      for (const b of recent) candidates.push({ id: String(b._id), mutualCount: 0 });
     }
     if (candidates.length === 0) return [];
 
@@ -116,10 +140,10 @@ export class SuggestionsService {
     candidates.sort((a, b) =>
       b.mutualCount !== a.mutualCount ? b.mutualCount - a.mutualCount : a.id.localeCompare(b.id)
     );
-    candidates = candidates.slice(0, CANDIDATE_SCORE_CAP);
+    const scoreable = candidates.slice(0, CANDIDATE_SCORE_CAP);
 
     const buyers = await Buyer.find({
-      _id: { $in: candidates.map((c) => c.id) },
+      _id: { $in: scoreable.map((c) => c.id) },
       socialSuspendedAt: null,
       username: { $exists: true, $ne: null },
     });
@@ -128,7 +152,7 @@ export class SuggestionsService {
     const viewerGoingEventIds = viewer ? new Set(await GoingService.goingEventIds(viewer)) : new Set<string>();
     const viewerCity = normalizeCity(viewer?.city);
 
-    const eligible = candidates.filter((c) => bMap.has(c.id));
+    const eligible = scoreable.filter((c) => bMap.has(c.id));
     // Batch-resolve every candidate's going-eventIds in a FIXED number of
     // queries (see GoingService.goingEventIdsBatch), instead of one
     // GoingService.goingEventIds call per candidate.
@@ -153,11 +177,21 @@ export class SuggestionsService {
 
     // seed present → shuffle the quality pool; absent → today's composite-score
     // ranking. Both paginate the same way, so pages stay stable within a visit.
+    //
+    // The shuffle runs WITHIN the friends-of-friends tier and the top-up tier
+    // separately, never across them. Shuffling the two together would scatter
+    // a handful of genuine connections through a much larger pool of
+    // strangers — and since the UI always sends a seed, that is the path that
+    // actually ships. Each tier alone shuffles exactly as it did before, so a
+    // viewer with no top-ups (or no connections) is unaffected.
     const ordered = seed === undefined
       ? [...scored].sort((a, b) =>
           b.score !== a.score ? b.score - a.score : String(a.buyer._id).localeCompare(String(b.buyer._id))
         )
-      : seededShuffle(scored, seed);
+      : [
+          ...seededShuffle(scored.filter((c) => c.mutualCount > 0), seed),
+          ...seededShuffle(scored.filter((c) => c.mutualCount === 0), seed),
+        ];
 
     const skip = (Math.max(1, page) - 1) * limit;
     return ordered.slice(skip, skip + limit).map(({ buyer, mutualCount }) => ({ buyer, mutualCount }));

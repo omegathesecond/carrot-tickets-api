@@ -120,6 +120,70 @@ describe('GET /api/social/suggestions/people', () => {
     expect(usernames).not.toContain(null);
   });
 
+  it('keeps suggesting people after the buyer follows exactly one person who follows no one', async () => {
+    // The cold-start cliff: a fresh signup follows their first person, that
+    // person follows nobody, so friends-of-friends is empty. Suggestions must
+    // not collapse to [] — they should top up from the recently-active pool.
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    const onlyFollow = await Buyer.create({
+      phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a', lastLoginAt: new Date(),
+    });
+    await Buyer.create({
+      phone: '+26878000022', password: 'secret1', name: 'Stranger', username: 'stranger_b', lastLoginAt: new Date(),
+    });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: onlyFollow._id });
+
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const usernames = res.body.data.map((p: any) => p.username);
+    expect(usernames).toContain('stranger_b');
+    expect(usernames).not.toContain('friend_a'); // already followed
+    expect(usernames).not.toContain('me_one');   // never suggest self
+  });
+
+  it('ranks real friends-of-friends above the recently-active top-up', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const fof = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'FoF', username: 'fof_b' });
+    // A stranger with a much more recent login must still rank BELOW the
+    // genuine friend-of-friend — mutualCount stays the primary signal.
+    await Buyer.create({
+      phone: '+26878000023', password: 'secret1', name: 'Stranger', username: 'stranger_c', lastLoginAt: new Date(),
+    });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: fof._id });
+
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const usernames = res.body.data.map((p: any) => p.username);
+    expect(usernames.indexOf('fof_b')).toBeLessThan(usernames.indexOf('stranger_c'));
+    expect(res.body.data.find((p: any) => p.username === 'fof_b').mutualCount).toBe(1);
+    expect(res.body.data.find((p: any) => p.username === 'stranger_c').mutualCount).toBe(0);
+  });
+
+  it('with a seed, still ranks friends-of-friends above the recently-active top-up', async () => {
+    // The production UI ALWAYS sends a seed, so the shuffle path is the one
+    // that matters: shuffling top-ups together with real connections would
+    // bury a handful of genuine friends-of-friends among a pool of strangers.
+    const me = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const fof = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'FoF', username: 'fof_b' });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: fof._id });
+    // A crowd of strangers big enough that a global shuffle would almost
+    // certainly push the single friend-of-friend off the first page.
+    for (let i = 0; i < 30; i++) {
+      await Buyer.create({ phone: `+2687901${String(i).padStart(4, '0')}`, password: 'secret1', name: `S${i}`, username: `str_${i}`, lastLoginAt: new Date() });
+    }
+
+    for (const seed of [1, 7, 42, 999, 123456]) {
+      const res = await request(app)
+        .get(`/api/social/suggestions/people?seed=${seed}&limit=5`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+      expect(res.body.data[0].username).toBe('fof_b');
+      expect(res.body.data[0].mutualCount).toBe(1);
+    }
+  });
+
   it('401s when anonymous', async () => {
     await request(app).get('/api/social/suggestions/people').expect(401);
   });
