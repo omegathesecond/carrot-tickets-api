@@ -8,7 +8,7 @@ dotenv.config();
 const MONGODB_URI = process.env['MONGODB_URI'] || 'mongodb://localhost:27017/keshless-tickets-dev';
 
 async function seedTestData() {
-  console.log('🌱 Seeding test data for Keshless Tickets API...\n');
+  console.log('🌱 Seeding test data for Carrot Tickets API...\n');
 
   try {
     // Connect to MongoDB

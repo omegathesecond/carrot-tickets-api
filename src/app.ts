@@ -149,7 +149,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-enc
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     success: true,
-    message: 'Keshless Tickets API is running',
+    message: 'Carrot Tickets API is running',
     timestamp: new Date().toISOString(),
     version: '1.0.0'
   });
@@ -316,7 +316,7 @@ if (process.env['NODE_ENV'] !== 'test') {
   app.listen(PORT, () => {
     console.log('');
     console.log('🎫 ====================================== 🎫');
-    console.log('   Keshless Tickets API Server');
+    console.log('   Carrot Tickets API Server');
     console.log('🎫 ====================================== 🎫');
     console.log('');
     console.log(`🚀 Server running on port ${PORT}`);

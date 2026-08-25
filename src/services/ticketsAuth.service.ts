@@ -273,7 +273,7 @@ export class TicketsAuthService {
       throw new Error('This organizer account is inactive. Please contact support.');
     }
     if (!vendor.apps?.tickets?.enabled) {
-      throw new Error('Keshless Tickets access is not enabled for this account. Please contact support.');
+      throw new Error('Carrot Tickets access is not enabled for this account. Please contact support.');
     }
   }
 
@@ -394,7 +394,7 @@ export class TicketsAuthService {
   }
 
   /**
-   * Unified login for Keshless Tickets app
+   * Unified login for Carrot Tickets app
    * Automatically detects user type (Vendor or SubUser) and authenticates accordingly
    */
   static async login(identifier: string, password: string) {
@@ -417,7 +417,7 @@ export class TicketsAuthService {
       }
 
       if (!vendor.apps?.tickets?.enabled) {
-        throw new Error('Keshless Tickets access is not enabled for this vendor. Please contact support.');
+        throw new Error('Carrot Tickets access is not enabled for this vendor. Please contact support.');
       }
 
       // Generate tokens for vendor
@@ -470,7 +470,7 @@ export class TicketsAuthService {
       });
 
       if (!ticketsAccess) {
-        throw new Error('You do not have access to Keshless Tickets. Please contact your administrator.');
+        throw new Error('You do not have access to Carrot Tickets. Please contact your administrator.');
       }
 
       // Verify vendor has Tickets enabled
@@ -480,7 +480,7 @@ export class TicketsAuthService {
       }
 
       if (!vendorForSubUser.apps?.tickets?.enabled) {
-        throw new Error('Keshless Tickets is not enabled for your vendor');
+        throw new Error('Carrot Tickets is not enabled for your vendor');
       }
 
       if (!vendorForSubUser.isActive) {
@@ -538,7 +538,7 @@ export class TicketsAuthService {
       // Verify it's a Tickets token
       if ((decoded as any).app !== 'tickets') {
         console.error('[TicketsAuth] Token verification failed: Missing or invalid app claim');
-        throw new Error('Invalid token for Keshless Tickets');
+        throw new Error('Invalid token for Carrot Tickets');
       }
 
       return decoded;
@@ -557,7 +557,7 @@ export class TicketsAuthService {
         throw new Error('Invalid token signature');
       } else if (error.name === 'NotBeforeError') {
         throw new Error('Token not yet valid');
-      } else if (error.message === 'Invalid token for Keshless Tickets') {
+      } else if (error.message === 'Invalid token for Carrot Tickets') {
         throw error; // Re-throw our custom error
       }
 
@@ -675,7 +675,7 @@ export class TicketsAuthService {
       });
 
       if (!ticketsAccess) {
-        throw new Error('Keshless Tickets access not found');
+        throw new Error('Carrot Tickets access not found');
       }
 
       const vendorForSubUser = await Vendor.findById(subUser.vendorId);
@@ -918,7 +918,7 @@ export class TicketsAuthService {
       });
 
       if (!ticketsAccess) {
-        throw new Error('Keshless Tickets access not found');
+        throw new Error('Carrot Tickets access not found');
       }
 
       const vendorForSubUser = await Vendor.findById(subUser.vendorId);

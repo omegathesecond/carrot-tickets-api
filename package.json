@@ -1,7 +1,7 @@
 {
-  "name": "keshless-tickets-api",
+  "name": "carrot-tickets-api",
   "version": "1.0.0",
-  "description": "Keshless Tickets Event Management & Ticketing API Backend",
+  "description": "Carrot Tickets Event Management & Ticketing API Backend",
   "main": "dist/app.js",
   "scripts": {
     "build": "tsc && tsc-alias",
@@ -39,7 +39,7 @@
     "mongodb",
     "tickets",
     "events",
-    "keshless"
+    "carrot"
   ],
   "author": "",
   "license": "ISC",
