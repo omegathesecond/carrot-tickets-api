@@ -125,7 +125,7 @@ export class TicketPdfService {
       // Header band
       doc.rect(0, 0, doc.page.width, 90).fill(brand);
       doc.fillColor('white').fontSize(26).font('Helvetica-Bold')
-        .text('Keshless Tickets', 50, 32);
+        .text('Carrot Tickets', 50, 32);
       doc.fontSize(11).font('Helvetica')
         .text('E-Ticket — present the QR code below at the entrance', 50, 64);
 
