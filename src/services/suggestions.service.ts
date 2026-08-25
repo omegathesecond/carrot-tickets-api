@@ -253,9 +253,17 @@ export class SuggestionsService {
           eventCount: { $ifNull: [{ $arrayElemAt: ['$_events.count', 0] }, 0] },
         },
       },
-      // Stable tiebreak on _id keeps pagination deterministic when several
-      // organizers tie on followerCount.
-      { $sort: { followerCount: -1, _id: 1 } },
+      // followerCount is the primary signal, but most organizers on a young
+      // platform tie at 0 followers — without a further tiebreak the list
+      // collapses to whichever organizers registered first (ascending _id),
+      // permanently burying anyone who signs up and publishes events later.
+      // eventCount as the second key surfaces organizers who actually have
+      // something to follow; _id DESC as the final tiebreak favors the most
+      // recently registered organizer within a tie, so new organizers who
+      // just created their first event are no longer stuck behind years of
+      // dormant zero-follower, zero-event accounts. Still fully deterministic
+      // for pagination.
+      { $sort: { followerCount: -1, eventCount: -1, _id: -1 } },
       { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1 } },
     ];
 
