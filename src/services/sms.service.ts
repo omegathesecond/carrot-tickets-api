@@ -125,22 +125,25 @@ export class SmsService {
       minute: '2-digit',
     });
 
+    const profileNote = 'View anytime in your Carrot profile.';
+
     let body: string;
     if (tickets.length === 1) {
       body =
         `🎫 ${first.eventName} ticket confirmed!\n` +
         `Code: ${groupTicketCode(first.ticketId)}\n` +
         `${dateShort} • ${first.venue}\n` +
-        `Show this code at entry.`;
+        `Show this code at entry. ${profileNote}`;
     } else {
       const codes = tickets.map((t) => groupTicketCode(t.ticketId)).join('\n');
       const candidate =
         `🎫 ${tickets.length} ${first.eventName} tickets confirmed!\n` +
         `${codes}\n` +
-        `${dateShort} • ${first.venue}`;
+        `${dateShort} • ${first.venue}\n` +
+        profileNote;
       body = candidate.length <= 320
         ? candidate
-        : `🎫 ${tickets.length} ${first.eventName} tickets confirmed! See your receipt for codes. ${dateShort} • ${first.venue}`;
+        : `🎫 ${tickets.length} ${first.eventName} tickets confirmed! See your receipt for codes. ${dateShort} • ${first.venue} ${profileNote}`;
     }
 
     return this.send(phoneNumber, body);
