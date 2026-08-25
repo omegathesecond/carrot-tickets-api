@@ -120,6 +120,19 @@ describe('GET /api/social/suggestions/organizers', () => {
     expect(order.indexOf(String(mid._id))).toBeLessThan(order.indexOf(String(low._id)));
   });
 
+  it('ranks a newer organizer with a published event ahead of an older, eventless one when both have 0 followers', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    // Created first, so it would win an ascending-_id tiebreak — but it has
+    // no events, so it must not outrank the newer organizer below it.
+    const oldDormant = await Vendor.create({ businessName: 'Old Dormant Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const newActive = await Vendor.create({ businessName: 'New Active Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    await Event.create({ vendorId: newActive._id, name: 'Fresh Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
+
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const order = res.body.data.map((o: any) => o.id);
+    expect(order.indexOf(String(newActive._id))).toBeLessThan(order.indexOf(String(oldDormant._id)));
+  });
+
   it('excludes inactive and unverified vendors', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     await Vendor.create({ businessName: 'Inactive Org', password: 'secret1', isActive: false, verificationStatus: VerificationStatus.VERIFIED });
