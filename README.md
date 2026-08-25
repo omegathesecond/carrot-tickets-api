@@ -1,4 +1,4 @@
-# Keshless Tickets API
+# Carrot Tickets API
 
 A comprehensive REST API for event management, ticket sales, and entry validation. Standalone ticketing platform with Keshless wallet payment integration.
 
@@ -69,7 +69,7 @@ src/
 
 1. **Clone and navigate to the project**
    ```bash
-   cd /path/to/keshless-tickets/dev/backend/keshless-tickets-api
+   cd ~/Documents/omevision/contracts/carrot-tickets/api
    ```
 
 2. **Install dependencies**
@@ -357,4 +357,4 @@ Proprietary - All rights reserved
 
 ## Support
 
-For support, contact: support@keshless.app
+For support, contact: support@carrottickets.com

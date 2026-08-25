@@ -16,7 +16,7 @@ import {
 const router = Router();
 
 /**
- * Media Upload Routes for Keshless Tickets
+ * Media Upload Routes for Carrot Tickets
  * All routes require authentication via authenticateTickets
  *
  * Base path: /api/media

@@ -5,7 +5,7 @@
  * Uses API key authentication for secure server-to-server communication
  *
  * Integration Pattern:
- * - All Keshless Tickets vendors share a single Keshless vendor account
+ * - All Carrot Tickets vendors share a single Keshless vendor account
  * - Authentication via API key (not JWT or password)
  * - Synchronous payment processing (no webhooks needed)
  * - Direct integration with Keshless vendor payment acceptance API
@@ -49,7 +49,7 @@ export class KeshlessPaymentService {
         throw new Error('KESHLESS_API_KEY not configured. Please set valid API key in environment.');
       }
 
-      console.log('🎫 [Keshless Tickets] Initiating payment acceptance:');
+      console.log('🎫 [Carrot Tickets] Initiating payment acceptance:');
       console.log('  - API URL:', this.KESHLESS_API_URL);
       console.log('  - Vendor ID:', this.VENDOR_ID);
       console.log('  - Card Number:', params.cardNumber);
@@ -67,7 +67,7 @@ export class KeshlessPaymentService {
           cardNumber: params.cardNumber,
           amount: params.amount,
           pin: params.pin,
-          description: params.description || `Keshless Tickets - Event ticket purchase`
+          description: params.description || `Carrot Tickets - Event ticket purchase`
         })
       });
 
@@ -77,7 +77,7 @@ export class KeshlessPaymentService {
           message: `HTTP ${response.status}: ${response.statusText}`
         }));
 
-        console.error('❌ [Keshless Tickets] Payment failed:', errorData);
+        console.error('❌ [Carrot Tickets] Payment failed:', errorData);
 
         // Return structured error response
         return {
@@ -95,7 +95,7 @@ export class KeshlessPaymentService {
       // Parse successful response
       const data: any = await response.json();
 
-      console.log('✅ [Keshless Tickets] Payment accepted successfully');
+      console.log('✅ [Carrot Tickets] Payment accepted successfully');
       console.log('  - Transaction ID:', data.data?._id || data.transactionId);
       console.log('  - Fee Amount:', data.data?.feeAmount);
       console.log('  - Vendor Received:', data.data?.vendorReceived);
@@ -115,7 +115,7 @@ export class KeshlessPaymentService {
 
     } catch (error) {
       const err = error as Error;
-      console.error('❌ [Keshless Tickets] Payment error:', err);
+      console.error('❌ [Carrot Tickets] Payment error:', err);
 
       return {
         transactionId: '',

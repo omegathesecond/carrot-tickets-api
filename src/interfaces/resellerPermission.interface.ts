@@ -1,7 +1,7 @@
 /**
- * Keshless Tickets Reseller Permission System
+ * Carrot Tickets Reseller Permission System
  *
- * Modular permission system for resellers on the Keshless Tickets POS.
+ * Modular permission system for resellers on the Carrot Tickets POS.
  * Uses 'reseller:' namespace to avoid conflicts with other permission scopes.
  */
 

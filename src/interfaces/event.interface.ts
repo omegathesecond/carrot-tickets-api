@@ -4,7 +4,7 @@ import type { PaymentMethod } from './ticket.interface';
 
 export enum EventStatus {
   DRAFT = 'draft',
-  // An organizer has submitted the event to go live, but a Keshless admin must
+  // An organizer has submitted the event to go live, but a Carrot admin must
   // approve it first. Approval is per-EVENT, not per-organizer-account — a
   // pending event sells nothing until a superadmin publishes (approves) it.
   PENDING_APPROVAL = 'pending_approval',

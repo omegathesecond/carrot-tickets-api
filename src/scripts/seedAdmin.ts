@@ -11,7 +11,7 @@ const MONGODB_URI = process.env['MONGODB_URI'] || 'mongodb://localhost:27017/kes
 const ADMIN_PASSWORD = process.env['ADMIN_SEED_PASSWORD'];
 
 async function seedAdmin() {
-  console.log('🔐 Seeding admin user for Keshless Tickets API...\n');
+  console.log('🔐 Seeding admin user for Carrot Tickets API...\n');
 
   if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
     console.error('❌ ADMIN_SEED_PASSWORD env var is required (min 12 chars) to seed the admin. Aborting.');
@@ -41,7 +41,7 @@ async function seedAdmin() {
       email: 'admin@keshless.com',
       phoneNumber: '+26878999999',
       password: ADMIN_PASSWORD,
-      businessName: 'Keshless Tickets Administrator',
+      businessName: 'Carrot Tickets Administrator',
       apps: {
         keshless: { enabled: false },
         tickets: { enabled: true, activatedAt: new Date() }

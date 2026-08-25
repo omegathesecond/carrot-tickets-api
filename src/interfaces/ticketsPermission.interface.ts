@@ -1,7 +1,7 @@
 /**
- * Keshless Tickets Permission System
+ * Carrot Tickets Permission System
  *
- * Modular permission system for Keshless Tickets event management.
+ * Modular permission system for Carrot Tickets event management.
  * Uses 'tickets:' namespace to avoid conflicts with other apps.
  */
 
