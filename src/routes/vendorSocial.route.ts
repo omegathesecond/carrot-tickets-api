@@ -48,5 +48,6 @@ router.post('/stories/:id/finalize', authenticateTickets, requireProfilePhoto, S
 router.get('/stories', authenticateTickets, StoryController.listAsVendor);
 router.post('/stories/:id/seen', authenticateTickets, StoryController.seenAsVendor);
 router.get('/stories/:id/viewers', authenticateTickets, StoryController.viewersAsVendor);
+router.delete('/stories/:id', authenticateTickets, StoryController.removeAsVendor);
 
 export default router;
