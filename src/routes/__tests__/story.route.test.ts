@@ -5,6 +5,7 @@ import { signBuyerToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Story } from '@models/story.model';
 import { FollowService } from '@services/follow.service';
+import { BlockService } from '@services/block.service';
 
 jest.mock('@utils/updatesR2', () => ({
   updatesR2: {
@@ -140,10 +141,24 @@ describe('Stories API', () => {
       expect(res.body.data.stories).toEqual([]);
     });
 
-    it('excludes a story from a non-followed author', async () => {
+    it('includes a story from a non-followed author — Stories are visible to everyone', async () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
       const stranger = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Stranger' });
       await seedReadyStory(String(stranger._id));
+
+      const res = await request(app)
+        .get('/api/social/stories')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+      expect(res.body.data.stories).toHaveLength(1);
+      expect(res.body.data.stories[0].author.id).toBe(String(stranger._id));
+    });
+
+    it('excludes a story from a blocked author', async () => {
+      const viewer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Viewer' });
+      const blocked = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Blocked' });
+      await seedReadyStory(String(blocked._id));
+      await BlockService.block(viewer, String(blocked._id));
 
       const res = await request(app)
         .get('/api/social/stories')
@@ -285,6 +300,44 @@ describe('Stories API', () => {
 
     it('401s without a token', async () => {
       await request(app).get('/api/social/stories/000000000000000000000000/viewers').expect(401);
+    });
+  });
+
+  describe('DELETE /api/social/stories/:id', () => {
+    it('lets the author delete their own story', async () => {
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      const story = await seedReadyStory(String(owner._id));
+
+      await request(app)
+        .delete(`/api/social/stories/${story.id}`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+
+      expect(await Story.findById(story.id)).toBeNull();
+    });
+
+    it("403s deleting someone else's story", async () => {
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Nosy' });
+      const owner = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      const story = await seedReadyStory(String(owner._id));
+
+      await request(app)
+        .delete(`/api/social/stories/${story.id}`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(403);
+      expect(await Story.findById(story.id)).not.toBeNull();
+    });
+
+    it('404s an unknown story id', async () => {
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      await request(app)
+        .delete('/api/social/stories/000000000000000000000000')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(404);
+    });
+
+    it('401s without a token', async () => {
+      await request(app).delete('/api/social/stories/000000000000000000000000').expect(401);
     });
   });
 });
