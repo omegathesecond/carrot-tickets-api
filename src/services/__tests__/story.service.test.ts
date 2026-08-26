@@ -7,6 +7,7 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { FollowService } from '@services/follow.service';
 import { HttpError } from '@utils/httpError.util';
+import { totalStoryPoints, STORY_POINTS } from '@services/storyPoints.service';
 
 jest.mock('@utils/updatesR2', () => ({
   updatesR2: {
@@ -58,6 +59,35 @@ describe('story.service', () => {
 
     it('finalizeStory throws 404 for an unknown id', async () => {
       await expect(finalizeStory(new mongoose.Types.ObjectId().toString())).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('finalizeStory(image) awards story points to a buyer author', async () => {
+      const author = buyerId();
+      const { story } = await createStory({ actor: { type: 'buyer', id: author }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg' });
+      await finalizeStory(story.id);
+      expect(await totalStoryPoints(author)).toBe(STORY_POINTS);
+    });
+
+    it('finalizeStory(image) never awards points to a vendor/organizer author', async () => {
+      const author = buyerId();
+      const { story } = await createStory({ actor: { type: 'vendor', id: author }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg' });
+      await finalizeStory(story.id);
+      expect(await totalStoryPoints(author)).toBe(0);
+    });
+
+    it('finalizeStory(video) does not award points — media never reaches ready here', async () => {
+      const author = buyerId();
+      const { story } = await createStory({ actor: { type: 'buyer', id: author }, kind: 'video', ext: 'mp4', contentType: 'video/mp4' });
+      await finalizeStory(story.id);
+      expect(await totalStoryPoints(author)).toBe(0);
+    });
+
+    it('finalizeStory(image) is idempotent for points even if called twice', async () => {
+      const author = buyerId();
+      const { story } = await createStory({ actor: { type: 'buyer', id: author }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg' });
+      await finalizeStory(story.id);
+      await finalizeStory(story.id);
+      expect(await totalStoryPoints(author)).toBe(STORY_POINTS);
     });
   });
 
