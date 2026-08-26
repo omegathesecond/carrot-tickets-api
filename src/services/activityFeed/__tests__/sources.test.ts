@@ -223,11 +223,13 @@ describe('activity feed sources', () => {
     expect(mongoose.isValidObjectId(rows[0]!.actor.id)).toBe(true);
   });
 
+  const AVATAR_URL = 'https://cdn.test/avatar.jpg';
+
   it('joinCandidates returns recent buyers newest-first as actor-only rows', async () => {
-    const older = await Buyer.create({ phone: '+26878100020', password: 'password123', name: 'Older' });
+    const older = await Buyer.create({ phone: '+26878100020', password: 'password123', name: 'Older', avatarUrl: AVATAR_URL });
     // Backdate via the raw driver (timestamps: true strips createdAt from $set).
     await Buyer.collection.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } });
-    const newer = await Buyer.create({ phone: '+26878100021', password: 'password123', name: 'Newer' });
+    const newer = await Buyer.create({ phone: '+26878100021', password: 'password123', name: 'Newer', avatarUrl: AVATAR_URL });
 
     const { candidates: rows } = await joinCandidates({ limit: 20 });
     expect(rows).toHaveLength(2);
@@ -238,20 +240,35 @@ describe('activity feed sources', () => {
   });
 
   it('joinCandidates honours the before watermark', async () => {
-    const older = await Buyer.create({ phone: '+26878100022', password: 'password123' });
+    const older = await Buyer.create({ phone: '+26878100022', password: 'password123', avatarUrl: AVATAR_URL });
     await Buyer.collection.updateOne({ _id: older._id }, { $set: { createdAt: new Date(Date.now() - 5 * DAY) } });
-    const newer = await Buyer.create({ phone: '+26878100023', password: 'password123' });
+    const newer = await Buyer.create({ phone: '+26878100023', password: 'password123', avatarUrl: AVATAR_URL });
 
     const { candidates: rows } = await joinCandidates({ limit: 20, before: newer.createdAt as Date });
     expect(rows.map((r) => r.actor.id)).toEqual([String(older._id)]);
   });
 
   it('joinCandidates contributes nothing on the following tab (actorIds set)', async () => {
-    await Buyer.create({ phone: '+26878100024', password: 'password123' });
+    await Buyer.create({ phone: '+26878100024', password: 'password123', avatarUrl: AVATAR_URL });
     const { candidates, nextBefore } = await joinCandidates({
       limit: 20, actorIds: [String(new mongoose.Types.ObjectId())],
     });
     expect(candidates).toHaveLength(0);
     expect(nextBefore).toBeNull();
+  });
+
+  // The bug this closes: a buyer created via in-checkout registration has no
+  // avatarUrl (photo isn't required to complete a purchase), and previously
+  // showed up here as a fully "joined" member with a default/initials avatar —
+  // visible proof to every viewer that the "mandatory" photo requirement
+  // wasn't enforced. They haven't joined the community feed until the photo
+  // requirement is actually satisfied.
+  it('joinCandidates excludes buyers who have not set a profile photo', async () => {
+    const withPhoto = await Buyer.create({ phone: '+26878100025', password: 'password123', avatarUrl: AVATAR_URL });
+    await Buyer.create({ phone: '+26878100026', password: 'password123' }); // no avatarUrl
+    await Buyer.create({ phone: '+26878100027', password: 'password123', avatarUrl: '' }); // empty string
+
+    const { candidates: rows } = await joinCandidates({ limit: 20 });
+    expect(rows.map((r) => r.actor.id)).toEqual([String(withPhoto._id)]);
   });
 });
