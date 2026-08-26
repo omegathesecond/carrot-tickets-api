@@ -414,7 +414,7 @@ async function testLogout() {
 
 async function runAllTests() {
   console.log('\n🎫 ====================================== 🎫');
-  console.log('   Keshless Tickets API Endpoint Tests');
+  console.log('   Carrot Tickets API Endpoint Tests');
   console.log('🎫 ====================================== 🎫');
   console.log(`\n📍 Testing API at: ${BASE_URL}\n`);
 

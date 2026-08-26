@@ -5,10 +5,10 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Keshless Tickets API Documentation',
+      title: 'Carrot Tickets API Documentation',
       version: version,
       description: `
-# Keshless Tickets Event Management & Ticketing API
+# Carrot Tickets Event Management & Ticketing API
 
 A comprehensive REST API for event management, ticket sales, and entry validation.
 
@@ -56,7 +56,7 @@ All errors follow a consistent format:
 \`\`\`
       `,
       contact: {
-        name: 'Keshless Tickets API Support',
+        name: 'Carrot Tickets API Support',
         email: 'support@carrottickets.com',
       },
       license: {

@@ -12,7 +12,7 @@ import { SubUserRole } from '../interfaces/subUser.interface';
 dotenv.config();
 
 async function testModels() {
-  console.log('🎫 Testing Keshless Tickets Database Models\n');
+  console.log('🎫 Testing Carrot Tickets Database Models\n');
 
   try {
     // Connect to MongoDB

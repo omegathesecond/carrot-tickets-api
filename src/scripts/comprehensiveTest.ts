@@ -31,7 +31,7 @@ async function apiRequest(endpoint: string, options: any = {}) {
 
 async function runComprehensiveTest() {
   console.log('\n🎫 ================================================');
-  console.log('   KESHLESS TICKETS - COMPREHENSIVE E2E TEST');
+  console.log('   CARROT TICKETS - COMPREHENSIVE E2E TEST');
   console.log('================================================\n');
 
   try {

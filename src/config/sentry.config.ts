@@ -1,5 +1,5 @@
 /**
- * Sentry Configuration for Keshless Tickets API
+ * Sentry Configuration for Carrot Tickets API
  *
  * Environment Variables Required:
  * - SENTRY_DSN: Your Sentry project DSN
@@ -16,7 +16,7 @@ export const sentryConfig = {
   environment: process.env['SENTRY_ENVIRONMENT'] || process.env['NODE_ENV'] || 'development',
 
   // Release version - should match your deployment version
-  release: process.env['SENTRY_RELEASE'] || `keshless-tickets-api@${process.env['npm_package_version'] || '1.0.0'}`,
+  release: process.env['SENTRY_RELEASE'] || `carrot-tickets-api@${process.env['npm_package_version'] || '1.0.0'}`,
 
   // Sample rate for error events (1.0 = 100%)
   sampleRate: 1.0,
@@ -32,7 +32,7 @@ export const sentryConfig = {
   debug: process.env['NODE_ENV'] === 'development',
 
   // Server name - useful for identifying which instance reported the error
-  serverName: process.env['SERVER_NAME'] || 'keshless-tickets-api',
+  serverName: process.env['SERVER_NAME'] || 'carrot-tickets-api',
 
   // Integrations configuration
   integrations: {

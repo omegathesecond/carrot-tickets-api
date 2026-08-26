@@ -8,6 +8,7 @@ import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR = '64c000000000000000000a01';
@@ -31,6 +32,10 @@ async function setup(bandUid: string | null = 'LOST1') {
   if (bandUid) {
     await BandBinding.create({ walletId: wallet._id, eventId: event._id, bandUid, boundAt: new Date() });
   }
+  // Reissue binds a REPLACEMENT tag, and a tag only binds if it is in this
+  // event's register — so the organizer's spare stock has to be in the box, not
+  // just the one that was lost.
+  await enrolTags(event._id, 'LOST1', 'FRESH1', 'FRESH2', 'TAKEN1');
   return { event, wallet };
 }
 

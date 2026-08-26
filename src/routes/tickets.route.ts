@@ -19,6 +19,7 @@ import { OrganizerCashlessController } from '@controllers/organizerCashless.cont
 import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { MenuAdminController } from '@controllers/menuAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
+import { EventTagController } from '@controllers/eventTag.controller';
 import { TagReportController } from '@controllers/tagReport.controller';
 import { TagAdminController } from '@controllers/tagAdmin.controller';
 import { AdminUsersController } from '@controllers/adminUsers.controller';
@@ -603,6 +604,20 @@ router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(Ti
  */
 router.get('/events/:eventId/tags/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.summary);
 router.get('/events/:eventId/tags/registrations', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.registrations);
+
+/**
+ * The event's TAG REGISTER — which physical tags the organizer has enrolled
+ * into this show. Distinct from /tags above: those are the WALLETS behind tags
+ * already handed to attendees; this is the pool of plastic that is allowed to
+ * become one at all. Gated on ISSUE_TAGS so the Register desk reaches it as
+ * well as the organizer — it is the desk's own screen.
+ *
+ * ORDER MATTERS: /tags/registry must stay above /tags/:walletId, or Express
+ * matches "registry" as a wallet id.
+ */
+router.get('/events/:eventId/tags/registry', requireTicketsPermission(TicketsPermission.ISSUE_TAGS), EventTagController.list);
+router.post('/events/:eventId/tags/registry', requireTicketsPermission(TicketsPermission.ISSUE_TAGS), EventTagController.register);
+router.post('/events/:eventId/tags/registry/retire', requireTicketsPermission(TicketsPermission.ISSUE_TAGS), EventTagController.retire);
 router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.list);
 router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
 router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);

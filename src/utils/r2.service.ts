@@ -49,7 +49,7 @@ function getR2Client(): S3Client {
 }
 
 /**
- * R2Service - Cloudflare R2 storage service for Keshless Tickets media
+ * R2Service - Cloudflare R2 storage service for Carrot Tickets media
  *
  * Handles upload, delete, and management of event media files:
  * - Event posters

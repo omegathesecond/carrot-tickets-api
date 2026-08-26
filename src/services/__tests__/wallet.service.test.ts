@@ -3,6 +3,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helper
 import { WalletService } from '@services/wallet.service';
 import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
 
 const eventId = new mongoose.Types.ObjectId().toString();
 const ticketId = new mongoose.Types.ObjectId().toString();
@@ -94,6 +95,12 @@ describe('WalletService.ensureWalletForTicket', () => {
 
 describe('WalletService.bindBand', () => {
   beforeAll(async () => { await connectTestDb(); });
+  // A tag only binds if the organizer enrolled it into this event's register,
+  // so every uid these tests reach for has to be in the box first. clearTestDb
+  // empties the register along with everything else, hence beforeEach.
+  beforeEach(async () => {
+    await enrolTags(eventId, 'AABBCC01', 'AABBCC02', 'AABBCC03', 'AABBCC09', 'AABBCC10', 'uid1', 'SAMEUID1');
+  });
   // restoreAllMocks here too, so a stub can never leak past its test even if an
   // assertion throws mid-test.
   afterEach(async () => { await clearTestDb(); jest.restoreAllMocks(); });
@@ -182,6 +189,11 @@ describe('WalletService.bindBand', () => {
     // A duplicate-key error whose keyPattern is NOT bandUid must surface as-is,
     // never be mapped to "already bound to another wallet". Reject (not throw)
     // so the error flows through the claim's .catch where discrimination lives.
+    //
+    // A REAL wallet, not a made-up id: the register check reads the wallet for
+    // its eventId before the claim runs, so a nonexistent id would now fail with
+    // 'wallet not found' and never reach the stub this test exists to cover.
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
     const dupOther = Object.assign(new Error('E11000 duplicate key error'), {
       code: 11000,
       keyPattern: { eventId: 1, buyerId: 1 },
@@ -191,7 +203,7 @@ describe('WalletService.bindBand', () => {
     );
 
     await expect(
-      WalletService.bindBand(new mongoose.Types.ObjectId().toString(), 'AABBCC10'),
+      WalletService.bindBand(String(w._id), 'AABBCC10'),
     ).rejects.toThrow('E11000');
   });
 
@@ -211,6 +223,7 @@ describe('WalletService.bindBand', () => {
 
 describe('WalletService.unbindBand (lost band reissue)', () => {
   beforeAll(async () => { await connectTestDb(); });
+  beforeEach(async () => { await enrolTags(eventId, 'LOSTBAND', 'NEWBAND1', 'REUSEUID'); });
   afterEach(async () => { await clearTestDb(); jest.restoreAllMocks(); });
   afterAll(async () => { await disconnectTestDb(); });
 

@@ -1,5 +1,5 @@
 /**
- * Phone normalisation for Keshless Tickets.
+ * Phone normalisation for Carrot Tickets.
  *
  * Tickets are matched to a buyer purely by their phone number
  * (Ticket.customerPhone), so the SAME normalisation MUST run both when a

@@ -599,27 +599,45 @@ export class AnalyticsService {
         eventIdFilter.vendorId = new mongoose.Types.ObjectId(vendorId);
       }
 
+      // Wristband/tag batches (TicketService.issueWristbandBatch) are
+      // platform-printed, zero-amount admission tickets, not sales — mixing
+      // them into "tickets sold" / "total sales" makes an organizer's count
+      // look inflated against what they actually collected. They're reported
+      // separately as `tagsPrinted` and excluded from the real-sale figures.
+      const wristbandSaleIds = await TicketSale.distinct('_id', {
+        ...eventIdFilter,
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: SalesChannel.WRISTBAND
+      });
+      const realSaleFilter = {
+        ...eventIdFilter,
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: { $ne: SalesChannel.WRISTBAND }
+      };
+
       // Get sales data
       const [
         totalSales,
         totalRevenue,
         ticketsSold,
+        allTicketsSoldStatus,
         checkedInCount,
-        salesByType
+        salesByType,
+        tagsPrintedAgg,
+        cashSalesAgg
       ] = await Promise.all([
-        TicketSale.countDocuments({
-          ...eventIdFilter,
-          paymentStatus: PaymentStatus.COMPLETED
-        }),
+        TicketSale.countDocuments(realSaleFilter),
         TicketSale.aggregate([
-          {
-            $match: {
-              ...eventIdFilter,
-              paymentStatus: PaymentStatus.COMPLETED
-            }
-          },
+          { $match: realSaleFilter },
           { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ]),
+        Ticket.countDocuments({
+          ...eventIdFilter,
+          status: TicketStatus.SOLD,
+          saleId: { $nin: wristbandSaleIds }
+        }),
+        // Same-shape count including wristband tickets — kept only to
+        // preserve the existing check-in-rate math below unchanged.
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.SOLD }),
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.CHECKED_IN }),
         Ticket.aggregate([
@@ -631,11 +649,27 @@ export class AnalyticsService {
               revenue: { $sum: '$price' }
             }
           }
+        ]),
+        TicketSale.aggregate([
+          {
+            $match: {
+              ...eventIdFilter,
+              paymentStatus: PaymentStatus.COMPLETED,
+              channel: SalesChannel.WRISTBAND
+            }
+          },
+          { $group: { _id: null, total: { $sum: '$quantity' } } }
+        ]),
+        TicketSale.aggregate([
+          { $match: { ...realSaleFilter, paymentMethod: PaymentMethod.CASH } },
+          { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ])
       ]);
 
       const revenue = totalRevenue[0]?.total || 0;
-      const checkInRate = ticketsSold > 0 ? (checkedInCount / ticketsSold) * 100 : 0;
+      const tagsPrinted = tagsPrintedAgg[0]?.total || 0;
+      const cashSales = cashSalesAgg[0]?.total || 0;
+      const checkInRate = allTicketsSoldStatus > 0 ? (checkedInCount / allTicketsSoldStatus) * 100 : 0;
 
       return {
         event: {
@@ -649,6 +683,8 @@ export class AnalyticsService {
           totalSales,
           totalRevenue: revenue,
           ticketsSold,
+          tagsPrinted,
+          cashSales,
           checkedIn: checkedInCount,
           checkInRate: Math.round(checkInRate * 100) / 100
         },

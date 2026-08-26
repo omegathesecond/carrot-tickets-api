@@ -1,7 +1,7 @@
 {
-  "name": "keshless-tickets-api",
+  "name": "carrot-tickets-api",
   "version": "1.0.0",
-  "description": "Keshless Tickets Event Management & Ticketing API Backend",
+  "description": "Carrot Tickets Event Management & Ticketing API Backend",
   "main": "dist/app.js",
   "scripts": {
     "build": "tsc && tsc-alias",
@@ -17,6 +17,7 @@
     "backfill:event-ticketing": "ts-node -r tsconfig-paths/register src/scripts/backfillEventTicketing.ts",
     "backfill:event-category": "ts-node -r tsconfig-paths/register src/scripts/backfillEventCategory.ts",
     "backfill:update-hashtags": "ts-node -r tsconfig-paths/register src/scripts/backfillUpdateHashtags.ts",
+    "backfill:event-tag-register": "ts-node -r tsconfig-paths/register src/scripts/backfillEventTagRegister.ts",
     "migrate:review-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-review-indexes.ts",
     "migrate:merchant-credentials": "ts-node -r tsconfig-paths/register src/scripts/migrate-merchant-credentials.ts",
     "cleanup:eventless-cashiers": "ts-node -r tsconfig-paths/register src/scripts/cleanup-eventless-cashiers.ts",
@@ -43,7 +44,7 @@
     "mongodb",
     "tickets",
     "events",
-    "keshless"
+    "carrot"
   ],
   "author": "",
   "license": "ISC",

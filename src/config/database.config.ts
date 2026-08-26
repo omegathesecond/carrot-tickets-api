@@ -119,7 +119,7 @@ export const logDatabaseConfig = (): void => {
   const validation = validateDatabaseConfig();
 
   console.log('');
-  console.log('🎫 DATABASE CONFIGURATION - KESHLESS TICKETS');
+  console.log('🎫 DATABASE CONFIGURATION - CARROT TICKETS');
   console.log('═'.repeat(50));
   console.log(`   Environment:     ${info.environment}`);
   console.log(`   Database:        ${info.databaseName}`);

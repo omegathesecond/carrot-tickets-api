@@ -24,7 +24,7 @@ This document describes the available seed scripts for populating your database 
 
 **Usage:**
 ```bash
-cd backend/keshless-tickets-api
+cd ~/Documents/omevision/contracts/carrot-tickets/api
 npm run seed:sales
 ```
 
