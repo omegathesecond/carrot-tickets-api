@@ -436,7 +436,37 @@ export class TicketsController {
         ticketsUser.isSuperAdmin || false
       );
 
-      ApiResponseUtil.success(res, event);
+      // event.totalTicketsSold / ticketTypes[].sold are persisted counters
+      // that include platform-printed wristband/tag batches, which makes
+      // them look inflated on the event detail page. Overlay the live,
+      // wristband-excluded figures for display — the raw fields are left
+      // untouched since other logic (quantity-adjustment guards, the
+      // reseller POS remaining-capacity calc) depends on them reflecting
+      // true inventory consumption, tags included.
+      const salesSummary = await AnalyticsService.getEventSalesSummary(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
+      const soldByType = new Map(salesSummary.ticketTypes.map((t) => [t.name, t.sold]));
+      const tagsByType = new Map(salesSummary.tagsPrintedByType.map((t) => [t.name, t.count]));
+
+      const eventJson = typeof (event as any).toObject === 'function' ? (event as any).toObject() : event;
+      const responseEvent = {
+        ...eventJson,
+        ticketTypes: (eventJson.ticketTypes || []).map((tt: any) => ({
+          ...tt,
+          realSold: soldByType.get(tt.name) || 0,
+          tagsPrinted: tagsByType.get(tt.name) || 0
+        })),
+        salesSummary: {
+          ticketsSold: salesSummary.ticketsSold,
+          tagsPrinted: salesSummary.tagsPrinted,
+          cashSales: salesSummary.cashSales
+        }
+      };
+
+      ApiResponseUtil.success(res, responseEvent);
     } catch (error: any) {
       console.error('Get event error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to fetch event', 404);

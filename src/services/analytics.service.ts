@@ -599,27 +599,46 @@ export class AnalyticsService {
         eventIdFilter.vendorId = new mongoose.Types.ObjectId(vendorId);
       }
 
+      // Wristband/tag batches (TicketService.issueWristbandBatch) are
+      // platform-printed, zero-amount admission tickets, not sales — mixing
+      // them into "tickets sold" / "total sales" makes an organizer's count
+      // look inflated against what they actually collected. They're reported
+      // separately as `tagsPrinted` and excluded from the real-sale figures.
+      const wristbandSaleIds = await TicketSale.distinct('_id', {
+        ...eventIdFilter,
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: SalesChannel.WRISTBAND
+      });
+      const realSaleFilter = {
+        ...eventIdFilter,
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: { $ne: SalesChannel.WRISTBAND }
+      };
+
       // Get sales data
       const [
         totalSales,
         totalRevenue,
         ticketsSold,
+        allTicketsSoldStatus,
         checkedInCount,
-        salesByType
+        salesByType,
+        realSoldByType,
+        tagsPrintedAgg,
+        cashSalesAgg
       ] = await Promise.all([
-        TicketSale.countDocuments({
-          ...eventIdFilter,
-          paymentStatus: PaymentStatus.COMPLETED
-        }),
+        TicketSale.countDocuments(realSaleFilter),
         TicketSale.aggregate([
-          {
-            $match: {
-              ...eventIdFilter,
-              paymentStatus: PaymentStatus.COMPLETED
-            }
-          },
+          { $match: realSaleFilter },
           { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ]),
+        Ticket.countDocuments({
+          ...eventIdFilter,
+          status: TicketStatus.SOLD,
+          saleId: { $nin: wristbandSaleIds }
+        }),
+        // Same-shape count including wristband tickets — kept only to
+        // preserve the existing check-in-rate math below unchanged.
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.SOLD }),
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.CHECKED_IN }),
         Ticket.aggregate([
@@ -631,11 +650,33 @@ export class AnalyticsService {
               revenue: { $sum: '$price' }
             }
           }
+        ]),
+        // Per-type breakdown, wristband batches excluded — same status
+        // filter as `ticketsSold` above, so the two stay consistent.
+        Ticket.aggregate([
+          { $match: { ...eventIdFilter, status: TicketStatus.SOLD, saleId: { $nin: wristbandSaleIds } } },
+          { $group: { _id: '$ticketType', sold: { $sum: 1 } } }
+        ]),
+        TicketSale.aggregate([
+          {
+            $match: {
+              ...eventIdFilter,
+              paymentStatus: PaymentStatus.COMPLETED,
+              channel: SalesChannel.WRISTBAND
+            }
+          },
+          { $group: { _id: null, total: { $sum: '$quantity' } } }
+        ]),
+        TicketSale.aggregate([
+          { $match: { ...realSaleFilter, paymentMethod: PaymentMethod.CASH } },
+          { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ])
       ]);
 
       const revenue = totalRevenue[0]?.total || 0;
-      const checkInRate = ticketsSold > 0 ? (checkedInCount / ticketsSold) * 100 : 0;
+      const tagsPrinted = tagsPrintedAgg[0]?.total || 0;
+      const cashSales = cashSalesAgg[0]?.total || 0;
+      const checkInRate = allTicketsSoldStatus > 0 ? (checkedInCount / allTicketsSoldStatus) * 100 : 0;
 
       return {
         event: {
@@ -649,16 +690,21 @@ export class AnalyticsService {
           totalSales,
           totalRevenue: revenue,
           ticketsSold,
+          tagsPrinted,
+          cashSales,
           checkedIn: checkedInCount,
           checkInRate: Math.round(checkInRate * 100) / 100
         },
         ticketTypes: event.ticketTypes.map(tt => {
           const typeStats = salesByType.find(s => s._id === tt.name);
+          const realSoldStats = realSoldByType.find(s => s._id === tt.name);
           return {
             name: tt.name,
             price: tt.price,
             quantity: tt.quantity,
-            sold: tt.sold,
+            // Wristband/tag batches excluded — see `ticketsSold` above.
+            // Persisted tt.sold (used for inventory/available) is untouched.
+            sold: realSoldStats?.sold || 0,
             available: tt.available,
             revenue: typeStats?.revenue || 0
           };
@@ -667,6 +713,66 @@ export class AnalyticsService {
     } catch (error: any) {
       console.error('Get event analytics error:', error);
       throw new Error(error.message || 'Failed to fetch event analytics');
+    }
+  }
+
+  /**
+   * Live per-event sales summary for the event detail / ticket-config admin
+   * view. event.totalTicketsSold and ticketTypes[].sold are persisted
+   * counters incremented for every issued ticket, wristband/tag batches
+   * included — they make an organizer's "Sold" figure look inflated against
+   * what they actually collected. This recomputes the real (non-wristband)
+   * count live, so it's correct for events that already carry an inflated
+   * counter without needing a backfill. Unlike getEventAnalytics's
+   * `sales.ticketsSold`, sold tickets that have since been checked in still
+   * count here — this must not shrink as people scan in at the gate.
+   */
+  static async getEventSalesSummary(eventId: string, vendorId: string, isSuperAdmin: boolean = false) {
+    try {
+      const eventIdFilter: any = { eventId: new mongoose.Types.ObjectId(eventId) };
+      if (!isSuperAdmin) {
+        eventIdFilter.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
+
+      const wristbandSaleIds = await TicketSale.distinct('_id', {
+        ...eventIdFilter,
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: SalesChannel.WRISTBAND
+      });
+      const realSaleFilter = {
+        ...eventIdFilter,
+        paymentStatus: PaymentStatus.COMPLETED,
+        channel: { $ne: SalesChannel.WRISTBAND }
+      };
+      const soldStatuses = [TicketStatus.SOLD, TicketStatus.CHECKED_IN];
+
+      const [ticketsSold, tagsPrinted, cashSalesAgg, soldByType, tagsByType] = await Promise.all([
+        Ticket.countDocuments({ ...eventIdFilter, status: { $in: soldStatuses }, saleId: { $nin: wristbandSaleIds } }),
+        Ticket.countDocuments({ ...eventIdFilter, saleId: { $in: wristbandSaleIds } }),
+        TicketSale.aggregate([
+          { $match: { ...realSaleFilter, paymentMethod: PaymentMethod.CASH } },
+          { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
+        ]),
+        Ticket.aggregate([
+          { $match: { ...eventIdFilter, status: { $in: soldStatuses }, saleId: { $nin: wristbandSaleIds } } },
+          { $group: { _id: '$ticketType', sold: { $sum: 1 } } }
+        ]),
+        Ticket.aggregate([
+          { $match: { ...eventIdFilter, saleId: { $in: wristbandSaleIds } } },
+          { $group: { _id: '$ticketType', count: { $sum: 1 } } }
+        ])
+      ]);
+
+      return {
+        ticketsSold,
+        tagsPrinted,
+        cashSales: cashSalesAgg[0]?.total || 0,
+        ticketTypes: soldByType.map(s => ({ name: s._id as string, sold: s.sold as number })),
+        tagsPrintedByType: tagsByType.map(t => ({ name: t._id as string, count: t.count as number }))
+      };
+    } catch (error: any) {
+      console.error('Get event sales summary error:', error);
+      throw new Error(error.message || 'Failed to fetch event sales summary');
     }
   }
 
