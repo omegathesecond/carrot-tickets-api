@@ -64,5 +64,43 @@ describe('getEventAnalytics — printed tags are reported separately from ticket
     expect(res.sales.tagsPrinted).toBe(20);     // reported on its own
     expect(res.sales.cashSales).toBe(100);      // only the cash sale, not the card sale or the (zero) wristband amount
     expect(res.sales.totalRevenue).toBe(250);   // real sales revenue unaffected (was already correct)
+    expect(res.ticketTypes[0]?.sold).toBe(2);   // per-type breakdown also excludes wristband tags
+  });
+});
+
+describe('getEventSalesSummary — live figures for the event detail / ticket-config page', () => {
+  beforeAll(connectTestDb);
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  it('excludes wristband tags from ticketsSold, keeps checked-in tickets counted as sold, and reports cash sales + per-type breakdown', async () => {
+    const event = await Event.create({
+      vendorId, name: 'Piano Republic Showcase', venue: 'V',
+      eventDate: new Date(Date.now() + 86400000), startTime: new Date(Date.now() + 86400000), endTime: new Date(Date.now() + 90000000),
+      status: EventStatus.PUBLISHED,
+      ticketTypes: [
+        { name: 'General', price: 100, quantity: 50 },
+      ],
+    });
+    const eventId = event._id;
+    const ticketTypeId = event.ticketTypes[0]?._id?.toString() ?? '';
+
+    const cashSale = await saleDoc(eventId, { totalAmount: 100, amountCharged: 100, paymentMethod: PaymentMethod.CASH });
+    const cardSale = await saleDoc(eventId, { totalAmount: 150, amountCharged: 150, paymentMethod: PaymentMethod.PEACH_CARD, organizerProceeds: 150 });
+    await ticketDoc(eventId, 'General', 100, cashSale._id);
+    // This one has already been scanned at the gate — must still count as sold.
+    const checkedInTicket = await ticketDoc(eventId, 'General', 150, cardSale._id);
+    checkedInTicket.status = TicketStatus.CHECKED_IN;
+    await checkedInTicket.save();
+
+    await TicketService.issueWristbandBatch({ eventId: eventId.toString(), ticketTypeId, quantity: 20 });
+
+    const summary = await AnalyticsService.getEventSalesSummary(eventId.toString(), vendorId.toString());
+
+    expect(summary.ticketsSold).toBe(2);
+    expect(summary.tagsPrinted).toBe(20);
+    expect(summary.cashSales).toBe(100);
+    expect(summary.ticketTypes).toEqual([{ name: 'General', sold: 2 }]);
+    expect(summary.tagsPrintedByType).toEqual([{ name: 'General', count: 20 }]);
   });
 });
