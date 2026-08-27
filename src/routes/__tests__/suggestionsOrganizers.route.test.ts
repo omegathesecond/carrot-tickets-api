@@ -133,6 +133,25 @@ describe('GET /api/social/suggestions/organizers', () => {
     expect(order.indexOf(String(newActive._id))).toBeLessThan(order.indexOf(String(oldDormant._id)));
   });
 
+  it('ranks a new organizer with a published event ahead of a dormant organizer that has followers but no events', async () => {
+    // Reproduces the reported bug: a brand-new organizer starts at 0
+    // followers by definition, so ranking by followerCount first (even with
+    // an eventCount tiebreak) still buried them behind ANY organizer with
+    // even a handful of stale followers and zero events.
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    const dormantWithFollowers = await Vendor.create({ businessName: 'Dormant With Followers', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const newOrganizer = await Vendor.create({ businessName: 'Brand New Organizer', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    for (let i = 0; i < 8; i++) {
+      const fan = await Buyer.create({ phone: `+2687841${100 + i}`, password: 'secret1', name: `Fan${i}` });
+      await Follow.create({ followerType: 'buyer', followerId: fan._id, targetType: 'organizer', targetId: dormantWithFollowers._id });
+    }
+    await Event.create({ vendorId: newOrganizer._id, name: 'First Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
+
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const order = res.body.data.map((o: any) => o.id);
+    expect(order.indexOf(String(newOrganizer._id))).toBeLessThan(order.indexOf(String(dormantWithFollowers._id)));
+  });
+
   it('excludes inactive and unverified vendors', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     await Vendor.create({ businessName: 'Inactive Org', password: 'secret1', isActive: false, verificationStatus: VerificationStatus.VERIFIED });

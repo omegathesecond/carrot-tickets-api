@@ -197,12 +197,13 @@ export class SuggestionsService {
     return ordered.slice(skip, skip + limit).map(({ buyer, mutualCount }) => ({ buyer, mutualCount }));
   }
 
-  /** Active, verified organizers to follow, ranked by follower count. May
+  /** Active, verified organizers to follow, ranked by eventCount (has this
+   *  organizer actually published something), then followerCount. May
    *  include organizers the buyer already follows (marked isFollowing:true) —
    *  this is a directory, not an exclusion list like peopleYouMayKnow.
    *
    *  Single aggregation across ALL verified vendors (not just the first 100),
-   *  so the most-followed organizer can always surface — the old
+   *  so the most-active organizer can always surface — the old
    *  find().limit(100) + per-vendor count queries capped the candidate pool
    *  BEFORE ranking, which meant a popular organizer past the 100th row could
    *  never appear, on top of firing ~2 queries per vendor. */
@@ -253,28 +254,32 @@ export class SuggestionsService {
           eventCount: { $ifNull: [{ $arrayElemAt: ['$_events.count', 0] }, 0] },
         },
       },
-      // followerCount is the primary signal, but most organizers on a young
-      // platform tie at 0 followers — without a further tiebreak the list
-      // collapses to whichever organizers registered first (ascending _id),
-      // permanently burying anyone who signs up and publishes events later.
-      // eventCount as the second key surfaces organizers who actually have
-      // something to follow; _id DESC as the final tiebreak favors the most
-      // recently registered organizer within a tie, so new organizers who
-      // just created their first event are no longer stuck behind years of
-      // dormant zero-follower, zero-event accounts. Still fully deterministic
+      // eventCount is the PRIMARY signal, not followerCount. A brand new
+      // organizer starts at 0 followers by definition — the moment they
+      // publish their first event is exactly the moment they should surface.
+      // Sorting by followerCount first (even with an eventCount tiebreak)
+      // still permanently buried them behind ANY organizer with even one
+      // follower, including dormant/test accounts that never published a
+      // single event — that was reported again after the previous tiebreak
+      // fix shipped (organizers with a handful of stale followers and 0
+      // events kept outranking active new organizers with real events).
+      // followerCount now only breaks ties among organizers who are equally
+      // active (same eventCount); _id DESC is the final tiebreak, favoring
+      // the most recently registered organizer. Still fully deterministic
       // for pagination.
-      { $sort: { followerCount: -1, eventCount: -1, _id: -1 } },
+      { $sort: { eventCount: -1, followerCount: -1, _id: -1 } },
       { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1 } },
     ];
 
     let rows: any[];
     if (seed === undefined) {
-      // Deterministic path — the caller's exact page, ranked by follower count.
+      // Deterministic path — the caller's exact page, ranked by eventCount then follower count.
       rows = await Vendor.aggregate([...basePipeline, { $skip: skip }, { $limit: limit }]);
     } else {
-      // Seeded path — a bounded quality pool (top organizers by follower count),
-      // seed-shuffled in-app then paginated. Established organizers stay in the
-      // pool but are no longer permanently pinned to the top.
+      // Seeded path — a bounded quality pool (top organizers by eventCount
+      // then follower count), seed-shuffled in-app then paginated.
+      // Established organizers stay in the pool but are no longer
+      // permanently pinned to the top.
       const POOL_SIZE = Math.max(60, limit * 3);
       const pool = await Vendor.aggregate([...basePipeline, { $limit: POOL_SIZE }]);
       rows = seededShuffle(pool, seed).slice(skip, skip + limit);
