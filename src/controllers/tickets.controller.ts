@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
-import { PaymentMethod } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
@@ -26,6 +26,7 @@ import {
   sellTicketSchema,
   refundTicketSchema,
   ticketSalesQuerySchema,
+  ticketSalesExportQuerySchema,
   validateTicketSchema,
   checkInTicketSchema,
   scanQuerySchema,
@@ -1151,13 +1152,30 @@ export class TicketsController {
   static async exportSales(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
-      const { eventId, startDate, endDate } = req.query;
 
+      // Validate, like getSales does — an unrecognised filter must 400 rather
+      // than silently match nothing and hand back an empty CSV.
+      const { error, value } = ticketSalesExportQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+      const { eventId, startDate, endDate, paymentMethod, paymentStatus, channel } = value;
+
+      // Same filter set the Sales History page shows on screen — an export
+      // that ignored them returned rows the visible table had excluded.
+      // `isSuperAdmin` is what keeps paymentStatus from widening an
+      // organizer's visibility; the service asserts that too.
       const csv = await ExportService.exportSalesToCSV({
         vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         eventId: eventId as string,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined
+        paymentMethod: paymentMethod as PaymentMethod | undefined,
+        paymentStatus: paymentStatus as PaymentStatus | undefined,
+        channel: channel as SalesChannel | undefined,
+        // Joi has already coerced these to Date objects.
+        startDate,
+        endDate
       });
 
       const filename = ExportService.getFilename('sales');

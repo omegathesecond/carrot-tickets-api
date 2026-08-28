@@ -2,7 +2,7 @@ import { TicketSale } from '@models/ticketSale.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketScan } from '@models/ticketScan.model';
 import { Event } from '@models/event.model';
-import { PaymentStatus } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 export interface ExportQuery {
   vendorId: string;
@@ -11,21 +11,50 @@ export interface ExportQuery {
   endDate?: Date;
 }
 
+/**
+ * Sales export only. Kept separate from ExportQuery so the revenue and
+ * event-summary exports don't advertise filters they silently ignore — which
+ * is exactly the bug this fixes on the sales side.
+ */
+export interface ExportSalesQuery extends ExportQuery {
+  paymentMethod?: PaymentMethod;
+  channel?: SalesChannel;
+  /**
+   * Honoured for super-admins only. Organizers are locked to COMPLETED —
+   * see the visibility note in exportSalesToCSV.
+   */
+  paymentStatus?: PaymentStatus;
+  isSuperAdmin?: boolean;
+}
+
 export class ExportService {
   /**
    * Export sales to CSV
    */
-  static async exportSalesToCSV(query: ExportQuery): Promise<string> {
+  static async exportSalesToCSV(query: ExportSalesQuery): Promise<string> {
     try {
-      const { vendorId, eventId, startDate, endDate } = query;
+      const {
+        vendorId, eventId, startDate, endDate,
+        paymentMethod, paymentStatus, channel, isSuperAdmin = false
+      } = query;
 
       // Build filter
-      const filter: any = {
-        vendorId,
-        paymentStatus: PaymentStatus.COMPLETED
-      };
+      const filter: any = { vendorId };
+
+      // Payment-status visibility MIRRORS TicketService.getSales exactly:
+      // failed/pending attempts are super-admin-only, so an organizer's
+      // paymentStatus is ignored rather than applied. Diverging here would
+      // newly expose those rows through a CSV organizers can already download
+      // — the filters below are a narrowing feature, never a widening one.
+      if (isSuperAdmin) {
+        if (paymentStatus) filter.paymentStatus = paymentStatus;
+      } else {
+        filter.paymentStatus = PaymentStatus.COMPLETED;
+      }
 
       if (eventId) filter.eventId = eventId;
+      if (paymentMethod) filter.paymentMethod = paymentMethod;
+      if (channel) filter.channel = channel;
 
       if (startDate || endDate) {
         filter.soldAt = {};
