@@ -1,6 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { IReseller } from '@interfaces/reseller.interface';
+import { applyOperatorEventScope } from '@models/operatorEventScope.schema';
 
 const resellerSchema = new Schema<IReseller>({
   businessName: { type: String, required: true, trim: true, index: true },
@@ -28,6 +29,8 @@ const resellerSchema = new Schema<IReseller>({
     }
   }
 });
+
+applyOperatorEventScope(resellerSchema);
 
 resellerSchema.pre('save', async function(next) {
   if (!this.isModified('password') || !this.password) return next();

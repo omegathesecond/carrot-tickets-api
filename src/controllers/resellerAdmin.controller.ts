@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { Reseller } from '@models/reseller.model';
+import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ResellerHub } from '@models/resellerHub.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { SettlementService } from '@services/settlement.service';
@@ -56,6 +57,21 @@ export class ResellerAdminController {
       const update: Record<string, unknown> = {};
       for (const key of allowed) {
         if (key in req.body) update[key] = req.body[key];
+      }
+
+      // Event assignment. Kept out of the allowlist loop because it is
+      // validated, not copied — and only touched when the key is present, so a
+      // PATCH of some other field never clears an existing assignment.
+      //
+      // Resellers are a platform-wide channel, so there is no organizer to
+      // hold the assignment to; undefined checks existence only.
+      if ('eventIds' in req.body) {
+        const assignment = await validateEventAssignment(req.body.eventIds, undefined);
+        if (!assignment.ok) {
+          ApiResponseUtil.error(res, assignment.message, 400);
+          return;
+        }
+        update['eventIds'] = assignment.eventIds;
       }
       const reseller = await Reseller.findByIdAndUpdate(
         req.params['id'],

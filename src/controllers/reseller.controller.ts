@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
+import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { ResellerAuthService } from '@services/resellerAuth.service';
 import { ResellerSaleService } from '@services/resellerSale.service';
@@ -85,13 +86,19 @@ export class ResellerController {
         return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
-      // Resellers see all published events platform-wide — pass a dummy vendorId
-      // and isSuperAdmin=true so EventService.getEvents skips vendor scoping.
+      // Resellers are a platform-wide channel — pass a dummy vendorId and
+      // isSuperAdmin=true so EventService.getEvents skips vendor scoping — but
+      // an ASSIGNED reseller sees only its own events. null means unassigned,
+      // which stays platform-wide; [] means assigned to nothing and lists
+      // nothing, so the value is passed through as-is rather than length-checked.
+      const allowedEventIds = await resolveOperatorEventScope(req);
+
       const result = await EventService.getEvents({
         vendorId: '',
         status: EventStatus.PUBLISHED,
         isSuperAdmin: true,
         ...value,
+        ...(allowedEventIds ? { allowedEventIds } : {}),
       });
 
       return ApiResponseUtil.success(res, result);
@@ -107,6 +114,12 @@ export class ResellerController {
   static async getEventTickets(req: Request, res: Response): Promise<any> {
     try {
       const { id } = req.params;
+
+      // Refuse before the lookup: an assigned reseller has no business reading
+      // the tier names, prices or remaining capacity of somebody else's show.
+      if (!(await operatorMayActOnEvent(req, id))) {
+        return ApiResponseUtil.forbidden(res, 'This event is not assigned to you');
+      }
 
       // getEventById with isSuperAdmin=true so we can see any event by id
       const event = await EventService.getEventById(id as string, '', true);
@@ -182,6 +195,13 @@ export class ResellerController {
 
       if (error) {
         return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      // The real chokepoint. Hiding an event from the list does nothing on its
+      // own: event ids are public (they sit in /event/<slug>-<24hex> URLs), so
+      // an unassigned event is one hand-rolled POST away without this.
+      if (!(await operatorMayActOnEvent(req, value.eventId))) {
+        return ApiResponseUtil.forbidden(res, 'This event is not assigned to you');
       }
 
       const result = await ResellerSaleService.createSale({

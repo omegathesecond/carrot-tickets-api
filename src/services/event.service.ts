@@ -73,6 +73,14 @@ export interface GetEventsQuery {
   page?: number;
   limit?: number;
   isSuperAdmin?: boolean;
+  /**
+   * When set, ONLY these events are listed — the caller's back-office event
+   * assignment. Undefined means unrestricted; an EMPTY array means restricted
+   * to nothing and must list nothing, so this is deliberately checked for
+   * presence rather than length. Guarding on `.length` would turn the
+   * deny-everything case into show-everything.
+   */
+  allowedEventIds?: string[];
 }
 
 export function computeAvailable(t: { quantity: number; sold: number; reserved?: number }): number {
@@ -139,7 +147,8 @@ export class EventService {
         search,
         page = 1,
         limit = 20,
-        isSuperAdmin = false
+        isSuperAdmin = false,
+        allowedEventIds
       } = query;
 
       // Build query - skip vendorId filter for superadmin
@@ -149,6 +158,14 @@ export class EventService {
         // schema-aware casting — a raw string here matches zero documents
         // instead of erroring, so cast to ObjectId explicitly.
         filter.vendorId = new mongoose.Types.ObjectId(vendorId);
+      }
+
+      // An event assignment narrows the list for anyone who carries one,
+      // including a caller listed as super-admin (resellers list this way), so
+      // it is applied OUTSIDE the branch above. Same ObjectId cast, same
+      // reason: aggregate() does no schema-aware casting of its own.
+      if (allowedEventIds) {
+        filter._id = { $in: allowedEventIds.map((id) => new mongoose.Types.ObjectId(id)) };
       }
 
       if (status) {
