@@ -35,7 +35,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
     it('surfaces friends-of-friends the brand does not already follow', async () => {
       const brand = await makeVendor('Bushfire');
       const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
-      const suggestion = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'Suggested', username: 'sugg_b' });
+      const suggestion = await Buyer.create({ phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Suggested', username: 'sugg_b' });
       // brand (vendor) -> friend (buyer); friend -> suggestion (buyer)
       await Follow.create({ followerType: 'vendor', followerId: brand._id, targetType: 'buyer', targetId: friend._id });
       await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: suggestion._id });
@@ -51,7 +51,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
     it('falls back to recently-active buyers when the brand follows no one, mutualCount 0', async () => {
       const brand = await makeVendor('New Brand');
-      await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Other', username: 'other_a', lastLoginAt: new Date() });
+      await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Other', username: 'other_a', lastLoginAt: new Date() });
 
       const res = await request(app)
         .get('/api/tickets/social/suggestions/people')
