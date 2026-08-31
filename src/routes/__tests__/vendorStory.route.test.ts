@@ -151,7 +151,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       expect(second.body.data.stories.find((g: any) => !g.isOwn).seen).toBe(true);
     });
 
-    it('excludes a story from an author the brand does not follow', async () => {
+    it('includes a story from an author the brand does not follow — Stories are visible to everyone', async () => {
       const vendor = await makeVendor();
       const stranger = await Buyer.create({ phone: '+26878400302', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Stranger' });
       await seedReadyStory('buyer', String(stranger._id));
@@ -160,7 +160,8 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
         .get('/api/tickets/social/stories')
         .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
         .expect(200);
-      expect(res.body.data.stories).toEqual([]);
+      expect(res.body.data.stories).toHaveLength(1);
+      expect(res.body.data.stories[0].author.id).toBe(String(stranger._id));
     });
 
     it('401s a buyer token', async () => {
@@ -196,6 +197,40 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
         .get(`/api/tickets/social/stories/${mine.id}/viewers`)
         .set('Authorization', `Bearer ${signVendorToken(String(otherBrand._id))}`)
         .expect(403);
+    });
+  });
+
+  describe('DELETE /api/tickets/social/stories/:id', () => {
+    it('lets the brand delete its own story', async () => {
+      const vendor = await makeVendor();
+      const story = await seedReadyStory('vendor', String(vendor._id));
+
+      await request(app)
+        .delete(`/api/tickets/social/stories/${story.id}`)
+        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .expect(200);
+
+      expect(await Story.findById(story.id)).toBeNull();
+    });
+
+    it("403s another brand's story", async () => {
+      const author = await makeVendor('Author Brand');
+      const stranger = await makeVendor('Nosy Brand');
+      const story = await seedReadyStory('vendor', String(author._id));
+
+      await request(app)
+        .delete(`/api/tickets/social/stories/${story.id}`)
+        .set('Authorization', `Bearer ${signVendorToken(String(stranger._id))}`)
+        .expect(403);
+      expect(await Story.findById(story.id)).not.toBeNull();
+    });
+
+    it('401s a buyer token', async () => {
+      await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
+      await request(app)
+        .delete('/api/tickets/social/stories/000000000000000000000000')
+        .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+        .expect(401);
     });
   });
 });

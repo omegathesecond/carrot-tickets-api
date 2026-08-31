@@ -15,9 +15,9 @@ describe('GET /api/social/suggestions/people', () => {
   afterEach(clearTestDb); afterAll(disconnectTestDb);
 
   it('surfaces friends-of-friends I do not already follow, ranked by mutual count', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
-    const suggestion = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'Suggested', username: 'sugg_b' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
+    const suggestion = await Buyer.create({ phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Suggested', username: 'sugg_b' });
     // me -> friend, friend -> suggestion
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: suggestion._id });
@@ -30,8 +30,8 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('shapes the DTO correctly and marks suggestions as not-followed', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
     const suggestion = await Buyer.create({
       phone: '+26878000022', password: 'secret1', name: 'Suggested', username: 'sugg_b',
       avatarUrl: 'https://cdn.example.com/a.png', bio: 'hello there',
@@ -54,11 +54,11 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('ranks candidates with more shared connections higher', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friendA = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'FriendA', username: 'friend_a' });
-    const friendB = await Buyer.create({ phone: '+26878000023', password: 'secret1', name: 'FriendB', username: 'friend_c' });
-    const popular = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'Popular', username: 'popular_b' });
-    const lonely = await Buyer.create({ phone: '+26878000024', password: 'secret1', name: 'Lonely', username: 'lonely_d' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friendA = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'FriendA', username: 'friend_a' });
+    const friendB = await Buyer.create({ phone: '+26878000023', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'FriendB', username: 'friend_c' });
+    const popular = await Buyer.create({ phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Popular', username: 'popular_b' });
+    const lonely = await Buyer.create({ phone: '+26878000024', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Lonely', username: 'lonely_d' });
 
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friendA._id });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friendB._id });
@@ -78,10 +78,10 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('excludes buyers who are socially suspended', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
     const suspended = await Buyer.create({
-      phone: '+26878000022', password: 'secret1', name: 'Suspended', username: 'sus_b', socialSuspendedAt: new Date(),
+      phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Suspended', username: 'sus_b', socialSuspendedAt: new Date(),
     });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: suspended._id });
@@ -91,10 +91,28 @@ describe('GET /api/social/suggestions/people', () => {
     expect(usernames).not.toContain('sus_b');
   });
 
+  it('excludes candidates without a genuine uploaded profile picture (initials/placeholder avatars)', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
+    const noAvatar = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'NoAvatar', username: 'no_avatar_b' });
+    const emptyAvatar = await Buyer.create({ phone: '+26878000023', password: 'secret1', avatarUrl: '', name: 'EmptyAvatar', username: 'empty_avatar_c' });
+    const withAvatar = await Buyer.create({ phone: '+26878000024', password: 'secret1', avatarUrl: 'https://cdn.example.com/real.png', name: 'WithAvatar', username: 'with_avatar_d' });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: noAvatar._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: emptyAvatar._id });
+    await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: withAvatar._id });
+
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const usernames = res.body.data.map((p: any) => p.username);
+    expect(usernames).not.toContain('no_avatar_b');
+    expect(usernames).not.toContain('empty_avatar_c');
+    expect(usernames).toContain('with_avatar_d');
+  });
+
   it('excludes second-degree candidates with no username (unlinkable in the UI)', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
-    const noUsername = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'NoHandle' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
+    const noUsername = await Buyer.create({ phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'NoHandle' });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: noUsername._id });
 
@@ -104,11 +122,11 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('falls back to recently-active handled buyers when the buyer follows no one, with mutualCount 0', async () => {
-    await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
     const other = await Buyer.create({
-      phone: '+26878000021', password: 'secret1', name: 'Other', username: 'other_a', lastLoginAt: new Date(),
+      phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Other', username: 'other_a', lastLoginAt: new Date(),
     });
-    const noUsername = await Buyer.create({ phone: '+26878000099', password: 'secret1', name: 'NoHandle' });
+    const noUsername = await Buyer.create({ phone: '+26878000099', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'NoHandle' });
     void noUsername;
 
     const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
@@ -124,12 +142,12 @@ describe('GET /api/social/suggestions/people', () => {
     // The cold-start cliff: a fresh signup follows their first person, that
     // person follows nobody, so friends-of-friends is empty. Suggestions must
     // not collapse to [] — they should top up from the recently-active pool.
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
     const onlyFollow = await Buyer.create({
-      phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a', lastLoginAt: new Date(),
+      phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a', lastLoginAt: new Date(),
     });
     await Buyer.create({
-      phone: '+26878000022', password: 'secret1', name: 'Stranger', username: 'stranger_b', lastLoginAt: new Date(),
+      phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Stranger', username: 'stranger_b', lastLoginAt: new Date(),
     });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: onlyFollow._id });
 
@@ -141,13 +159,13 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('ranks real friends-of-friends above the recently-active top-up', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
-    const fof = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'FoF', username: 'fof_b' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
+    const fof = await Buyer.create({ phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'FoF', username: 'fof_b' });
     // A stranger with a much more recent login must still rank BELOW the
     // genuine friend-of-friend — mutualCount stays the primary signal.
     await Buyer.create({
-      phone: '+26878000023', password: 'secret1', name: 'Stranger', username: 'stranger_c', lastLoginAt: new Date(),
+      phone: '+26878000023', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Stranger', username: 'stranger_c', lastLoginAt: new Date(),
     });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: fof._id });
@@ -163,15 +181,15 @@ describe('GET /api/social/suggestions/people', () => {
     // The production UI ALWAYS sends a seed, so the shuffle path is the one
     // that matters: shuffling top-ups together with real connections would
     // bury a handful of genuine friends-of-friends among a pool of strangers.
-    const me = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
-    const fof = await Buyer.create({ phone: '+26878000022', password: 'secret1', name: 'FoF', username: 'fof_b' });
+    const me = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
+    const fof = await Buyer.create({ phone: '+26878000022', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'FoF', username: 'fof_b' });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: fof._id });
     // A crowd of strangers big enough that a global shuffle would almost
     // certainly push the single friend-of-friend off the first page.
     for (let i = 0; i < 30; i++) {
-      await Buyer.create({ phone: `+2687901${String(i).padStart(4, '0')}`, password: 'secret1', name: `S${i}`, username: `str_${i}`, lastLoginAt: new Date() });
+      await Buyer.create({ phone: `+2687901${String(i).padStart(4, '0')}`, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: `S${i}`, username: `str_${i}`, lastLoginAt: new Date() });
     }
 
     for (const seed of [1, 7, 42, 999, 123456]) {
@@ -189,13 +207,13 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('page 2 is disjoint from page 1', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
 
     const candidates = [];
     for (let i = 0; i < 6; i++) {
-      const c = await Buyer.create({ phone: `+2687800005${i}`, password: 'secret1', name: `Cand${i}`, username: `cand_${i}` });
+      const c = await Buyer.create({ phone: `+2687800005${i}`, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: `Cand${i}`, username: `cand_${i}` });
       await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: c._id });
       candidates.push(c);
     }
@@ -217,16 +235,16 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('ranks a candidate sharing an event with the viewer above an equal-mutual candidate sharing none', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
 
     // Deliberately seeded/followed in an order that does NOT match the
     // expected rank (noEvent first) — a naive insertion-order-stable sort
     // would keep noEvent ahead, so this only passes once event-overlap
     // actually reorders the tie.
-    const noEvent = await Buyer.create({ phone: '+26878000032', password: 'secret1', name: 'NoEvent', username: 'no_event' });
-    const sharesEvent = await Buyer.create({ phone: '+26878000031', password: 'secret1', name: 'SharesEvent', username: 'shares_event', });
+    const noEvent = await Buyer.create({ phone: '+26878000032', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'NoEvent', username: 'no_event' });
+    const sharesEvent = await Buyer.create({ phone: '+26878000031', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'SharesEvent', username: 'shares_event', });
     // Both are equal-mutual: only `friend` connects me to each of them.
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: noEvent._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: sharesEvent._id });
@@ -247,15 +265,15 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('breaks a same-mutual, same-event tie in favor of the buyer in the same city as the viewer', async () => {
-    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one', city: 'Manzini' });
-    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', name: 'Friend', username: 'friend_a' });
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me', username: 'me_one', city: 'Manzini' });
+    const friend = await Buyer.create({ phone: '+26878000021', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Friend', username: 'friend_a' });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
 
     // otherCity seeded/followed FIRST — a naive stable sort on tied
     // mutualCount would keep it ahead, so this only passes once same-city
     // actually breaks the tie in sameCity's favor.
-    const otherCity = await Buyer.create({ phone: '+26878000042', password: 'secret1', name: 'OtherCity', username: 'other_city', city: 'Mbabane' });
-    const sameCity = await Buyer.create({ phone: '+26878000041', password: 'secret1', name: 'SameCity', username: 'same_city', city: 'Manzini' });
+    const otherCity = await Buyer.create({ phone: '+26878000042', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'OtherCity', username: 'other_city', city: 'Mbabane' });
+    const sameCity = await Buyer.create({ phone: '+26878000041', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'SameCity', username: 'same_city', city: 'Manzini' });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: otherCity._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: sameCity._id });
 
@@ -265,9 +283,9 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('with a seed, returns a deterministic order that changes with the seed (fallback pool)', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me' });
     for (let i = 0; i < 8; i++) {
-      await Buyer.create({ phone: `+2687000000${i}`, password: 'secret1', name: `P${i}`, username: `pp${i}` });
+      await Buyer.create({ phone: `+2687000000${i}`, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: `P${i}`, username: `pp${i}` });
     }
     const token = signBuyerToken(PHONE);
     const a1 = await request(app).get('/api/social/suggestions/people?seed=7').set('Authorization', `Bearer ${token}`).expect(200);
@@ -278,9 +296,9 @@ describe('GET /api/social/suggestions/people', () => {
   });
 
   it('with a fixed seed, paginates the fallback pool without overlap', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'Me' });
     for (let i = 0; i < 6; i++) {
-      await Buyer.create({ phone: `+2687100000${i}`, password: 'secret1', name: `Q${i}`, username: `qq${i}` });
+      await Buyer.create({ phone: `+2687100000${i}`, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: `Q${i}`, username: `qq${i}` });
     }
     const token = signBuyerToken(PHONE);
     const p1 = await request(app).get('/api/social/suggestions/people?seed=42&limit=2&page=1').set('Authorization', `Bearer ${token}`).expect(200);

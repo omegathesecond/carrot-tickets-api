@@ -2,6 +2,7 @@
 import mongoose, { Schema } from 'mongoose';
 import { IGateOperator } from '@interfaces/gateOperator.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
+import { applyOperatorEventScope } from '@models/operatorEventScope.schema';
 
 const gateOperatorSchema = new Schema<IGateOperator>({
   fullName: { type: String, required: true, trim: true },
@@ -17,6 +18,7 @@ const gateOperatorSchema = new Schema<IGateOperator>({
 });
 
 applyOperatorCredentials(gateOperatorSchema);
+applyOperatorEventScope(gateOperatorSchema);
 
 gateOperatorSchema.index({ vendorId: 1, isActive: 1 });
 

@@ -1,3 +1,5 @@
+import { Types } from 'mongoose';
+
 export interface IReseller {
   businessName: string;
   slug?: string;
@@ -11,6 +13,9 @@ export interface IReseller {
   status: 'active' | 'suspended';
   isActive: boolean;
   comparePassword(candidate: string): Promise<boolean>;
+  // Events this actor may work. EMPTY = every event (the pre-assignment
+  // behaviour), so existing rows keep working untouched.
+  eventIds: Types.ObjectId[];
 }
 
 export interface IResellerHub {
@@ -37,4 +42,7 @@ export interface IResellerOperator {
   lockedUntil?: Date | null;
   lastLoginAt?: Date;
   comparePin(p: string): Promise<boolean>;
+  // Events this actor may work. EMPTY = every event (the pre-assignment
+  // behaviour), so existing rows keep working untouched.
+  eventIds: Types.ObjectId[];
 }

@@ -71,6 +71,48 @@ describe('GET /api/social/suggestions/organizers', () => {
     expect(row.isFollowing).toBe(true);
   });
 
+  it('prioritises organizers the buyer is not already following ahead of ones it does, even when the followed one has more followers/events', async () => {
+    const me = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    const followed = await Vendor.create({ businessName: 'Followed Popular Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const notFollowed = await Vendor.create({ businessName: 'Unfollowed Quiet Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    await Event.create({ vendorId: followed._id, name: 'Big Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
+    await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'organizer', targetId: followed._id });
+
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const order = res.body.data.map((o: any) => o.id);
+    expect(order.indexOf(String(notFollowed._id))).toBeLessThan(order.indexOf(String(followed._id)));
+  });
+
+  it('rotates in a brand-new organizer that would otherwise be crowded out of the seeded pool by established organizers', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    // A wall of established organizers, each with a published event — exactly
+    // enough (60) to fill the default POOL_SIZE ahead of a brand-new,
+    // eventless organizer sorted purely by eventCount/followerCount, so the
+    // brand-new one is guaranteed to fall outside the established pool.
+    for (let i = 0; i < 60; i++) {
+      const established = await Vendor.create({ businessName: `Established Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+      await Event.create({ vendorId: established._id, name: `Show ${i}`, venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
+    }
+    const brandNew = await Vendor.create({ businessName: 'Brand New Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+
+    // Walk every page at a limit small enough (<=20) to keep POOL_SIZE
+    // pinned at its 60 floor — a bigger limit would inflate POOL_SIZE past
+    // 61 and trivially include the brand-new org without exercising the
+    // top-up path at all. Collecting the union across pages (rather than
+    // asserting on one page) keeps the test independent of exactly where the
+    // seeded shuffle happens to place it.
+    const token = signBuyerToken(PHONE);
+    const seen = new Set<string>();
+    for (let page = 1; page <= 4; page++) {
+      const res = await request(app)
+        .get(`/api/social/suggestions/organizers?seed=7&limit=20&page=${page}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      for (const o of res.body.data) seen.add(o.id);
+    }
+    expect(seen.has(String(brandNew._id))).toBe(true);
+  });
+
   it('ranks organizers with more followers higher', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     const popular = await Vendor.create({ businessName: 'Popular Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
@@ -118,6 +160,38 @@ describe('GET /api/social/suggestions/organizers', () => {
     const order = res.body.data.map((o: any) => o.id);
     expect(order.indexOf(String(top._id))).toBeLessThan(order.indexOf(String(mid._id)));
     expect(order.indexOf(String(mid._id))).toBeLessThan(order.indexOf(String(low._id)));
+  });
+
+  it('ranks a newer organizer with a published event ahead of an older, eventless one when both have 0 followers', async () => {
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    // Created first, so it would win an ascending-_id tiebreak — but it has
+    // no events, so it must not outrank the newer organizer below it.
+    const oldDormant = await Vendor.create({ businessName: 'Old Dormant Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const newActive = await Vendor.create({ businessName: 'New Active Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    await Event.create({ vendorId: newActive._id, name: 'Fresh Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
+
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const order = res.body.data.map((o: any) => o.id);
+    expect(order.indexOf(String(newActive._id))).toBeLessThan(order.indexOf(String(oldDormant._id)));
+  });
+
+  it('ranks a new organizer with a published event ahead of a dormant organizer that has followers but no events', async () => {
+    // Reproduces the reported bug: a brand-new organizer starts at 0
+    // followers by definition, so ranking by followerCount first (even with
+    // an eventCount tiebreak) still buried them behind ANY organizer with
+    // even a handful of stale followers and zero events.
+    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    const dormantWithFollowers = await Vendor.create({ businessName: 'Dormant With Followers', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    const newOrganizer = await Vendor.create({ businessName: 'Brand New Organizer', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+    for (let i = 0; i < 8; i++) {
+      const fan = await Buyer.create({ phone: `+2687841${100 + i}`, password: 'secret1', name: `Fan${i}` });
+      await Follow.create({ followerType: 'buyer', followerId: fan._id, targetType: 'organizer', targetId: dormantWithFollowers._id });
+    }
+    await Event.create({ vendorId: newOrganizer._id, name: 'First Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
+
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const order = res.body.data.map((o: any) => o.id);
+    expect(order.indexOf(String(newOrganizer._id))).toBeLessThan(order.indexOf(String(dormantWithFollowers._id)));
   });
 
   it('excludes inactive and unverified vendors', async () => {

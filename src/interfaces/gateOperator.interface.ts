@@ -15,4 +15,7 @@ export interface IGateOperator extends Document {
   lockedUntil: Date | null;
   lastLoginAt?: Date;
   comparePin(candidate: string): Promise<boolean>;
+  // Events this actor may work. EMPTY = every event (the pre-assignment
+  // behaviour), so existing rows keep working untouched.
+  eventIds: Types.ObjectId[];
 }

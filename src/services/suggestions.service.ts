@@ -55,6 +55,12 @@ function normalizeCity(city?: string | null): string | null {
   return trimmed ? trimmed : null;
 }
 
+// "Genuine profile picture" — avatarUrl is only ever written by an explicit
+// upload (BuyerProfileController), never auto-generated, so its presence
+// alone is enough to rule out an initials/placeholder avatar (a null
+// avatarUrl is exactly what renders as an initials circle client-side).
+const GENUINE_AVATAR_FILTER = { avatarUrl: { $exists: true, $nin: [null, ''] } };
+
 /** Pure composite ranking score for "people you may know" — exported for
  *  direct unit testing. Higher ranks first. See the weight constants above
  *  for why mutualCount can never be overtaken by the other signals. */
@@ -77,7 +83,10 @@ export class SuggestionsService {
    *  handled buyers (mutualCount 0) whenever friends-of-friends alone does not
    *  fill the scoring pool, so a buyer who follows nobody — or who follows
    *  only people who follow nobody — still gets suggestions. Excludes self,
-   *  already-followed and socially-suspended buyers. Paginated via
+   *  already-followed, socially-suspended buyers, and anyone without a
+   *  genuine uploaded profile picture (see GENUINE_AVATAR_FILTER) — a buyer
+   *  who never uploaded a photo renders as an initials/placeholder circle,
+   *  which is exactly what this list must not surface. Paginated via
    *  `page`/`limit` over the fully ranked candidate set, so pagination is
    *  deterministic. */
   static async peopleYouMayKnow(
@@ -126,7 +135,12 @@ export class SuggestionsService {
     // page-dependent top-up would rank page 2 over a different candidate set
     // than page 1 and let the two pages overlap under `seed`.
     if (candidates.length < CANDIDATE_SCORE_CAP) {
-      const recent = await Buyer.find({ _id: { $nin: [...claimed] }, username: { $exists: true, $ne: null }, socialSuspendedAt: null })
+      const recent = await Buyer.find({
+        _id: { $nin: [...claimed] },
+        username: { $exists: true, $ne: null },
+        socialSuspendedAt: null,
+        ...GENUINE_AVATAR_FILTER,
+      })
         .select('_id')
         .sort({ lastLoginAt: -1 })
         .limit(FALLBACK_CANDIDATE_POOL_CAP);
@@ -146,6 +160,7 @@ export class SuggestionsService {
       _id: { $in: scoreable.map((c) => c.id) },
       socialSuspendedAt: null,
       username: { $exists: true, $ne: null },
+      ...GENUINE_AVATAR_FILTER,
     });
     const bMap = new Map(buyers.map((b) => [String(b._id), b]));
 
@@ -197,12 +212,16 @@ export class SuggestionsService {
     return ordered.slice(skip, skip + limit).map(({ buyer, mutualCount }) => ({ buyer, mutualCount }));
   }
 
-  /** Active, verified organizers to follow, ranked by follower count. May
-   *  include organizers the buyer already follows (marked isFollowing:true) —
-   *  this is a directory, not an exclusion list like peopleYouMayKnow.
+  /** Active, verified organizers to follow, ranked by isFollowing (not
+   *  already followed first — see below), then eventCount (has this
+   *  organizer actually published something), then followerCount. May still
+   *  include organizers the buyer already follows (marked isFollowing:true)
+   *  — this stays a directory, not a hard exclusion list like
+   *  peopleYouMayKnow — but they sort behind everyone not yet followed, so
+   *  the section reads as "to follow", not "people you follow already".
    *
    *  Single aggregation across ALL verified vendors (not just the first 100),
-   *  so the most-followed organizer can always surface — the old
+   *  so the most-active organizer can always surface — the old
    *  find().limit(100) + per-vendor count queries capped the candidate pool
    *  BEFORE ranking, which meant a popular organizer past the 100th row could
    *  never appear, on top of firing ~2 queries per vendor. */
@@ -218,10 +237,13 @@ export class SuggestionsService {
     const match: Record<string, unknown> = { isActive: true, verificationStatus: VerificationStatus.VERIFIED, isSuperAdmin: { $ne: true } };
     if (actor.type === 'vendor') match['_id'] = { $ne: new Types.ObjectId(actor.id) };
 
-    // Ranking pipeline shared by both paths — identical to the pre-shuffle
-    // version up to and including the $project.
-    const basePipeline: any[] = [
-      { $match: match },
+    const followingIds = await FollowService.followingIds(actor.id, 'organizer', actor.type);
+    const followingObjectIds = followingIds.map((id) => new Types.ObjectId(id));
+
+    // Follower/event-count lookups, shared by the established AND the fresh
+    // top-up pipeline below, so a newly-registered organizer's counts are
+    // real rather than assumed-zero.
+    const countStages: any[] = [
       {
         // Follower count for this organizer. `from` is read off the actual
         // registered Mongoose collection (not a hardcoded string) so a
@@ -251,33 +273,78 @@ export class SuggestionsService {
         $addFields: {
           followerCount: { $ifNull: [{ $arrayElemAt: ['$_followers.count', 0] }, 0] },
           eventCount: { $ifNull: [{ $arrayElemAt: ['$_events.count', 0] }, 0] },
+          isFollowing: { $in: ['$_id', followingObjectIds] },
         },
       },
-      // Stable tiebreak on _id keeps pagination deterministic when several
-      // organizers tie on followerCount.
-      { $sort: { followerCount: -1, _id: 1 } },
-      { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1 } },
+    ];
+
+    // Ranking pipeline shared by both paths — identical to the pre-shuffle
+    // version up to and including the $project.
+    const basePipeline: any[] = [
+      { $match: match },
+      ...countStages,
+      // isFollowing is now the PRIMARY sort key — an organizer the buyer
+      // already follows doesn't need "suggesting" again, so it drops behind
+      // every not-yet-followed organizer (still included, never excluded,
+      // per the class doc above). eventCount is the next signal, not
+      // followerCount: a brand new organizer starts at 0 followers by
+      // definition — the moment they publish their first event is exactly
+      // the moment they should surface. Sorting by followerCount first (even
+      // with an eventCount tiebreak) still permanently buried them behind
+      // ANY organizer with even one follower, including dormant/test
+      // accounts that never published a single event — that was reported
+      // again after the previous tiebreak fix shipped (organizers with a
+      // handful of stale followers and 0 events kept outranking active new
+      // organizers with real events). followerCount now only breaks ties
+      // among organizers who are equally active (same eventCount); _id DESC
+      // is the final tiebreak, favoring the most recently registered
+      // organizer. Still fully deterministic for pagination.
+      { $sort: { isFollowing: 1, eventCount: -1, followerCount: -1, _id: -1 } },
+      { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1, isFollowing: 1 } },
     ];
 
     let rows: any[];
     if (seed === undefined) {
-      // Deterministic path — the caller's exact page, ranked by follower count.
+      // Deterministic path — the caller's exact page, ranked by isFollowing then eventCount then follower count.
       rows = await Vendor.aggregate([...basePipeline, { $skip: skip }, { $limit: limit }]);
     } else {
-      // Seeded path — a bounded quality pool (top organizers by follower count),
-      // seed-shuffled in-app then paginated. Established organizers stay in the
-      // pool but are no longer permanently pinned to the top.
+      // Seeded path — a bounded quality pool (top organizers by isFollowing,
+      // eventCount then follower count), seed-shuffled in-app then
+      // paginated, so a repeat visit doesn't keep showing the same handful.
+      // Established organizers stay in the pool but are no longer
+      // permanently pinned to the top.
       const POOL_SIZE = Math.max(60, limit * 3);
-      const pool = await Vendor.aggregate([...basePipeline, { $limit: POOL_SIZE }]);
-      rows = seededShuffle(pool, seed).slice(skip, skip + limit);
+      const established = await Vendor.aggregate([...basePipeline, { $limit: POOL_SIZE }]);
+
+      // Top up with the most-recently-registered verified organizers not
+      // already in the established pool — an organizer who just signed up
+      // and hasn't accumulated events/followers yet would otherwise sit
+      // permanently past POOL_SIZE and never get a chance to rotate in
+      // (same "don't let a thin signal collapse to nothing" reasoning as
+      // peopleYouMayKnow's recently-active top-up above).
+      const seenIds = established.map((v: any) => v._id);
+      const FRESH_POOL_SIZE = Math.max(20, limit);
+      // Merge onto match's own `_id` (only present for a vendor actor
+      // excluding itself) rather than overwriting it — losing that exclusion
+      // would let a vendor actor see itself in its own "to follow" pool.
+      const existingIdFilter = (match['_id'] as Record<string, unknown>) ?? {};
+      const freshMatch: Record<string, unknown> = { ...match, _id: { ...existingIdFilter, $nin: seenIds } };
+      const fresh = await Vendor.aggregate([
+        { $match: freshMatch },
+        { $sort: { createdAt: -1 } },
+        { $limit: FRESH_POOL_SIZE },
+        ...countStages,
+        { $project: { businessName: 1, logoUrl: 1, address: 1, followerCount: 1, eventCount: 1, isFollowing: 1 } },
+      ]);
+
+      rows = seededShuffle([...established, ...fresh], seed).slice(skip, skip + limit);
     }
 
-    const following = new Set(await FollowService.followingIds(actor.id, 'organizer', actor.type));
     return rows.map((v: any) => ({
       vendor: v,
       followerCount: v.followerCount,
       eventCount: v.eventCount,
-      isFollowing: following.has(String(v._id)),
+      isFollowing: v.isFollowing,
     }));
   }
 }

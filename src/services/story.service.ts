@@ -5,7 +5,7 @@ import { Vendor } from '@models/vendor.model';
 import { updatesR2 } from '@utils/updatesR2';
 import { triggerTranscode } from '@services/transcode.client';
 import { awardStoryPointsIfEligible } from '@services/storyPoints.service';
-import { FollowService } from '@services/follow.service';
+import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
 import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import type { StoryKind } from '@interfaces/story.interface';
@@ -105,6 +105,23 @@ export async function finalizeStory(id: string): Promise<IStory> {
   return story;
 }
 
+/**
+ * Author-only hard delete. Unlike Update (soft-delete via status:'removed'),
+ * Story has no status field — the model already treats a story as ephemeral
+ * (TTL auto-delete at expiresAt), so an early delete is just that same
+ * disappearance happening on request instead of on a timer. The StorySeen
+ * rows are cleaned up alongside it; they have no TTL of their own (unlike
+ * Story) and would otherwise linger as orphans pointing at a gone document.
+ */
+export async function deleteStory(storyId: string, actor: SocialActor): Promise<void> {
+  const story = await Story.findById(storyId).select('authorType authorId');
+  if (!story) throw new HttpError(404, 'Story not found');
+  if (!isActorAuthorOf(story.authorType, story.authorId, actor)) {
+    throw new HttpError(403, 'Not your story');
+  }
+  await Promise.all([Story.deleteOne({ _id: storyId }), StorySeen.deleteMany({ storyId })]);
+}
+
 export async function markSeen(storyId: string, actor: SocialActor): Promise<void> {
   const story = await Story.findById(storyId).select('authorType authorId');
   if (!story) throw new HttpError(404, 'Story not found');
@@ -200,27 +217,30 @@ export interface StoryGroupDto {
 }
 
 /**
- * Active (unexpired, media-ready) stories from authors the viewer follows,
- * PLUS the viewer's own, grouped by author. Ordering: own group first, then
- * groups with any unseen item, then fully-seen groups; within each bucket,
- * most-recently-posted author first.
+ * Active (unexpired, media-ready) stories from EVERYONE on Carrot — not just
+ * authors the viewer follows. Explicit client decision: follower-only
+ * visibility discouraged posting while the user base is still small, so
+ * Stories are global, same as the "for-you" Discover feed (see
+ * feed.service#getFeed). Still excludes authors blocked in EITHER direction
+ * (mirrors nearby.service#nearbyPeople) — global visibility should not
+ * resurrect content from someone you've blocked or who has blocked you.
+ * Own stories are never excluded (you can't block yourself).
+ *
+ * Grouped by author. Ordering: own group first, then groups with any unseen
+ * item, then fully-seen groups; within each bucket, most-recently-posted
+ * author first.
  */
 export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]> {
-  // Follow.targetType calls a Vendor author an 'organizer', not 'vendor' —
-  // translated here at the boundary (Story.authorType stays 'vendor' below).
-  const [followedBuyerIds, followedOrganizerIds] = await Promise.all([
-    FollowService.followingIds(actor.id, 'buyer', actor.type),
-    FollowService.followingIds(actor.id, 'organizer', actor.type),
+  const [iBlocked, blockedMe] = await Promise.all([
+    BlockService.listBlockedIds(actor.id),
+    BlockService.listBlockerIds(actor.id),
   ]);
-
-  const or: Record<string, unknown>[] = [{ authorType: actor.type, authorId: actor.id }]; // own
-  if (followedBuyerIds.length) or.push({ authorType: 'buyer', authorId: { $in: followedBuyerIds } });
-  if (followedOrganizerIds.length) or.push({ authorType: 'vendor', authorId: { $in: followedOrganizerIds } });
+  const excludedAuthorIds = [...new Set([...iBlocked, ...blockedMe])];
 
   const stories = await Story.find({
     expiresAt: { $gt: new Date() },
     'media.status': 'ready',
-    $or: or,
+    authorId: { $nin: excludedAuthorIds },
   }).sort({ createdAt: 1 }); // ascending: items build up chronologically per author below
 
   if (stories.length === 0) return [];

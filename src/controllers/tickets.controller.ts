@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
-import { PaymentMethod } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
@@ -26,6 +26,7 @@ import {
   sellTicketSchema,
   refundTicketSchema,
   ticketSalesQuerySchema,
+  ticketSalesExportQuerySchema,
   validateTicketSchema,
   checkInTicketSchema,
   scanQuerySchema,
@@ -436,7 +437,37 @@ export class TicketsController {
         ticketsUser.isSuperAdmin || false
       );
 
-      ApiResponseUtil.success(res, event);
+      // event.totalTicketsSold / ticketTypes[].sold are persisted counters
+      // that include platform-printed wristband/tag batches, which makes
+      // them look inflated on the event detail page. Overlay the live,
+      // wristband-excluded figures for display — the raw fields are left
+      // untouched since other logic (quantity-adjustment guards, the
+      // reseller POS remaining-capacity calc) depends on them reflecting
+      // true inventory consumption, tags included.
+      const salesSummary = await AnalyticsService.getEventSalesSummary(
+        eventId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false
+      );
+      const soldByType = new Map(salesSummary.ticketTypes.map((t) => [t.name, t.sold]));
+      const tagsByType = new Map(salesSummary.tagsPrintedByType.map((t) => [t.name, t.count]));
+
+      const eventJson = typeof (event as any).toObject === 'function' ? (event as any).toObject() : event;
+      const responseEvent = {
+        ...eventJson,
+        ticketTypes: (eventJson.ticketTypes || []).map((tt: any) => ({
+          ...tt,
+          realSold: soldByType.get(tt.name) || 0,
+          tagsPrinted: tagsByType.get(tt.name) || 0
+        })),
+        salesSummary: {
+          ticketsSold: salesSummary.ticketsSold,
+          tagsPrinted: salesSummary.tagsPrinted,
+          cashSales: salesSummary.cashSales
+        }
+      };
+
+      ApiResponseUtil.success(res, responseEvent);
     } catch (error: any) {
       console.error('Get event error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to fetch event', 404);
@@ -1121,13 +1152,30 @@ export class TicketsController {
   static async exportSales(req: Request, res: Response): Promise<any> {
     try {
       const ticketsUser = (req as any).ticketsUser;
-      const { eventId, startDate, endDate } = req.query;
 
+      // Validate, like getSales does — an unrecognised filter must 400 rather
+      // than silently match nothing and hand back an empty CSV.
+      const { error, value } = ticketSalesExportQuerySchema.validate(req.query);
+      if (error) {
+        ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+        return;
+      }
+      const { eventId, startDate, endDate, paymentMethod, paymentStatus, channel } = value;
+
+      // Same filter set the Sales History page shows on screen — an export
+      // that ignored them returned rows the visible table had excluded.
+      // `isSuperAdmin` is what keeps paymentStatus from widening an
+      // organizer's visibility; the service asserts that too.
       const csv = await ExportService.exportSalesToCSV({
         vendorId: ticketsUser.vendorId as string,
+        isSuperAdmin: ticketsUser.isSuperAdmin || false,
         eventId: eventId as string,
-        startDate: startDate ? new Date(startDate as string) : undefined,
-        endDate: endDate ? new Date(endDate as string) : undefined
+        paymentMethod: paymentMethod as PaymentMethod | undefined,
+        paymentStatus: paymentStatus as PaymentStatus | undefined,
+        channel: channel as SalesChannel | undefined,
+        // Joi has already coerced these to Date objects.
+        startDate,
+        endDate
       });
 
       const filename = ExportService.getFilename('sales');

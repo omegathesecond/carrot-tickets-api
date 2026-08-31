@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { createStory, finalizeStory, listForViewer, markSeen } from '@services/story.service';
+import { createStory, deleteStory, finalizeStory, listForViewer, markSeen } from '@services/story.service';
 import { Story } from '@models/story.model';
 import { StorySeen } from '@models/storySeen.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { FollowService } from '@services/follow.service';
+import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
 import { totalStoryPoints, STORY_POINTS } from '@services/storyPoints.service';
 
@@ -91,6 +92,30 @@ describe('story.service', () => {
     });
   });
 
+  describe('deleteStory', () => {
+    it('the author can delete their own story, and its StorySeen rows go with it', async () => {
+      const author = buyerId();
+      const { story } = await createStory({ actor: { type: 'buyer', id: author }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg' });
+      const viewer = { type: 'buyer' as const, id: buyerId() };
+      await markSeen(story.id, viewer);
+
+      await deleteStory(story.id, { type: 'buyer', id: author });
+
+      expect(await Story.findById(story.id)).toBeNull();
+      expect(await StorySeen.find({ storyId: story.id })).toHaveLength(0);
+    });
+
+    it('throws 403 for a non-author trying to delete someone else\'s story', async () => {
+      const { story } = await createStory({ actor: { type: 'buyer', id: buyerId() }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg' });
+      await expect(deleteStory(story.id, { type: 'buyer', id: buyerId() })).rejects.toMatchObject({ statusCode: 403 });
+      expect(await Story.findById(story.id)).not.toBeNull();
+    });
+
+    it('throws 404 for an unknown story id', async () => {
+      await expect(deleteStory(new mongoose.Types.ObjectId().toString(), { type: 'buyer', id: buyerId() })).rejects.toMatchObject({ statusCode: 404 });
+    });
+  });
+
   describe('markSeen', () => {
     it('is idempotent — calling twice creates only one StorySeen row', async () => {
       const { story } = await createStory({ actor: { type: 'buyer', id: buyerId() }, kind: 'image', ext: 'jpg', contentType: 'image/jpeg' });
@@ -153,10 +178,32 @@ describe('story.service', () => {
       expect(groups[0]!.author).toEqual({ type: 'organizer', id: String(vendor._id), name: 'Acme Events', avatarUrl: null });
     });
 
-    it('excludes a story from a NON-followed author (and not own)', async () => {
+    it('includes a story from a NON-followed, non-blocked author — Stories are visible to everyone', async () => {
       const viewer = await seedBuyer('+26878400005');
-      const stranger = await seedBuyer('+26878400006');
+      const stranger = await seedBuyer('+26878400006', { name: 'Stranger' });
       await seedReadyStory('buyer', String(stranger._id));
+
+      const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
+      expect(groups).toHaveLength(1);
+      expect(groups[0]!.isOwn).toBe(false);
+      expect(groups[0]!.author.id).toBe(String(stranger._id));
+    });
+
+    it('excludes a story from an author the viewer has blocked', async () => {
+      const viewer: IBuyer = await seedBuyer('+26878400017');
+      const blocked = await seedBuyer('+26878400018');
+      await seedReadyStory('buyer', String(blocked._id));
+      await BlockService.block(viewer, String(blocked._id));
+
+      const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
+      expect(groups).toHaveLength(0);
+    });
+
+    it('excludes a story from an author who has blocked the viewer', async () => {
+      const viewer = await seedBuyer('+26878400019');
+      const blocker: IBuyer = await seedBuyer('+26878400020');
+      await seedReadyStory('buyer', String(blocker._id));
+      await BlockService.block(blocker, String(viewer._id));
 
       const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
       expect(groups).toHaveLength(0);

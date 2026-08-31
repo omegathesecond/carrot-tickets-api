@@ -475,6 +475,29 @@ export const refundTicketSchema = Joi.object({
     })
 });
 
+/**
+ * Query for GET /tickets/export/sales.
+ *
+ * Same filter vocabulary as ticketSalesQuerySchema minus paging — the CSV is
+ * the whole result set, not a page. Validated rather than passed straight
+ * through so a bad value (a typo'd channel, a stale enum from an old client)
+ * gets a 400 instead of quietly producing an EMPTY CSV that looks like
+ * "no sales matched" — the export people reconcile their money against.
+ */
+export const ticketSalesExportQuerySchema = Joi.object({
+  eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  paymentMethod: Joi.string().valid(...Object.values(PaymentMethod)).optional(),
+  paymentStatus: Joi.string().valid(...Object.values(PaymentStatus)).optional(),
+  channel: Joi.string().valid(...Object.values(SalesChannel)).optional(),
+  startDate: Joi.date().iso().optional(),
+  endDate: Joi.date().iso().optional().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().iso().min(Joi.ref('startDate')),
+  }).messages({
+    'date.min': 'End date must be after start date'
+  })
+});
+
 export const ticketSalesQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(20),

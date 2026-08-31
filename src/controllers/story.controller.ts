@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
-import { createStory, finalizeStory, listForViewer, listViewers, markSeen } from '@services/story.service';
+import { createStory, deleteStory, finalizeStory, listForViewer, listViewers, markSeen } from '@services/story.service';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import { Story } from '@models/story.model';
@@ -126,6 +126,31 @@ export class StoryController {
       return ApiResponseUtil.success(res, { stories });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load stories');
+    }
+  }
+
+  /** DELETE /api/social/stories/:id — author deletes their own story. */
+  static async remove(req: Request, res: Response): Promise<any> {
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.removeFor({ type: 'buyer', id: String(buyer._id) }, req, res);
+  }
+
+  /** DELETE /api/tickets/social/stories/:id */
+  static async removeAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.removeFor(actor, req, res);
+  }
+
+  private static async removeFor(actor: SocialActor, req: Request, res: Response): Promise<any> {
+    const id = req.params['id'] as string;
+    if (!HEX24.test(id)) return ApiResponseUtil.validationError(res, 'Invalid story id');
+    try {
+      await deleteStory(id, actor);
+      return ApiResponseUtil.success(res, { ok: true });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to delete story');
     }
   }
 
