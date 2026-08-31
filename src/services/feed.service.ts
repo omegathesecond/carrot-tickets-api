@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { Update } from '@models/update.model';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
@@ -13,7 +14,10 @@ export type FeedSlide =
   | { type: 'event'; id: string; sortAt: string; [k: string]: any };
 
 interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; actor?: SocialActor; limit?: number; category?: string; }
-interface Cursor { u?: string; e?: number; }
+/** `u`/`e` are the recency/skip cursors 'following' and 'events' still use.
+ *  `s` ("seen") is 'for-you' only: ids already served THIS random walk, so a
+ *  later page's $sample never repeats one — see the for-you branch below. */
+interface Cursor { u?: string; e?: number; s?: string[]; }
 
 function decode(cursor?: string): Cursor { if (!cursor) return {}; try { return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { return {}; } }
 function encode(c: Cursor): string { return Buffer.from(JSON.stringify(c)).toString('base64url'); }
@@ -62,9 +66,26 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   // posts predating the field (Mongo null-equality). The 'following' tab and
   // profile grids deliberately keep them — hiding is Discover-only.
   if (opts.tab === 'for-you') updateQuery.hiddenFromDiscoverAt = null;
-  if (cur.u) updateQuery.createdAt = { $lt: new Date(cur.u) };
   if (categoryEventIds) updateQuery.eventId = { $in: categoryEventIds };
-  const updates = opts.tab === 'events' ? [] : await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();
+
+  let updates: any[];
+  if (opts.tab === 'events') {
+    updates = [];
+  } else if (opts.tab === 'for-you') {
+    // Discover randomizes across the ENTIRE active pool, not just a recency
+    // slice — a plain createdAt sort could only ever rotate the newest posts
+    // into view. `$sample` draws uniformly from every post the query matches,
+    // so a months-old post can land at the very top exactly as often as
+    // yesterday's, and a fresh mount/reload (no cursor) always re-samples the
+    // whole pool from scratch. `s` excludes ids this random walk already
+    // served so paging in never repeats one.
+    const seenIds = (cur.s ?? []).map((id) => new Types.ObjectId(id));
+    if (seenIds.length) updateQuery._id = { $nin: seenIds };
+    updates = await Update.aggregate([{ $match: updateQuery }, { $sample: { size: limit } }]);
+  } else {
+    if (cur.u) updateQuery.createdAt = { $lt: new Date(cur.u) };
+    updates = await Update.find(updateQuery).sort({ createdAt: -1 }).limit(limit).lean();
+  }
 
   const eventSkip = cur.e ?? 0;
   const eventQuery: any = { status: EventStatus.PUBLISHED, ...notEndedFilter() };
@@ -127,12 +148,20 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   }
 
   // ---- next cursor from the last consumed position of each source ----
-  const consumedUpdateAt = items.filter((i) => i.type === 'update').slice(-1)[0]?.sortAt;
   const consumedEventCount = items.filter((i) => i.type === 'event').length;
 
   const next: Cursor = {};
-  if (consumedUpdateAt) next.u = consumedUpdateAt;
-  else if (cur.u) next.u = cur.u;
+  if (opts.tab === 'for-you') {
+    // Accumulate every id served across this random walk (not just this
+    // page) so a later page's $nin exclusion still covers earlier pages too.
+    const newIds = items.filter((i) => i.type === 'update').map((i) => i.id);
+    const merged = [...(cur.s ?? []), ...newIds];
+    if (merged.length) next.s = merged;
+  } else {
+    const consumedUpdateAt = items.filter((i) => i.type === 'update').slice(-1)[0]?.sortAt;
+    if (consumedUpdateAt) next.u = consumedUpdateAt;
+    else if (cur.u) next.u = cur.u;
+  }
   if (consumedEventCount) next.e = eventSkip + consumedEventCount;
   else if (cur.e) next.e = cur.e;
 
