@@ -1,5 +1,6 @@
 import { Story, IStory } from '@models/story.model';
 import { StorySeen } from '@models/storySeen.model';
+import { StoryLike } from '@models/storyLike.model';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { updatesR2 } from '@utils/updatesR2';
@@ -99,7 +100,11 @@ export async function deleteStory(storyId: string, actor: SocialActor): Promise<
   if (!isActorAuthorOf(story.authorType, story.authorId, actor)) {
     throw new HttpError(403, 'Not your story');
   }
-  await Promise.all([Story.deleteOne({ _id: storyId }), StorySeen.deleteMany({ storyId })]);
+  await Promise.all([
+    Story.deleteOne({ _id: storyId }),
+    StorySeen.deleteMany({ storyId }),
+    StoryLike.deleteMany({ storyId }),
+  ]);
 }
 
 export async function markSeen(storyId: string, actor: SocialActor): Promise<void> {
@@ -115,6 +120,31 @@ export async function markSeen(storyId: string, actor: SocialActor): Promise<voi
   } catch (err: any) {
     if (err?.code !== 11000) throw err; // already seen — idempotent
   }
+}
+
+/**
+ * Toggle the caller's like on one story item — create the StoryLike row if
+ * absent, delete it if present. Returns the resulting state so the caller
+ * (already holding the previous state client-side for the optimistic flip)
+ * can reconcile against the authoritative outcome rather than guessing.
+ * A liked-then-relisted story reports it back via `viewerHasLiked` in
+ * listForViewer below, which is what keeps the button's state correct after
+ * closing and reopening the viewer.
+ */
+export async function toggleLike(storyId: string, actor: SocialActor): Promise<{ liked: boolean }> {
+  const story = await Story.findById(storyId).select('_id');
+  if (!story) throw new HttpError(404, 'Story not found');
+  const existing = await StoryLike.findOne({ storyId, actorType: actor.type, buyerId: actor.id });
+  if (existing) {
+    await StoryLike.deleteOne({ _id: existing._id });
+    return { liked: false };
+  }
+  try {
+    await StoryLike.create({ storyId, buyerId: actor.id, actorType: actor.type });
+  } catch (err: any) {
+    if (err?.code !== 11000) throw err; // raced with another like — already liked
+  }
+  return { liked: true };
 }
 
 export interface StoryViewerDto {
@@ -187,6 +217,10 @@ export interface StoryItemDto {
   /** How many others have seen this item. Only populated on the viewer's OWN
    *  items — view counts on other people's stories are private. */
   viewerCount?: number;
+  /** Whether the viewer has liked this item — round-tripped so the Like
+   *  button in the story viewer opens already in the right state instead of
+   *  resetting every time the story is closed and reopened. */
+  viewerHasLiked: boolean;
 }
 
 export interface StoryGroupDto {
@@ -227,14 +261,16 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
 
   const vendorIds = [...new Set(stories.filter((s) => s.authorType === 'vendor').map((s) => String(s.authorId)))];
   const buyerIds = [...new Set(stories.filter((s) => s.authorType === 'buyer').map((s) => String(s.authorId)))];
-  const [vendors, buyers, seenRows] = await Promise.all([
+  const [vendors, buyers, seenRows, likedRows] = await Promise.all([
     vendorIds.length ? Vendor.find({ _id: { $in: vendorIds } }).select('businessName logoUrl') : [],
     buyerIds.length ? Buyer.find({ _id: { $in: buyerIds } }).select('name username avatarUrl') : [],
     StorySeen.find({ actorType: actor.type, buyerId: actor.id, storyId: { $in: stories.map((s) => s._id) } }).select('storyId'),
+    StoryLike.find({ actorType: actor.type, buyerId: actor.id, storyId: { $in: stories.map((s) => s._id) } }).select('storyId'),
   ]);
   const vMap = new Map(vendors.map((v: any) => [String(v._id), v]));
   const bMap = new Map(buyers.map((b: any) => [String(b._id), b]));
   const seenSet = new Set(seenRows.map((r: any) => String(r.storyId)));
+  const likedSet = new Set(likedRows.map((r: any) => String(r.storyId)));
 
   // "Seen by N" for the viewer's OWN items, so the rail/viewer can label the
   // count without a second round-trip. Scoped to own stories only — view
@@ -269,6 +305,7 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
       kind: s.kind,
       durationSec: playbackDurationSec(s),
       createdAt: s.createdAt,
+      viewerHasLiked: likedSet.has(String(s._id)),
       ...(isOwnStory ? { viewerCount: viewerCounts.get(String(s._id)) ?? 0 } : {}),
     });
     group.latestCreatedAt = s.createdAt.getTime();
