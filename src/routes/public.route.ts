@@ -10,6 +10,7 @@ import { EnquiryController } from '@controllers/enquiry.controller';
 import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
+import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import { authenticateBuyer, authenticateBuyerOrOrganizer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
@@ -313,6 +314,17 @@ router.post('/auth/reset-password', PublicController.resetPasswordBuyer);
  * @access  Buyer
  */
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
+
+/**
+ * Ticket PDF downloads — the "Download" / "Download all" buttons behind
+ * My Profile > Tickets. Ownership-checked the same way as /my-tickets
+ * (buyerId/phone/email), so a buyer can only download their own tickets.
+ * @route   GET  /api/public/tickets/:ticketId/pdf  -> one ticket's PDF (QR + details)
+ * @route   POST /api/public/tickets/pdf-bundle      { ticketIds: string[] } -> one PDF, one page per ticket
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/tickets/:ticketId/pdf', authenticateBuyer, TicketPdfController.downloadTicketPdf);
+router.post('/tickets/pdf-bundle', authenticateBuyer, TicketPdfController.downloadTicketsBundle);
 
 /**
  * Buyer profile (ticket-holder). Identity is the verified phone on the buyer
