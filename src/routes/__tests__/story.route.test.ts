@@ -256,6 +256,39 @@ describe('Stories API', () => {
     });
   });
 
+  describe('POST /api/social/stories/:id/like', () => {
+    it('401s without a token', async () => {
+      await request(app).post('/api/social/stories/000000000000000000000000/like').expect(401);
+    });
+
+    it('toggles the like on and back off, and it round-trips through the rail', async () => {
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker' });
+      const story = await seedReadyStory(String(author._id));
+      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+
+      const liked = await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', auth).expect(200);
+      expect(liked.body.data.liked).toBe(true);
+
+      const afterLike = await request(app).get('/api/social/stories').set('Authorization', auth).expect(200);
+      expect(afterLike.body.data.stories[0].items[0].viewerHasLiked).toBe(true);
+
+      const unliked = await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', auth).expect(200);
+      expect(unliked.body.data.liked).toBe(false);
+
+      const afterUnlike = await request(app).get('/api/social/stories').set('Authorization', auth).expect(200);
+      expect(afterUnlike.body.data.stories[0].items[0].viewerHasLiked).toBe(false);
+    });
+
+    it('404s for a story that does not exist', async () => {
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker' });
+      await request(app)
+        .post('/api/social/stories/000000000000000000000000/like')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(404);
+    });
+  });
+
   describe('GET /api/social/stories/:id/viewers', () => {
     it('lists who saw the story, newest first, for the author', async () => {
       const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
