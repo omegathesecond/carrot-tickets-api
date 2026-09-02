@@ -31,8 +31,18 @@ describe('POST /api/public/events/:eventId/save', () => {
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 
+  // /save itself isn't behind requireProfilePhoto, but the
+  // "liking an event does NOT create a save reaction" test below also hits
+  // /like, which is — a buyer with no avatarUrl gets 403 PHOTO_REQUIRED there
+  // (see requirePhoto.middleware.ts). Seed an avatarUrl so that assertion
+  // exercises the like/save independence, not the photo gate.
   beforeEach(async () => {
-    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester' });
+    await Buyer.create({
+      phone: BUYER_PHONE,
+      password: 'secret123',
+      username: 'tester',
+      avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg',
+    });
   });
 
   it('401s an anonymous save — never a silent no-op', async () => {

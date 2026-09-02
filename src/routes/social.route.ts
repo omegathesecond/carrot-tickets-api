@@ -49,6 +49,7 @@ router.post('/stories', authenticateBuyer, requireProfilePhoto, StoryController.
 router.post('/stories/:id/finalize', authenticateBuyer, requireProfilePhoto, StoryController.finalize);
 router.get('/stories', authenticateBuyer, StoryController.list);
 router.post('/stories/:id/seen', authenticateBuyer, StoryController.seen);
+router.post('/stories/:id/like', authenticateBuyer, StoryController.like);
 router.get('/stories/:id/viewers', authenticateBuyer, StoryController.viewers);
 router.delete('/stories/:id', authenticateBuyer, StoryController.remove);
 // '/users/search' MUST be registered BEFORE '/users/:username' or "search" is captured as a username.

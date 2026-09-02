@@ -47,6 +47,7 @@ router.post('/stories', authenticateTickets, requireProfilePhoto, StoryControlle
 router.post('/stories/:id/finalize', authenticateTickets, requireProfilePhoto, StoryController.finalizeAsVendor);
 router.get('/stories', authenticateTickets, StoryController.listAsVendor);
 router.post('/stories/:id/seen', authenticateTickets, StoryController.seenAsVendor);
+router.post('/stories/:id/like', authenticateTickets, StoryController.likeAsVendor);
 router.get('/stories/:id/viewers', authenticateTickets, StoryController.viewersAsVendor);
 router.delete('/stories/:id', authenticateTickets, StoryController.removeAsVendor);
 

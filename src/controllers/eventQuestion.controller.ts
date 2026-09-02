@@ -58,10 +58,10 @@ export class EventQuestionController {
     try {
       const actor = await resolveActorFromRequest(req).catch(() => null);
       const question = await getQuestion(req.params['questionId'] as string, actor);
-      if (!question) return ApiResponseUtil.notFound(res, 'Topic not found');
+      if (!question) return ApiResponseUtil.notFound(res, 'Group chat not found');
       return ApiResponseUtil.success(res, question);
     } catch (error: any) {
-      return failWithHttpError(res, error, 'Failed to load topic');
+      return failWithHttpError(res, error, 'Failed to load group chat');
     }
   }
 
