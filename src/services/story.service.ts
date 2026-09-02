@@ -5,6 +5,7 @@ import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { updatesR2 } from '@utils/updatesR2';
 import { triggerTranscode } from '@services/transcode.client';
+import { awardStoryPointsIfEligible } from '@services/storyPoints.service';
 import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
 import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
@@ -72,6 +73,18 @@ export async function finalizeStory(id: string): Promise<IStory> {
     story.media.image = { url: updatesR2.publicUrl(story.media.rawKey), width: 0, height: 0 };
     story.media.status = 'ready';
     await story.save();
+    if (story.authorType === 'buyer') {
+      // Awaited (unlike triggerTranscode below, a real network call worth not
+      // blocking on): this is one more write to the same database, and
+      // awaiting it means the caller's balance is correct the moment finalize
+      // resolves. A failure here must never fail the story upload itself, but
+      // it must be visible, not swallowed — hence catch-and-log, not catch-and-ignore.
+      try {
+        await awardStoryPointsIfEligible(story.authorId, story._id);
+      } catch (err: any) {
+        console.error('awardStoryPointsIfEligible failed:', err?.message);
+      }
+    }
     return story;
   }
   story.media.processingStartedAt = new Date();
@@ -83,6 +96,13 @@ export async function finalizeStory(id: string): Promise<IStory> {
   // array — see @models/update.model), so it's wrapped here to satisfy
   // Transcodable's array shape without changing StoryMedia's cardinality.
   triggerTranscode({ id: story.id, media: [{ rawKey: story.media.rawKey }] }).catch((err: any) => console.error('triggerTranscode (story) failed:', err?.message));
+  // NOTE: video stories never earn points today — the transcoder callback
+  // that would flip media.status to 'ready' is hardcoded to the `updates`
+  // collection (see the CAVEAT above finalizeStory) and never reaches here.
+  // Awarding here instead would pay out for a story that's stuck 'processing'
+  // forever, which is exactly what postCount's 'ready'-only rule exists to
+  // avoid for posts. Once that transcoder gap is fixed, award at the point
+  // media.status becomes 'ready' for video too.
   return story;
 }
 

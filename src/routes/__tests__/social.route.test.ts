@@ -1,8 +1,10 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { signBuyerToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
+import { StoryPointsAward } from '@models/storyPointsAward.model';
 
 const PHONE = '+26878422613';
 
@@ -34,7 +36,21 @@ describe('social profile routes', () => {
     expect(res.body.data.username).toMatch(/^[a-z0-9_]{3,20}$/);
     expect(res.body.data.usernameCustomized).toBe(false);
     expect(res.body.data.dmPrivacy).toBe('community');
+    expect(res.body.data.storyPoints).toBe(0);
     expect(JSON.stringify(res.body.data)).not.toContain(PHONE); // no phone leak
+  });
+
+  it('GET /me sums storyPoints from the persisted award ledger, not from live Story docs', async () => {
+    const buyer = await seedBuyer();
+    await StoryPointsAward.create([
+      { buyerId: buyer._id, storyId: new mongoose.Types.ObjectId(), points: 25 },
+      { buyerId: buyer._id, storyId: new mongoose.Types.ObjectId(), points: 25 },
+    ]);
+    const res = await request(app)
+      .get('/api/social/me')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .expect(200);
+    expect(res.body.data.storyPoints).toBe(50);
   });
 
   it('PATCH /me sets a custom username, bio and dmPrivacy', async () => {

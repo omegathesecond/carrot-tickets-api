@@ -19,6 +19,7 @@ import { HEX24, failWithHttpError, parseMessageCursorParams } from '@utils/contr
 import { onlineBuyerIds } from '@utils/buyerOnline.util';
 import { DmEligibilityService } from '@services/dmEligibility.service';
 import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
+import { totalStoryPoints } from '@services/storyPoints.service';
 
 export class SocialProfileController {
   /** Own-profile payload. NEVER include the phone — usernames are the public identity. */
@@ -43,7 +44,7 @@ export class SocialProfileController {
       await ensureUsername(buyer);
 
       const myId = String(buyer._id);
-      const [followerCount, followingCount, friendIds, attendedEventIds, postCount] = await Promise.all([
+      const [followerCount, followingCount, friendIds, attendedEventIds, postCount, storyPoints] = await Promise.all([
         FollowService.followerCount('buyer', myId),
         FollowService.followingCount(myId),
         FollowService.friendIds(myId),
@@ -53,6 +54,10 @@ export class SocialProfileController {
         // derived points total. A looser filter here would count posts the
         // buyer cannot see (removed, or still transcoding).
         Update.countDocuments({ authorType: 'buyer', authorId: myId, status: 'active', 'media.status': 'ready' }),
+        // Unlike postCount/eventsAttended, this is NOT re-derivable from
+        // live data — Stories TTL-delete after 48h, so it's a persisted
+        // ledger total (see @services/storyPoints.service), not a count.
+        totalStoryPoints(myId),
       ]);
       return ApiResponseUtil.success(res, {
         ...SocialProfileController.toOwnProfile(buyer),
@@ -61,6 +66,7 @@ export class SocialProfileController {
         friendCount: friendIds.length,
         eventsAttended: attendedEventIds.length,
         postCount,
+        storyPoints,
       });
     } catch (error: any) {
       console.error('Get social profile error:', error);
