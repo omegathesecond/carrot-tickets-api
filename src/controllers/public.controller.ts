@@ -722,7 +722,7 @@ export class PublicController {
 
       return ApiResponseUtil.success(res, { posts, tag, page, hasMore });
     } catch (error: any) {
-      return failWithHttpError(res, error, 'Failed to fetch topic posts');
+      return failWithHttpError(res, error, 'Failed to fetch group chat posts');
     }
   }
 

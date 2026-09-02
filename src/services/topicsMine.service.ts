@@ -115,7 +115,7 @@ export async function listMine(actor: SocialActor, limit = DEFAULT_LIMIT): Promi
  * (actor, question) index.
  */
 export async function markRead(questionId: string, actor: SocialActor): Promise<{ ok: true }> {
-  if (!(await EventQuestion.exists({ _id: questionId }))) throw new HttpError(404, 'Topic not found');
+  if (!(await EventQuestion.exists({ _id: questionId }))) throw new HttpError(404, 'Group chat not found');
   await EventQuestionRead.updateOne(
     { actorType: actor.type, actorId: actor.id, questionId },
     { $set: { lastViewedAt: new Date() } },
