@@ -34,8 +34,18 @@ describe('POST /api/public/events/:eventId/like', () => {
   // the token's normalized phone; without this row the actor resolves to null
   // and every buyer-authed request here 401s before it can reach the
   // event-existence check or the toggle itself.
+  // /like is mounted behind requireProfilePhoto (see requirePhoto.middleware.ts):
+  // a buyer with no avatarUrl gets 403 PHOTO_REQUIRED before reaching the
+  // event-existence check or the toggle. Seed an avatarUrl so these tests
+  // exercise the like/toggle logic itself, matching the pattern used across
+  // the other photo-gated route tests (e.g. eventQuestion.route.test.ts).
   beforeEach(async () => {
-    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester' });
+    await Buyer.create({
+      phone: BUYER_PHONE,
+      password: 'secret123',
+      username: 'tester',
+      avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg',
+    });
   });
 
   it('401s an anonymous like — never a silent no-op', async () => {
