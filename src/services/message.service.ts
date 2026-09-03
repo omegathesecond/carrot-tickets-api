@@ -151,8 +151,30 @@ export class MessageService {
     actor: SocialActor,
     opts: { before?: string; after?: string; limit?: number } = {}
   ): Promise<MessageView[]> {
-    await MessageService.requireChannelAccess(channelId, actor);
+    await MessageService.requireReadAccess(channelId, actor);
     return MessageService.listWithCursor({ channelId }, opts);
+  }
+
+  /**
+   * Read gate for listMessages: an organizer-only, non-gated channel (e.g.
+   * #announcements) is broadcast to the whole audience, so viewing it never
+   * requires joining the community first — only an actual ban blocks it.
+   * Posting there still goes through the full requireChannelAccess +
+   * postPolicy check in sendMessage, unaffected by this. Every other channel
+   * keeps the full membership/ticket gate.
+   */
+  private static async requireReadAccess(channelId: string, actor: SocialActor): Promise<void> {
+    const channel = await Channel.findById(channelId);
+    if (!channel) throw new HttpError(404, 'Channel not found');
+    if (channel.archived) throw new HttpError(403, 'This channel is archived');
+
+    if (channel.postPolicy === 'organizer' && !channel.gated) {
+      const membership = await Membership.findOne({ ...memberKey(actor), communityId: channel.communityId });
+      if (membership?.bannedAt) throw new HttpError(403, 'You have been banned from this community');
+      return;
+    }
+
+    await MessageService.requireChannelAccess(channelId, actor);
   }
 
   /** Cheap "is this actor a member of the channel's community?" check with no
