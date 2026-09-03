@@ -4,7 +4,8 @@ import os from 'os';
 import path from 'path';
 import { getObject, putObject, publicUrl } from './r2';
 import { buildRenditionArgs, buildPosterArgs, runFfmpeg, buildProbeArgs, runProbe, parseProbe } from './ffmpeg';
-import { connect, Update } from './db';
+import { connect, Update, StoryTarget } from './db';
+import { renditionKeyPrefix, readyUpdateOps, failedUpdateOps, type MediaCollection } from './mediaTarget';
 
 const app = express();
 app.use(express.json());
@@ -13,14 +14,18 @@ app.get('/health', (_req, res) => res.status(200).json({ ok: true }));
 app.post('/transcode', async (req, res) => {
   const secret = process.env.TRANSCODER_SHARED_SECRET;
   if (!secret || req.header('x-transcoder-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
-  const { updateId, rawKey } = req.body || {};
+  const { updateId, rawKey, collection } = req.body || {};
   if (!updateId || !rawKey) return res.status(400).json({ error: 'updateId and rawKey required' });
+  // Defaults to 'updates' for backward compat with any in-flight caller that
+  // predates this field — everything on the api side now sends it explicitly.
+  const target: MediaCollection = collection === 'stories' ? 'stories' : 'updates';
   res.status(202).json({ accepted: true });          // ack immediately; work continues async
-  process.nextTick(() => transcode(updateId, rawKey).catch((e) => console.error('transcode job failed:', e?.message)));
+  process.nextTick(() => transcode(updateId, rawKey, target).catch((e) => console.error('transcode job failed:', e?.message)));
 });
 
-async function transcode(updateId: string, rawKey: string): Promise<void> {
+async function transcode(updateId: string, rawKey: string, collection: MediaCollection): Promise<void> {
   await connect();
+  const Model = collection === 'stories' ? StoryTarget : Update;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tc-'));
   const input = path.join(dir, 'in');
   try {
@@ -30,16 +35,14 @@ async function transcode(updateId: string, rawKey: string): Promise<void> {
     await runFfmpeg(buildRenditionArgs(input, p480, 854));
     await runFfmpeg(buildPosterArgs(input, pj));
     const { width, height, durationSec } = parseProbe(await runProbe(buildProbeArgs(p720)));
-    const k720 = `updates/ready/${updateId}/720.mp4`, k480 = `updates/ready/${updateId}/480.mp4`, kp = `updates/ready/${updateId}/poster.jpg`;
+    const prefix = renditionKeyPrefix(collection, updateId);
+    const k720 = `${prefix}/720.mp4`, k480 = `${prefix}/480.mp4`, kp = `${prefix}/poster.jpg`;
     await putObject(k720, await fs.readFile(p720), 'video/mp4');
     await putObject(k480, await fs.readFile(p480), 'video/mp4');
     await putObject(kp, await fs.readFile(pj), 'image/jpeg');
-    await Update.updateOne({ _id: updateId }, { $set: {
-      'media.0.status': 'ready',
-      'media.0.video': { url: publicUrl(k720), url480: publicUrl(k480), poster: publicUrl(kp), width, height, durationSec },
-    } });
+    await Model.updateOne({ _id: updateId }, { $set: readyUpdateOps(collection, { url: publicUrl(k720), url480: publicUrl(k480), poster: publicUrl(kp), width, height, durationSec }) });
   } catch (err: any) {
-    await Update.updateOne({ _id: updateId }, { $set: { 'media.0.status': 'failed', 'media.0.error': err?.message?.slice(0, 400) || 'transcode failed' } });
+    await Model.updateOne({ _id: updateId }, { $set: failedUpdateOps(collection, err?.message?.slice(0, 400) || 'transcode failed') });
     throw err;
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

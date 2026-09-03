@@ -1,7 +1,7 @@
 import { ReservationService } from '@services/reservation.service';
 import { TicketService } from '@services/ticket.service';
 import { EventReminderService } from '@services/eventReminder.service';
-import { reconcileStuckUpdates } from '@services/transcode.client';
+import { reconcileStuckUpdates, reconcileStuckStories } from '@services/transcode.client';
 import { BookingService } from '@services/transport/booking.service';
 
 // Start the reservation expiry sweep
@@ -39,6 +39,11 @@ const REMINDER_SWEEP_MS = 600_000;
 // 'processing' (transcoder crashed/never called back). See
 // @services/transcode.client#reconcileStuckUpdates.
 const UPDATE_RECONCILE_MS = 120_000;
+
+// Stories: same sweep as above for video Stories stuck 'processing' (a
+// crashed/never-dispatched transcode job). See
+// @services/transcode.client#reconcileStuckStories.
+const STORY_RECONCILE_MS = 120_000;
 
 // Bus bookings: reconcile paid-but-stuck Peach card bookings (mirrors
 // CARD_RECONCILE_MS above) + sweep expired PENDING bookings whose
@@ -86,6 +91,10 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     reconcileStuckUpdates().catch((e) => console.error('update reconcile sweep failed:', e?.message));
   }, UPDATE_RECONCILE_MS));
+
+  handles.push(setInterval(() => {
+    reconcileStuckStories().catch((e) => console.error('story reconcile sweep failed:', e?.message));
+  }, STORY_RECONCILE_MS));
 
   handles.push(setInterval(() => {
     BookingService.reconcilePendingCardBookings().catch(err => console.error('[booking card-reconcile] error', err));

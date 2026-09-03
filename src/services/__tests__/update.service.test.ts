@@ -62,6 +62,10 @@ describe('update.service', () => {
     expect(out.media[0]!.status).toBe('processing');
     expect(out.media[0]!.processingStartedAt).toBeInstanceOf(Date);
     expect(mockTriggerTranscode).toHaveBeenCalledTimes(1);
+    // Regression: must tell the transcoder to target the `updates` collection
+    // (explicit now that Transcodable.collection also serves Story — see
+    // transcode.client#Transcodable), not fall through to some default.
+    expect(mockTriggerTranscode).toHaveBeenCalledWith(expect.objectContaining({ id: update.id, collection: 'updates' }));
   });
 
   it('finalizeUpdate(image) marks ready immediately with an image url', async () => {

@@ -14,6 +14,7 @@ describe('startBackgroundTasks', () => {
     jest.spyOn(reservationSvc.ReservationService, 'sweepExpired').mockResolvedValue(undefined as any);
     jest.spyOn(reminderSvc.EventReminderService, 'sweep').mockResolvedValue(undefined as any);
     jest.spyOn(transcodeClient, 'reconcileStuckUpdates').mockResolvedValue(undefined as any);
+    jest.spyOn(transcodeClient, 'reconcileStuckStories').mockResolvedValue(undefined as any);
     // Mocked so the real implementations don't fire real (unconnected) DB
     // queries in this fake-timers unit test — mirrors every other sweep above.
     const bookingCardReconcileSpy = jest.spyOn(bookingSvc.BookingService, 'reconcilePendingCardBookings').mockResolvedValue(undefined as any);
