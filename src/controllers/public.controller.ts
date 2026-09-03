@@ -15,6 +15,7 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { PeachClient } from '@services/payments/peach.client';
 import { DeltapayClient } from '@services/payments/deltapay.client';
 import { YocoClient } from '@services/payments/yoco.client';
+import { YeboPayClient } from '@services/payments/yebopay.client';
 import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
@@ -170,6 +171,16 @@ const deltapayInitiateSchema = Joi.object({
 // Validation schema for Yoco hosted-checkout purchase initiation.
 // Same shape as card: Yoco collects the card details on its own page.
 const yocoInitiateSchema = Joi.object({
+  eventId: Joi.string().hex().length(24).required(),
+  ticketTypeId: Joi.string().hex().length(24).required(),
+  quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
+  customerName: Joi.string().max(100).optional(),
+});
+
+// Validation schema for YeboPay hosted-checkout purchase initiation.
+// Same shape as the other card rails: YeboPay collects the card details on its
+// own hosted page, so Carrot never sees them.
+const yebopayInitiateSchema = Joi.object({
   eventId: Joi.string().hex().length(24).required(),
   ticketTypeId: Joi.string().hex().length(24).required(),
   quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
@@ -992,16 +1003,19 @@ export class PublicController {
       if (cfg.deltapayEnabled && new DeltapayClient().isConfigured()) methods.push('deltapay');
       // Yoco, same rule: toggle AND live credentials, else the button is hidden.
       if (cfg.yocoEnabled && new YocoClient().isConfigured()) methods.push('yoco');
+      // YeboPay, same rule again: toggle AND live credentials, else hidden.
+      if (cfg.yebopayEnabled && new YeboPayClient().isConfigured()) methods.push('yebopay');
       // Per-method flat buyer service fee (E) so checkout can show a live
       // breakdown. The charge is recomputed server-side on purchase (display only).
       const serviceFees = absorbed
-        ? { keshless_wallet: 0, mtn_momo: 0, peach_card: 0, deltapay: 0, yoco: 0 }
+        ? { keshless_wallet: 0, mtn_momo: 0, peach_card: 0, deltapay: 0, yoco: 0, yebopay: 0 }
         : {
             keshless_wallet: cfg.keshlessServiceFee,
             mtn_momo: cfg.momoServiceFee,
             peach_card: cfg.cardServiceFee,
             deltapay: cfg.deltapayServiceFee,
             yoco: cfg.yocoServiceFee,
+            yebopay: cfg.yebopayServiceFee,
           };
       return ApiResponseUtil.success(res, { methods, serviceFees });
     } catch (error: any) {
@@ -1148,6 +1162,29 @@ export class PublicController {
       return ApiResponseUtil.success(res, r);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e.message || 'Could not start Yoco payment', 400);
+    }
+  }
+
+  /**
+   * Initiate an async YeboPay hosted-checkout purchase. Buyer-authed.
+   * Returns the redirect URL for the SPA to send the buyer to.
+   */
+  static async initiateYeboPayPurchase(req: Request, res: Response): Promise<any> {
+    const { error, value } = yebopayInitiateSchema.validate(req.body);
+    if (error) return ApiResponseUtil.badRequest(res, error.message);
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to buy a ticket');
+    try {
+      const r = await TicketService.initiateYeboPayPurchase({
+        ...value,
+        customerPhone: buyer.phone,
+        customerEmail: buyer.email,
+        buyerId: String(buyer._id),
+        channel: SalesChannel.ONLINE,
+      });
+      return ApiResponseUtil.success(res, r);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Could not start YeboPay payment', 400);
     }
   }
 

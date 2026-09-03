@@ -414,6 +414,15 @@ router.post('/purchase/deltapay', authenticateBuyer, PublicController.initiateDe
 router.post('/purchase/yoco', authenticateBuyer, PublicController.initiateYocoPurchase);
 
 /**
+ * @route   POST /api/public/purchase/yebopay
+ * @desc    Initiate an async YeboPay hosted-checkout ticket purchase. Identity
+ *          comes from the authenticated buyer, never the body. Returns the
+ *          YeboPay hosted URL for the SPA to send the buyer to.
+ * @access  Buyer (authenticated)
+ */
+router.post('/purchase/yebopay', authenticateBuyer, PublicController.initiateYeboPayPurchase);
+
+/**
  * @route   GET /api/public/purchase/yoco/latest/status
  * @desc    Outcome of the buyer's most recent Yoco payment, with no identifier
  *          on the URL. Declared BEFORE the /:checkoutId/status route so that

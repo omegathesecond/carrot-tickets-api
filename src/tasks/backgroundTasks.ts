@@ -25,6 +25,13 @@ const DELTAPAY_RECONCILE_MS = 60_000;
 // carve-out that keeps such sales PENDING.
 const YOCO_STUCK_REPORT_MS = 300_000;
 
+// YeboPay: RESOLVE (not merely report) sales stuck PENDING because no signed
+// webhook arrived. YeboPay publishes GET /v1/checkouts/:id, so unlike Yoco this
+// can ask and finalise. It runs on a short interval because YeboPay webhook
+// delivery has no automatic retry — this sweep is the only thing behind a
+// dropped POST, and the buyer's return handler.
+const YEBOPAY_RECONCILE_MS = 60_000;
+
 // Event reminders (spec §6): T-24h and day-of pushes for ticket holders.
 const REMINDER_SWEEP_MS = 600_000;
 
@@ -67,6 +74,10 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     TicketService.reportStuckYocoSales().catch(err => console.error('[yoco-stuck] error', err));
   }, YOCO_STUCK_REPORT_MS));
+
+  handles.push(setInterval(() => {
+    TicketService.reconcilePendingYeboPaySales().catch(err => console.error('[yebopay-reconcile] error', err));
+  }, YEBOPAY_RECONCILE_MS));
 
   handles.push(setInterval(() => {
     EventReminderService.sweep().catch((err) => console.error('[reminder-sweep] error', err));

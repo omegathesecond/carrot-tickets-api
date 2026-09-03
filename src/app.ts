@@ -60,6 +60,7 @@ import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
 import deltapayRoutes from '@routes/deltapay.route';
 import yocoRoutes from '@routes/yoco.route';
+import yebopayRoutes from '@routes/yebopay.route';
 import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
 import operatorRoutes from '@routes/operator.route';
@@ -126,19 +127,21 @@ app.use(cors({
 // re-serialised `req.body` would never verify — see YocoController.webhook.
 // Capturing here (rather than remounting middleware around the webhook route)
 // keeps route ordering untouched.
-// Only the Yoco webhook needs its raw bytes kept. Scoping the capture to that
-// one path avoids duplicating every 10mb JSON body into a second string.
+// Only signed webhooks need their raw bytes kept. Scoping the capture to those
+// paths avoids duplicating every 10mb JSON body into a second string.
 const YOCO_WEBHOOK_PATH = '/api/public/purchase/yoco/webhook';
+const YEBOPAY_WEBHOOK_PATH = '/api/public/purchase/yebopay/webhook';
+const RAW_BODY_PATHS = new Set([YOCO_WEBHOOK_PATH, YEBOPAY_WEBHOOK_PATH]);
 
 app.use(express.json({
   limit: '10mb',
   verify: (req, _res, buf) => {
-    // The Yoco webhook's Standard-Webhooks signature is computed over the exact
-    // body Yoco sent, so a re-serialised `req.body` would never verify. Stash
+    // A signed webhook's signature is computed over the exact body the provider
+    // sent, so a re-serialised `req.body` would never verify. Stash
     // the raw bytes here — see YocoController.webhook. Capturing at this level
     // (rather than remounting middleware around the route) leaves route
     // ordering untouched.
-    if (buf?.length && req.url?.split('?')[0] === YOCO_WEBHOOK_PATH) {
+    if (buf?.length && RAW_BODY_PATHS.has(req.url?.split('?')[0] ?? '')) {
       (req as any).rawBody = buf.toString('utf8');
     }
   },
@@ -196,6 +199,7 @@ app.use('/api/public', publicRoutes);                  // Public routes - no aut
 app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
 app.use('/api/public/purchase/deltapay', deltapayRoutes);    // DeltaPay return + session callback (unauthenticated)
 app.use('/api/public/purchase/yoco', yocoRoutes);            // Yoco signed webhook + return (unauthenticated)
+app.use('/api/public/purchase/yebopay', yebopayRoutes);       // YeboPay signed webhook + return (unauthenticated)
 app.use('/api/momo', momoRoutes);                      // MTN MoMo callback (unauthenticated)
 app.use('/api/operator', operatorRoutes);
 app.use('/api/community', communityRoutes);          // Event communities (buyer social)
