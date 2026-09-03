@@ -1271,6 +1271,37 @@ export class PublicController {
   }
 
   /**
+   * Outcome of the buyer's most recent YeboPay payment.
+   *
+   * Mirrors getLatestYocoStatus: the YeboPay return redirect deliberately
+   * carries no identifiers, so this authenticated endpoint — scoped to the
+   * caller's own sales — is how the result page learns the outcome.
+   */
+  static async getLatestYeboPayStatus(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const sale = await TicketService.getLatestYeboPaySaleForBuyer(buyer);
+      if (!sale?.yebopayCheckoutId) {
+        return ApiResponseUtil.success(res, { status: 'none' });
+      }
+
+      const status =
+        sale.paymentStatus === 'completed'
+          ? 'completed'
+          : sale.paymentStatus === 'pending'
+          ? 'pending'
+          : 'failed';
+      return ApiResponseUtil.success(res, { status, checkoutId: sale.yebopayCheckoutId });
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
    * Initiate an async DeltaPay hosted-checkout purchase. Buyer-authed.
    * Returns the checkout URL for the SPA to redirect to.
    */

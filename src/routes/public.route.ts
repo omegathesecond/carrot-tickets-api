@@ -423,6 +423,15 @@ router.post('/purchase/yoco', authenticateBuyer, PublicController.initiateYocoPu
 router.post('/purchase/yebopay', authenticateBuyer, PublicController.initiateYeboPayPurchase);
 
 /**
+ * @route   GET /api/public/purchase/yebopay/latest/status
+ * @desc    Outcome of the buyer's most recent YeboPay payment. The YeboPay
+ *          return redirect carries no identifiers by design, so the result page
+ *          asks this authenticated endpoint rather than parsing the URL.
+ * @access  Buyer (authenticated)
+ */
+router.get('/purchase/yebopay/latest/status', authenticateBuyer, PublicController.getLatestYeboPayStatus);
+
+/**
  * @route   GET /api/public/purchase/yoco/latest/status
  * @desc    Outcome of the buyer's most recent Yoco payment, with no identifier
  *          on the URL. Declared BEFORE the /:checkoutId/status route so that

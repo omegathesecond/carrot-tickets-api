@@ -1705,6 +1705,26 @@ export class TicketService {
     }).sort({ createdAt: -1 });
   }
 
+  /**
+   * The buyer's most recent YeboPay sale.
+   *
+   * The YeboPay return redirect carries no identifiers on purpose — `ref` is
+   * not secret (it is handed to YeboPay as metadata), so echoing a status for
+   * it would let anyone turn a guessed ref into "does this sale exist, and was
+   * it paid?". Same rule as the Yoco rail, so the result page asks an
+   * AUTHENTICATED endpoint about the buyer's own latest sale instead of
+   * parsing the address bar.
+   */
+  static async getLatestYeboPaySaleForBuyer(
+    buyer: { _id?: unknown; phone?: string; email?: string }
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({
+      $or: buyerTicketOr(buyer),
+      paymentMethod: PaymentMethod.YEBOPAY,
+      yebopayCheckoutId: { $exists: true, $nin: [null, ''] },
+    }).sort({ createdAt: -1 });
+  }
+
   static async getLatestDeltapaySaleForBuyer(
     buyer: { _id?: unknown; phone?: string; email?: string }
   ): Promise<InstanceType<typeof TicketSale> | null> {
