@@ -20,15 +20,35 @@ import { onlineBuyerIds } from '@utils/buyerOnline.util';
 import { DmEligibilityService } from '@services/dmEligibility.service';
 import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
 import { totalStoryPoints } from '@services/storyPoints.service';
+import { NAME_CHANGE_COOLDOWN_MS } from '@models/buyer.model';
+
+/** Human-readable form of the message the spec requires verbatim:
+ *  "You can change your profile name again on [date]." */
+function formatNameChangeDate(date: Date): string {
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/** When a buyer may next change `name`, or null if unrestricted right now. */
+function nameChangeLockedUntil(buyer: IBuyer): Date | null {
+  if (!buyer.nameChangedAt) return null;
+  const unlocksAt = new Date(buyer.nameChangedAt.getTime() + NAME_CHANGE_COOLDOWN_MS);
+  return unlocksAt.getTime() > Date.now() ? unlocksAt : null;
+}
 
 export class SocialProfileController {
   /** Own-profile payload. NEVER include the phone — usernames are the public identity. */
   private static toOwnProfile(buyer: IBuyer) {
+    const lockedUntil = nameChangeLockedUntil(buyer);
     return {
       id: String(buyer._id),
       username: buyer.username ?? null,
       usernameCustomized: Boolean(buyer.usernameCustomizedAt),
       name: buyer.name ?? null,
+      // Non-null only while the 30-day cooldown is still in effect, so the
+      // Edit Profile UI can disable the Name field and show the "You can
+      // change your profile name again on [date]" hint proactively, instead
+      // of only after a rejected save.
+      nextNameChangeAt: lockedUntil ? lockedUntil.toISOString() : null,
       avatarUrl: buyer.avatarUrl ?? null,
       bio: buyer.bio ?? null,
       dmPrivacy: buyer.dmPrivacy,
@@ -86,13 +106,30 @@ export class SocialProfileController {
       if (value.username !== undefined) {
         const username = String(value.username).toLowerCase();
         if (!USERNAME_REGEX.test(username)) {
-          return ApiResponseUtil.error(res, 'Usernames are 3-20 characters: a-z, 0-9 and _', 400);
+          return ApiResponseUtil.error(res, 'Usernames are 3-20 characters: a-z, 0-9, _ and .', 400);
         }
         if (RESERVED_USERNAMES.includes(username)) {
           return ApiResponseUtil.error(res, 'That username is reserved', 409);
         }
         buyer.username = username;
         buyer.usernameCustomizedAt = new Date();
+      }
+      if (value.name !== undefined) {
+        const name = String(value.name).trim();
+        // Only a real change starts (or is blocked by) the cooldown — saving
+        // the same name back is a no-op, not a "change".
+        if (name !== (buyer.name ?? '')) {
+          const lockedUntil = nameChangeLockedUntil(buyer);
+          if (lockedUntil) {
+            return ApiResponseUtil.error(
+              res,
+              `You can change your profile name again on ${formatNameChangeDate(lockedUntil)}.`,
+              409
+            );
+          }
+          buyer.name = name;
+          buyer.nameChangedAt = new Date();
+        }
       }
       if (value.bio !== undefined) buyer.bio = value.bio;
       if (value.dmPrivacy !== undefined) buyer.dmPrivacy = value.dmPrivacy;

@@ -75,6 +75,79 @@ describe('social profile routes', () => {
     await request(app).patch('/api/social/me').set('Authorization', auth).send({ username: 'X' }).expect(400);
     await request(app).patch('/api/social/me').set('Authorization', auth).send({ username: 'admin' }).expect(409);
     await request(app).patch('/api/social/me').set('Authorization', auth).send({ username: 'taken_name' }).expect(409);
+    // Spaces are never in-alphabet, so they 400 the same as any other
+    // disallowed character — no dedicated space check needed.
+    await request(app).patch('/api/social/me').set('Authorization', auth).send({ username: 'has space' }).expect(400);
+  });
+
+  it('accepts full stops in a username (letters, numbers, underscores and full stops only)', async () => {
+    await seedBuyer();
+    const res = await request(app)
+      .patch('/api/social/me')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ username: 'laslie.g_2' })
+      .expect(200);
+    expect(res.body.data.username).toBe('laslie.g_2');
+  });
+
+  it('PATCH /me sets the profile name on first change, with no cooldown yet applied', async () => {
+    await seedBuyer(PHONE, { name: 'Old Name' });
+    const res = await request(app)
+      .patch('/api/social/me')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ name: 'New Name' })
+      .expect(200);
+
+    expect(res.body.data.name).toBe('New Name');
+    // Just changed it, so the 30-day cooldown is now active.
+    expect(res.body.data.nextNameChangeAt).not.toBeNull();
+  });
+
+  it('blocks a second profile-name change within 30 days, keeps the existing name, and names the retry date', async () => {
+    const buyer = await seedBuyer(PHONE, { name: 'Old Name' });
+    buyer.name = 'First Change';
+    buyer.nameChangedAt = new Date('2026-08-20T00:00:00.000Z'); // 14 days before "now" in these tests
+    await buyer.save();
+
+    const res = await request(app)
+      .patch('/api/social/me')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ name: 'Second Change' })
+      .expect(409);
+
+    expect(res.body.message).toMatch(/^You can change your profile name again on .+\.$/);
+    const stored = await Buyer.findById(buyer._id);
+    expect(stored?.name).toBe('First Change'); // unchanged
+  });
+
+  it('allows a profile-name change again once 30 days have passed', async () => {
+    const buyer = await seedBuyer(PHONE, { name: 'Old Name' });
+    buyer.name = 'First Change';
+    buyer.nameChangedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    await buyer.save();
+
+    const res = await request(app)
+      .patch('/api/social/me')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ name: 'Second Change' })
+      .expect(200);
+
+    expect(res.body.data.name).toBe('Second Change');
+  });
+
+  it('re-saving the same profile name is a no-op — does not consume the cooldown', async () => {
+    const buyer = await seedBuyer(PHONE, { name: 'Same Name' });
+    const res = await request(app)
+      .patch('/api/social/me')
+      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .send({ name: 'Same Name', bio: 'unrelated update' })
+      .expect(200);
+
+    expect(res.body.data.name).toBe('Same Name');
+    expect(res.body.data.nextNameChangeAt).toBeNull();
+    expect(res.body.data.bio).toBe('unrelated update');
+    const stored = await Buyer.findById(buyer._id);
+    expect(stored?.nameChangedAt).toBeUndefined();
   });
 
   it('public profile by username hides the phone', async () => {

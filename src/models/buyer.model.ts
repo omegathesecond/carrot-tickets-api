@@ -4,7 +4,10 @@ import bcrypt from 'bcrypt';
 /** Canonical username shape. Lives on the model so the schema validator and
  *  the generator in @utils/username.util share one definition (the util
  *  imports from here — the reverse would be a circular import). */
-export const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
+export const USERNAME_REGEX = /^[a-z0-9_.]{3,20}$/;
+
+/** How often a buyer may change their profile `name` — see `nameChangedAt`. */
+export const NAME_CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface NotificationPrefs {
   announcements: boolean;
@@ -36,6 +39,11 @@ export interface IBuyer extends Document {
   phoneVerifiedAt?: Date;
   password: string; // bcrypt hash (select: false)
   name?: string;
+  // Set whenever `name` is changed by the buyer (not on the initial signup
+  // value). Drives the 30-day cooldown in SocialProfileController.update —
+  // see NAME_CHANGE_COOLDOWN_MS. Left unset for buyers who have never
+  // renamed themselves post-signup, so they are never gated on first edit.
+  nameChangedAt?: Date;
   avatarUrl?: string; // public R2 URL of the buyer's profile picture (optional)
   username?: string; // unique social handle, auto-generated on first social touch
   bio?: string;
@@ -88,6 +96,7 @@ const buyerSchema = new Schema<IBuyer>(
       select: false
     },
     name: { type: String, trim: true, maxlength: 100 },
+    nameChangedAt: { type: Date },
     avatarUrl: { type: String, trim: true },
     username: {
       type: String,
@@ -98,7 +107,7 @@ const buyerSchema = new Schema<IBuyer>(
       lowercase: true,
       minlength: 3,
       maxlength: 20,
-      match: [USERNAME_REGEX, 'Usernames are 3-20 characters: a-z, 0-9 and _']
+      match: [USERNAME_REGEX, 'Usernames are 3-20 characters: a-z, 0-9, _ and .']
     },
     bio: { type: String, trim: true, maxlength: 280 },
     city: { type: String, trim: true, maxlength: 100 },

@@ -40,7 +40,7 @@ export class SocialProfileViewService {
    * raw buyer id: a usernameless buyer (username is auto-generated only on a
    * buyer's first social touch) has no /u/:username address, so link surfaces
    * fall back to /u/:id. A real username can never be 24 hex chars
-   * (USERNAME_REGEX caps them at [a-z0-9_]{3,20}), so the shape is
+   * (USERNAME_REGEX caps them at [a-z0-9_.]{3,20}), so the shape is
    * unambiguous — hex-24 → look up by _id, otherwise by username. Returns null
    * when no buyer matches — callers translate that into a 404.
    */
