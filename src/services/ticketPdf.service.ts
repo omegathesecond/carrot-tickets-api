@@ -57,8 +57,10 @@ export class TicketPdfService {
    * Draw ONE ticket (QR code + event/holder details) onto the document's
    * CURRENT page. Shared by the single-ticket and bundle builders above — one
    * drawing routine, so a bundle page looks identical to a standalone ticket
-   * PDF. Mirrors the on-screen stub in PrintableTicket.tsx (My Profile >
-   * Tickets) — same orange brand, same poster-flush-against-QR layout.
+   * PDF. Mirrors the on-screen ticket card in PrintableTicket.tsx (My Profile
+   * > Tickets), which is the master design: card + orange header, a left info
+   * column, and a QR box on the right — no poster in any of the three
+   * surfaces (on-screen card, preview dialog, PDF).
    */
   private static async drawTicketPage(doc: PDFKit.PDFDocument, ticket: ITicket): Promise<void> {
     const event: any = ticket.eventId && typeof ticket.eventId === 'object' ? ticket.eventId : null;
@@ -73,137 +75,95 @@ export class TicketPdfService {
       width: 600
     });
 
-    // Poster is a nice-to-have, not the QR — a broken/unreachable image must
-    // never take down the download itself, so a fetch/decode failure just
-    // means no poster on this stub (see catch below), not a failed PDF.
-    const posterBuffer = event?.posterUrl ? await this.fetchImageBuffer(event.posterUrl) : null;
-
     // Carrot's official orange (see landing/src/index.css --primary: 16 100% 60%).
     const brand = '#FF6B35';
+    const brandDark = '#E85A2A';
+    const cardX = 50;
+    const cardY = 40;
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const cardW = pageWidth;
+    const pad = 20;
 
-    // Header band
-    doc.rect(0, 0, doc.page.width, 90).fill(brand);
-    doc.fillColor('white').fontSize(26).font('Helvetica-Bold')
-      .text('Carrot Tickets', 50, 32);
-    doc.fontSize(11).font('Helvetica')
-      .text('E-Ticket — present the QR code below at the entrance', 50, 64);
+    // Header band (gradient primary -> orange-600, same as the web card).
+    const headerH = 74;
+    doc.save();
+    doc.roundedRect(cardX, cardY, cardW, headerH + 14, 14).clip();
+    doc.rect(cardX, cardY, cardW, headerH)
+      .fill(doc.linearGradient(cardX, cardY, cardX + cardW, cardY).stop(0, brand).stop(1, brandDark) as any);
+    doc.restore();
 
-    doc.fillColor('black');
-    let y = 120;
+    doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
+      .text('CARROT TICKETS', cardX + pad, cardY + 14, { characterSpacing: 1 });
+    doc.fontSize(17).font('Helvetica-Bold')
+      .text(eventName, cardX + pad, cardY + 30, { width: cardW - pad * 2 });
 
-    // Event title
-    doc.fontSize(20).font('Helvetica-Bold').fillColor('#111')
-      .text(eventName, 50, y, { width: pageWidth });
-    y = doc.y + 6;
-    if (venue) {
-      doc.fontSize(12).font('Helvetica').fillColor(brand)
-        .text(venue, 50, y, { width: pageWidth });
-      y = doc.y;
-    }
+    // Body — two columns: ticket details (left) and the QR box (right),
+    // flush against each other with no poster between them.
+    const bodyY = cardY + headerH + pad;
+    const qrColW = 150;
+    const infoColW = cardW - pad * 2 - qrColW - 16;
+    const infoX = cardX + pad;
+    const qrColX = cardX + cardW - pad - qrColW;
 
-    // Event date / time
+    let iy = bodyY;
+    doc.fillColor('#111').fontSize(10.5).font('Helvetica');
+
     const eventDate = this.fmtDate(event?.eventDate);
     const timeRange = this.fmtTimeRange(event?.startTime, event?.endTime);
-    const whenLine = [eventDate, timeRange].filter(Boolean).join('   •   ');
+    const whenLine = [eventDate, timeRange].filter(Boolean).join(' · ');
     if (whenLine) {
-      doc.fillColor(brand).fontSize(12).font('Helvetica')
-        .text(whenLine, 50, y + 2, { width: pageWidth });
-      y = doc.y;
+      doc.text(whenLine, infoX, iy, { width: infoColW });
+      iy = doc.y + 6;
+    }
+    if (venue) {
+      doc.text(venue, infoX, iy, { width: infoColW });
+      iy = doc.y + 10;
     }
 
-    y += 20;
-    doc.moveTo(50, y).lineTo(50 + pageWidth, y).dash(3, { space: 2 }).strokeColor(brand).opacity(0.4).stroke();
-    doc.undash().opacity(1);
-    y += 20;
+    doc.moveTo(infoX, iy).lineTo(infoX + infoColW, iy).dash(3, { space: 2 }).strokeColor('#DDD').stroke();
+    doc.undash();
+    iy += 12;
 
-    // Poster (left) flush against the QR (right) — same block height, zero
-    // gap between them, so the two read as one strip (matches the web stub).
-    // Decode BEFORE laying out the strip: posters can be uploaded as WebP
-    // (allowed by the upload middleware) but PDFKit's image() only decodes
-    // JPEG/PNG and throws synchronously on anything else — decoding first
-    // lets an unsupported format fall back to a QR-only strip instead of
-    // taking down the whole PDF mid-draw.
-    // @types/pdfkit doesn't declare openImage even though it exists at
-    // runtime (used internally by .image()) — hence the `any`.
-    let posterImage: any = null;
-    if (posterBuffer) {
-      try {
-        posterImage = (doc as any).openImage(posterBuffer);
-      } catch (error) {
-        console.error('[ticket-pdf] poster image could not be decoded (unsupported format?):', error);
-      }
+    const detailRows: Array<[string, string]> = [['Ticket type', ticket.ticketType || 'General']];
+    if (ticket.customerName) detailRows.push(['Holder', ticket.customerName]);
+    if (typeof ticket.price === 'number') detailRows.push(['Paid', this.fmtPrice(ticket.price)]);
+
+    for (const [label, value] of detailRows) {
+      doc.fillColor('#888').fontSize(8).font('Helvetica-Bold')
+        .text(label.toUpperCase(), infoX, iy, { characterSpacing: 0.5 });
+      doc.fillColor('#111').fontSize(11).font('Helvetica-Bold')
+        .text(value, infoX, doc.y + 1, { width: infoColW });
+      iy = doc.y + 8;
     }
 
-    const blockH = 170;
-    const qrSize = blockH - 30; // leaves room for the ticket-id line beneath it
-    const posterW = posterImage ? 150 : 0;
-    const qrColW = pageWidth - posterW;
-    const stripX = 50;
+    // QR box — light background block, same as the web card's
+    // `bg-muted/40 rounded-lg` box (poster-free on every surface).
+    const qrBoxH = qrColW + 44;
+    doc.roundedRect(qrColX, bodyY, qrColW, qrBoxH, 8).fillColor('#F5F5F4').fill();
+    const qrSize = qrColW - 24;
+    doc.image(qrPng, qrColX + 12, bodyY + 12, { width: qrSize, height: qrSize });
+    doc.fillColor('#888').fontSize(7.5).font('Helvetica')
+      .text('TICKET CODE', qrColX, bodyY + qrSize + 18, { width: qrColW, align: 'center', characterSpacing: 0.5 });
+    doc.fillColor('#111').fontSize(9).font('Courier-Bold')
+      .text(ticket.ticketId, qrColX, bodyY + qrSize + 29, { width: qrColW, align: 'center' });
 
-    doc.rect(stripX, y, pageWidth, blockH).fillColor('#FFF3EC').fill();
+    const bodyBottom = Math.max(iy, bodyY + qrBoxH) + pad;
 
-    if (posterImage) {
-      doc.save();
-      doc.rect(stripX, y, posterW, blockH).clip();
-      doc.image(posterImage, stripX, y, { cover: [posterW, blockH], align: 'center', valign: 'center' });
-      doc.restore();
-    }
+    // Footer strip — dashed top border, admission note left / non-refundable
+    // right, matching the on-screen card footer exactly.
+    const footerH = 30;
+    doc.moveTo(cardX, bodyBottom).lineTo(cardX + cardW, bodyBottom).dash(3, { space: 2 }).strokeColor('#DDD').stroke();
+    doc.undash();
+    doc.roundedRect(cardX, bodyBottom, cardW, footerH, 0).fillColor('#FAFAF9').fill();
+    doc.fillColor('#888').fontSize(8.5).font('Helvetica')
+      .text('Show this code or QR at entry', cardX + pad, bodyBottom + 10, { width: cardW / 2 })
+      .text('Non-refundable', cardX + pad, bodyBottom + 10, { width: cardW - pad * 2, align: 'right' });
 
-    const qrX = stripX + posterW + (qrColW - qrSize) / 2;
-    const qrY = y + (blockH - qrSize - 22) / 2;
-    doc.image(qrPng, qrX, qrY, { width: qrSize, height: qrSize });
-    doc.fillColor('#111').fontSize(12).font('Courier-Bold')
-      .text(ticket.ticketId, stripX + posterW, qrY + qrSize + 8, { width: qrColW, align: 'center' });
+    // Card border (drawn last so it sits on top of the fills).
+    doc.roundedRect(cardX, cardY, cardW, bodyBottom + footerH - cardY, 14).strokeColor('#FFD9C2').lineWidth(2).stroke();
 
-    const belowStrip = y + blockH + 24;
-
-    // Detail rows
-    const rows: Array<[string, string]> = [
-      ['Ticket Type', ticket.ticketType || 'General'],
-      ['Ticket Number', ticket.ticketId],
-      ['Price', this.fmtPrice(ticket.price)],
-      ['Status', this.fmtStatus(ticket.status)]
-    ];
-    if (ticket.customerName) rows.push(['Holder', ticket.customerName]);
-    if (ticket.customerPhone) rows.push(['Phone', ticket.customerPhone]);
-
-    let ry = belowStrip;
-    for (const [label, value] of rows) {
-      doc.fillColor(brand).fontSize(11).font('Helvetica-Bold').text(label, 50, ry, { width: 160 });
-      doc.fillColor('#111').fontSize(12).font('Helvetica')
-        .text(value, 210, ry, { width: pageWidth - 160 });
-      ry = doc.y + 10;
-    }
-
-    // Admission details
-    ry += 6;
-    doc.fillColor(brand).fontSize(11).font('Helvetica-Bold').text('Admission', 50, ry, { width: pageWidth });
-    ry = doc.y + 2;
-    doc.fillColor('#111').fontSize(11).font('Helvetica')
-      .text('Show this code or QR at the entrance. Non-refundable.', 50, ry, { width: pageWidth });
-
-    // Footer
     doc.fillColor('#999').fontSize(9).font('Helvetica')
-      .text('Powered by Carrot Tickets', 50, doc.page.height - 60, { width: pageWidth, align: 'center' });
-  }
-
-  /**
-   * Fetch a remote image (event poster) into a Buffer for embedding via
-   * doc.image(). Non-critical: any failure (network, 404, an unsupported
-   * format PDFKit can't decode) resolves to null rather than throwing, so a
-   * bad poster never blocks the ticket PDF the buyer actually needs.
-   */
-  private static async fetchImageBuffer(url: string): Promise<Buffer | null> {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const arrayBuffer = await res.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch (error) {
-      console.error('[ticket-pdf] poster fetch failed:', error);
-      return null;
-    }
+      .text('Powered by Carrot Tickets', cardX, bodyBottom + footerH + 16, { width: cardW, align: 'center' });
   }
 
   private static fmtDate(d?: Date | string): string {
@@ -232,8 +192,4 @@ export class TicketPdfService {
     return `E${price.toFixed(2)}`;
   }
 
-  private static fmtStatus(status?: string): string {
-    if (!status) return '';
-    return status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  }
 }
