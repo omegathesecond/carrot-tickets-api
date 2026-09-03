@@ -7,6 +7,7 @@ const cfg: ServiceFeeConfig = {
   cardServiceFee: 15,
   deltapayServiceFee: 6,
   yocoServiceFee: 0,
+  yebopayServiceFee: 10,
 };
 
 describe('computeServiceFee — waiveServiceFee (allocation tiers)', () => {
