@@ -55,7 +55,10 @@ describe('story.service', () => {
       expect(out.media.status).toBe('processing');
       expect(out.media.processingStartedAt).toBeInstanceOf(Date);
       expect(mockTriggerTranscode).toHaveBeenCalledTimes(1);
-      expect(mockTriggerTranscode).toHaveBeenCalledWith(expect.objectContaining({ id: story.id }));
+      // Regression: a video Story MUST tell the transcoder to write its result
+      // back to the `stories` collection, not the default `updates` one — see
+      // transcode.client#Transcodable and the CAVEAT this used to carry.
+      expect(mockTriggerTranscode).toHaveBeenCalledWith(expect.objectContaining({ id: story.id, collection: 'stories' }));
     });
 
     it('finalizeStory throws 404 for an unknown id', async () => {
@@ -231,6 +234,42 @@ describe('story.service', () => {
 
       const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
       expect(groups).toHaveLength(0);
+    });
+
+    it('still surfaces the VIEWER\'S OWN processing story, with mediaStatus so the client can show it as pending', async () => {
+      const viewer = await seedBuyer('+26878400021');
+      await Story.create({
+        authorType: 'buyer', authorId: viewer._id, kind: 'video',
+        media: { rawKey: 'k', status: 'processing' },
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      });
+
+      const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
+      expect(groups).toHaveLength(1);
+      expect(groups[0]!.isOwn).toBe(true);
+      expect(groups[0]!.items[0]!.mediaStatus).toBe('processing');
+      expect(groups[0]!.items[0]!.mediaUrl).toBe('');
+    });
+
+    it('still surfaces the VIEWER\'S OWN failed story, with mediaStatus so the client can show a failure state', async () => {
+      const viewer = await seedBuyer('+26878400022');
+      await Story.create({
+        authorType: 'buyer', authorId: viewer._id, kind: 'video',
+        media: { rawKey: 'k', status: 'failed', error: 'transcode timed out' },
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      });
+
+      const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
+      expect(groups).toHaveLength(1);
+      expect(groups[0]!.items[0]!.mediaStatus).toBe('failed');
+    });
+
+    it('a ready story reports mediaStatus:ready', async () => {
+      const viewer = await seedBuyer('+26878400023');
+      await seedReadyStory('buyer', String(viewer._id));
+
+      const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
+      expect(groups[0]!.items[0]!.mediaStatus).toBe('ready');
     });
 
     it('reflects seen:true after markSeen for every item in the group', async () => {

@@ -53,7 +53,7 @@ export async function finalizeUpdate(id: string): Promise<IUpdate> {
   video.status = 'processing';
   await update.save();
   // fire-and-forget; durability comes from reconcileStuckUpdates (Task 8)
-  triggerTranscode(update).catch((err) => console.error('triggerTranscode failed:', err?.message));
+  triggerTranscode({ id: update.id, media: update.media, collection: 'updates' }).catch((err) => console.error('triggerTranscode failed:', err?.message));
   return update;
 }
 

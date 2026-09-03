@@ -1,5 +1,17 @@
 import { spawn } from 'child_process';
 
+/**
+ * Orientation: no explicit `transpose`/rotate filter here, and none needed.
+ * A phone-recorded portrait video carries its rotation as stream metadata
+ * (the `rotate`/`displaymatrix` side data), not baked into the pixels — the
+ * decoder/filter pipeline auto-applies that metadata before `-vf` runs
+ * (ffmpeg's `autorotate`, on by default since 4.3; this image's ffmpeg, from
+ * Alpine, is well past that). The encode then bakes the now-correctly-
+ * oriented frames into the output with no rotation tag left to interpret, so
+ * the width/height `parseProbe` reads back off THIS function's own output
+ * (never the raw upload) are already the final display dimensions — that's
+ * what index.ts stores as `video.width`/`video.height`.
+ */
 export function buildRenditionArgs(input: string, output: string, targetHeight: number): string[] {
   return [
     '-y', '-i', input,
