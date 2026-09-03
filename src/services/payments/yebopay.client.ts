@@ -30,6 +30,20 @@ import crypto from 'crypto';
 export type YeboPayCheckoutStatus = 'OPEN' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 
 /**
+ * How a TEST-key checkout behaves. Ignored entirely on a live key.
+ *
+ *  - `stripe_test` — a REAL Stripe test-mode PaymentIntent behind YeboPay's
+ *    branded Elements page. Pay with Stripe's test cards (4242… approves,
+ *    4000 0000 0000 0002 declines) and the outcome arrives as a genuine
+ *    signed `payment_intent.*` webhook. This is the default because it
+ *    exercises the same code path live money will, so a green sandbox run
+ *    actually means something.
+ *  - `simulated` — YeboPay's no-Stripe stub page with Succeed/Fail/Expire
+ *    buttons. No card entry, so it is the only option for automated tests.
+ */
+export type YeboPaySandboxMode = 'stripe_test' | 'simulated';
+
+/**
  * Map a YeboPay event type onto the outcomes the sale finalizer acts on.
  *
  * SECURITY: anything unrecognised maps to 'ignore', never 'success' — a
@@ -130,6 +144,27 @@ export class YeboPayClient {
     return this.apiKey.startsWith('ypk_test_');
   }
 
+  /**
+   * Which sandbox behaviour to request, or undefined on a live key (where
+   * YeboPay ignores the field and sending it would only be misleading).
+   *
+   * Throws on an unrecognised YEBOPAY_SANDBOX_MODE rather than quietly
+   * falling back: a typo'd value silently downgrading real Stripe test
+   * coverage to button-clicking is exactly the kind of failure that is
+   * discovered in production.
+   */
+  sandboxMode(): YeboPaySandboxMode | undefined {
+    if (!this.isTestMode()) return undefined;
+    const raw = process.env['YEBOPAY_SANDBOX_MODE'];
+    if (!raw) return 'stripe_test';
+    if (raw !== 'stripe_test' && raw !== 'simulated') {
+      throw new Error(
+        `Invalid YEBOPAY_SANDBOX_MODE '${raw}' (expected 'stripe_test' or 'simulated')`
+      );
+    }
+    return raw;
+  }
+
   private headers(): Record<string, string> {
     return { 'Content-Type': 'application/json', 'x-api-key': this.apiKey };
   }
@@ -142,6 +177,7 @@ export class YeboPayClient {
    * must never see a "working" checkout we cannot bill.
    */
   async createCheckout(p: YeboPayCheckoutCreateInput): Promise<YeboPayCheckoutCreateResult> {
+    const sandboxMode = this.sandboxMode();
     const res = await fetch(`${this.baseUrl}/v1/checkouts`, {
       method: 'POST',
       headers: this.headers(),
@@ -157,6 +193,8 @@ export class YeboPayClient {
         payment_method: 'CARD',
         success_url: p.successUrl,
         cancel_url: p.cancelUrl,
+        // Only present on a test key — see sandboxMode().
+        ...(sandboxMode ? { sandbox_mode: sandboxMode } : {}),
         ...(p.description ? { description: p.description } : {}),
         ...(p.email ? { email: p.email } : {}),
         ...(p.metadata ? { metadata: p.metadata } : {}),
