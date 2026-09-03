@@ -11,6 +11,7 @@ import { FeedController } from '@controllers/feed.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
 import { TicketPdfController } from '@controllers/ticketPdf.controller';
+import { MenuPublicController } from '@controllers/menuPublic.controller';
 import { authenticateBuyer, authenticateBuyerOrOrganizer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
@@ -153,6 +154,39 @@ router.get('/events/live', PublicController.getLiveEvents);
  * @access  Public
  */
 router.get('/events/:eventId', PublicController.getPublicEvent);
+
+/**
+ * @route   GET /api/public/events/:eventId/menu
+ * @desc    Active bar/vendor menu items for the event's Menu tab, plus the
+ *          preorder payment methods available and the current Carrot
+ *          service-charge percentage.
+ * @access  Public
+ */
+router.get('/events/:eventId/menu', MenuPublicController.getEventMenu);
+
+/**
+ * @route   POST /api/public/events/:eventId/menu-orders
+ * @desc    Place a bar/vendor preorder. keshless_wallet resolves synchronously
+ *          (card number + PIN for >= E50); mtn_momo returns a referenceId to
+ *          poll. Identity comes from the buyer token, never the body.
+ * @access  Buyer (Bearer buyer token)
+ * @body    items: [{ menuItemId, quantity }], paymentMethod, keshlessCardNumber?, keshlessPin?, momoPhone?, notes?
+ */
+router.post('/events/:eventId/menu-orders', authenticateBuyer, MenuPublicController.createOrder);
+
+/**
+ * @route   GET /api/public/menu-orders/momo/:referenceId/status
+ * @desc    Poll a pending MoMo preorder; finalizes when MTN reports SUCCESSFUL.
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/menu-orders/momo/:referenceId/status', authenticateBuyer, MenuPublicController.getMomoOrderStatus);
+
+/**
+ * @route   GET /api/public/my-menu-orders
+ * @desc    The signed-in buyer's Menu preorder history.
+ * @access  Buyer (Bearer buyer token)
+ */
+router.get('/my-menu-orders', authenticateBuyer, MenuPublicController.getMyOrders);
 
 /**
  * @route   GET /api/public/events/:eventId/reviews
