@@ -13,6 +13,11 @@ import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { PeachClient, classifyResultCode } from '@services/payments/peach.client';
 import { DeltapayClient, classifySessionStatus } from '@services/payments/deltapay.client';
 import { YocoClient, classifyEventType, toCents } from '@services/payments/yoco.client';
+import {
+  YeboPayClient,
+  classifyEventType as classifyYeboPayEventType,
+  classifyCheckoutStatus,
+} from '@services/payments/yebopay.client';
 import { ReservationService } from '@services/reservation.service';
 import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
@@ -1140,9 +1145,16 @@ export class TicketService {
   private static DELTAPAY_TTL_MS = 12 * 60_000;
   // ── Yoco hosted-checkout client (mocked in tests via jest.mock at module level) ──
   private static yocoClient = new YocoClient();
+
+  // ── YeboPay hosted-checkout client (mocked in tests via jest.mock at module level) ──
+  private static yebopayClient = new YeboPayClient();
   // 15 min — matches the Peach card hold: a hosted card page plus 3-D Secure
   // takes appreciably longer than a wallet approval.
   private static YOCO_TTL_MS = 15 * 60_000;
+
+  // YeboPay hosted checkouts live 24h provider-side, but Carrot holds inventory
+  // for far less — the hold, not the checkout, is what bounds the buyer's window.
+  private static YEBOPAY_TTL_MS = 15 * 60_000;
 
   /**
    * Initiate an async MTN MoMo purchase:
@@ -2556,6 +2568,393 @@ export class TicketService {
       console.error(`[yoco-stuck] ${stuck.length} Yoco sale(s) awaiting a webhook that never arrived`);
     }
     return stuck.length;
+  }
+
+  /**
+   * Initiate an async YeboPay hosted-checkout purchase:
+   * 1) Create PENDING sale with no tickets yet.
+   * 2) Reserve inventory (prevent oversell during the async window).
+   * 3) Create the YeboPay checkout — on failure, release reservation + fail sale + rethrow.
+   *
+   * Mirrors initiateDeltapayPurchase; differences: paymentMethod = YEBOPAY, the
+   * provider call is yebopayClient.createCheckout, and YeboPay takes THREE distinct
+   * return URLs (success / cancel / failure) rather than one.
+   */
+  static async initiateYeboPayPurchase(p: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone?: string;
+    customerName?: string;
+    // Buyer identity, when purchasing while logged in — persisted on the
+    // PENDING sale so finalizeYeboPaySale can stamp it onto the minted tickets.
+    customerEmail?: string;
+    buyerId?: string;
+    vendorId?: string;
+    soldBy?: string;
+    soldByType?: 'vendor' | 'reseller-operator';
+    resellerId?: string;
+    hubId?: string;
+    resellerCommissionPercent?: number;
+    channel?: SalesChannel;
+  }): Promise<{ checkoutId: string; redirectUrl: string; saleId: string; expiresAt: Date }> {
+    if (!this.yebopayClient.isConfigured()) throw new Error('YeboPay is not available');
+
+    // Checked up-front, BEFORE any sale row or inventory hold exists — a throw
+    // after the reserve would strand held tickets until the expiry sweep.
+    const returnUrl = process.env['YEBOPAY_RETURN_URL'];
+    if (!returnUrl) throw new Error('YEBOPAY_RETURN_URL is not configured');
+
+    const cfg = await PaymentConfigService.get();
+    if (!cfg.yebopayEnabled) throw new Error('YeboPay is not available');
+
+    const avail = await EventService.checkTicketAvailability(
+      p.eventId, p.ticketTypeId, p.quantity, PaymentMethod.YEBOPAY,
+      { buyerId: p.buyerId, phone: p.customerPhone }
+    );
+    if (!avail.available) throw new Error(avail.message || 'Tickets not available');
+
+    const tt = avail.ticketTypeData!;
+    const totalAmount = tt.price * p.quantity;
+
+    const event = await Event.findById(p.eventId);
+    if (!event) throw new Error('Event not found');
+    assertCarrotTicketing(event);
+
+    // Attribution: mirror initiateDeltapayPurchase defaults exactly.
+    const soldByType = p.soldByType ?? 'vendor';
+    const mappedSoldByType = SOLD_BY_TYPE_MAP[soldByType];
+    const channel = p.channel ?? deriveChannel(mappedSoldByType);
+    const vendorId = p.vendorId ?? event.vendorId;
+    const soldBy = p.soldBy ?? event.vendorId;
+
+    // Service fee — ONLINE checkout only (reseller/POS stay at face). Computed
+    // BEFORE the economic snapshot because on an event whose organizer absorbs
+    // the fee, the buyer is charged face and the fee becomes a deduction from
+    // organizerProceeds — so the snapshot below needs the amount.
+    const { serviceFeeAmount, amountCharged, absorbedServiceFeeAmount } =
+      channel === SalesChannel.ONLINE
+        ? computeServiceFee(totalAmount, p.quantity, PaymentMethod.YEBOPAY, cfg, {
+            waiveServiceFee: tt.waiveServiceFee,
+            absorbedByOrganizer: event.organizerAbsorbsServiceFee,
+          })
+        : { serviceFeeAmount: 0, amountCharged: totalAmount, absorbedServiceFeeAmount: 0 };
+
+    // Immutable economic snapshot — YeboPay is electronic so custody derives to 'carrot'.
+    const econ = await this.buildSaleSnapshot({
+      totalAmount,
+      paymentMethod: PaymentMethod.YEBOPAY,
+      mappedSoldByType,
+      resellerCommissionPercent: p.resellerCommissionPercent,
+      displayCurrency: event.currency ?? 'SZL',
+      absorbedServiceFeeAmount,
+    });
+    const saleResellerId = resolveSaleResellerId(tt, p.resellerId ? String(p.resellerId) : undefined);
+    const resellerAttribution = {
+      ...(saleResellerId ? { resellerId: saleResellerId } : {}),
+      ...(p.hubId ? { hubId: p.hubId } : {}),
+      ...(tt.isAllocation ? { isAllocation: true } : {}),
+    };
+
+    // 1) PENDING sale, no tickets yet
+    const sale = new TicketSale({
+      eventId: p.eventId,
+      vendorId,
+      ticketIds: [],
+      quantity: p.quantity,
+      customerName: p.customerName,
+      customerPhone: p.customerPhone,
+      ...(p.customerEmail ? { customerEmail: p.customerEmail.toLowerCase() } : {}),
+      ...(p.buyerId ? { buyerId: p.buyerId } : {}),
+      totalAmount,
+      paymentMethod: PaymentMethod.YEBOPAY,
+      paymentStatus: PaymentStatus.PENDING,
+      soldBy,
+      soldByType: mappedSoldByType,
+      channel,
+      ...resellerAttribution,
+      ...econ,
+      serviceFeeAmount,
+      amountCharged,
+      soldAt: new Date(),
+    });
+    await sale.save();
+
+    // 2) Reserve inventory
+    const { expiresAt } = await ReservationService.reserve({
+      eventId: p.eventId,
+      ticketTypeId: p.ticketTypeId,
+      quantity: p.quantity,
+      saleId: sale._id.toString(),
+      ttlMs: this.YEBOPAY_TTL_MS,
+    });
+    sale.reservationExpiresAt = expiresAt;
+
+    // 3) Create the YeboPay checkout; on failure release + fail + rethrow
+    try {
+      // Thread OUR reference through each return URL so the return handler can
+      // tell which sale the buyer came back from.
+      //
+      // This is a LOOKUP HINT ONLY — never proof of anything. Unlike the Peach
+      // and DeltaPay return handlers, this one does NOT finalise: YeboPay offers no
+      // status-query endpoint, so the ONLY thing that can move a sale to
+      // COMPLETED is a signature-verified webhook. A forged or guessed ref on
+      // the return URL therefore grants nothing beyond a status read.
+      const withRef = (outcome: 'success' | 'cancel' | 'failure') => {
+        const u = new URL(returnUrl);
+        u.searchParams.set('ref', sale.saleId);
+        u.searchParams.set('outcome', outcome);
+        return u.toString();
+      };
+
+      const checkout = await this.yebopayClient.createCheckout({
+        amount: amountCharged,
+        // SZL, not ZAR. Unlike Peach and Yoco, YeboPay accepts Emalangeni and
+        // applies the 1:1 Common Monetary Area peg itself when it reaches the
+        // card processor — so Carrot never does the conversion.
+        currency: settlementCurrencyForMethod(PaymentMethod.YEBOPAY),
+        successUrl: withRef('success'),
+        cancelUrl: withRef('cancel'),
+        description: `Carrot Tickets — sale ${sale.saleId}`,
+        ...(p.customerEmail ? { email: p.customerEmail } : {}),
+        // saleRef is how the webhook and the return handler find this sale.
+        // NOTE: YeboPay does NOT honour Idempotency-Key on checkout creation
+        // (only on /v1/charges), so unlike the Yoco rail there is no provider
+        // -side dedupe. The PENDING sale row is the dedupe anchor: initiate is
+        // only reached once per sale, and a retry creates a NEW sale.
+        metadata: { saleRef: sale.saleId, eventId: String(p.eventId) },
+      });
+
+      sale.yebopayCheckoutId = checkout.id;
+      await sale.save();
+      return {
+        checkoutId: checkout.id,
+        redirectUrl: checkout.hostedUrl,
+        saleId: sale._id.toString(),
+        expiresAt,
+      };
+    } catch (err) {
+      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Look up a YeboPay sale by its checkout ID. Returns null if not found. Never throws.
+   */
+  static async getYeboPaySaleByCheckoutId(
+    checkoutId: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ yebopayCheckoutId: checkoutId });
+  }
+
+  /**
+   * Look up a YeboPay sale by OUR OWN reference (sale.saleId), for the return
+   * redirect. A lookup hint only — see initiateYeboPayPurchase.
+   */
+  static async getYeboPaySaleByRef(
+    saleRef: string
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({ saleId: saleRef, paymentMethod: PaymentMethod.YEBOPAY });
+  }
+
+  /**
+   * Finalize a YeboPay sale from an ALREADY-VERIFIED webhook payload. Idempotent.
+   *
+   * WHY THE SIGNATURE DIFFERS FROM ITS PEACH/DELTAPAY TWINS: YeboPay publishes no
+   * status-query endpoint, so there is nothing to ask "is this paid?". The
+   * caller (YeboPayController.webhook) MUST have already checked the Standard-
+   * Webhooks signature; this method then treats the payload as authoritative.
+   * Never call it with an unverified body — that is the whole security boundary.
+   *
+   * - Sale not PENDING → return current status immediately (no re-mint).
+   * - Unknown event type → 'pending', hold left intact (never mints).
+   * - payment.failed → release + fail.
+   * - payment.succeeded → AMOUNT/CURRENCY GUARD (cents, against
+   *   `amountCharged ?? totalAmount`) → ATOMIC claim → mint.
+   */
+  static async finalizeYeboPaySale(
+    checkoutId: string,
+    // `amount` is YeboPay's DECIMAL string/number ("150.0000"), not cents.
+    event: { type: string; amount: string | number; currency: string }
+  ): Promise<{ status: 'completed' | 'failed' | 'pending' }> {
+    const sale = await TicketSale.findOne({ yebopayCheckoutId: checkoutId });
+    if (!sale) throw new Error('Sale not found for checkout id');
+
+    // Already finalized — idempotent return
+    if (sale.paymentStatus !== PaymentStatus.PENDING) {
+      return { status: sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed' };
+    }
+
+    const outcome = classifyYeboPayEventType(event.type);
+
+    // 'ignore' covers refund events and anything YeboPay adds later. Leaving the
+    // sale PENDING (rather than failing it) keeps the inventory hold alive so a
+    // genuine payment.succeeded arriving afterwards can still mint.
+    if (outcome === 'ignore') return { status: 'pending' };
+
+    const reservation = await TicketReservation.findOne({ saleId: sale._id });
+    const ticketTypeId = reservation?.ticketTypeId;
+
+    if (outcome === 'rejected') {
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // succeeded — verify the EXACT amount + currency YeboPay reports before minting.
+    // YeboPay reports DECIMAL amounts ("150.0000"), unlike Yoco's integer cents,
+    // so normalise BOTH sides to integer cents before comparing: float equality
+    // on 150.0000 vs 150 is a trap worth designing out, and this check is the
+    // last thing between a tampered amount and a minted ticket.
+    const expectedCents = toCents(sale.amountCharged ?? sale.totalAmount);
+    const confirmedAmount = Number(event.amount);
+    const confirmedCents = Number.isFinite(confirmedAmount) ? toCents(confirmedAmount) : NaN;
+    const expectedCurrency = settlementCurrencyForMethod(PaymentMethod.YEBOPAY);
+    if (
+      !Number.isFinite(confirmedCents) ||
+      confirmedCents !== expectedCents ||
+      event.currency !== expectedCurrency
+    ) {
+      console.error('[yebopay finalize] amount/currency mismatch — refusing to mint', {
+        checkoutId,
+        expected: { amountCents: expectedCents, currency: expectedCurrency },
+        confirmed: { amount: event.amount, currency: event.currency },
+      });
+      await ReservationService.release(sale._id.toString());
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      return { status: 'failed' };
+    }
+
+    // Atomically CLAIM the sale so a retried webhook + the poll can't double-mint
+    const claimed = await TicketSale.findOneAndUpdate(
+      { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } },
+      { new: true }
+    );
+    if (!claimed) return { status: 'completed' }; // someone else already finalized
+
+    // Mint tickets, confirm reservation (reserved→sold), best-effort SMS/email
+    const eventDoc = await Event.findById(sale.eventId);
+    const ticketTypeDoc = eventDoc?.ticketTypes.find((t: any) => t._id?.toString() === ticketTypeId);
+    const tickets: ITicket[] = [];
+    for (let i = 0; i < sale.quantity; i++) {
+      const t = this.buildTicket({
+        eventId: sale.eventId,
+        vendorId: sale.vendorId,
+        ticketType: ticketTypeDoc?.name || 'Ticket',
+        price: sale.totalAmount / sale.quantity,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        customerEmail: sale.customerEmail,
+        buyerId: sale.buyerId,
+        saleId: sale._id,
+        // The sale already carries the currency stamped at initiate time
+        // (buildSaleSnapshot) — reuse it rather than re-deriving from event.
+        currency: sale.currency ?? 'SZL',
+      });
+      await t.save();
+      tickets.push(t);
+    }
+
+    claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
+    await claimed.save();
+
+    await ReservationService.confirm(sale._id.toString()); // reserved -= qty
+    if (ticketTypeId) {
+      await EventService.updateTicketsSold(
+        sale.eventId.toString(),
+        ticketTypeId,
+        sale.quantity,
+        sale.totalAmount
+      ); // sold += qty
+    }
+
+    if (eventDoc) {
+      const summaries = tickets.map(t => ({
+        ticketId: t.ticketId,
+        eventName: eventDoc.name,
+        eventDate: eventDoc.eventDate.toISOString(),
+        startTime: eventDoc.startTime?.toISOString(),
+        venue: eventDoc.venue,
+      }));
+      if (sale.customerPhone) {
+        SmsService.sendTicketConfirmation(sale.customerPhone, summaries)
+          .catch(err => console.error('[SMS] yebopay confirmation threw', err));
+      }
+      if (sale.customerEmail) {
+        EmailService.sendTicketConfirmation(sale.customerEmail, summaries)
+          .catch(err => console.error('[Email] yebopay confirmation threw', err));
+      }
+    }
+
+    await this.autoFollowOrganizerForSale(claimed);
+
+    return { status: 'completed' };
+  }
+
+  /**
+   * Reconcile PENDING YeboPay sales by ASKING YeboPay, then finalising.
+   *
+   * This is the rail's real advantage over Yoco: YeboPay publishes
+   * `GET /v1/checkouts/:id`, so a sale whose webhook never arrived can still be
+   * resolved instead of merely reported. That matters because YeboPay webhook
+   * delivery has NO automatic retry — a single failed POST would otherwise
+   * strand a paid sale until a human noticed.
+   *
+   * Runs ahead of the reservation-expiry sweep so a paid sale is minted, never
+   * failed. Pairs with the ReservationService carve-out that leaves YeboPay
+   * sales PENDING precisely so a late confirmation can still mint them.
+   */
+  static async reconcilePendingYeboPaySales(olderThanMs = 90_000): Promise<{ minted: number; failed: number; pending: number }> {
+    if (!this.yebopayClient.isConfigured()) return { minted: 0, failed: 0, pending: 0 };
+
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await TicketSale.find({
+      paymentMethod: PaymentMethod.YEBOPAY,
+      paymentStatus: PaymentStatus.PENDING,
+      yebopayCheckoutId: { $exists: true, $nin: [null, ''] },
+      createdAt: { $lt: cutoff },
+    }).limit(100);
+
+    let minted = 0, failed = 0, pending = 0;
+    for (const sale of stuck) {
+      // One bad row must not stop the batch — the next sale may be a paid one
+      // waiting to mint. Never swallowed silently.
+      try {
+        const remote = await this.yebopayClient.getCheckout(sale.yebopayCheckoutId!);
+        const outcome = classifyCheckoutStatus(remote.status);
+        if (outcome === 'pending') { pending += 1; continue; }
+
+        // Route through the SAME finalizer the webhook uses, so the amount and
+        // currency verification runs here too. A reconcile path that trusted the
+        // status alone would be a way around that check.
+        const res = await this.finalizeYeboPaySale(sale.yebopayCheckoutId!, {
+          type: outcome === 'success' ? 'checkout.completed' : 'checkout.expired',
+          amount: remote.amount ?? 0,
+          currency: remote.currency ?? settlementCurrencyForMethod(PaymentMethod.YEBOPAY),
+        });
+        if (res.status === 'completed') minted += 1;
+        else if (res.status === 'failed') failed += 1;
+        else pending += 1;
+      } catch (err) {
+        console.error('[yebopay reconcile] could not resolve sale', {
+          saleId: sale.saleId,
+          checkoutId: sale.yebopayCheckoutId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (minted || failed) {
+      console.log('[yebopay reconcile] resolved', { minted, failed, pending, scanned: stuck.length });
+    }
+    return { minted, failed, pending };
   }
 
   /**

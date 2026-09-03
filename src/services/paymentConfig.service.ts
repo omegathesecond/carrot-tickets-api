@@ -7,6 +7,7 @@ const DEFAULTS = {
   peachCardEnabled: false,
   deltapayEnabled: false, // off until DeltaPay issues live credentials
   yocoEnabled: false, // off until Yoco credentials are bound + verified
+  yebopayEnabled: false, // off until the YeboPay key is bound + verified
   defaultResellerCommissionPercent: 0,
   platformFeePercent: 0,
   // Live launch values (flat E, added on top at online checkout). Overridable in
@@ -16,6 +17,7 @@ const DEFAULTS = {
   cardServiceFee: 10,
   deltapayServiceFee: 5, // wallet rail — priced like MoMo
   yocoServiceFee: 0, // set at launch alongside the toggle
+  yebopayServiceFee: 0, // set at launch alongside the toggle
 };
 
 type PaymentConfig = typeof DEFAULTS;

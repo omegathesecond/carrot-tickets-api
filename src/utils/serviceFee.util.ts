@@ -16,6 +16,7 @@ export interface ServiceFeeConfig {
   cardServiceFee: number;
   deltapayServiceFee: number;
   yocoServiceFee: number;
+  yebopayServiceFee: number;
 }
 
 /** Hard cap on tickets a buyer may purchase in a single online order. */
@@ -24,6 +25,19 @@ export const MAX_TICKETS_PER_ORDER = 10;
 /** Round to 2 decimals (cents), guarding against binary-float drift. */
 export function round2(x: number): number {
   return Math.round((x + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Integer CENTS from a decimal amount. Guards binary-float drift
+ * (80.7 * 100 = 8069.999…).
+ *
+ * Lives here rather than in a provider client because more than one rail needs
+ * it: Yoco sends cents on the wire, and the YeboPay rail normalises YeboPay's
+ * DECIMAL amounts to cents purely to compare them safely — float equality on
+ * "150.0000" vs 150 is a trap worth designing out.
+ */
+export function toCents(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100);
 }
 
 /** The configured PER-TICKET fee for a method (0 for cash / anything without a fee). */
@@ -39,6 +53,8 @@ export function serviceFeeFor(method: PaymentMethod, cfg: ServiceFeeConfig): num
       return cfg.deltapayServiceFee || 0;
     case PaymentMethod.YOCO:
       return cfg.yocoServiceFee || 0;
+    case PaymentMethod.YEBOPAY:
+      return cfg.yebopayServiceFee || 0;
     default:
       return 0;
   }

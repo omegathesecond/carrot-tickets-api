@@ -19,10 +19,11 @@ import crypto from 'crypto';
  * as the Peach card rail), so the numeric amount carries over unchanged.
  */
 
-/** Yoco takes integer CENTS. Guard against binary-float drift (80.7*100 = 8069.999…). */
-export function toCents(amount: number): number {
-  return Math.round((amount + Number.EPSILON) * 100);
-}
+// Yoco takes integer CENTS. The helper now lives in @utils/serviceFee.util
+// because the YeboPay rail needs the same conversion; re-exported here so
+// existing importers of yoco.client are unaffected.
+import { toCents } from '@utils/serviceFee.util';
+export { toCents };
 
 /**
  * Map a webhook event type onto the outcomes the sale finalizer acts on.

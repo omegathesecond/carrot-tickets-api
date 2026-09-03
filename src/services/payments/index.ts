@@ -6,6 +6,7 @@ import { MtnMomoProcessor } from './mtnMomo.processor';
 import { CardProcessor } from './card.processor';
 import { DeltapayProcessor } from './deltapay.processor';
 import { YocoProcessor } from './yoco.processor';
+import { YeboPayProcessor } from './yebopay.processor';
 
 const processors: Record<string, PaymentProcessor> = {
   [PaymentMethod.CASH]: new CashProcessor(),
@@ -14,6 +15,7 @@ const processors: Record<string, PaymentProcessor> = {
   [PaymentMethod.PEACH_CARD]: new CardProcessor(),
   [PaymentMethod.DELTAPAY]: new DeltapayProcessor(),
   [PaymentMethod.YOCO]: new YocoProcessor(),
+  [PaymentMethod.YEBOPAY]: new YeboPayProcessor(),
 };
 
 export function getProcessor(method: PaymentMethod): PaymentProcessor {

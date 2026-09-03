@@ -133,6 +133,15 @@ const ticketSaleSchema = new Schema<ITicketSale>({
     index: true,
     trim: true
   },
+  // YeboPay checkout ID. Unlike Yoco, YeboPay DOES publish a status endpoint
+  // (GET /v1/checkouts/:id), so this key also drives reconcilePendingYeboPaySales —
+  // a sale whose webhook never arrived can be resolved by asking, not just reported.
+  yebopayCheckoutId: {
+    type: String,
+    sparse: true,
+    index: true,
+    trim: true,
+  },
   reservationExpiresAt: {
     type: Date,
     index: true
