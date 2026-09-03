@@ -6,7 +6,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { buyerTicketOr } from '@utils/ticketHolder.util';
 
-const EVENT_POPULATE_FIELDS = 'name venue eventDate startTime endTime';
+const EVENT_POPULATE_FIELDS = 'name venue eventDate startTime endTime posterUrl';
 // Guards a pathological request (e.g. a hand-crafted body) from asking for an
 // unbounded number of pages in one PDF.
 const MAX_BUNDLE_TICKETS = 100;
