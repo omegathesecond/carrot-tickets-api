@@ -7,6 +7,7 @@ export const sendMessageSchema = Joi.object({
 
 export const updateProfileSchema = Joi.object({
   username: Joi.string().optional(),
+  name: Joi.string().trim().min(1).max(100).optional(),
   bio: Joi.string().allow('').max(280).optional(),
   dmPrivacy: Joi.string().valid('community', 'friends').optional(),
   notificationPrefs: Joi.object({
