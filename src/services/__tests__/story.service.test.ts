@@ -1,8 +1,9 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { createStory, deleteStory, finalizeStory, listForViewer, markSeen } from '@services/story.service';
+import { createStory, deleteStory, finalizeStory, listForViewer, listLikers, markSeen, toggleLike } from '@services/story.service';
 import { Story } from '@models/story.model';
 import { StorySeen } from '@models/storySeen.model';
+import { Notification } from '@models/notification.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { FollowService } from '@services/follow.service';
@@ -19,6 +20,12 @@ jest.mock('@utils/updatesR2', () => ({
 }));
 const mockTriggerTranscode = jest.fn().mockResolvedValue(undefined);
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: (...a: any[]) => mockTriggerTranscode(...a) }));
+jest.mock('@services/push.service', () => ({
+  PushService: { sendToBuyer: jest.fn().mockResolvedValue(undefined) },
+}));
+jest.mock('@utils/buyerOnline.util', () => ({
+  isBuyerOnline: jest.fn().mockResolvedValue(false),
+}));
 
 describe('story.service', () => {
   beforeAll(connectTestDb);
@@ -268,6 +275,157 @@ describe('story.service', () => {
       const viewer = await seedBuyer('+26878400016');
       const groups = await listForViewer({ type: 'buyer', id: String(viewer._id) });
       expect(groups).toEqual([]);
+    });
+
+    it('carries likeCount on the viewer\'s own item, but not on someone else\'s', async () => {
+      const author = await seedBuyer('+26878400021');
+      const other = await seedBuyer('+26878400022');
+      const liker = await seedBuyer('+26878400023');
+      const ownStory = await seedReadyStory('buyer', String(author._id));
+      const otherStory = await seedReadyStory('buyer', String(other._id));
+      await toggleLike(ownStory.id, { type: 'buyer', id: String(liker._id) });
+
+      const asAuthor = await listForViewer({ type: 'buyer', id: String(author._id) });
+      expect(asAuthor[0]!.items[0]!.likeCount).toBe(1);
+
+      const asStranger = await listForViewer({ type: 'buyer', id: String(other._id) });
+      const strangerOwnItem = asStranger.find((g) => g.isOwn)!.items[0]!;
+      expect(strangerOwnItem.likeCount).toBe(0);
+      const foreignGroup = asStranger.find((g) => !g.isOwn)!;
+      expect(foreignGroup.items[0]!.likeCount).toBeUndefined();
+      void otherStory;
+    });
+  });
+
+  describe('toggleLike', () => {
+    const seedBuyer = (phone: string, extra: Record<string, unknown> = {}) => Buyer.create({ phone, password: 'secret1', ...extra });
+    const seedReadyStory = (authorType: 'buyer' | 'vendor', authorId: string) =>
+      Story.create({
+        authorType, authorId, kind: 'image',
+        media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn.carrottickets.com/x.jpg', width: 1, height: 1 } },
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      });
+
+    it('likes then unlikes, and a second like creates no duplicate row', async () => {
+      const author = await seedBuyer('+26878400030');
+      const liker = await seedBuyer('+26878400031');
+      const story = await seedReadyStory('buyer', String(author._id));
+
+      const first = await toggleLike(story.id, { type: 'buyer', id: String(liker._id) });
+      expect(first.liked).toBe(true);
+      const second = await toggleLike(story.id, { type: 'buyer', id: String(liker._id) });
+      expect(second.liked).toBe(false);
+      const third = await toggleLike(story.id, { type: 'buyer', id: String(liker._id) });
+      expect(third.liked).toBe(true);
+
+      const rows = await listLikers(story.id, { type: 'buyer', id: String(author._id) });
+      expect(rows).toHaveLength(1);
+    });
+
+    it('notifies the buyer author with "[Username] liked your story." when someone else likes', async () => {
+      const author = await seedBuyer('+26878400032');
+      const liker = await seedBuyer('+26878400033', { name: 'Liker Name', username: 'likerhandle' });
+      const story = await seedReadyStory('buyer', String(author._id));
+
+      await toggleLike(story.id, { type: 'buyer', id: String(liker._id) });
+
+      const rows = await Notification.find({ recipientType: 'buyer', recipientId: author._id, type: 'story_like' });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.body).toBe('likerhandle liked your story.');
+      expect(rows[0]!.data.storyId).toBe(story.id);
+      expect(rows[0]!.data.actorId).toBe(String(liker._id));
+    });
+
+    it('notifies a vendor author directly when a buyer likes their story', async () => {
+      const vendor = await Vendor.create({ businessName: 'Acme Events', email: 'acme-like@x.co', password: 'secret1' });
+      const liker = await seedBuyer('+26878400034');
+      const story = await seedReadyStory('vendor', String(vendor._id));
+
+      await toggleLike(story.id, { type: 'buyer', id: String(liker._id) });
+
+      const rows = await Notification.find({ recipientType: 'vendor', recipientId: vendor._id, type: 'story_like' });
+      expect(rows).toHaveLength(1);
+    });
+
+    it('never notifies the author for liking their OWN story', async () => {
+      const author = await seedBuyer('+26878400035');
+      const story = await seedReadyStory('buyer', String(author._id));
+
+      await toggleLike(story.id, { type: 'buyer', id: String(author._id) });
+
+      const rows = await Notification.find({ recipientType: 'buyer', recipientId: author._id, type: 'story_like' });
+      expect(rows).toHaveLength(0);
+    });
+
+    it('does not notify again on unlike', async () => {
+      const author = await seedBuyer('+26878400036');
+      const liker = await seedBuyer('+26878400037');
+      const story = await seedReadyStory('buyer', String(author._id));
+
+      await toggleLike(story.id, { type: 'buyer', id: String(liker._id) }); // like
+      await toggleLike(story.id, { type: 'buyer', id: String(liker._id) }); // unlike
+
+      const rows = await Notification.find({ recipientType: 'buyer', recipientId: author._id, type: 'story_like' });
+      expect(rows).toHaveLength(1);
+    });
+
+    it('throws 404 for an unknown story id', async () => {
+      await expect(toggleLike(new mongoose.Types.ObjectId().toString(), { type: 'buyer', id: buyerId() })).rejects.toMatchObject({ statusCode: 404 });
+    });
+  });
+
+  describe('listLikers', () => {
+    const seedBuyer = (phone: string, extra: Record<string, unknown> = {}) => Buyer.create({ phone, password: 'secret1', ...extra });
+    const seedReadyStory = (authorType: 'buyer' | 'vendor', authorId: string) =>
+      Story.create({
+        authorType, authorId, kind: 'image',
+        media: { rawKey: 'k', status: 'ready', image: { url: 'https://cdn.carrottickets.com/x.jpg', width: 1, height: 1 } },
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      });
+
+    it('author-only: throws 403 for a non-author', async () => {
+      const author = await seedBuyer('+26878400040');
+      const stranger = await seedBuyer('+26878400041');
+      const story = await seedReadyStory('buyer', String(author._id));
+      await expect(listLikers(story.id, { type: 'buyer', id: String(stranger._id) })).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it('throws 404 for an unknown story id', async () => {
+      await expect(listLikers(new mongoose.Types.ObjectId().toString(), { type: 'buyer', id: buyerId() })).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('lists each liker\'s profile picture, name and username, newest first', async () => {
+      const author = await seedBuyer('+26878400042');
+      const first = await seedBuyer('+26878400043', { name: 'First Liker', username: 'first_liker', avatarUrl: 'https://cdn.x/first.jpg' });
+      const second = await seedBuyer('+26878400044', { name: 'Second Liker', username: 'second_liker' });
+      const story = await seedReadyStory('buyer', String(author._id));
+
+      await toggleLike(story.id, { type: 'buyer', id: String(first._id) });
+      await toggleLike(story.id, { type: 'buyer', id: String(second._id) });
+
+      const rows = await listLikers(story.id, { type: 'buyer', id: String(author._id) });
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ type: 'buyer', id: String(second._id), name: 'Second Liker', username: 'second_liker' });
+      expect(rows[1]).toMatchObject({ type: 'buyer', id: String(first._id), name: 'First Liker', username: 'first_liker', avatarUrl: 'https://cdn.x/first.jpg' });
+    });
+
+    it('drops a like when the liker unlikes', async () => {
+      const author = await seedBuyer('+26878400045');
+      const liker = await seedBuyer('+26878400046');
+      const story = await seedReadyStory('buyer', String(author._id));
+
+      await toggleLike(story.id, { type: 'buyer', id: String(liker._id) });
+      await toggleLike(story.id, { type: 'buyer', id: String(liker._id) }); // unlike
+
+      const rows = await listLikers(story.id, { type: 'buyer', id: String(author._id) });
+      expect(rows).toHaveLength(0);
+    });
+
+    it('returns an empty array (not 403) for the author when nobody has liked yet', async () => {
+      const author = await seedBuyer('+26878400047');
+      const story = await seedReadyStory('buyer', String(author._id));
+      const rows = await listLikers(story.id, { type: 'buyer', id: String(author._id) });
+      expect(rows).toEqual([]);
     });
   });
 });

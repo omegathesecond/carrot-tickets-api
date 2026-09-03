@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
-import { createStory, deleteStory, finalizeStory, listForViewer, listViewers, markSeen, toggleLike } from '@services/story.service';
+import { createStory, deleteStory, finalizeStory, listForViewer, listLikers, listViewers, markSeen, toggleLike } from '@services/story.service';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
 import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import { Story } from '@models/story.model';
@@ -229,6 +229,34 @@ export class StoryController {
       return ApiResponseUtil.success(res, { viewers, count: viewers.length });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load story viewers');
+    }
+  }
+
+  /**
+   * Who has liked one story, newest first. Author-only — the service throws
+   * 403 for anyone else, same privacy rule as `viewers` above.
+   */
+  static async likers(req: Request, res: Response): Promise<any> {
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.likersFor({ type: 'buyer', id: String(buyer._id) }, req, res);
+  }
+
+  /** GET /api/tickets/social/stories/:id/likers */
+  static async likersAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.likersFor(actor, req, res);
+  }
+
+  private static async likersFor(actor: SocialActor, req: Request, res: Response): Promise<any> {
+    const id = req.params['id'] as string;
+    if (!HEX24.test(id)) return ApiResponseUtil.validationError(res, 'Invalid story id');
+    try {
+      const likers = await listLikers(id, actor);
+      return ApiResponseUtil.success(res, { likers, count: likers.length });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load story likers');
     }
   }
 }

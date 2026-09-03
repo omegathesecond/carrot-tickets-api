@@ -7,6 +7,8 @@ import { updatesR2 } from '@utils/updatesR2';
 import { triggerTranscode } from '@services/transcode.client';
 import { awardStoryPointsIfEligible } from '@services/storyPoints.service';
 import { BlockService } from '@services/block.service';
+import { NotificationService } from '@services/notification.service';
+import { NotificationDispatcher } from '@services/notificationDispatcher.service';
 import { HttpError } from '@utils/httpError.util';
 import { isActorAuthorOf, type SocialActor } from '@utils/socialActor.util';
 import type { StoryKind } from '@interfaces/story.interface';
@@ -152,7 +154,7 @@ export async function markSeen(storyId: string, actor: SocialActor): Promise<voi
  * closing and reopening the viewer.
  */
 export async function toggleLike(storyId: string, actor: SocialActor): Promise<{ liked: boolean }> {
-  const story = await Story.findById(storyId).select('_id');
+  const story = await Story.findById(storyId).select('authorType authorId');
   if (!story) throw new HttpError(404, 'Story not found');
   const existing = await StoryLike.findOne({ storyId, actorType: actor.type, buyerId: actor.id });
   if (existing) {
@@ -164,7 +166,45 @@ export async function toggleLike(storyId: string, actor: SocialActor): Promise<{
   } catch (err: any) {
     if (err?.code !== 11000) throw err; // raced with another like — already liked
   }
+  // Best-effort: tell the author they got a like. Awaited (like
+  // follow.service#notifyOrganizerFollowed) so the caller's response reflects
+  // a completed attempt, but internally swallowed — a notification failure
+  // must never make the like itself appear to fail.
+  await notifyStoryLiked(story, storyId, actor).catch((err: any) => console.error('[story] notifyStoryLiked failed:', err?.message));
   return { liked: true };
+}
+
+/** "[Username] liked your story." — fired once per like (not on unlike, and
+ *  never for liking your own story). Routes through the buyer dispatcher
+ *  (prefs + block-filtering + push) when the author is a buyer, same as
+ *  every other buyer-facing notification; a vendor author is written
+ *  directly, mirroring follow.service#notifyOrganizerFollowed. */
+async function notifyStoryLiked(
+  story: Pick<IStory, 'authorType' | 'authorId'>,
+  storyId: string,
+  actor: SocialActor
+): Promise<void> {
+  if (isActorAuthorOf(story.authorType, story.authorId, actor)) return; // liking your own story
+  let name = 'Someone';
+  let username: string | undefined;
+  if (actor.type === 'buyer') {
+    const b = await Buyer.findById(actor.id).select('username name');
+    name = b?.username ?? b?.name ?? 'Someone';
+    username = b?.username ?? undefined;
+  } else {
+    const v = await Vendor.findById(actor.id).select('businessName');
+    name = v?.businessName ?? 'A brand';
+  }
+  const body = `${name} liked your story.`;
+  const data = { storyId, actorId: actor.id, actorType: actor.type, ...(username ? { username } : {}) };
+  if (story.authorType === 'vendor') {
+    await NotificationService.create('vendor', String(story.authorId), 'story_like', 'New like', body, data).catch(() => undefined);
+  } else {
+    // Awaited (unlike message.service's DM fan-out, which is fire-and-forget
+    // for latency): a like is a single-recipient write, cheap enough that the
+    // caller can wait for prefs/block-filtering/push to actually complete.
+    await NotificationDispatcher.dispatch([String(story.authorId)], 'story_like', 'New like', body, data, actor.id);
+  }
 }
 
 export interface StoryViewerDto {
@@ -228,6 +268,65 @@ export async function listViewers(storyId: string, actor: SocialActor): Promise<
   });
 }
 
+export interface StoryLikerDto {
+  type: 'buyer' | 'organizer';
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  likedAt: Date;
+}
+
+/**
+ * Who has liked one story, most recent first. AUTHOR-ONLY, same shape and
+ * privacy rule as listViewers above: a non-author gets 403 rather than an
+ * empty list, so "nobody has liked yet" and "you can't see this" never look
+ * the same.
+ */
+export async function listLikers(storyId: string, actor: SocialActor): Promise<StoryLikerDto[]> {
+  const story = await Story.findById(storyId).select('authorType authorId');
+  if (!story) throw new HttpError(404, 'Story not found');
+  if (!isActorAuthorOf(story.authorType, story.authorId, actor)) {
+    throw new HttpError(403, 'Not your story');
+  }
+
+  const rows = await StoryLike.find({ storyId }).sort({ createdAt: -1 });
+  if (rows.length === 0) return [];
+
+  const buyerIds = rows.filter((r) => r.actorType === 'buyer').map((r) => String(r.buyerId));
+  const vendorIds = rows.filter((r) => r.actorType === 'vendor').map((r) => String(r.buyerId));
+  const [buyers, vendors] = await Promise.all([
+    buyerIds.length ? Buyer.find({ _id: { $in: buyerIds } }).select('name username avatarUrl') : [],
+    vendorIds.length ? Vendor.find({ _id: { $in: vendorIds } }).select('businessName logoUrl') : [],
+  ]);
+  const bMap = new Map(buyers.map((b: any) => [String(b._id), b]));
+  const vMap = new Map(vendors.map((v: any) => [String(v._id), v]));
+
+  return rows.map((r) => {
+    const id = String(r.buyerId);
+    if (r.actorType === 'vendor') {
+      const v = vMap.get(id);
+      return {
+        type: 'organizer' as const,
+        id,
+        name: v?.businessName ?? 'Organizer',
+        username: null,
+        avatarUrl: v?.logoUrl ?? null,
+        likedAt: r.createdAt,
+      };
+    }
+    const b = bMap.get(id);
+    return {
+      type: 'buyer' as const,
+      id,
+      name: b?.name ?? null,
+      username: b?.username ?? null,
+      avatarUrl: b?.avatarUrl ?? null,
+      likedAt: r.createdAt,
+    };
+  });
+}
+
 export interface StoryItemDto {
   id: string;
   mediaUrl: string;
@@ -237,6 +336,10 @@ export interface StoryItemDto {
   /** How many others have seen this item. Only populated on the viewer's OWN
    *  items — view counts on other people's stories are private. */
   viewerCount?: number;
+  /** How many people have liked this item. Only populated on the viewer's OWN
+   *  items, same privacy scoping as viewerCount — displayed next to "Seen N"
+   *  as "Likes N" (spec: Story Likes and Notifications Update). */
+  likeCount?: number;
   /** Whether the viewer has liked this item — round-tripped so the Like
    *  button in the story viewer opens already in the right state instead of
    *  resetting every time the story is closed and reopened. */
@@ -292,17 +395,26 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
   const seenSet = new Set(seenRows.map((r: any) => String(r.storyId)));
   const likedSet = new Set(likedRows.map((r: any) => String(r.storyId)));
 
-  // "Seen by N" for the viewer's OWN items, so the rail/viewer can label the
-  // count without a second round-trip. Scoped to own stories only — view
-  // counts on other people's stories are the author's business, not yours.
+  // "Seen by N" / "Liked by N" for the viewer's OWN items, so the rail/viewer
+  // can label both counts without extra round-trips. Scoped to own stories
+  // only — seen/like counts on other people's stories are the author's
+  // business, not yours.
   const ownStoryIds = stories.filter((s) => isActorAuthorOf(s.authorType, s.authorId, actor)).map((s) => s._id);
   const viewerCounts = new Map<string, number>();
+  const likeCounts = new Map<string, number>();
   if (ownStoryIds.length) {
-    const counts = await StorySeen.aggregate<{ _id: any; n: number }>([
-      { $match: { storyId: { $in: ownStoryIds } } },
-      { $group: { _id: '$storyId', n: { $sum: 1 } } },
+    const [seenCounts, likeCountRows] = await Promise.all([
+      StorySeen.aggregate<{ _id: any; n: number }>([
+        { $match: { storyId: { $in: ownStoryIds } } },
+        { $group: { _id: '$storyId', n: { $sum: 1 } } },
+      ]),
+      StoryLike.aggregate<{ _id: any; n: number }>([
+        { $match: { storyId: { $in: ownStoryIds } } },
+        { $group: { _id: '$storyId', n: { $sum: 1 } } },
+      ]),
     ]);
-    for (const c of counts) viewerCounts.set(String(c._id), c.n);
+    for (const c of seenCounts) viewerCounts.set(String(c._id), c.n);
+    for (const c of likeCountRows) likeCounts.set(String(c._id), c.n);
   }
 
   const groups = new Map<string, StoryGroupDto & { latestCreatedAt: number }>();
@@ -326,7 +438,7 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
       durationSec: playbackDurationSec(s),
       createdAt: s.createdAt,
       viewerHasLiked: likedSet.has(String(s._id)),
-      ...(isOwnStory ? { viewerCount: viewerCounts.get(String(s._id)) ?? 0 } : {}),
+      ...(isOwnStory ? { viewerCount: viewerCounts.get(String(s._id)) ?? 0, likeCount: likeCounts.get(String(s._id)) ?? 0 } : {}),
     });
     group.latestCreatedAt = s.createdAt.getTime();
     if (!seenSet.has(String(s._id))) group.seen = false;

@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type NotificationType = 'announcement' | 'dm' | 'mention' | 'friend' | 'event_reminder' | 'follow' | 'meetup_request' | 'meetup_accepted' | 'enquiry_received';
+export type NotificationType = 'announcement' | 'dm' | 'mention' | 'friend' | 'event_reminder' | 'follow' | 'meetup_request' | 'meetup_accepted' | 'enquiry_received' | 'story_like';
 
 export type NotificationRecipientType = 'buyer' | 'vendor';
 
@@ -24,7 +24,7 @@ const notificationSchema = new Schema<INotification>(
     recipientId: { type: Schema.Types.ObjectId, required: true },
     type: {
       type: String,
-      enum: ['announcement', 'dm', 'mention', 'friend', 'event_reminder', 'follow', 'meetup_request', 'meetup_accepted', 'enquiry_received'],
+      enum: ['announcement', 'dm', 'mention', 'friend', 'event_reminder', 'follow', 'meetup_request', 'meetup_accepted', 'enquiry_received', 'story_like'],
       required: true,
     },
     title: { type: String, required: true, trim: true, maxlength: 120 },

@@ -287,6 +287,68 @@ describe('Stories API', () => {
         .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
         .expect(404);
     });
+
+    it('one tap creates only one like — round-tripped likeCount stays 1, never duplicates', async () => {
+      const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker' });
+      const story = await seedReadyStory(String(author._id));
+      const likerAuth = `Bearer ${signBuyerToken(PHONE)}`;
+      const authorAuth = `Bearer ${signBuyerToken(AUTHOR_PHONE)}`;
+
+      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', likerAuth).expect(200);
+
+      const asAuthor = await request(app).get('/api/social/stories').set('Authorization', authorAuth).expect(200);
+      expect(asAuthor.body.data.stories[0].items[0].likeCount).toBe(1);
+
+      const likers = await request(app).get(`/api/social/stories/${story.id}/likers`).set('Authorization', authorAuth).expect(200);
+      expect(likers.body.data.count).toBe(1);
+    });
+  });
+
+  describe('GET /api/social/stories/:id/likers', () => {
+    it('lists who liked the story, newest first, for the author only', async () => {
+      const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      const first = await Buyer.create({ phone: '+26878400402', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'First Liker', username: 'firstl' });
+      const second = await Buyer.create({ phone: '+26878400403', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Second Liker', username: 'secondl' });
+      const story = await seedReadyStory(String(owner._id));
+
+      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', `Bearer ${signBuyerToken('+26878400402')}`).expect(200);
+      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', `Bearer ${signBuyerToken('+26878400403')}`).expect(200);
+
+      const res = await request(app)
+        .get(`/api/social/stories/${story.id}/likers`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(200);
+
+      expect(res.body.data.count).toBe(2);
+      expect(res.body.data.likers.map((v: any) => v.name)).toEqual(['Second Liker', 'First Liker']);
+      expect(res.body.data.likers[0]).toMatchObject({ type: 'buyer', username: 'secondl', id: String(second._id) });
+      expect(res.body.data.likers[0].likedAt).toBeTruthy();
+      void first;
+    });
+
+    it("403s a non-author asking who liked someone else's story", async () => {
+      const owner = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Nosy' });
+      const story = await seedReadyStory(String(owner._id));
+
+      await request(app)
+        .get(`/api/social/stories/${story.id}/likers`)
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(403);
+    });
+
+    it('404s an unknown story id', async () => {
+      await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
+      await request(app)
+        .get('/api/social/stories/000000000000000000000000/likers')
+        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .expect(404);
+    });
+
+    it('401s without a token', async () => {
+      await request(app).get('/api/social/stories/000000000000000000000000/likers').expect(401);
+    });
   });
 
   describe('GET /api/social/stories/:id/viewers', () => {
