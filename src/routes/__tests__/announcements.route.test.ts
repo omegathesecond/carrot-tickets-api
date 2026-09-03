@@ -63,6 +63,25 @@ describe('organizer announcements', () => {
     expect(list.body.data[0].sender.name).toBe('Piano Republic Events');
   });
 
+  it('a buyer who has never joined the community can still read announcements (no "Join the community first")', async () => {
+    const { vendor, seeded, announcements } = await seedWorld();
+    await request(app)
+      .post(`/api/tickets/events/${seeded.eventId}/announcements`)
+      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .send({ body: 'Doors at 19:00' })
+      .expect(201);
+
+    // A second buyer with no Membership row at all for this community.
+    await Buyer.create({ phone: '+26878422614', password: 'secret1', username: 'outsider_listener' });
+    const outsiderAuth = `Bearer ${signBuyerToken('+26878422614')}`;
+
+    const res = await request(app)
+      .get(`/api/community/channels/${String(announcements._id)}/messages`)
+      .set('Authorization', outsiderAuth)
+      .expect(200);
+    expect(res.body.data[0].body).toBe('Doors at 19:00');
+  });
+
   it('authz: non-owner vendor 403, missing permission 403, buyer POST still rejected, unknown event 404', async () => {
     const { seeded, announcements, buyerAuth } = await seedWorld();
 
