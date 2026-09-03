@@ -1706,6 +1706,32 @@ export class TicketService {
   }
 
   /**
+   * ONE YeboPay sale by its reference, scoped to the buyer who owns it.
+   *
+   * Preferred over getLatestYeboPaySaleForBuyer: "latest" is ambiguous the
+   * moment a buyer has two checkouts in flight (two tabs), where the result
+   * page for the one they PAID would report the status of the other. Settlement
+   * was never affected — that keys on yebopayCheckoutId — but the buyer could
+   * be told "unconfirmed" for a payment that went through.
+   *
+   * The buyerTicketOr scope is what makes exposing the ref safe: `ref` travels
+   * through YeboPay as metadata and is not secret, so this must never answer
+   * for a sale the caller does not own. A foreign or unknown ref returns null,
+   * which the caller reports identically to "no sale" — so this cannot be used
+   * to probe whether a given ref exists.
+   */
+  static async getYeboPaySaleByRefForBuyer(
+    ref: string,
+    buyer: { _id?: unknown; phone?: string; email?: string }
+  ): Promise<InstanceType<typeof TicketSale> | null> {
+    return TicketSale.findOne({
+      $or: buyerTicketOr(buyer),
+      saleId: ref,
+      paymentMethod: PaymentMethod.YEBOPAY,
+    });
+  }
+
+  /**
    * The buyer's most recent YeboPay sale.
    *
    * The YeboPay return redirect carries no identifiers on purpose — `ref` is

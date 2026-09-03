@@ -78,14 +78,20 @@ export class YeboPayController {
    * webhooks are not retried, so resolving on return is what turns a dropped
    * delivery from a stranded sale into a non-event.
    *
-   * It finalises but deliberately REPORTS NOTHING. This endpoint is
+   * It finalises but REPORTS NOTHING IN ITS OWN RESPONSE. This endpoint is
    * unauthenticated and `ref` is not secret — it is sent to YeboPay as
-   * metadata. Echoing the sale's status back would let anyone turn a known or
-   * guessed ref into "does this sale exist, and was it paid?". So the response
-   * is byte-identical for a real ref, a forged ref and no ref at all.
+   * metadata. Echoing the sale's status back HERE would let anyone turn a known
+   * or guessed ref into "does this sale exist, and was it paid?". So the
+   * response is byte-identical for a real ref, a forged ref and no ref at all:
+   * always a 302 to the result page.
    *
-   * The buyer's actual outcome comes from the authenticated latest-status
-   * endpoint, which reads THEIR OWN most recent sale.
+   * It DOES forward `ref` on that redirect, which is not the same thing. The
+   * buyer's outcome then comes from an authenticated status endpoint scoped to
+   * their own sales (by-ref, falling back to latest). Carrying the reference is
+   * safe; answering for it without authentication is not — do not collapse
+   * those two into "the return must carry nothing", which is what an earlier
+   * version of this comment implied and which cost buyers a correct result
+   * screen whenever they had two checkouts in flight.
    */
   static async returnRedirect(req: Request, res: Response): Promise<any> {
     const ref = typeof req.query['ref'] === 'string' ? req.query['ref'] : undefined;
@@ -110,6 +116,14 @@ export class YeboPayController {
       }
     }
 
-    return res.redirect(302, `${paymentResultPageUrl()}?method=yebopay`);
+    // Forward the ref so the result page can report THIS payment rather than
+    // guessing from the buyer's latest sale, which is ambiguous with two
+    // checkouts in flight. Safe because the status lookup behind it is
+    // authenticated AND scoped to the caller's own sales — the earlier
+    // "carry nothing" rule was guarding against an UNAUTHENTICATED status
+    // echo, which is a different thing from letting the buyer hold their own
+    // reference.
+    const qs = ref ? `?method=yebopay&ref=${encodeURIComponent(ref)}` : '?method=yebopay';
+    return res.redirect(302, `${paymentResultPageUrl()}${qs}`);
   }
 }

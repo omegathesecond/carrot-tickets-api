@@ -423,6 +423,14 @@ router.post('/purchase/yoco', authenticateBuyer, PublicController.initiateYocoPu
 router.post('/purchase/yebopay', authenticateBuyer, PublicController.initiateYeboPayPurchase);
 
 /**
+ * @route   GET /api/public/purchase/yebopay/by-ref/:ref/status
+ * @desc    Outcome of ONE YeboPay payment by reference, scoped to the caller's
+ *          own sales. Exact where /latest/status is a heuristic.
+ * @access  Buyer (authenticated)
+ */
+router.get('/purchase/yebopay/by-ref/:ref/status', authenticateBuyer, PublicController.getYeboPayStatusByRef);
+
+/**
  * @route   GET /api/public/purchase/yebopay/latest/status
  * @desc    Outcome of the buyer's most recent YeboPay payment. The YeboPay
  *          return redirect carries no identifiers by design, so the result page

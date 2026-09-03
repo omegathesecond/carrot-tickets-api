@@ -1271,6 +1271,40 @@ export class PublicController {
   }
 
   /**
+   * Outcome of ONE YeboPay payment, by reference, scoped to the caller.
+   *
+   * The exact answer the result page wants. A ref the caller does not own is
+   * reported as 'none' — identical to a ref that does not exist — so an
+   * authenticated buyer cannot probe other people's sales.
+   */
+  static async getYeboPayStatusByRef(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) {
+        return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
+      }
+
+      const ref = String(req.params['ref'] || '');
+      if (!ref) return ApiResponseUtil.success(res, { status: 'none' });
+
+      const sale = await TicketService.getYeboPaySaleByRefForBuyer(ref, buyer);
+      if (!sale?.yebopayCheckoutId) {
+        return ApiResponseUtil.success(res, { status: 'none' });
+      }
+
+      const status =
+        sale.paymentStatus === 'completed'
+          ? 'completed'
+          : sale.paymentStatus === 'pending'
+          ? 'pending'
+          : 'failed';
+      return ApiResponseUtil.success(res, { status, checkoutId: sale.yebopayCheckoutId });
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e.message || 'Status check failed', 400);
+    }
+  }
+
+  /**
    * Outcome of the buyer's most recent YeboPay payment.
    *
    * Mirrors getLatestYocoStatus: the YeboPay return redirect deliberately
