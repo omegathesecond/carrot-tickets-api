@@ -173,6 +173,10 @@ const ticketSaleSchema = new Schema<ITicketSale>({
   // Allocation-block sale (see ITicketSale.isAllocation). Sparse-indexed so the
   // analytics revenue filter `isAllocation: { $ne: true }` stays cheap.
   isAllocation: { type: Boolean, index: true, sparse: true },
+  // Refund counters — see ITicketSale.refundedQuantity. Aggregates read them
+  // via $ifNull so sales written before the fields existed count as 0.
+  refundedQuantity: { type: Number, default: 0, min: 0 },
+  refundedAmount: { type: Number, default: 0, min: 0 },
 
   // Economic snapshot — immutable, written at sale time
   faceAmount: { type: Number },

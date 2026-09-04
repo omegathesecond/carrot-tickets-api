@@ -666,6 +666,14 @@ export class TicketService {
       ticket.status = TicketStatus.REFUNDED;
       await ticket.save(session ? { session } : undefined);
 
+      // Record the refund on the sale. The sale stays COMPLETED — the money
+      // was collected — and analytics read totalAmount − refundedAmount /
+      // quantity − refundedQuantity, so this is what makes revenue, cash and
+      // tickets-sold figures drop with the ticket.
+      sale.refundedQuantity = (sale.refundedQuantity ?? 0) + 1;
+      sale.refundedAmount = (sale.refundedAmount ?? 0) + ticket.price;
+      await sale.save(session ? { session } : undefined);
+
       // Update event stats
       const event = await Event.findById(ticket.eventId).session(session || null);
       if (event) {
@@ -3001,65 +3009,5 @@ export class TicketService {
       console.log('[yebopay reconcile] resolved', { minted, failed, pending, scanned: stuck.length });
     }
     return { minted, failed, pending };
-  }
-
-  /**
-   * Get sales statistics
-   */
-  static async getSalesStats(
-    vendorId: string,
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<{
-    totalSales: number;
-    totalRevenue: number;
-    cashSales: number;
-    walletSales: number;
-    cashRevenue: number;
-    walletRevenue: number;
-    ticketsSold: number;
-  }> {
-    try {
-      const filter: any = {
-        vendorId,
-        paymentStatus: PaymentStatus.COMPLETED
-      };
-
-      if (startDate || endDate) {
-        filter.soldAt = {};
-        if (startDate) filter.soldAt.$gte = startDate;
-        if (endDate) filter.soldAt.$lte = endDate;
-      }
-
-      const sales = await TicketSale.find(filter);
-
-      const stats = {
-        totalSales: sales.length,
-        totalRevenue: 0,
-        cashSales: 0,
-        walletSales: 0,
-        cashRevenue: 0,
-        walletRevenue: 0,
-        ticketsSold: 0
-      };
-
-      for (const sale of sales) {
-        stats.totalRevenue += sale.totalAmount;
-        stats.ticketsSold += sale.quantity;
-
-        if (sale.paymentMethod === PaymentMethod.CASH) {
-          stats.cashSales += 1;
-          stats.cashRevenue += sale.totalAmount;
-        } else if (sale.paymentMethod === PaymentMethod.KESHLESS_WALLET) {
-          stats.walletSales += 1;
-          stats.walletRevenue += sale.totalAmount;
-        }
-      }
-
-      return stats;
-    } catch (error: any) {
-      console.error('Get sales stats error:', error);
-      throw new Error(error.message || 'Failed to fetch sales statistics');
-    }
   }
 }
