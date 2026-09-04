@@ -1,5 +1,6 @@
 // api/src/controllers/merchant.controller.ts
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -8,12 +9,14 @@ import { Wallet } from '@models/wallet.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
 import { MerchantService, WalletDeclinedError, ChargeIdempotencyMismatchError } from '@services/merchant.service';
-import { StockDeclinedError } from '@services/stock.service';
+import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockCountService } from '@services/stockCount.service';
 import { StockAlertService } from '@services/stockAlert.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
-import { posCountSchema } from '@validators/stock.validator';
+import { posCountSchema, posStockAdjustSchema } from '@validators/stock.validator';
+import { toBaseUnits } from '@utils/stockUnits.util';
+import { StockMovementReason } from '@interfaces/stock.interface';
 import { MerchantToken } from '@interfaces/merchant.interface';
 
 /** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
@@ -191,5 +194,52 @@ export class MerchantController {
       const { count, onHand } = await StockCountService.recordCount({ eventId, merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantOperatorId });
       return ApiResponseUtil.success(res, { countId: String(count._id), expectedOnHand: count.expectedOnHand, countedOnHand: count.countedOnHand, variance: count.variance, onHand });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Count failed', 500); }
+  }
+
+  /**
+   * Resolve the product named in the body against the token's event and turn
+   * the quantity into base units. Returns null after answering the response —
+   * every POS stock write shares these two refusals.
+   */
+  private static async resolveProductAndUnits(
+    req: Request, res: Response, value: { productId: string; quantity: number; unit: 'unit' | 'pack' },
+  ): Promise<number | null> {
+    const { eventId } = (req as any).merchant as MerchantToken;
+    const product = await Product.findById(value.productId).lean();
+    if (!product || String(product.eventId) !== String(eventId)) {
+      ApiResponseUtil.badRequest(res, 'product does not belong to this event');
+      return null;
+    }
+    const units = toBaseUnits(product, value.quantity, value.unit);
+    if (units == null) {
+      ApiResponseUtil.badRequest(res, 'product has no pack size; receive in units');
+      return null;
+    }
+    return units;
+  }
+
+  /** POST /api/merchant/stock/receive — a delivery INTO this stall. */
+  static async receiveStock(req: Request, res: Response): Promise<any> {
+    try {
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const { error, value } = posStockAdjustSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const units = await MerchantController.resolveProductAndUnits(req, res, value);
+      if (units == null) return;
+
+      const { onHand, movement } = await StockService.applyMovement({
+        eventId, merchantId, productId: value.productId,
+        delta: units, reason: StockMovementReason.RECEIVE,
+        refType: 'stock_receive', refId: String(new mongoose.Types.ObjectId()),
+        byType: 'Merchant', by: merchantOperatorId, note: value.note,
+      });
+      // Fire-and-forget: a receive back above threshold re-arms the alert. A
+      // rearm failure must never turn a successful receive into a 500.
+      StockAlertService.rearm(String(merchantId), String(value.productId)).catch(() => {});
+      return ApiResponseUtil.success(res, { onHand, movementId: String(movement._id) });
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e?.message || 'Receive failed', 500);
+    }
   }
 }

@@ -39,4 +39,10 @@ router.get(
   MerchantController.stalls,
 );
 
+router.post(
+  '/stock/receive',
+  requireMerchantPermission(MerchantPermission.MANAGE_STOCK),
+  MerchantController.receiveStock,
+);
+
 export default router;

@@ -62,3 +62,14 @@ export const transferStockSchema = Joi.object({
 const phase = Joi.string().valid('opening', 'interim', 'closing');
 export const stockCountSchema = Joi.object({ merchantId: objectId.required(), productId: objectId.required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });
 export const posCountSchema = Joi.object({ productId: objectId.required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });
+
+/**
+ * POS stock write (receive / waste). merchantId is deliberately absent — the
+ * stall comes from the token, so a body cannot aim a write at another stall.
+ */
+export const posStockAdjustSchema = Joi.object({
+  productId: objectId.required(),
+  quantity: Joi.number().integer().min(1).max(MAX_QTY).required(),
+  unit: Joi.string().valid('unit', 'pack').default('unit'),
+  note: Joi.string().trim().optional(),
+});

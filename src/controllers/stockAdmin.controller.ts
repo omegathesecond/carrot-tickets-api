@@ -10,6 +10,7 @@ import { StockAlertService } from '@services/stockAlert.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { createProductSchema, updateProductSchema, receiveStockSchema, thresholdSchema, transferStockSchema, stockCountSchema } from '@validators/stock.validator';
+import { toBaseUnits } from '@utils/stockUnits.util';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -95,11 +96,10 @@ export class StockAdminController {
       }
 
       // Case->unit conversion: 'pack' quantities multiply by unitsPerPack.
-      const perPack = product.unitsPerPack && product.unitsPerPack > 0 ? product.unitsPerPack : 1;
-      if (value.unit === 'pack' && perPack === 1) {
+      const baseUnits = toBaseUnits(product, value.quantity, value.unit);
+      if (baseUnits == null) {
         ApiResponseUtil.badRequest(res, 'product has no pack size; receive in units'); return;
       }
-      const baseUnits = value.unit === 'pack' ? value.quantity * perPack : value.quantity;
 
       const actor = actorOf(req);
       const { onHand, movement } = await StockService.applyMovement({
