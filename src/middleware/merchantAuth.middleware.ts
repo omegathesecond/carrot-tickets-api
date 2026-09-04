@@ -4,7 +4,7 @@ import { MerchantAuthService } from '@services/merchantAuth.service';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
-import { grantedMerchantPermissions } from '@interfaces/operatorGrant.interface';
+import { deriveMerchantPermissions } from '@interfaces/operatorGrant.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 /**
@@ -67,10 +67,7 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
   // the liveness read above, so deriving here costs no extra query.
   (req as any).merchant = {
     ...decoded,
-    permissions: [
-      MerchantPermission.CHARGE,
-      ...grantedMerchantPermissions(operator.grants),
-    ],
+    permissions: deriveMerchantPermissions(operator.grants),
   };
   next();
 };

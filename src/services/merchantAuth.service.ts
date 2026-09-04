@@ -3,8 +3,8 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { Event } from '@models/event.model';
-import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
-import { grantedMerchantPermissions } from '@interfaces/operatorGrant.interface';
+import { MerchantToken } from '@interfaces/merchant.interface';
+import { deriveMerchantPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
@@ -69,10 +69,9 @@ export class MerchantAuthService {
       // The role is the floor (every person on a till can charge); grants are
       // the per-person extras. Re-derived from the row on every request too —
       // see authenticateMerchant — so this is the POS's copy, not the gate.
-      permissions: [
-        MerchantPermission.CHARGE,
-        ...grantedMerchantPermissions((operator as any).grants),
-      ],
+      // deriveMerchantPermissions is the single definition of that formula,
+      // shared with authenticateMerchant precisely so the two cannot drift.
+      permissions: deriveMerchantPermissions((operator as any).grants),
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 

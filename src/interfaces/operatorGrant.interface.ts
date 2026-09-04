@@ -76,6 +76,23 @@ export function grantedMerchantPermissions(grants?: string[] | null): MerchantPe
     .filter((p): p is MerchantPermission => p !== undefined);
 }
 
+/**
+ * THE single definition of a stall operator's permission set: the role's
+ * floor (merchant:charge — every person on a till can charge, no exceptions)
+ * plus whatever grants the row carries, translated into the merchant
+ * namespace. Both the token mint (MerchantAuthService.login, the POS's
+ * rendering copy) and the per-request gate (authenticateMerchant, the
+ * authoritative check) must call this rather than each spelling out the
+ * formula — the two are deliberately the same computation, and duplicating
+ * it is how they drift: a second baseline permission or a future `canCharge`
+ * flag would have to be added in both places, and missing one lets the POS
+ * render a control the API then 403s, with no test catching it because each
+ * site is exercised by a different suite.
+ */
+export function deriveMerchantPermissions(grants?: string[] | null): MerchantPermission[] {
+  return [MerchantPermission.CHARGE, ...grantedMerchantPermissions(grants)];
+}
+
 /** Normalize an admin-supplied list: known values only, no duplicates. */
 export function sanitizeGrants(input: unknown): OperatorGrant[] {
   if (!Array.isArray(input)) return [];
