@@ -3,6 +3,7 @@ import { ResellerOperator } from '@models/resellerOperator.model';
 import { Reseller } from '@models/reseller.model';
 import { ResellerRole, RESELLER_ROLE_PERMISSIONS, ResellerToken } from '@interfaces/resellerPermission.interface';
 import { JWT_SECRET } from '@config/jwt.config';
+import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 const MAX_PIN_ATTEMPTS = 5;
@@ -10,7 +11,10 @@ const LOCK_MINUTES = 15;
 
 export class ResellerAuthService {
   static async login(loginCode: string, pin: string) {
-    const operator = await ResellerOperator.findOne({ loginCode, isActive: true }).select('+pin');
+    if (typeof loginCode !== 'string' || typeof pin !== 'string') {
+      throw new Error('Invalid credentials');
+    }
+    const operator = await ResellerOperator.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
     if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {

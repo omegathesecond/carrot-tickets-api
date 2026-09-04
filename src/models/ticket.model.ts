@@ -1,5 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
-import { ITicket, TicketStatus } from '@interfaces/ticket.interface';
+import { ITicket, TicketStatus, TicketPdfStatus } from '@interfaces/ticket.interface';
 import { generateTicketCode } from '@utils/ticketCode.util';
 
 const ticketSchema = new Schema<ITicket>({
@@ -93,6 +93,19 @@ const ticketSchema = new Schema<ITicket>({
   checkedInByModel: {
     type: String,
     enum: ['Vendor', 'VendorSubUser', 'GateOperator']
+  },
+
+  // Shareable PDF (lazily generated, cached in R2)
+  pdfUrl: {
+    type: String,
+    trim: true
+  },
+  pdfStatus: {
+    type: String,
+    enum: Object.values(TicketPdfStatus)
+  },
+  pdfRequestedAt: {
+    type: Date
   }
 }, {
   timestamps: true
@@ -136,7 +149,8 @@ ticketSchema.methods.isValidForEntry = function(): boolean {
 ticketSchema.index({ eventId: 1, status: 1 });
 ticketSchema.index({ vendorId: 1, status: 1 });
 // Activity feed: global newest-first scan of live tickets (the "is going"
-// source). Every other Ticket index is a point lookup — none serves recency.
+// source). Every other single-field Ticket index is a point lookup — none
+// serves recency. Compound, so it belongs here (not on a field).
 ticketSchema.index({ status: 1, createdAt: -1 });
 // Activity feed, Following tab: goingCandidates() filters live tickets by
 // `customerPhone: { $in: [...followed actors' phones] }` sorted newest-first

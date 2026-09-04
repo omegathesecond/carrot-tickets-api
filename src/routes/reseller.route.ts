@@ -127,4 +127,11 @@ router.post('/payouts',
   requireResellerPermission(ResellerPermission.REQUEST_PAYOUT),
   ResellerPayoutController.request);
 
+/**
+ * Wallets (cashless) — cash top-up at a desk (CASH_TOPUP)
+ */
+router.post('/wallets/cash-topup',
+  requireResellerPermission(ResellerPermission.CASH_TOPUP),
+  ResellerController.cashTopup);
+
 export default router;

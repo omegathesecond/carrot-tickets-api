@@ -256,6 +256,14 @@ export const createEventSchema = Joi.object({
     .messages({
       'boolean.base': 'isMultiDay must be a boolean value'
     }),
+  // Whether NFC tap-and-go wallet/POS is enabled for this event (cashless
+  // spec §11). Optional — omitting it lets the Event model default (false)
+  // apply, same as isMultiDay above.
+  cashless: Joi.boolean()
+    .optional()
+    .messages({
+      'boolean.base': 'cashless must be a boolean value'
+    }),
   category: Joi.string().valid(...EVENT_CATEGORIES).default('Other').messages({
     'any.only': 'Invalid event category'
   }),
@@ -331,6 +339,12 @@ export const updateEventSchema = Joi.object({
   startTime: Joi.date().optional(),
   endTime: Joi.date().optional(),
   isMultiDay: Joi.boolean().optional(),
+  // See createEventSchema.cashless — optional, false unsets it.
+  cashless: Joi.boolean()
+    .optional()
+    .messages({
+      'boolean.base': 'cashless must be a boolean value'
+    }),
   category: Joi.string().valid(...EVENT_CATEGORIES).messages({
     'any.only': 'Invalid event category'
   }),
@@ -387,7 +401,11 @@ export const eventQuerySchema = Joi.object({
   }).messages({
     'date.min': 'End date must be after start date'
   }),
-  search: Joi.string().optional()
+  search: Joi.string().optional(),
+  // Platform-staff-only narrowing: pick one organizer's catalogue while acting
+  // on their behalf. Silently ignored for everyone else, whose own vendorId
+  // already scopes the query.
+  vendorId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional()
 });
 
 /**
@@ -537,13 +555,22 @@ export const validateTicketSchema = Joi.object({
     .messages({ 'string.pattern.base': 'Invalid event ID' })
 });
 
+// Gate check-in accepts EITHER a scanned QR/short-code ticketId OR a tapped
+// cashless band uid (cashless spec §5.1) — never both, never neither. bandUid
+// uses the same 8-hex (4-byte) minimum as bindBandSchema/reissueBandSchema.
 export const checkInTicketSchema = Joi.object({
   ticketId: Joi.string()
-    .required()
     .trim()
     .messages({
-      'string.empty': 'Ticket ID is required',
-      'any.required': 'Ticket ID is required'
+      'string.empty': 'Ticket ID is required'
+    }),
+  bandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{8,}$/)
+    .messages({
+      'string.empty': 'Band UID is required',
+      'string.pattern.base': 'Band UID must be at least 4 bytes (8 hex chars)'
     }),
   expectedEventId: Joi.string()
     .optional()
@@ -555,6 +582,71 @@ export const checkInTicketSchema = Joi.object({
     .messages({
       'string.max': 'Notes cannot exceed 500 characters'
     })
+}).xor('ticketId', 'bandUid').messages({
+  'object.xor': 'Provide exactly one of ticketId or bandUid'
+});
+
+// Band binding is a dedicated band-desk action (cashless spec §5.1) — see
+// ScanService.bindBandToTicket. bandUid must be a real NFC chip id: 8 hex
+// chars = 4 bytes, the minimum real-world UID length (see @utils/bandUid.util
+// for the shared normalize/validate logic consumed elsewhere in the system).
+export const bindBandSchema = Joi.object({
+  ticketId: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Ticket ID is required',
+      'any.required': 'Ticket ID is required'
+    }),
+  bandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{8,}$/)
+    .required()
+    .messages({
+      'string.empty': 'Band UID is required',
+      'string.pattern.base': 'Band UID must be at least 4 bytes (8 hex chars)',
+      'any.required': 'Band UID is required'
+    }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
+});
+
+// Reissue is the lost-band path (cashless spec §5.1) — see
+// ScanService.reissueBandForTicket. `reason` is required so the audit trail
+// (BandBinding.unboundReason) always has a true explanation, never a blank.
+// newBandUid uses the same 8-hex (4-byte) requirement as bindBandSchema.bandUid.
+export const reissueBandSchema = Joi.object({
+  ticketId: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Ticket ID is required',
+      'any.required': 'Ticket ID is required'
+    }),
+  newBandUid: Joi.string()
+    .trim()
+    .lowercase()
+    .pattern(/^[0-9a-f]{8,}$/)
+    .required()
+    .messages({
+      'string.empty': 'New band UID is required',
+      'string.pattern.base': 'New band UID must be at least 4 bytes (8 hex chars)',
+      'any.required': 'New band UID is required'
+    }),
+  reason: Joi.string()
+    .required()
+    .trim()
+    .messages({
+      'string.empty': 'Reason is required',
+      'any.required': 'Reason is required'
+    }),
+  expectedEventId: Joi.string()
+    .optional()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .messages({ 'string.pattern.base': 'Invalid event ID' })
 });
 
 export const scanQuerySchema = Joi.object({
@@ -660,4 +752,13 @@ export const updateAccessSchema = Joi.object({
     .optional()
 }).or('role', 'customPermissions').messages({
   'object.missing': 'At least one field (role or customPermissions) must be provided for update'
+});
+
+
+// An organizer's ask for cashless (they may not set the flag themselves — see
+// EventService.requestCashless). The note is optional context for Carrot ops.
+export const cashlessRequestSchema = Joi.object({
+  note: Joi.string().trim().max(300).allow('').optional().messages({
+    'string.max': 'Note cannot exceed 300 characters',
+  }),
 });

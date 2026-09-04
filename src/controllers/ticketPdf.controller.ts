@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
 import { Ticket } from '@models/ticket.model';
-import { ITicket } from '@interfaces/ticket.interface';
+import { ITicket, TicketPdfStatus } from '@interfaces/ticket.interface';
 import { TicketPdfService } from '@services/ticketPdf.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { buyerTicketOr } from '@utils/ticketHolder.util';
+import { normalizePhone } from '@utils/phone.util';
 
 const EVENT_POPULATE_FIELDS = 'name venue eventDate startTime endTime posterUrl';
 // Guards a pathological request (e.g. a hand-crafted body) from asking for an
@@ -22,11 +23,19 @@ function sendPdf(res: Response, buffer: Buffer, filename: string): void {
 }
 
 /**
- * Ticket-PDF download endpoints behind My Profile > Tickets on the website.
- * Buyer-owned only: a ticket (or every ticket in a bundle request) must
- * belong to the signed-in buyer (matched by buyerId/phone/email, the same
- * `buyerTicketOr` used by /my-tickets) — otherwise one buyer could download
- * another's QR code.
+ * Two families of ticket-PDF endpoint share this controller:
+ *
+ *  - downloadTicketPdf / downloadTicketsBundle — the buyer "Download" action
+ *    behind My Profile > Tickets on the website. Rendered fresh per request
+ *    and streamed back as PDF bytes. Buyer-owned only: a ticket (or every
+ *    ticket in a bundle request) must belong to the signed-in buyer (matched
+ *    by buyerId/phone/email, the same `buyerTicketOr` used by /my-tickets) —
+ *    otherwise one buyer could download another's QR code.
+ *
+ *  - getTicketPdf — the SHAREABLE, R2-cached PDF used by the service-auth
+ *    surfaces (Keshless user-app via the keshless-api proxy, and the
+ *    dashboard's vendor JWT). Returns a status envelope with a URL rather
+ *    than bytes, so the same artifact can be shared and re-fetched.
  */
 export class TicketPdfController {
   /** GET /api/public/tickets/:ticketId/pdf — one ticket as a downloadable PDF. */
@@ -94,6 +103,61 @@ export class TicketPdfController {
     } catch (error: any) {
       console.error('Download tickets bundle error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to generate tickets PDF');
+    }
+  }
+
+  /**
+   * Shareable ticket-PDF endpoint, used by the service-auth surfaces:
+   *  - user-app  : proxied with a Keshless user JWT → service auth attaches
+   *                req.ticketsUser.userPhone (must match the ticket's phone)
+   *  - dashboard : vendor JWT → req.ticketsUser.vendorId (must own the ticket,
+   *                or be a super-admin)
+   *
+   * Response envelope (data):
+   *   { status: 'ready',      pdfUrl }  (200) — share/download this URL
+   *   { status: 'generating' }          (202) — poll again shortly
+   */
+  static async getTicketPdf(req: Request, res: Response): Promise<any> {
+    try {
+      const idOrCode = req.params['ticketId'];
+      if (!idOrCode) {
+        return ApiResponseUtil.badRequest(res, 'Ticket id is required');
+      }
+
+      const ticket = await TicketPdfService.resolveTicket(idOrCode);
+      if (!ticket) {
+        return ApiResponseUtil.notFound(res, 'Ticket not found');
+      }
+
+      const tu = (req as any).ticketsUser || {};
+      const requesterPhone = tu.userPhone as string | undefined;
+      const vendorId = tu.vendorId as string | undefined;
+      const isSuperAdmin = Boolean(tu.isSuperAdmin);
+
+      const ownsByPhone = Boolean(
+        requesterPhone &&
+          ticket.customerPhone &&
+          normalizePhone(requesterPhone) === normalizePhone(ticket.customerPhone)
+      );
+      const ownsByVendor = Boolean(
+        isSuperAdmin || (vendorId && ticket.vendorId?.toString() === vendorId)
+      );
+
+      if (!ownsByPhone && !ownsByVendor) {
+        return ApiResponseUtil.forbidden(res, 'You are not allowed to access this ticket');
+      }
+
+      const result = await TicketPdfService.ensureTicketPdf(ticket);
+
+      if (result.status === TicketPdfStatus.READY) {
+        return ApiResponseUtil.success(res, result, 'Ticket PDF ready');
+      }
+      // Still rendering (a concurrent request claimed generation) — tell the
+      // client to poll.
+      return ApiResponseUtil.success(res, result, 'Ticket PDF is being generated', 202);
+    } catch (error: any) {
+      console.error('Get ticket PDF error:', error);
+      return ApiResponseUtil.error(res, error.message || 'Failed to generate ticket PDF');
     }
   }
 }

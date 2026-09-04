@@ -209,7 +209,14 @@ export async function joinCandidates(opts: SourceOpts): Promise<SourceResult> {
   // tab. On the "following" tab (actorIds set) this source is simply empty.
   if (opts.actorIds) return { candidates: [], nextBefore: null };
 
-  const rows = await Buyer.find(windowed({}, opts))
+  // Only surface buyers who satisfy the mandatory profile-photo requirement.
+  // avatarUrl isn't `required` at the schema level (checkout must be able to
+  // create a Buyer before a photo exists — see requirePhoto.middleware), so
+  // without this filter every photoless signup shows up here as a fully
+  // "joined" member complete with a default/initials avatar, which is exactly
+  // the visible proof that the requirement isn't being enforced. A buyer who
+  // hasn't completed their photo yet hasn't "joined" the community feed.
+  const rows = await Buyer.find(windowed({ avatarUrl: { $exists: true, $nin: [null, ''] } }, opts))
     .sort({ createdAt: -1 })
     .limit(opts.limit)
     .select('createdAt')

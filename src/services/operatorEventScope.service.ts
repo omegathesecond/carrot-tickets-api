@@ -1,9 +1,11 @@
 // api/src/services/operatorEventScope.service.ts
 import { Request } from 'express';
 import { GateOperator } from '@models/gateOperator.model';
+import { Cashier } from '@models/cashier.model';
 import { Reseller } from '@models/reseller.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { Event } from '@models/event.model';
+import { ICashier } from '@interfaces/cashier.interface';
 
 /**
  * Resolves which events the caller is allowed to work.
@@ -75,7 +77,78 @@ async function resellerOperatorScope(operatorId: string): Promise<EventScope> {
 }
 
 /**
+ * A cashier's tier.
+ *
+ * Gate and reseller operators are genuinely multi-event and carry the shared
+ * `eventIds` set (see operatorEventScope.schema.ts). A cashier is hired for
+ * exactly ONE event and carries a singular, immutable `eventId` instead —
+ * reading `eventIds` off a cashier finds nothing and would resolve to "no
+ * assignment", i.e. UNRESTRICTED. That is the wrong way to fail, so the
+ * cashier population is read through its own field here.
+ *
+ * An EMPTY ARRAY denies every event and is returned for the three rows that
+ * must not be trusted: an organizer cashier carrying no event, a row that has
+ * been deleted, and a row that has been DEACTIVATED. See each branch for why
+ * it fails closed. Only a PLATFORM cashier — Carrot's own staff — resolves to
+ * null, because she is legitimately global.
+ */
+async function cashierScope(cashierId: string): Promise<EventScope> {
+  // Read the SINGULAR eventId — a cashier has no eventIds set at all. The
+  // Pick<ICashier, …> annotation documents the shape and catches a rename
+  // on the INTERFACE, but note .lean<T>() is an unchecked cast: dropping
+  // the field from the SCHEMA while leaving it on ICashier would still
+  // compile. It is a help, not a guarantee — the fail-closed branches below
+  // are what actually hold the line.
+  const cashier = await Cashier.findById(cashierId).select('eventId scope isActive')
+    .lean<Pick<ICashier, 'eventId' | 'scope' | 'isActive'> | null>();
+
+  // A VANISHED row denies, unlike a missing gate/reseller operator which is
+  // read as unrestricted. A cashier token always names a real row, so nothing
+  // here means a deleted or unknown actor.
+  //
+  // This is not hypothetical: cleanup-eventless-cashiers.ts DELETES legacy
+  // rows, and authenticateCashier verifies the JWT with no database lookup
+  // at all while CashierAuthService mints 7-day tokens. Resolving to null
+  // would therefore flip a deleted cashier from "denied everywhere" (the
+  // empty-array case below) to "allowed everywhere" for up to a week —
+  // and since loadCashlessEvent does no vendor comparison of its own and
+  // event ids are public (they sit in /event/<slug>-<24hex> URLs), she
+  // could top up and cash out at any published cashless event of any
+  // organizer.
+  if (!cashier) return [];
+
+  // A DEACTIVATED row denies too, for the same reason a vanished one does:
+  // authenticateCashier does no database lookup and CashierAuthService
+  // mints 7-day tokens, so PATCH /cashiers/:id {isActive:false} would
+  // otherwise only stop her NEXT LOGIN while the token in her hand kept
+  // topping up and cashing out for the rest of the week. The row is already
+  // being read here, so this costs nothing beyond one more selected field.
+  if (!cashier.isActive) return [];
+
+  // `scope` is selected precisely so the two no-event cases can be told
+  // apart. An ORGANIZER cashier is REQUIRED to carry an event, so a row
+  // without one is a legacy row written before that rule existed — the
+  // schema enforces `required` on WRITE, not on read. Falling through to
+  // null there would make her unrestricted, and loadCashlessEvent does no
+  // vendor comparison of its own, so she could top up and cash out at any
+  // published cashless event belonging to ANY organizer. An empty array
+  // denies every event instead (allowed.includes() is false for all), so
+  // the row surfaces as a 403 and gets cleaned up rather than silently
+  // holding global access.
+  if (cashier.scope === 'organizer' && !cashier.eventId) return [];
+
+  // Only a PLATFORM cashier — Carrot's own staff — is legitimately global.
+  return cashier.eventId ? [String(cashier.eventId)] : null;
+}
+
+/**
  * The events this caller may act on, or null when they are unrestricted.
+ *
+ * null covers every actor that is not an event-assignable operator
+ * (organizers and platform staff acting in the dashboard, unauthenticated
+ * requests), a multi-event operator with no assignment (empty set = every
+ * event, the pre-assignment behaviour), a PLATFORM cashier, and a token
+ * naming a gate or reseller operator row that no longer exists.
  *
  * Reseller callers resolve TWO tiers — the company and, for a till, the
  * operator — intersected. The company tier binds the owner login too: the
@@ -91,6 +164,11 @@ export async function resolveOperatorEventScope(req: Request): Promise<EventScop
   if (ticketsUser?.userType === 'gate-operator' && ticketsUser.userId) {
     const gate = await GateOperator.findById(String(ticketsUser.userId)).select('eventIds').lean();
     return scopeOf(gate?.eventIds as unknown[]);
+  }
+
+  const cashier = (req as any).cashier;
+  if (cashier?.cashierId) {
+    return cashierScope(String(cashier.cashierId));
   }
 
   const reseller = (req as any).reseller;

@@ -8,6 +8,11 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { EventService } from '@services/event.service';
 import { AllocationService } from '@services/allocation.service';
 import { EventStatus } from '@interfaces/event.interface';
+import { cashTopupSchema } from '@validators/reseller.validator';
+import { Event } from '@models/event.model';
+import { Wallet } from '@models/wallet.model';
+import { WalletService } from '@services/wallet.service';
+import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
 export class ResellerController {
   /**
@@ -47,7 +52,12 @@ export class ResellerController {
   static async login(req: Request, res: Response): Promise<any> {
     try {
       const { error, value } = Joi.object({
-        loginCode: Joi.string().pattern(/^\d{6}$/).required(),
+        // Login codes are now Crockford base32 (letters + digits), not
+        // 6-digit-numeric-only. Case-insensitive alnum only gates obviously
+        // malformed input — the service's normalizeLoginCode owns folding
+        // case and the I/L/O ambiguous glyphs, validation should not
+        // duplicate that logic.
+        loginCode: Joi.string().pattern(/^[0-9A-Za-z]{6}$/).required(),
         pin: Joi.string().pattern(/^\d{6}$/).required(),
       }).validate(req.body);
 
@@ -344,4 +354,43 @@ export class ResellerController {
       return ApiResponseUtil.error(res, err.message || 'Failed to fetch sales');
     }
   }
+
+  /**
+   * Wallets: Cash top-up at a desk (spec §5.2). Resolves the wallet by bandUid
+   * OR ticketId (xor'd in the schema), gates on Event.cashless, and delegates
+   * the atomic credit + ledger posting to WalletService.topUpCash. recordedBy
+   * comes ONLY from the verified JWT (req.reseller.operatorId), never the body.
+   */
+  static async cashTopup(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = cashTopupSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const event = await Event.findById(value.eventId).lean();
+      if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
+      if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
+      // Lifecycle guard: only a live (PUBLISHED) event can take top-ups, mirroring
+      // ResellerSaleService.createSale. Blocks loading a band at a cancelled or
+      // not-yet-live event.
+      if (event.status !== EventStatus.PUBLISHED) {
+        return ApiResponseUtil.error(res, 'Event is not published', 400);
+      }
+
+      const wallet = value.bandUid
+        ? await Wallet.findOne({ eventId: value.eventId, bandUid: value.bandUid })
+        : await Wallet.findOne({ ticketId: value.ticketId, eventId: value.eventId });
+      if (!wallet) return ApiResponseUtil.error(res, 'No wallet for that band/ticket', 404);
+
+      const result = await WalletService.topUpCash({
+        walletId: String(wallet._id), eventId: value.eventId,
+        amount: value.amount, recordedBy: (req as any).reseller.operatorId, clientTxnId: value.clientTxnId,
+      });
+      return ApiResponseUtil.success(res, result);
+    } catch (e: any) {
+      const msg = e?.message || 'Top-up failed';
+      const status = /not active|not found|cashless|amount/i.test(msg) ? 400 : 500;
+      return ApiResponseUtil.error(res, msg, status);
+    }
+  }
+
 }

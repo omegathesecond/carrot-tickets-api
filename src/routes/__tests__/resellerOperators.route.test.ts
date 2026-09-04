@@ -34,7 +34,7 @@ it('a hub manager issues an operator in their own hub', async () => {
     .set('Authorization', `Bearer ${mgr.token}`)
     .send({ fullName: 'Hired', role: 'reseller_operator' });
   expect(res.status).toBe(201);
-  expect(res.body.data.loginCode).toMatch(/^\d{6}$/);
+  expect(res.body.data.loginCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/);
   expect(res.body.data.operator.hubId).toBe(mgr.hubId);
 });
 

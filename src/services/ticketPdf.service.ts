@@ -1,16 +1,106 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
-import { ITicket } from '@interfaces/ticket.interface';
+import mongoose from 'mongoose';
+import { Ticket } from '@models/ticket.model';
+import { R2Service } from '@utils/r2.service';
+import { ITicket, TicketPdfStatus } from '@interfaces/ticket.interface';
 
 /**
- * TicketPdfService — renders a branded, QR-coded PDF for one or more tickets,
- * on demand, for the buyer "Download" action on My Profile > Tickets.
+ * TicketPdfService — renders a branded, QR-coded PDF for one or more tickets.
  *
- * Generated fresh per request (no caching): a single ticket's PDF is one
- * PDFKit page plus one QR render, which is cheap enough to redo on every
- * download rather than add a storage/cache layer for it.
+ * Two delivery modes share ONE drawing routine (drawTicketPage), so every
+ * surface gets the identical card:
+ *
+ *  - On demand (buildTicketPdfBuffer / buildBundlePdfBuffer): the buyer
+ *    "Download" action on My Profile > Tickets. Generated fresh per request —
+ *    a single ticket's PDF is one PDFKit page plus one QR render, which is
+ *    cheap enough to redo on every download rather than add a cache for it.
+ *
+ *  - Cached + shareable (ensureTicketPdf): one stored artifact in Cloudflare
+ *    R2, shared by the Keshless wallet user-app (via the main keshless-api
+ *    proxy) and the dashboard (vendor JWT). Generation is lazy and idempotent
+ *    — the first request renders + uploads, every later request returns the
+ *    cached URL. Generation runs inside the triggering request — reliable on
+ *    Cloud Run where CPU is throttled outside request handling, unlike
+ *    fire-and-forget background work. The status envelope ({ status, pdfUrl })
+ *    still lets clients poll, and a concurrent second request gets
+ *    `generating` instead of rendering a duplicate.
  */
+
+// A 'generating' marker older than this is treated as stalled (e.g. an instance
+// died mid-render) and the next request restarts generation.
+const STALE_GENERATING_MS = 60_000;
+
+export interface TicketPdfResult {
+  status: TicketPdfStatus;
+  pdfUrl?: string;
+}
+
 export class TicketPdfService {
+  /**
+   * Resolve a ticket by its human ticket code (TKT-…) or Mongo _id, with the
+   * event populated for rendering. Returns null if not found.
+   */
+  static async resolveTicket(idOrCode: string): Promise<ITicket | null> {
+    let ticket = await Ticket.findOne({ ticketId: idOrCode }).populate('eventId');
+    if (!ticket && mongoose.isValidObjectId(idOrCode)) {
+      ticket = await Ticket.findById(idOrCode).populate('eventId');
+    }
+    return ticket;
+  }
+
+  /**
+   * Return the ticket's PDF URL, generating + uploading it on first request.
+   * Idempotent: a cached READY url is returned immediately; an in-flight
+   * GENERATING returns `generating` so the caller can poll.
+   */
+  static async ensureTicketPdf(ticket: ITicket): Promise<TicketPdfResult> {
+    if (ticket.pdfStatus === TicketPdfStatus.READY && ticket.pdfUrl) {
+      return { status: TicketPdfStatus.READY, pdfUrl: ticket.pdfUrl };
+    }
+
+    const requestedAt = ticket.pdfRequestedAt ? ticket.pdfRequestedAt.getTime() : 0;
+    const isStale = Date.now() - requestedAt > STALE_GENERATING_MS;
+    if (ticket.pdfStatus === TicketPdfStatus.GENERATING && !isStale) {
+      return { status: TicketPdfStatus.GENERATING };
+    }
+
+    // Claim generation for this request.
+    ticket.pdfStatus = TicketPdfStatus.GENERATING;
+    ticket.pdfRequestedAt = new Date();
+    await ticket.save();
+
+    try {
+      const buffer = await this.buildTicketPdfBuffer(ticket);
+      const eventId = this.eventIdOf(ticket);
+      const { url } = await R2Service.uploadFile(
+        `tickets/${eventId}`,
+        `${ticket.ticketId}.pdf`,
+        buffer,
+        'application/pdf'
+      );
+
+      ticket.pdfUrl = url;
+      ticket.pdfStatus = TicketPdfStatus.READY;
+      await ticket.save();
+
+      return { status: TicketPdfStatus.READY, pdfUrl: url };
+    } catch (error: any) {
+      // Surface the failure loudly — never hand back a stale/placeholder URL.
+      ticket.pdfStatus = TicketPdfStatus.FAILED;
+      await ticket.save().catch(() => {});
+      console.error(`[ticket-pdf] generation failed for ${ticket.ticketId}:`, error);
+      throw new Error(error?.message || 'Failed to generate ticket PDF');
+    }
+  }
+
+  /** ObjectId of the event, whether eventId is populated or a raw id. */
+  private static eventIdOf(ticket: ITicket): string {
+    const e: any = ticket.eventId;
+    if (e && typeof e === 'object' && e._id) return e._id.toString();
+    return e?.toString() || 'unknown';
+  }
+
   /** Render ONE ticket into a Buffer (QR code + event/holder details). */
   static async buildTicketPdfBuffer(ticket: ITicket): Promise<Buffer> {
     return await new Promise<Buffer>((resolve, reject) => {
@@ -55,12 +145,12 @@ export class TicketPdfService {
 
   /**
    * Draw ONE ticket (QR code + event/holder details) onto the document's
-   * CURRENT page. Shared by the single-ticket and bundle builders above — one
-   * drawing routine, so a bundle page looks identical to a standalone ticket
-   * PDF. Mirrors the on-screen ticket card in PrintableTicket.tsx (My Profile
-   * > Tickets), which is the master design: card + orange header, a left info
-   * column, and a QR box on the right — no poster in any of the three
-   * surfaces (on-screen card, preview dialog, PDF).
+   * CURRENT page. Shared by the single-ticket, bundle and R2-cached builders
+   * above — one drawing routine, so a bundle page looks identical to a
+   * standalone ticket PDF. Mirrors the on-screen ticket card in
+   * PrintableTicket.tsx (My Profile > Tickets), which is the master design:
+   * card + orange header, a left info column, and a QR box on the right — no
+   * poster in any of the three surfaces (on-screen card, preview dialog, PDF).
    */
   private static async drawTicketPage(doc: PDFKit.PDFDocument, ticket: ITicket): Promise<void> {
     const event: any = ticket.eventId && typeof ticket.eventId === 'object' ? ticket.eventId : null;
@@ -191,5 +281,4 @@ export class TicketPdfService {
     if (price === 0) return 'Free';
     return `E${price.toFixed(2)}`;
   }
-
 }

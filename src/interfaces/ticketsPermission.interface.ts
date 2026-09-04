@@ -34,6 +34,23 @@ export enum TicketsPermission {
   // Access Management
   MANAGE_ACCESS = 'tickets:manage_access',
 
+  // Cashless stock/inventory management — organiser manages the product
+  // catalogue, per-bar stock, transfers and counts. Events-vertical (a bus
+  // operator has no bar stock), so it lives in EVENT_PERMISSIONS below.
+  MANAGE_STOCK = 'tickets:manage_stock',
+  // Event Menu (bar + vendor preorder catalogue) management — organizer
+  // manages the menu items and views/updates incoming preorders. Events-
+  // vertical, same reasoning as MANAGE_STOCK, so it lives in
+  // EVENT_PERMISSIONS below.
+  MANAGE_MENU = 'tickets:manage_menu',
+  // The Register desk: enrol the organizer's physical tags into an event's
+  // register, and bind one of those tags to an attendee's ticket. Granted per
+  // operator (see OperatorGrant), never part of a SCANNER's default set —
+  // running the register is a distinct job from scanning people in. OWNER holds
+  // it via EVENT_PERMISSIONS, which is what lets the organizer register a whole
+  // tag order from the dashboard without creating a desk account first.
+  ISSUE_TAGS = 'tickets:issue_tags',
+
   // Platform User Management (Carrot admins/team only) — see the platform-wide
   // list of registered buyers + signup analytics. Super-admins pass via
   // middleware; everyone else needs this assigned explicitly. NEVER part of any
@@ -98,6 +115,8 @@ export const TICKETS_ROLE_PERMISSIONS: Record<TicketsRole, TicketsPermission[]> 
     TicketsPermission.MANAGE_TRANSPORT,
     TicketsPermission.VIEW_REVENUE,
     TicketsPermission.EXPORT_REPORTS,
+    TicketsPermission.MANAGE_STOCK,
+    TicketsPermission.MANAGE_MENU,
     TicketsPermission.EDIT_BRAND
   ],
 
@@ -154,6 +173,9 @@ export const EVENT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.VIEW_REVENUE,
   TicketsPermission.EXPORT_REPORTS,
   TicketsPermission.MANAGE_ACCESS,
+  TicketsPermission.MANAGE_STOCK,
+  TicketsPermission.MANAGE_MENU,
+  TicketsPermission.ISSUE_TAGS,
 ];
 
 export interface TicketsUserToken {

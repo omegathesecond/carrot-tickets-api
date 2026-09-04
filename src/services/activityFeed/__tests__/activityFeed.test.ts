@@ -12,6 +12,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { TicketStatus } from '@interfaces/ticket.interface';
 
 const DAY = 86400000;
+const AVATAR_URL = 'https://cdn.test/avatar.jpg';
 
 async function seedVendorEvent(name: string) {
   const vendor = await Vendor.create({ businessName: 'Org ' + name, password: 'password123', slug: 'org-' + name.toLowerCase() });
@@ -371,7 +372,7 @@ describe('getActivityFeed', () => {
 
   it('surfaces a new buyer signup as a join row on the everyone tab', async () => {
     const buyer = await Buyer.create({
-      phone: '+26878300001', password: 'password123', name: 'Fresh', username: 'fresh',
+      phone: '+26878300001', password: 'password123', name: 'Fresh', username: 'fresh', avatarUrl: AVATAR_URL,
     });
     const { items } = await getActivityFeed({ tab: 'everyone', limit: 30 });
     const join = items.find((i) => i.type === 'join');
@@ -380,9 +381,18 @@ describe('getActivityFeed', () => {
     expect(join!.target).toBeNull();
   });
 
+  // The requirement this closes: a buyer isn't a "joined" member of the
+  // community feed until they've satisfied the mandatory profile-photo
+  // requirement — see joinCandidates in ../sources.ts.
+  it('omits a join row for a buyer who has not set a profile photo', async () => {
+    await Buyer.create({ phone: '+26878300009', password: 'password123', username: 'photoless' });
+    const { items } = await getActivityFeed({ tab: 'everyone', limit: 30 });
+    expect(items.some((i) => i.type === 'join')).toBe(false);
+  });
+
   it('omits join rows from the following tab', async () => {
-    const viewer = await Buyer.create({ phone: '+26878300002', password: 'password123', username: 'viewer' });
-    const followed = await Buyer.create({ phone: '+26878300003', password: 'password123', username: 'followed' });
+    const viewer = await Buyer.create({ phone: '+26878300002', password: 'password123', username: 'viewer', avatarUrl: AVATAR_URL });
+    const followed = await Buyer.create({ phone: '+26878300003', password: 'password123', username: 'followed', avatarUrl: AVATAR_URL });
     await Follow.create({ followerType: 'buyer', followerId: viewer._id, targetType: 'buyer', targetId: followed._id });
     const { items } = await getActivityFeed({
       tab: 'following', limit: 30, viewer: { type: 'buyer', id: String(viewer._id) } as any,
@@ -393,7 +403,7 @@ describe('getActivityFeed', () => {
   it('paginates join rows without loss or duplication', async () => {
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const b = await Buyer.create({ phone: `+2687840100${i}`, password: 'password123', username: `jb${i}` });
+      const b = await Buyer.create({ phone: `+2687840100${i}`, password: 'password123', username: `jb${i}`, avatarUrl: AVATAR_URL });
       await Buyer.collection.updateOne({ _id: b._id }, { $set: { createdAt: new Date(Date.now() - i * DAY) } });
       ids.push(String(b._id));
     }

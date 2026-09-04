@@ -1,6 +1,7 @@
 // api/src/models/operatorCredentials.schema.ts
 import { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
+import { OPERATOR_GRANTS } from '@interfaces/operatorGrant.interface';
 
 /**
  * Shared credential mechanism for PIN-login operators (reseller + gate).
@@ -9,6 +10,11 @@ import bcrypt from 'bcrypt';
  */
 export function applyOperatorCredentials(schema: Schema): void {
   schema.add({
+    // Per-person capability grants on top of the role's fixed set (see
+    // OperatorGrant). Enum-validated so a typo is a write error, and filtered
+    // AGAIN at token-mint time so a value that stops being a grant later
+    // cannot keep widening old rows' tokens.
+    grants: { type: [{ type: String, enum: OPERATOR_GRANTS }], default: [] },
     pin: { type: String, required: [true, 'PIN is required'], select: false },
     failedPinAttempts: { type: Number, default: 0 },
     lockedUntil: { type: Date, default: null },

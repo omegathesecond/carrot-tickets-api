@@ -37,12 +37,11 @@ export interface IResellerOperator {
   loginCode: string;
   pin: string;
   role: string;
+  /** Events this operator may sell. EMPTY = every event available to their reseller. */
+  eventIds: Types.ObjectId[];
   isActive: boolean;
   failedPinAttempts: number;
   lockedUntil?: Date | null;
   lastLoginAt?: Date;
   comparePin(p: string): Promise<boolean>;
-  // Events this actor may work. EMPTY = every event (the pre-assignment
-  // behaviour), so existing rows keep working untouched.
-  eventIds: Types.ObjectId[];
 }

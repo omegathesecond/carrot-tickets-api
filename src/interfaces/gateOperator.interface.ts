@@ -10,12 +10,11 @@ export interface IGateOperator extends Document {
   pin: string;
   scope: GateOperatorScope;
   vendorId?: Types.ObjectId;
+  /** Events this operator may work. EMPTY = every event of their organizer. */
+  eventIds: Types.ObjectId[];
   isActive: boolean;
   failedPinAttempts: number;
   lockedUntil: Date | null;
   lastLoginAt?: Date;
   comparePin(candidate: string): Promise<boolean>;
-  // Events this actor may work. EMPTY = every event (the pre-assignment
-  // behaviour), so existing rows keep working untouched.
-  eventIds: Types.ObjectId[];
 }

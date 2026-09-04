@@ -27,6 +27,7 @@ const baseCfg = {
   defaultResellerCommissionPercent: 0, platformFeePercent: 0,
   keshlessServiceFee: 0, momoServiceFee: 5, cardServiceFee: 10,
   deltapayServiceFee: 5, yocoServiceFee: 7,
+  menuServiceFeePercent: 8,
 };
 
 beforeAll(connectTestDb);
