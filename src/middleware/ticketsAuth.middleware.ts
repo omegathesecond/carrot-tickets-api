@@ -73,7 +73,7 @@ async function effectivePermissions(ticketsUser: any): Promise<string[] | null> 
   return gateOperatorPermissions(row.grants);
 }
 
-/** Shared prologue for the three permission gates below. */
+/** Shared prologue for the permission and super-admin gates below. */
 async function resolvePermissions(req: Request, res: Response, next: NextFunction): Promise<string[] | undefined> {
   const ticketsUser = (req as any).ticketsUser;
   if (!ticketsUser) {
@@ -329,15 +329,23 @@ export const optionalCommunityViewer = async (
 };
 
 /**
- * Require super-admin access.
- * Checks isSuperAdmin flag on the already-decoded ticketsUser.
- * Must be used after authenticateTickets.
+ * Require super-admin access. Must be used after authenticateTickets.
+ *
+ * A dashboard super-admin is checked on the TOKEN flag, as before. A PLATFORM
+ * gate operator's token carries isSuperAdmin: true as well (minted from its
+ * scope at login), and honouring that flag alone meant deactivating the person
+ * changed nothing here until the token expired, up to 7 days later. So for a
+ * gate-operator token the row is read through the same prologue the permission
+ * gates use, and a missing or deactivated row is refused with the same 401
+ * before the flag is honoured. For every other token kind the prologue reads
+ * nothing.
  */
-export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction): void => {
+export const requireSuperAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   if (!(req as any).ticketsUser?.isSuperAdmin) {
     ApiResponseUtil.forbidden(res, 'Super admin access required');
     return;
   }
+  if (!(await resolvePermissions(req, res, next))) return;
   next();
 };
 
@@ -348,13 +356,13 @@ export const requireSuperAdmin = (req: Request, res: Response, next: NextFunctio
  * (e.g. VIEW_USERS) use this.
  */
 export const requireSuperAdminOrPermission = (permission: TicketsPermission) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const ticketsUser = (req as any).ticketsUser;
-    if (!ticketsUser) {
-      ApiResponseUtil.unauthorized(res, 'Authentication required');
-      return;
-    }
-    if (ticketsUser.isSuperAdmin || (ticketsUser.permissions || []).includes(permission)) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    // Row-resolved for a gate operator (liveness + current grants), token-
+    // resolved for everyone else — see requireSuperAdmin and effectivePermissions.
+    const permissions = await resolvePermissions(req, res, next);
+    if (!permissions) return;
+
+    if ((req as any).ticketsUser.isSuperAdmin || permissions.includes(permission)) {
       next();
       return;
     }

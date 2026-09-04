@@ -108,3 +108,97 @@ it('a token naming a row that no longer exists is refused the same way', async (
     .set('Authorization', `Bearer ${accessToken}`);
   expect(res.status).toBe(401);
 });
+
+// ── Platform gate operators ─────────────────────────────────────────────────
+//
+// A PLATFORM-scope gate operator's token is minted with isSuperAdmin: true, and
+// requireSuperAdmin / requireSuperAdminOrPermission honoured that flag on the
+// token alone — so deactivating the person changed nothing on the admin routes
+// behind those two gates until the token expired, up to 7 days later. Both
+// gates now read the row for a gate-operator token, exactly as the permission
+// gates above do, and refuse a missing or deactivated row with the same 401.
+
+/** A real PLATFORM row → a real login → the isSuperAdmin token the POS holds. */
+async function loginPlatform() {
+  const loginCode = nextLoginCode();
+  const operator = await GateOperator.create({
+    fullName: 'Platform Gate', scope: 'platform', eventIds: [], loginCode, pin: PIN, grants: [],
+  });
+  const { accessToken } = await GateOperatorAuthService.login(loginCode, PIN);
+  expect((jwt.verify(accessToken, JWT_SECRET) as any).isSuperAdmin).toBe(true);
+  return { operator, accessToken };
+}
+
+// requireSuperAdmin on a single route
+const adminFees = (token: string) =>
+  request(app).get('/api/tickets/admin/fees').set('Authorization', `Bearer ${token}`);
+// requireSuperAdmin mounted router-wide (router.use) on /api/admin
+const listResellers = (token: string) =>
+  request(app).get('/api/admin/resellers').set('Authorization', `Bearer ${token}`);
+// requireSuperAdminOrPermission(VIEW_USERS)
+const adminUsers = (token: string) =>
+  request(app).get('/api/tickets/admin/users').set('Authorization', `Bearer ${token}`);
+
+it('an active platform gate operator passes both super-admin gates (the control)', async () => {
+  const { accessToken } = await loginPlatform();
+  expect((await adminFees(accessToken)).status).toBe(200);
+  expect((await listResellers(accessToken)).status).toBe(200);
+  expect((await adminUsers(accessToken)).status).toBe(200);
+});
+
+it('deactivating a platform gate operator revokes its isSuperAdmin token on requireSuperAdmin at once', async () => {
+  const { operator, accessToken } = await loginPlatform();
+  expect((await adminFees(accessToken)).status).toBe(200);
+
+  await GateOperator.updateOne({ _id: operator._id }, { $set: { isActive: false } });
+
+  const res = await adminFees(accessToken);
+  expect(res.status).toBe(401);
+  expect(res.body.message).toBe('Operator deactivated');
+  expect((await listResellers(accessToken)).status).toBe(401);
+});
+
+it('deactivating a platform gate operator revokes its token on requireSuperAdminOrPermission too', async () => {
+  const { operator, accessToken } = await loginPlatform();
+  expect((await adminUsers(accessToken)).status).toBe(200);
+
+  await GateOperator.updateOne({ _id: operator._id }, { $set: { isActive: false } });
+
+  const res = await adminUsers(accessToken);
+  expect(res.status).toBe(401);
+  expect(res.body.message).toBe('Operator deactivated');
+});
+
+it('a platform token naming a row that no longer exists is refused at the super-admin gate', async () => {
+  const { operator, accessToken } = await loginPlatform();
+  await GateOperator.deleteOne({ _id: operator._id });
+
+  const res = await adminFees(accessToken);
+  expect(res.status).toBe(401);
+  expect(res.body.message).toBe('Operator deactivated');
+});
+
+it('a still-active platform operator keeps super-admin access while a colleague is deactivated', async () => {
+  const keeps = await loginPlatform();
+  const loses = await loginPlatform();
+  await GateOperator.updateOne({ _id: loses.operator._id }, { $set: { isActive: false } });
+
+  expect((await adminFees(loses.accessToken)).status).toBe(401);
+  expect((await adminFees(keeps.accessToken)).status).toBe(200);
+  expect((await adminUsers(keeps.accessToken)).status).toBe(200);
+});
+
+it('an active ORGANIZER-scope operator is still refused super-admin routes — the row check widens nothing', async () => {
+  const { accessToken } = await loginWith([]);
+  expect((await adminFees(accessToken)).status).toBe(403);
+  expect((await adminUsers(accessToken)).status).toBe(403);
+});
+
+it('a dashboard super-admin (vendor token, no operator row) is untouched by the row check', async () => {
+  const dashboardAdmin = jwt.sign({
+    app: 'tickets', userType: 'vendor', role: 'tickets_owner', vendorId: VENDOR,
+    permissions: [], isSuperAdmin: true,
+  }, JWT_SECRET);
+  expect((await adminFees(dashboardAdmin)).status).toBe(200);
+  expect((await adminUsers(dashboardAdmin)).status).toBe(200);
+});

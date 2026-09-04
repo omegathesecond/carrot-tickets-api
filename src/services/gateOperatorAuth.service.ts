@@ -63,6 +63,8 @@ export class GateOperatorAuthService {
       // Informational for the client — the gate re-reads the row (see
       // gateOperatorPermissions).
       permissions: gateOperatorPermissions((operator as any).grants),
+      // Honoured by requireSuperAdmin / requireSuperAdminOrPermission only
+      // while the row is still live — those gates re-read it per request.
       isSuperAdmin,
     };
     if (!isSuperAdmin && operator.vendorId) payload['vendorId'] = operator.vendorId.toString();
