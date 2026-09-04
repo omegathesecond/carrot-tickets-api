@@ -59,14 +59,11 @@ export async function createStory(input: CreateStoryInput): Promise<{ story: ISt
  * immediately; video kicks off the async transcoder and stays 'processing'
  * until it calls back.
  *
- * CAVEAT: the transcoder microservice (transcoder/src/db.ts +
- * transcoder/src/index.ts) currently writes its result back with
- * `Update.updateOne({_id: updateId}, ...)` hardcoded against the `updates`
- * collection — it has no notion of a `stories` collection yet. Until the
- * transcoder is generalized to accept a target collection, a video Story's
- * media will get stuck in 'processing' rather than transition to 'ready' in
- * a real deployment. Image stories are unaffected (no transcoder involved).
- * Flagged here rather than silently assumed fixed — see stories-api-report.md.
+ * The transcoder microservice (transcoder/src/db.ts + transcoder/src/index.ts)
+ * targets whichever collection `triggerTranscode`'s `collection` field names
+ * (`'stories'` below) — Story.media is a single embedded doc (`media.*`),
+ * not an array (`media.0.*`) like Update, so the transcoder branches its
+ * write path on this same field. See transcode.client#Transcodable.
  */
 export async function finalizeStory(id: string): Promise<IStory> {
   const story = await Story.findById(id);
@@ -92,19 +89,19 @@ export async function finalizeStory(id: string): Promise<IStory> {
   story.media.processingStartedAt = new Date();
   story.media.status = 'processing';
   await story.save();
-  // fire-and-forget, same as finalizeUpdate — no reconcile sweep exists for
-  // Stories yet (out of scope for this build; see report).
-  // Story.media stays a single embedded doc (unlike Update.media, now an
-  // array — see @models/update.model), so it's wrapped here to satisfy
-  // Transcodable's array shape without changing StoryMedia's cardinality.
-  triggerTranscode({ id: story.id, media: [{ rawKey: story.media.rawKey }] }).catch((err: any) => console.error('triggerTranscode (story) failed:', err?.message));
-  // NOTE: video stories never earn points today — the transcoder callback
-  // that would flip media.status to 'ready' is hardcoded to the `updates`
-  // collection (see the CAVEAT above finalizeStory) and never reaches here.
-  // Awarding here instead would pay out for a story that's stuck 'processing'
-  // forever, which is exactly what postCount's 'ready'-only rule exists to
-  // avoid for posts. Once that transcoder gap is fixed, award at the point
-  // media.status becomes 'ready' for video too.
+  // fire-and-forget; durability comes from reconcileStuckStories, same as
+  // finalizeUpdate relies on reconcileStuckUpdates. Story.media stays a
+  // single embedded doc (unlike Update.media, now an array — see
+  // @models/update.model), so it's wrapped here to satisfy Transcodable's
+  // array shape without changing StoryMedia's cardinality.
+  triggerTranscode({ id: story.id, media: [{ rawKey: story.media.rawKey }], collection: 'stories' }).catch((err: any) => console.error('triggerTranscode (story) failed:', err?.message));
+  // NOTE: video stories still never earn points, but now for a legitimate
+  // reason (not the collection-routing bug this fixed): the transcoder
+  // callback that flips media.status to 'ready' happens well after
+  // finalizeStory returns, and postCount's 'ready'-only rule intentionally
+  // never pays out for a still-processing (or failed) post. Award points at
+  // the point media.status actually becomes 'ready' for video would need a
+  // callback/webhook back into story.service — no such hook exists yet.
   return story;
 }
 
@@ -344,6 +341,13 @@ export interface StoryItemDto {
    *  button in the story viewer opens already in the right state instead of
    *  resetting every time the story is closed and reopened. */
   viewerHasLiked: boolean;
+  /** 'processing' | 'ready' | 'failed'. Only ever non-'ready' on the viewer's
+   *  OWN items — see listForViewer's query for why other authors' non-ready
+   *  media never reaches this DTO at all. Lets the client show "processing
+   *  your video…" / a failure state on your own pending story instead of it
+   *  just silently not appearing (or, for a failed one, silently vanishing
+   *  at the 48h TTL with no explanation). */
+  mediaStatus: 'processing' | 'ready' | 'failed';
 }
 
 export interface StoryGroupDto {
@@ -374,9 +378,13 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
   ]);
   const excludedAuthorIds = [...new Set([...iBlocked, ...blockedMe])];
 
+  // NOT filtered to 'media.status':'ready' here — a viewer's OWN
+  // processing/failed story must still come back so its author can see it
+  // (rather than it silently never appearing, or vanishing unexplained at
+  // the 48h TTL). Other authors' non-ready items are dropped per-item below
+  // instead, once isOwnStory is known.
   const stories = await Story.find({
     expiresAt: { $gt: new Date() },
-    'media.status': 'ready',
     authorId: { $nin: excludedAuthorIds },
   }).sort({ createdAt: 1 }); // ascending: items build up chronologically per author below
 
@@ -419,8 +427,12 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
 
   const groups = new Map<string, StoryGroupDto & { latestCreatedAt: number }>();
   for (const s of stories) {
-    const key = `${s.authorType}:${String(s.authorId)}`;
     const isOwnStory = isActorAuthorOf(s.authorType, s.authorId, actor);
+    // Someone else's still-processing/failed upload is theirs to see, not
+    // the viewer's — only the author gets a non-'ready' item (see the query
+    // comment above and StoryItemDto.mediaStatus).
+    if (!isOwnStory && s.media.status !== 'ready') continue;
+    const key = `${s.authorType}:${String(s.authorId)}`;
     let group = groups.get(key);
     if (!group) {
       const isOwn = isOwnStory;
@@ -438,6 +450,7 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
       durationSec: playbackDurationSec(s),
       createdAt: s.createdAt,
       viewerHasLiked: likedSet.has(String(s._id)),
+      mediaStatus: s.media.status,
       ...(isOwnStory ? { viewerCount: viewerCounts.get(String(s._id)) ?? 0, likeCount: likeCounts.get(String(s._id)) ?? 0 } : {}),
     });
     group.latestCreatedAt = s.createdAt.getTime();
