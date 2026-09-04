@@ -3,7 +3,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import app from '@/app';
-import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
@@ -18,7 +18,7 @@ const token = (perms: string[]) =>
 
 const ADMIN = () => token(['tickets:manage_access']);
 
-async function setup(bandUid: string | null = 'LOST1') {
+async function setup(bandUid: string | null = '105d0001') {
   const future = new Date(Date.now() + 7 * 864e5);
   const event = await Event.create({
     vendorId: new mongoose.Types.ObjectId(VENDOR), name: 'Fest', venue: 'V',
@@ -35,11 +35,11 @@ async function setup(bandUid: string | null = 'LOST1') {
   // Reissue binds a REPLACEMENT tag, and a tag only binds if it is in this
   // event's register — so the organizer's spare stock has to be in the box, not
   // just the one that was lost.
-  await enrolTags(event._id, 'LOST1', 'FRESH1', 'FRESH2', 'TAKEN1');
+  await enrolTags(event._id, '105d0001', 'f0e50001', 'f0e50002', '7a0e0001');
   return { event, wallet };
 }
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
@@ -95,11 +95,11 @@ describe('reissue', () => {
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
       .set('Authorization', `Bearer ${ADMIN()}`)
-      .send({ bandUid: 'FRESH1' });
+      .send({ bandUid: 'f0e50001' });
 
     expect(res.status).toBe(200);
     const after = await Wallet.findById(wallet._id);
-    expect(after!.bandUid).toBe('FRESH1');
+    expect(after!.bandUid).toBe('f0e50001');
     expect(after!.balance).toBe(9000);
   });
 
@@ -111,14 +111,14 @@ describe('reissue', () => {
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
       .set('Authorization', `Bearer ${ADMIN()}`)
-      .send({ bandUid: 'FRESH2' });
+      .send({ bandUid: 'f0e50002' });
 
     expect(res.status).toBe(200);
     const after = await Wallet.findById(wallet._id);
-    expect(after!.bandUid).toBe('FRESH2');
+    expect(after!.bandUid).toBe('f0e50002');
     expect(after!.balance).toBe(9000);
     // The old binding is closed with an audit trail, not silently dropped.
-    const old = await BandBinding.findOne({ walletId: wallet._id, bandUid: 'LOST1' });
+    const old = await BandBinding.findOne({ walletId: wallet._id, bandUid: '105d0001' });
     expect(old!.unboundAt).toBeTruthy();
     expect(old!.unboundReason).toMatch(/reissue/i);
   });
@@ -126,17 +126,17 @@ describe('reissue', () => {
   it('409s when the new tag is already issued at this event', async () => {
     const { event, wallet } = await setup();
     await Wallet.create({
-      eventId: event._id, ticketId: new mongoose.Types.ObjectId(), bandUid: 'TAKEN1',
+      eventId: event._id, ticketId: new mongoose.Types.ObjectId(), bandUid: '7a0e0001',
       balance: 0, cashFundedBalance: 0, status: 'active',
     });
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
       .set('Authorization', `Bearer ${ADMIN()}`)
-      .send({ bandUid: 'TAKEN1' });
+      .send({ bandUid: '7a0e0001' });
 
     expect(res.status).toBe(409);
-    expect(await Wallet.findById(wallet._id).then((w) => w!.bandUid)).toBe('LOST1');
+    expect(await Wallet.findById(wallet._id).then((w) => w!.bandUid)).toBe('105d0001');
   });
 
   it('404s a wallet belonging to a different event', async () => {
@@ -149,9 +149,76 @@ describe('reissue', () => {
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${otherWallet._id}/reissue`)
       .set('Authorization', `Bearer ${ADMIN()}`)
-      .send({ bandUid: 'FRESH3' });
+      .send({ bandUid: 'f0e50003' });
 
     expect(res.status).toBe(404);
+  });
+
+  // The dashboard form takes whatever the reader/typist produced. Storing it
+  // raw meant the cashier/merchant/gate lookups (all canonical) found nothing,
+  // and the same plastic could be issued a second time under another spelling.
+  it('stores the CANONICAL uid when the organizer types a colon/upper-case form', async () => {
+    const { event, wallet } = await setup();
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ bandUid: 'F0:E5:00:01' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.bandUid).toBe('f0e50001');
+    expect((await Wallet.findById(wallet._id))!.bandUid).toBe('f0e50001');
+    expect(await Wallet.countDocuments({ eventId: event._id, bandUid: 'f0e50001' })).toBe(1);
+  });
+
+  it('409s a differently-spelled uid that is already issued at this event', async () => {
+    const { event, wallet } = await setup();
+    await Wallet.create({
+      eventId: event._id, ticketId: new mongoose.Types.ObjectId(), bandUid: '7a0e0001',
+      balance: 0, cashFundedBalance: 0, status: 'active',
+    });
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ bandUid: '7A:0E:00:01' });
+
+    expect(res.status).toBe(409);
+    expect((await Wallet.findById(wallet._id))!.bandUid).toBe('105d0001');
+  });
+
+  it('400s a malformed uid and leaves the current tag working', async () => {
+    const { event, wallet } = await setup();
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ bandUid: 'not-hex!' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/hex/i);
+    expect((await Wallet.findById(wallet._id))!.bandUid).toBe('105d0001');
+  });
+
+  // Reissue used to unbind FIRST and only then find out the spare was not in
+  // the register: a 400 for the organizer, and an attendee whose old tag had
+  // just been killed for nothing.
+  it('400s an UNREGISTERED replacement WITHOUT stripping the working tag', async () => {
+    const { event, wallet } = await setup();
+
+    const res = await request(app)
+      .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ bandUid: 'deadbeef' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not registered/i);
+    const after = await Wallet.findById(wallet._id);
+    expect(after!.bandUid).toBe('105d0001');
+    expect(after!.balance).toBe(9000);
+    const old = await BandBinding.findOne({ walletId: wallet._id, bandUid: '105d0001' });
+    expect(old!.unboundAt).toBeUndefined();
+    expect(await BandBinding.countDocuments({ walletId: wallet._id })).toBe(1);
   });
 });
 
@@ -189,5 +256,26 @@ describe('office refund', () => {
       .send({ amount: 1000 });
 
     expect(res.status).toBe(400);
+  });
+
+  it('409s a reused clientTxnId carrying a DIFFERENT amount, and replays the same amount', async () => {
+    const { event, wallet } = await setup();
+    const url = `/api/tickets/events/${event._id}/tags/${wallet._id}/refund`;
+
+    const first = await request(app).post(url).set('Authorization', `Bearer ${REFUNDER()}`)
+      .send({ amount: 1000, clientTxnId: 'r-dup' });
+    expect(first.status).toBe(200);
+    expect(first.body.data.balance).toBe(8000);
+
+    const mismatch = await request(app).post(url).set('Authorization', `Bearer ${REFUNDER()}`)
+      .send({ amount: 2000, clientTxnId: 'r-dup' });
+    expect(mismatch.status).toBe(409);
+    expect(mismatch.body.message).toMatch(/clientTxnId already used with a different amount/);
+
+    const replay = await request(app).post(url).set('Authorization', `Bearer ${REFUNDER()}`)
+      .send({ amount: 1000, clientTxnId: 'r-dup' });
+    expect(replay.status).toBe(200);
+    expect(replay.body.data.withdrawalId).toBe(first.body.data.withdrawalId);
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(8000);
   });
 });

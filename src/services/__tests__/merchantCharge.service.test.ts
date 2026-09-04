@@ -9,6 +9,9 @@ import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { LedgerEntry } from '@models/ledgerEntry.model';
 import mongoose from 'mongoose';
+import { Product } from '@models/product.model';
+import { StockService } from '@services/stock.service';
+import { StockMovementReason } from '@interfaces/stock.interface';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
@@ -37,6 +40,16 @@ async function seedOperatorFor(merchantId: string, eventId: string, fullName = '
   });
   await op.save();
   return String(op._id);
+}
+
+/** A catalogue product with `onHand` units already received at the merchant. */
+async function seedProductWithStock(eventId: string, merchantId: string, p: { name: string; price: number; onHand: number }): Promise<string> {
+  const product = await Product.create({ eventId, name: p.name, category: 'beer', price: p.price });
+  await StockService.applyMovement({
+    eventId, merchantId, productId: product._id, delta: p.onHand,
+    reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: eventId,
+  });
+  return String(product._id);
 }
 
 // Deactivating a person is the ONLY revocation control the dashboard offers
@@ -211,6 +224,73 @@ it('is idempotent on clientTxnId scoped to the merchant (no double debit)', asyn
   expect(await MerchantCharge.countDocuments({ clientTxnId: 'dup' })).toBe(1);
 });
 
+it('refuses a replay of clientTxnId that asks for a DIFFERENT amount — never answers it with the original success', async () => {
+  const { eventId, walletId, bandUid } = await seedFundedWallet(1000);
+  const merchantId = await seedMerchant(eventId, 0);
+  const merchantOperatorId = await seedOperatorFor(merchantId, eventId);
+
+  await MerchantService.charge({
+    merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+    eventId, walletId, bandUid, amount: 300, clientTxnId: 'dup-amount',
+  });
+
+  // A till that reuses an id for a new sale must be told so, not shown a
+  // 700-cent "success" for a 300-cent charge that already happened.
+  await expect(
+    MerchantService.charge({
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, amount: 700, clientTxnId: 'dup-amount',
+    }),
+  ).rejects.toMatchObject({ reason: 'idempotency_mismatch' });
+
+  const w = await Wallet.findById(walletId).lean();
+  expect(w!.balance).toBe(700); // still only the first 300 debited
+  expect(await MerchantCharge.countDocuments({ clientTxnId: 'dup-amount' })).toBe(1);
+});
+
+it('refuses a replay of clientTxnId that asks for DIFFERENT items, and one that swaps items for an amount', async () => {
+  const { eventId, walletId, bandUid } = await seedFundedWallet(100000);
+  const merchantId = await seedMerchant(eventId, 0);
+  const merchantOperatorId = await seedOperatorFor(merchantId, eventId);
+  const beer = await seedProductWithStock(eventId, merchantId, { name: 'Beer', price: 2500, onHand: 10 });
+  const cola = await seedProductWithStock(eventId, merchantId, { name: 'Cola', price: 1800, onHand: 10 });
+
+  const first = await MerchantService.charge({
+    merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+    eventId, walletId, bandUid, clientTxnId: 'dup-items',
+    items: [{ productId: String(beer), qty: 2 }],
+  });
+  expect(first.charge.amount).toBe(5000);
+
+  // Same basket, same id → the committed charge (true replay), even when the
+  // duplicate lines are spelled differently.
+  const replay = await MerchantService.charge({
+    merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+    eventId, walletId, bandUid, clientTxnId: 'dup-items',
+    items: [{ productId: String(beer), qty: 1 }, { productId: String(beer), qty: 1 }],
+  });
+  expect(String(replay.charge._id)).toBe(String(first.charge._id));
+
+  await expect(
+    MerchantService.charge({
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, clientTxnId: 'dup-items',
+      items: [{ productId: String(cola), qty: 2 }],
+    }),
+  ).rejects.toMatchObject({ reason: 'idempotency_mismatch' });
+
+  await expect(
+    MerchantService.charge({
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, clientTxnId: 'dup-items', amount: 5000,
+    }),
+  ).rejects.toMatchObject({ reason: 'idempotency_mismatch' });
+
+  const w = await Wallet.findById(walletId).lean();
+  expect(w!.balance).toBe(95000); // one 5000-cent sale, nothing else
+  expect(await MerchantCharge.countDocuments({ clientTxnId: 'dup-items' })).toBe(1);
+});
+
 it('rejects a suspended merchant', async () => {
   const { eventId, walletId, bandUid } = await seedFundedWallet(1000);
   const merchantId = await seedMerchant(eventId, 0);
@@ -297,4 +377,62 @@ it('credits the STALL in the ledger, never the operator', async () => {
     expect(String(entry.accountRef)).toBe(merchantId);
     expect(String(entry.accountRef)).not.toBe(merchantOperatorId);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Replay UNDER CONTENTION. A till that gets no reply re-sends the SAME
+// clientTxnId, and the resend can overlap the original. Whichever attempt loses
+// the wallet CAS must still be answered with the charge that committed — never
+// with a decline: a false 402/409 for a sale that happened is what makes a till
+// retry under a NEW id (double charge) or refuse a drink that was paid for.
+// The exact-balance and last-unit cases are the ones where the loser's CAS
+// fails OUTRIGHT (balance / onHand now 0) instead of tripping the unique index.
+// ---------------------------------------------------------------------------
+describe('concurrent replay of the same clientTxnId', () => {
+  it('at exact balance: both callers get the ONE committed charge — balance 0, one row, ledger balanced', async () => {
+    const { eventId, walletId, bandUid } = await seedFundedWallet(300);
+    const merchantId = await seedMerchant(eventId, 0);
+    const merchantOperatorId = await seedOperatorFor(merchantId, eventId);
+    const args = {
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, amount: 300, clientTxnId: 'replay-exact',
+    };
+
+    const [a, b] = await Promise.all([MerchantService.charge(args), MerchantService.charge(args)]);
+
+    expect(String(a.charge._id)).toBe(String(b.charge._id));
+    expect(a.charge.amount).toBe(300);
+    expect(b.charge.amount).toBe(300);
+    expect(await MerchantCharge.countDocuments({ merchantId, clientTxnId: 'replay-exact' })).toBe(1);
+    expect((await Wallet.findById(walletId).lean())!.balance).toBe(0);
+    const entries = await LedgerEntry.find({ refType: 'merchant_charge', refId: 'replay-exact' }).lean();
+    expect(entries).toHaveLength(2); // debited ONCE: one WALLET + one MERCHANT leg
+    expect(entries.reduce((s, e) => s + e.delta, 0)).toBe(0);
+  });
+
+  it('on the last unit of stock: both callers get the ONE committed itemised charge — onHand 0, wallet debited once', async () => {
+    const { eventId, walletId, bandUid } = await seedFundedWallet(10_000);
+    const merchantId = await seedMerchant(eventId, 0);
+    const merchantOperatorId = await seedOperatorFor(merchantId, eventId);
+    const beer = await Product.create({ eventId, name: 'Castle Lite', category: 'beer', price: 2500 });
+    await StockService.applyMovement({
+      eventId, merchantId, productId: String(beer._id), delta: 1,
+      reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: 'v1',
+    });
+    const args = {
+      merchantId, merchantOperatorId, operatorName: 'Thabo Dlamini',
+      eventId, walletId, bandUid, items: [{ productId: String(beer._id), qty: 1 }], clientTxnId: 'replay-last-unit',
+    };
+
+    const [a, b] = await Promise.all([MerchantService.charge(args), MerchantService.charge(args)]);
+
+    expect(String(a.charge._id)).toBe(String(b.charge._id));
+    expect(a.charge.amount).toBe(2500);
+    expect(await MerchantCharge.countDocuments({ merchantId, clientTxnId: 'replay-last-unit' })).toBe(1);
+    expect(await StockService.getOnHand(merchantId, String(beer._id))).toBe(0);
+    expect((await Wallet.findById(walletId).lean())!.balance).toBe(7_500);
+    const entries = await LedgerEntry.find({ refType: 'merchant_charge', refId: 'replay-last-unit' }).lean();
+    expect(entries).toHaveLength(2);
+    expect(entries.reduce((s, e) => s + e.delta, 0)).toBe(0);
+  });
 });

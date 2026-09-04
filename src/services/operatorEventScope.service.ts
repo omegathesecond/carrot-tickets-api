@@ -58,8 +58,18 @@ function scopeOf(eventIds: unknown[] | undefined | null): EventScope {
  * partner sell every published event until their token expired.
  */
 async function resellerScope(resellerId: string): Promise<EventScope> {
-  const reseller = await Reseller.findById(resellerId).select('eventIds').lean();
+  const reseller = await Reseller.findById(resellerId).select('eventIds isActive status').lean();
   if (!reseller) return [];
+
+  // A DEACTIVATED or SUSPENDED company denies too, for the same reason a
+  // vanished one does: authenticateReseller does no database lookup and
+  // ResellerAuthService mints 7-day tokens, so suspending a partner would
+  // otherwise only stop their NEXT LOGIN while every token already in their
+  // tills kept selling for the rest of the week. This binds the owner token
+  // and, through intersectScopes, every till under the company. The row is
+  // already being read here, so this costs nothing beyond two more fields.
+  if (!reseller.isActive || reseller.status === 'suspended') return [];
+
   return scopeOf(reseller.eventIds as unknown[]);
 }
 
@@ -72,8 +82,18 @@ async function resellerScope(resellerId: string): Promise<EventScope> {
  * an admin merely re-created.
  */
 async function resellerOperatorScope(operatorId: string): Promise<EventScope> {
-  const operator = await ResellerOperator.findById(operatorId).select('eventIds').lean();
-  return scopeOf(operator?.eventIds as unknown[]);
+  const operator = await ResellerOperator.findById(operatorId).select('eventIds isActive').lean();
+  if (!operator) return null;
+
+  // A DEACTIVATED till denies, unlike a missing one. PATCH
+  // /reseller/operators/:id {isActive:false} is the only per-person
+  // revocation the reseller admin has, and with no database lookup in
+  // authenticateReseller and 7-day tokens it would otherwise only stop the
+  // NEXT LOGIN — the token in the till kept selling. An empty array here
+  // intersects to an empty array whatever the company tier says.
+  if (!operator.isActive) return [];
+
+  return scopeOf(operator.eventIds as unknown[]);
 }
 
 /**
@@ -162,8 +182,23 @@ async function cashierScope(cashierId: string): Promise<EventScope> {
 export async function resolveOperatorEventScope(req: Request): Promise<EventScope> {
   const ticketsUser = (req as any).ticketsUser;
   if (ticketsUser?.userType === 'gate-operator' && ticketsUser.userId) {
-    const gate = await GateOperator.findById(String(ticketsUser.userId)).select('eventIds').lean();
-    return scopeOf(gate?.eventIds as unknown[]);
+    const gate = await GateOperator.findById(String(ticketsUser.userId)).select('eventIds isActive').lean();
+
+    // A VANISHED row resolves to null (unrestricted) — see the doc comment on
+    // this function; requireTicketsPermission refuses a token naming no row
+    // before a request ever gets here.
+    if (!gate) return null;
+
+    // A DEACTIVATED row denies, for the same reason a deactivated cashier
+    // does: authenticateTickets does no database lookup and
+    // GateOperatorAuthService mints 7-day tokens, so PATCH /gate-operators/:id
+    // {isActive:false} would otherwise only stop their NEXT LOGIN while the
+    // token in their hand kept scanning — and, for an unassigned row, kept
+    // resolving to null, i.e. every event of every organizer. The row is
+    // already being read here, so this costs nothing beyond one more field.
+    if (!gate.isActive) return [];
+
+    return scopeOf(gate.eventIds as unknown[]);
   }
 
   const cashier = (req as any).cashier;

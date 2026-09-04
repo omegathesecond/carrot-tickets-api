@@ -165,4 +165,18 @@ describe('stock admin routes', () => {
       .send({ name: 'Castle Lite 330ml (again)', category: 'beer', price: 2500, barcode: '6001240100015' });
     expect(dupe.status).toBe(400);
   });
+
+  // A productId that is not a 24-hex ObjectId used to reach Product.findById()
+  // and surface as a CastError 500. Malformed input is the CLIENT's fault: 400.
+  it('rejects a malformed productId on receive with 400, not a CastError 500', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const merchant = await Merchant.create({ name: 'Bar 4', eventId, loginCode: String(__loginSeq++), pin: '000000' });
+    const res = await request(app)
+      .post(`/api/tickets/events/${eventId}/stock/receive`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ merchantId: String(merchant._id), productId: 'not-an-object-id', quantity: 10 });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/productId/);
+  });
 });

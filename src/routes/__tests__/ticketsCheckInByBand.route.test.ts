@@ -10,10 +10,24 @@ import { TicketStatus } from '@interfaces/ticket.interface';
 import { Event } from '@models/event.model';
 import { WalletService } from '@services/wallet.service';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
+import { GateOperator } from '@models/gateOperator.model';
+import mongoose from 'mongoose';
 
 beforeAll(connectTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
-const gate = (vendorId: string) => jwt.sign(
-  { app:'tickets', userType:'gate-operator', vendorId, permissions:[TicketsPermission.SCAN_TICKETS] }, JWT_SECRET);
+
+// requireTicketsPermission re-resolves a gate operator's permissions from
+// its ROW (SCANNER role set + grants), not the token, so the token has to
+// name a real, active row; the permissions it carries are informational.
+let __loginCodeSeq = 100;
+const gate = async (vendorId: string) => {
+  const op = await GateOperator.create({
+    fullName: 'Gate', loginCode: `4KW${__loginCodeSeq++}`, pin: '111111', scope: 'organizer', vendorId,
+  });
+  return jwt.sign({
+    app: 'tickets', userType: 'gate-operator', userId: String(op._id), vendorId,
+    permissions: [TicketsPermission.SCAN_TICKETS],
+  }, JWT_SECRET);
+};
 
 async function seedBound(cashless = true) {
   const { eventId, vendorId } = await seedPublishedEvent({});
@@ -28,7 +42,7 @@ async function seedBound(cashless = true) {
 it('checks in by band uid on a cashless event', async () => {
   const { eventId, vendorId } = await seedBound(true);
   const res = await request(app).post('/api/tickets/scans/check-in')
-    .set('Authorization', `Bearer ${gate(vendorId)}`)
+    .set('Authorization', `Bearer ${await gate(vendorId)}`)
     .send({ bandUid: '04a22b1c3d4e5f', expectedEventId: eventId });
   expect(res.status).toBe(200);
 });
@@ -36,7 +50,7 @@ it('checks in by band uid on a cashless event', async () => {
 it('rejects band check-in when the event is not cashless', async () => {
   const { eventId, vendorId } = await seedBound(false);
   const res = await request(app).post('/api/tickets/scans/check-in')
-    .set('Authorization', `Bearer ${gate(vendorId)}`)
+    .set('Authorization', `Bearer ${await gate(vendorId)}`)
     .send({ bandUid: '04a22b1c3d4e5f', expectedEventId: eventId });
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/cashless/i);
@@ -45,7 +59,7 @@ it('rejects band check-in when the event is not cashless', async () => {
 it('rejects an unbound uid with 400', async () => {
   const { eventId, vendorId } = await seedBound(true);
   const res = await request(app).post('/api/tickets/scans/check-in')
-    .set('Authorization', `Bearer ${gate(vendorId)}`)
+    .set('Authorization', `Bearer ${await gate(vendorId)}`)
     .send({ bandUid: 'bbbbbbbbbbbbbb', expectedEventId: eventId });
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/no wallet|not bound|no band/i);
@@ -58,7 +72,7 @@ it('rejects an unbound uid with 400', async () => {
 it('rejects cross-vendor band check-in with 403 before leaking existence', async () => {
   const { eventId } = await seedBound(true); // band bound under the seeded (Vendor B) event
   const res = await request(app).post('/api/tickets/scans/check-in')
-    .set('Authorization', `Bearer ${gate('vendor-a-different')}`)
+    .set('Authorization', `Bearer ${await gate(String(new mongoose.Types.ObjectId()))}`)
     .send({ bandUid: '04a22b1c3d4e5f', expectedEventId: eventId });
   expect(res.status).toBe(403);
   expect(res.body.message).toMatch(/different vendor/i);

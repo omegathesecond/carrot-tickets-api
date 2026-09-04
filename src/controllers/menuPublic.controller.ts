@@ -9,6 +9,19 @@ import { MenuOrderService } from '@services/menuOrder.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { createMenuOrderSchema } from '@validators/menu.validator';
+import { HttpError } from '@utils/httpError.util';
+
+/**
+ * A known checkout refusal carries its own status (MenuOrderService throws
+ * HttpError: 404 event closed, 400 PIN/cap, 402 payment declined, 409 item
+ * gone, 503 MoMo unavailable); a malformed id is a Mongoose CastError → 400.
+ * Anything else is a real failure and stays a 500.
+ */
+function knownPreorderRefusal(error: any): { status: number; message: string } | null {
+  if (error instanceof HttpError) return { status: error.statusCode, message: error.message };
+  if (error?.name === 'CastError') return { status: 400, message: 'Invalid event or menu item id' };
+  return null;
+}
 
 export class MenuPublicController {
   /**
@@ -89,6 +102,8 @@ export class MenuPublicController {
 
       return ApiResponseUtil.badRequest(res, 'Unsupported payment method');
     } catch (error: any) {
+      const refusal = knownPreorderRefusal(error);
+      if (refusal) return ApiResponseUtil.error(res, refusal.message, refusal.status);
       console.error('Create menu order error:', error);
       return ApiResponseUtil.error(res, error.message || 'Failed to place order');
     }
@@ -112,7 +127,7 @@ export class MenuPublicController {
       const result = await MenuOrderService.finalizeMomoOrder(referenceId);
       return ApiResponseUtil.success(res, result);
     } catch (error: any) {
-      return ApiResponseUtil.error(res, error.message || 'Status check failed', 400);
+      return ApiResponseUtil.error(res, error.message || 'Status check failed', error instanceof HttpError ? error.statusCode : 400);
     }
   }
 

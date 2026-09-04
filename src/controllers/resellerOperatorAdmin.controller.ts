@@ -130,7 +130,15 @@ export class ResellerOperatorAdminController {
         return;
       }
       if ('fullName' in req.body) operator.fullName = req.body.fullName;
-      if ('isActive' in req.body) operator.isActive = !!req.body.isActive;
+      if ('isActive' in req.body) {
+        // `!!` read the STRING "false" as true — a client sending the flag as
+        // text re-activated the person it meant to switch off. Only a real
+        // boolean lands; anything else is the caller's bug and gets a 400.
+        if (typeof req.body.isActive !== 'boolean') {
+          ApiResponseUtil.badRequest(res, 'isActive must be a boolean'); return;
+        }
+        operator.isActive = req.body.isActive;
+      }
       if ('role' in req.body) {
         if ((ROLE_RANK[req.body.role] ?? 99) >= (ROLE_RANK[actor.role] ?? 0)) {
           ApiResponseUtil.forbidden(res, 'Cannot assign a role at or above your own');

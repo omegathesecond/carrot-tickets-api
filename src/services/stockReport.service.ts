@@ -117,23 +117,48 @@ export class StockReportService {
    * opening-count if present else pre-doors receives; `added` = post-doors
    * receives; `expectedClosing` = the authoritative onHand; physical + variance
    * come from the latest CLOSING count. Derived from the journal by reason.
+   *
+   * An opening COUNT is the baseline its row reconciles against, so for that
+   * bar-product only movements AFTER the count are folded in: everything
+   * before it — the pre-doors receives, the count's own adjustment, a test
+   * sale — is already inside the counted figure, and adding it again would
+   * apply those units twice (phantom shrinkage on a bar that is exactly
+   * right). Receives after the count are `added` even when pre-doors.
    */
   static async reconciliation(eventId: string, startTime: Date) {
     const eid = oid(eventId);
-    const [byReason, receiveSplit, counts, stockRows, products, merchants] = await Promise.all([
+    const key = (m: any, p: any) => `${m}|${p}`;
+
+    // Latest opening + closing count per (merchant, product). Fetched FIRST:
+    // the opening counts decide what the movement aggregations may count.
+    const counts = await StockCount.aggregate([
+      { $match: { eventId: eid, phase: { $in: ['opening', 'closing'] } } },
+      { $sort: { at: -1 } },
+      { $group: { _id: { merchantId: '$merchantId', productId: '$productId', phase: '$phase' }, countId: { $first: '$_id' }, at: { $first: '$at' }, countedOnHand: { $first: '$countedOnHand' }, variance: { $first: '$variance' } } },
+    ]);
+    const openings = counts.filter((c: any) => c._id.phase === 'opening');
+    const openingKeys = new Set(openings.map((c: any) => key(c._id.merchantId, c._id.productId)));
+    // Movement scope: a bar-product WITH an opening count contributes only the
+    // movements at/after it, minus the count's own adjustment (which shares
+    // its timestamp); every other bar-product contributes its whole journal.
+    const scope = openings.length === 0 ? {} : {
+      $or: [
+        ...openings.map((c: any) => ({
+          merchantId: c._id.merchantId, productId: c._id.productId,
+          at: { $gte: c.at }, $nor: [{ refType: 'stock_count', refId: String(c.countId) }],
+        })),
+        { $nor: openings.map((c: any) => ({ merchantId: c._id.merchantId, productId: c._id.productId })) },
+      ],
+    };
+
+    const [byReason, receiveSplit, stockRows, products, merchants] = await Promise.all([
       StockMovement.aggregate([
-        { $match: { eventId: eid } },
+        { $match: { eventId: eid, ...scope } },
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId', reason: '$reason' }, qty: { $sum: '$delta' } } },
       ]),
       StockMovement.aggregate([
-        { $match: { eventId: eid, reason: StockMovementReason.RECEIVE } },
+        { $match: { eventId: eid, reason: StockMovementReason.RECEIVE, ...scope } },
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId', pre: { $lt: ['$at', startTime] } }, qty: { $sum: '$delta' } } },
-      ]),
-      // latest opening + closing count per (merchant, product)
-      StockCount.aggregate([
-        { $match: { eventId: eid, phase: { $in: ['opening', 'closing'] } } },
-        { $sort: { at: -1 } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId', phase: '$phase' }, countedOnHand: { $first: '$countedOnHand' }, variance: { $first: '$variance' } } },
       ]),
       ProductStock.find({ eventId: eid }).lean(),
       Product.find({ eventId: eid }).select('name').lean(),
@@ -142,7 +167,6 @@ export class StockReportService {
 
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name]));
-    const key = (m: any, p: any) => `${m}|${p}`;
 
     const rowByKey = new Map<string, any>();
     const ensure = (merchantId: string, productId: string) => {
@@ -174,10 +198,12 @@ export class StockReportService {
         default: break; // receive handled by the split below
       }
     }
-    // Opening (pre-doors receive) vs Added (post-doors receive).
+    // Opening (pre-doors receive) vs Added (post-doors receive) — unless an
+    // opening COUNT is the baseline, in which case any receive that survived
+    // the scope above came after the count and is an addition to it.
     for (const g of receiveSplit) {
       const r = ensure(String(g._id.merchantId), String(g._id.productId));
-      if (g._id.pre) r.opening += g.qty; else r.added += g.qty;
+      if (g._id.pre && !openingKeys.has(key(g._id.merchantId, g._id.productId))) r.opening += g.qty; else r.added += g.qty;
     }
     // An explicit opening count overrides the pre-doors-receive baseline; closing supplies physical + variance.
     for (const c of counts) {

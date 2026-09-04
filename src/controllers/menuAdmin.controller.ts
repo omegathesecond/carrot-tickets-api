@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { Event } from '@models/event.model';
 import { MenuItem } from '@models/menuItem.model';
-import { MenuOrder, MenuOrderFulfillmentStatus } from '@models/menuOrder.model';
+import { MenuOrder, MenuOrderFulfillmentStatus, fulfillmentTransitionRefusal } from '@models/menuOrder.model';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { createMenuItemSchema, updateMenuItemSchema, updateMenuOrderFulfillmentSchema } from '@validators/menu.validator';
 
@@ -92,7 +92,10 @@ export class MenuAdminController {
       if (!event) return;
       const { error, value } = updateMenuOrderFulfillmentSchema.validate(req.body || {});
       if (error) { ApiResponseUtil.badRequest(res, error.message); return; }
-      order.fulfillmentStatus = value.fulfillmentStatus as MenuOrderFulfillmentStatus;
+      const next = value.fulfillmentStatus as MenuOrderFulfillmentStatus;
+      const refusal = fulfillmentTransitionRefusal(order, next);
+      if (refusal) { ApiResponseUtil.error(res, refusal, 409); return; }
+      order.fulfillmentStatus = next;
       await order.save();
       ApiResponseUtil.success(res, order);
     } catch (err) { next(err); }

@@ -330,3 +330,22 @@ describe('cross-tenant IDOR — an organizer cannot touch another organizer\'s s
     expect(resetPin.status).toBe(200);
   });
 });
+
+// `!!req.body.isActive` read the STRING "false" as true: a client that sent
+// the value as text re-activated the person it was trying to switch off.
+it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', async () => {
+  const { merchantId } = await seedMerchant();
+  const admin = superAdminToken();
+  const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Thabo Dlamini' });
+  const operatorId = created.body.data.operator._id;
+
+  const res = await request(app).patch(`/api/tickets/merchant-operators/${operatorId}`)
+    .set('Authorization', `Bearer ${admin}`)
+    .send({ isActive: 'false' });
+
+  expect(res.status).toBe(400);
+  expect(res.body.message).toBe('isActive must be a boolean');
+  const stored = await MerchantOperator.findById(operatorId);
+  expect(stored!.isActive).toBe(true);
+});

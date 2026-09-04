@@ -4,6 +4,8 @@ import { EventTag } from '@models/eventTag.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
 import { Vendor } from '@models/vendor.model';
+import { Wallet } from '@models/wallet.model';
+import { WalletService } from '@services/wallet.service';
 import { IEventTag, EventTagStatus } from '@interfaces/eventTag.interface';
 import { assertValidBandUid, normalizeBandUid } from '@utils/bandUid.util';
 
@@ -22,6 +24,12 @@ export interface BulkRegisterResult {
   reactivated: string[];
   /** Rejected inputs, each with the reason — never silently dropped. */
   rejected: Array<{ bandUid: string; reason: string }>;
+}
+
+export interface RetireResult {
+  tag: IEventTag;
+  /** The wallet that was wearing the tag and had its binding released, if any. */
+  releasedWalletId: string | null;
 }
 
 /** Thrown by assertTagRegistered — the message the operator sees at the desk. */
@@ -122,15 +130,42 @@ export class EventTagService {
     return result;
   }
 
-  /** Pull a tag out of circulation. Idempotent — retiring a retired tag is fine. */
+  /**
+   * Pull a tag out of circulation. Idempotent — retiring a retired tag is fine.
+   *
+   * A retired tag must be dead EVERYWHERE, not just in the register: the money
+   * paths (top-up, charge, cash-out, check-in-by-tag) look the wallet up by
+   * uid and never consult the register again, so a wallet already wearing the
+   * tag would carry on working. If one is, its binding is released here — the
+   * balance stays on the wallet (a reissue onto a fresh tag is still possible)
+   * and the physical tag stops working at every desk.
+   *
+   * Release FIRST, then flip the row. If the release fails, the register still
+   * says active and the operator retries; if the flip fails after the release,
+   * the tag is already dead at every desk and the retry is idempotent. The
+   * other order — a retired row with a live binding — is exactly the hole this
+   * closes.
+   */
   static async retireTag(params: {
     eventId: string;
     bandUid: string;
     reason?: string;
-  }): Promise<IEventTag> {
+  }): Promise<RetireResult> {
     const bandUid = normalizeBandUid(params.bandUid);
+    const eventId = new Types.ObjectId(params.eventId);
+
+    const inRegister = await EventTag.exists({ eventId, bandUid });
+    if (!inRegister) throw new Error('That tag is not in this event’s register.');
+
+    let releasedWalletId: string | null = null;
+    const wearing = await Wallet.findOne({ eventId, bandUid }).select('_id').lean<{ _id: unknown } | null>();
+    if (wearing) {
+      await WalletService.unbindBand(String(wearing._id), params.reason ? `retired: ${params.reason}` : 'retired');
+      releasedWalletId = String(wearing._id);
+    }
+
     const tag = await EventTag.findOneAndUpdate(
-      { eventId: new Types.ObjectId(params.eventId), bandUid },
+      { eventId, bandUid },
       {
         $set: {
           status: 'retired',
@@ -140,8 +175,10 @@ export class EventTagService {
       },
       { new: true },
     );
+    // Vanished between the existence check and the flip: say so rather than
+    // report a retire that did not happen.
     if (!tag) throw new Error('That tag is not in this event’s register.');
-    return tag;
+    return { tag, releasedWalletId };
   }
 
   /**

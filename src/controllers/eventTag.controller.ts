@@ -143,7 +143,7 @@ export class EventTagController {
         return ApiResponseUtil.badRequest(res, 'bandUid is required');
       }
 
-      const tag = await EventTagService.retireTag({
+      const { tag, releasedWalletId } = await EventTagService.retireTag({
         eventId: String(event._id),
         bandUid,
         ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
@@ -152,6 +152,9 @@ export class EventTagController {
       return ApiResponseUtil.success(res, {
         bandUid: tag.bandUid,
         status: tag.status,
+        // Set when a wallet was wearing the tag and was released along with it,
+        // so the UI can say "this attendee's tag was switched off".
+        releasedWalletId,
         counts: await EventTagService.counts(String(event._id)),
       });
     } catch (err: any) {

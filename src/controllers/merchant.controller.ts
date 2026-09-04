@@ -6,7 +6,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { Wallet } from '@models/wallet.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
-import { MerchantService, WalletDeclinedError } from '@services/merchant.service';
+import { MerchantService, WalletDeclinedError, ChargeIdempotencyMismatchError } from '@services/merchant.service';
 import { StockDeclinedError } from '@services/stock.service';
 import { StockCountService } from '@services/stockCount.service';
 import { StockAlertService } from '@services/stockAlert.service';
@@ -100,6 +100,13 @@ export class MerchantController {
         return ApiResponseUtil.error(res, DECLINE_MESSAGE[e.reason], 402, {
           reason: e.reason,
           currentBalance: e.currentBalance,
+        });
+      }
+      // A clientTxnId reused for a DIFFERENT sale — 409, never the original
+      // success: the till must mint a new id rather than be told "paid".
+      if (e instanceof ChargeIdempotencyMismatchError) {
+        return ApiResponseUtil.error(res, 'clientTxnId already used for a different charge', 409, {
+          reason: e.reason, clientTxnId: e.clientTxnId,
         });
       }
       const msg = e?.message || 'Charge failed';

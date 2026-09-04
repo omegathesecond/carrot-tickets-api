@@ -378,3 +378,77 @@ it('propagates a database failure instead of silently widening access', async ()
 
   spy.mockRestore();
 });
+
+// Deactivation is the dashboard's only revocation control for a gate operator
+// (PATCH /gate-operators/:id {isActive:false}), a reseller till (PATCH
+// /reseller/operators/:id) and a reseller company (admin PATCH). None of the
+// authenticating middleware reads the database and every one of these
+// populations gets a 7-day token, so without the checks below the switch would
+// only stop the NEXT LOGIN — the token already in hand kept working the door
+// or the till for the rest of the week.
+describe('a DEACTIVATED row denies every event, whatever its assignment', () => {
+  it('gate operator with an assignment', async () => {
+    const a = oid();
+    const op = await GateOperator.create({ fullName: 'G', loginCode: '830001', pin: '111111', scope: 'organizer', vendorId: oid(), eventIds: [a] });
+    const req = { ticketsUser: { userType: 'gate-operator', userId: (op._id as any).toString() } };
+    expect(await operatorMayActOnEvent(req as any, a.toString())).toBe(true);
+
+    await GateOperator.updateOne({ _id: op._id }, { $set: { isActive: false } });
+
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+    expect(await operatorMayActOnEvent(req as any, a.toString())).toBe(false);
+  });
+
+  // The important case: an unassigned row resolves to null (every event), so
+  // reading only eventIds here would hand a revoked operator the whole
+  // catalogue rather than none of it.
+  it('gate operator with NO assignment, who would otherwise be unrestricted', async () => {
+    const op = await GateOperator.create({ fullName: 'G', loginCode: '830002', pin: '111111', scope: 'organizer', vendorId: oid(), isActive: false });
+    const req = { ticketsUser: { userType: 'gate-operator', userId: (op._id as any).toString() } };
+
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+    expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
+  });
+
+  it('a deactivated PLATFORM gate operator, rather than handing them every event', async () => {
+    const op = await GateOperator.create({ fullName: 'G', loginCode: '830003', pin: '111111', scope: 'platform', isActive: false });
+    const req = { ticketsUser: { userType: 'gate-operator', userId: (op._id as any).toString(), isSuperAdmin: true } };
+
+    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
+  });
+
+  it('reseller till under an unassigned reseller, who would otherwise be unrestricted', async () => {
+    const resellerId = await seedScopedReseller([]);
+    const operatorId = await seedTill(resellerId, []);
+    expect(await resolveOperatorEventScope(tillReq(resellerId, operatorId))).toBeNull();
+
+    await ResellerOperator.updateOne({ _id: operatorId }, { $set: { isActive: false } });
+
+    expect(await resolveOperatorEventScope(tillReq(resellerId, operatorId))).toEqual([]);
+    expect(await operatorMayActOnEvent(tillReq(resellerId, operatorId), oid().toString())).toBe(false);
+  });
+
+  it('a deactivated reseller company binds the owner token AND every till under it', async () => {
+    const a = oid();
+    const resellerId = await seedScopedReseller([a]);
+    const operatorId = await seedTill(resellerId, []);
+    expect(await operatorMayActOnEvent(ownerReq(resellerId), a.toString())).toBe(true);
+
+    await Reseller.updateOne({ _id: resellerId }, { $set: { isActive: false } });
+
+    expect(await resolveOperatorEventScope(ownerReq(resellerId))).toEqual([]);
+    expect(await resolveOperatorEventScope(tillReq(resellerId, operatorId))).toEqual([]);
+    expect(await operatorMayActOnEvent(tillReq(resellerId, operatorId), a.toString())).toBe(false);
+  });
+
+  it('a SUSPENDED reseller company (status, not isActive) is denied the same way', async () => {
+    const resellerId = await seedScopedReseller([]);
+    const operatorId = await seedTill(resellerId, []);
+    expect(await resolveOperatorEventScope(ownerReq(resellerId))).toBeNull();
+
+    await Reseller.updateOne({ _id: resellerId }, { $set: { status: 'suspended' } });
+
+    expect(await resolveOperatorEventScope(ownerReq(resellerId))).toEqual([]);
+    expect(await resolveOperatorEventScope(tillReq(resellerId, operatorId))).toEqual([]);
+  });
+});

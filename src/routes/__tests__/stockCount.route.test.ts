@@ -12,6 +12,7 @@ import { signVendorToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
 import { StockCount } from '@models/stockCount.model';
@@ -77,12 +78,17 @@ describe('organizer stock count route', () => {
 });
 
 describe('POS stock routes', () => {
-  // A merchant token names the STALL and the PERSON on its till; without the
-  // person authenticateMerchant rejects it. `merchantOperatorId` defaults to a
-  // fresh id per call but can be pinned so a test can assert on it later.
-  const merchantToken = (merchantId: string, eventId: string, merchantOperatorId = new mongoose.Types.ObjectId().toString()) =>
+  // A merchant token names the STALL and the PERSON on its till, and
+  // authenticateMerchant re-reads both rows on every request — so the person
+  // has to really exist. One is created per token unless the caller pins an
+  // id so a test can assert on it later.
+  const seedOperator = async (merchantId: string, eventId: string) =>
+    String((await MerchantOperator.create({
+      fullName: 'Thabo Dlamini', merchantId, eventId, loginCode: String(seq++), pin: '000000',
+    }))._id);
+  const merchantToken = async (merchantId: string, eventId: string, merchantOperatorId?: string) =>
     jwt.sign({
-      scope: 'merchant', merchantId, merchantOperatorId,
+      scope: 'merchant', merchantId, merchantOperatorId: merchantOperatorId ?? await seedOperator(merchantId, eventId),
       operatorName: 'Thabo Dlamini', eventId, name: 'Bar', permissions: [MerchantPermission.CHARGE],
     }, JWT_SECRET);
 
@@ -104,7 +110,7 @@ describe('POS stock routes', () => {
     const { eventId, barAId, productId } = await setup();
     const res = await request(app)
       .get('/api/merchant/stock')
-      .set('Authorization', `Bearer ${merchantToken(barAId, eventId)}`);
+      .set('Authorization', `Bearer ${await merchantToken(barAId, eventId)}`);
     expect(res.status).toBe(200);
     expect(res.body.data.stock).toEqual([
       expect.objectContaining({ productId, name: 'Beer', onHand: 100 }),
@@ -124,7 +130,7 @@ describe('POS stock routes', () => {
 
     const res = await request(app)
       .get('/api/merchant/stock')
-      .set('Authorization', `Bearer ${merchantToken(String(bar._id), String(eventId))}`);
+      .set('Authorization', `Bearer ${await merchantToken(String(bar._id), String(eventId))}`);
     expect(res.status).toBe(200);
     const rows: any[] = res.body.data.stock;
     const beerRow = rows.find((r) => r.productId === String(beer._id));
@@ -136,12 +142,12 @@ describe('POS stock routes', () => {
 
   it('POST /api/merchant/stock/count is scoped to the TOKEN\'s merchant', async () => {
     const { eventId, barAId, barBId, productId } = await setup();
-    const merchantOperatorId = new mongoose.Types.ObjectId().toString();
+    const merchantOperatorId = await seedOperator(barBId, eventId);
     // Bar B has no stock row at all; a count by Bar B's token must reconcile
     // BAR B's stock (0 -> 40), never touch Bar A's 100.
     const res = await request(app)
       .post('/api/merchant/stock/count')
-      .set('Authorization', `Bearer ${merchantToken(barBId, eventId, merchantOperatorId)}`)
+      .set('Authorization', `Bearer ${await merchantToken(barBId, eventId, merchantOperatorId)}`)
       .send({ productId, countedOnHand: 40 });
     expect(res.status).toBe(200);
     expect(res.body.data.expectedOnHand).toBe(0);
@@ -164,7 +170,7 @@ describe('POS stock routes', () => {
     const foreignProduct = await Product.create({ eventId: otherEventId, name: 'Foreign', category: ProductCategory.BEER, price: 1000 });
     const res = await request(app)
       .post('/api/merchant/stock/count')
-      .set('Authorization', `Bearer ${merchantToken(barAId, eventId)}`)
+      .set('Authorization', `Bearer ${await merchantToken(barAId, eventId)}`)
       .send({ productId: String(foreignProduct._id), countedOnHand: 5 });
     expect(res.status).toBe(400);
   });

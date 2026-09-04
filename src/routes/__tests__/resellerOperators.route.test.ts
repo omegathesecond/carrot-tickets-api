@@ -117,3 +117,19 @@ it('reset-pin clears lockout state', async () => {
   expect(op!.failedPinAttempts).toBe(0);
   expect(op!.lockedUntil).toBeNull();
 });
+
+// `!!req.body.isActive` read the STRING "false" as true: a client that sent
+// the value as text re-activated the person it was trying to switch off.
+it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', async () => {
+  const admin = await tokenFor('reseller_admin');
+  const target = await seedOperator({ resellerId: admin.resellerId, hubId: admin.hubId, role: 'reseller_operator' });
+
+  const res = await request(app).patch(`/api/reseller/operators/${target.operator._id}`)
+    .set('Authorization', `Bearer ${admin.token}`)
+    .send({ isActive: 'false' });
+
+  expect(res.status).toBe(400);
+  expect(res.body.message).toBe('isActive must be a boolean');
+  const op = await ResellerOperator.findById(target.operator._id);
+  expect(op!.isActive).toBe(true);
+});

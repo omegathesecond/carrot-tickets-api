@@ -1,5 +1,5 @@
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { WalletService, MAX_TOPUP_CENTS } from '@services/wallet.service';
+import { WalletService, MAX_TOPUP_CENTS, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
 import { Wallet } from '@models/wallet.model';
@@ -37,6 +37,46 @@ it('is idempotent on clientTxnId (no double credit)', async () => {
   const w = await Wallet.findById(walletId).lean();
   expect(w!.balance).toBe(500);
   expect(await WalletTopup.countDocuments({ clientTxnId: 'dup' })).toBe(1);
+});
+
+// A replay is only a replay if it asks for the SAME thing. Answering a retry
+// that carries a DIFFERENT amount with the original outcome tells the desk
+// "done" while the attendee was credited something else entirely.
+it('rejects a replay of the same clientTxnId with a DIFFERENT amount (no credit, no new row)', async () => {
+  const { eventId, walletId } = await seedActiveWallet();
+  await WalletService.topUpCash({ walletId, eventId, amount: 500, recordedBy: 'op1', clientTxnId: 'dup' });
+
+  await expect(WalletService.topUpCash({ walletId, eventId, amount: 700, recordedBy: 'op1', clientTxnId: 'dup' }))
+    .rejects.toBeInstanceOf(WalletIdempotencyMismatchError);
+  await expect(WalletService.topUpCash({ walletId, eventId, amount: 700, recordedBy: 'op1', clientTxnId: 'dup' }))
+    .rejects.toThrow(/clientTxnId already used with a different amount/);
+
+  const w = await Wallet.findById(walletId).lean();
+  expect(w!.balance).toBe(500);
+  expect(await WalletTopup.countDocuments({ walletId, clientTxnId: 'dup' })).toBe(1);
+});
+
+it('still returns the ORIGINAL outcome on a true replay (same amount)', async () => {
+  const { eventId, walletId } = await seedActiveWallet();
+  const first = await WalletService.topUpCash({ walletId, eventId, amount: 500, recordedBy: 'op1', clientTxnId: 'dup' });
+  const again = await WalletService.topUpCash({ walletId, eventId, amount: 500, recordedBy: 'op1', clientTxnId: 'dup' });
+
+  expect(String(again.topup._id)).toBe(String(first.topup._id));
+  expect(again.wallet.balance).toBe(500);
+});
+
+// walletId-keyed callers must not be able to post ledger legs under the wrong
+// event: the wallet CAS carries eventId, as withdrawCash and MerchantService do.
+it('refuses to credit a wallet under a DIFFERENT eventId than the wallet belongs to', async () => {
+  const { walletId } = await seedActiveWallet();
+  const wrongEvent = String(new mongoose.Types.ObjectId());
+
+  await expect(WalletService.topUpCash({ walletId, eventId: wrongEvent, amount: 500, recordedBy: 'op1', clientTxnId: 'wrong-ev' }))
+    .rejects.toThrow(/not found|not active/);
+
+  expect((await Wallet.findById(walletId).lean())!.balance).toBe(0);
+  expect(await WalletTopup.countDocuments({ walletId })).toBe(0);
+  expect(await LedgerService.floatBalance(wrongEvent)).toBe(0);
 });
 
 it('throws on a non-active wallet', async () => {

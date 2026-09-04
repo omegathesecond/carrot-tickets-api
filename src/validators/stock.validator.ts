@@ -1,5 +1,14 @@
 import Joi from 'joi';
 import { ProductCategory } from '@interfaces/stock.interface';
+import { HEX24 } from '@utils/controllerHelpers.util';
+
+/**
+ * A Mongo ObjectId in its 24-hex form. Rejecting anything else at the edge
+ * turns what would otherwise be a Mongoose CastError deep in the handler (a
+ * 500) into a 400 that names the field. Shared by every id field in the stock
+ * + merchant validators.
+ */
+export const objectId = Joi.string().trim().regex(HEX24, 'object id');
 
 const MAX_PRICE_CENTS = 100_000_00; // R100,000/unit ceiling, defense-in-depth
 const MAX_QTY = 1_000_000;
@@ -29,27 +38,27 @@ export const updateProductSchema = Joi.object({
 }).min(1);
 
 export const receiveStockSchema = Joi.object({
-  merchantId: Joi.string().trim().required(),
-  productId: Joi.string().trim().required(),
+  merchantId: objectId.required(),
+  productId: objectId.required(),
   quantity: Joi.number().integer().min(1).max(MAX_QTY).required(),
   unit: Joi.string().valid('unit', 'pack').default('unit'),
   note: Joi.string().trim().optional(),
 });
 
 export const thresholdSchema = Joi.object({
-  merchantId: Joi.string().trim().required(),
-  productId: Joi.string().trim().required(),
+  merchantId: objectId.required(),
+  productId: objectId.required(),
   lowStockThreshold: Joi.number().integer().min(0).allow(null).required(),
 });
 
 export const transferStockSchema = Joi.object({
-  productId: Joi.string().trim().required(),
-  fromMerchantId: Joi.string().trim().required(),
-  toMerchantId: Joi.string().trim().required(),
+  productId: objectId.required(),
+  fromMerchantId: objectId.required(),
+  toMerchantId: objectId.required(),
   qty: Joi.number().integer().min(1).max(MAX_QTY).required(),
   note: Joi.string().trim().optional(),
 });
 
 const phase = Joi.string().valid('opening', 'interim', 'closing');
-export const stockCountSchema = Joi.object({ merchantId: Joi.string().trim().required(), productId: Joi.string().trim().required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });
-export const posCountSchema = Joi.object({ productId: Joi.string().trim().required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });
+export const stockCountSchema = Joi.object({ merchantId: objectId.required(), productId: objectId.required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });
+export const posCountSchema = Joi.object({ productId: objectId.required(), countedOnHand: Joi.number().integer().min(0).max(MAX_QTY).required(), phase });

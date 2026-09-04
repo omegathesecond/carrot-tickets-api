@@ -194,3 +194,16 @@ it('rejects a legacy token minted before per-person operators — no anonymous c
   const w = await Wallet.findById(walletId).lean();
   expect(w?.balance).toBe(1000); // untouched — rejected, not silently attributed to the stall
 });
+
+// A productId that is not a 24-hex ObjectId used to reach Product.find() and
+// surface as a CastError 500. Malformed input is the CLIENT's fault: 400.
+it('rejects a malformed productId on an itemised charge with 400, not a CastError 500', async () => {
+  const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
+  const res = await request(app).post('/api/merchant/charge')
+    .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
+    .send({ bandUid, clientTxnId: 'c-bad-product-id', items: [{ productId: 'not-an-object-id', qty: 1 }] });
+
+  expect(res.status).toBe(400);
+  expect(res.body.success).toBe(false);
+  expect(res.body.message).toMatch(/productId/);
+});

@@ -11,7 +11,7 @@ import { EventStatus } from '@interfaces/event.interface';
 import { cashTopupSchema } from '@validators/reseller.validator';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
-import { WalletService } from '@services/wallet.service';
+import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
 export class ResellerController {
@@ -366,6 +366,12 @@ export class ResellerController {
       const { error, value } = cashTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
+      // Same chokepoint as /sales: event ids are public, so without this a
+      // till assigned to event A could credit wallets at event B.
+      if (!(await operatorMayActOnEvent(req, value.eventId))) {
+        return ApiResponseUtil.forbidden(res, 'You are not assigned to this event');
+      }
+
       const event = await Event.findById(value.eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
       if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
@@ -387,6 +393,7 @@ export class ResellerController {
       });
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {
+      if (e instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, e.message, 409);
       const msg = e?.message || 'Top-up failed';
       const status = /not active|not found|cashless|amount/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);

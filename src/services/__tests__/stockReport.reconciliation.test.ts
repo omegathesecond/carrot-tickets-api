@@ -6,6 +6,7 @@ import { StockService } from '@services/stock.service';
 import { StockCountService } from '@services/stockCount.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { StockMovement } from '@models/stockMovement.model';
+import { StockCount } from '@models/stockCount.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 
@@ -90,5 +91,64 @@ describe('StockReportService.reconciliation', () => {
     expect(byProduct[0]!.variance).toBe(-5);
     expect(total.physicalCount).toBe(45);
     expect(total.variance).toBe(-5);
+  });
+
+  // An OPENING count is the baseline the row reconciles against. Its own
+  // count_adjust (counted − expected) is already inside `opening`, so summing
+  // it into countAdjust as well applies the same units twice and reports
+  // phantom shrinkage on a bar that is exactly right.
+  it("does not double-count an opening count's variance: received 100, opening count 95, sold 30 -> expected 65, variance 0", async () => {
+    const b = await bar('Bar 1');
+    const p = await prod('Castle Lite');
+    await receive(b._id, p._id, 100, new Date('2026-08-13T15:00:00Z'));   // pre-doors receive
+    // Opening stock-take finds 95: count_adjust -5, and 95 becomes `opening`.
+    await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), countedOnHand: 95, phase: 'opening', byType: 'Organizer', by: 'v1' } as any);
+    await StockService.applyMovement({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), delta: -30, reason: StockMovementReason.SALE, byType: 'Merchant', by: 'till', refId: 'c1' } as any);
+
+    const { perBar } = await StockReportService.reconciliation(String(eventId), startTime);
+    const row = perBar[0]!;
+    expect(row.opening).toBe(95);
+    expect(row.sold).toBe(30);
+    expect(row.countAdjust).toBe(0);                  // the -5 is INSIDE `opening`, not on top of it
+    expect(row.expectedClosing).toBe(65);             // onHand = 100 - 5 - 30
+    expect(row.opening + row.added + row.transferIn - row.sold - row.transferOut + row.countAdjust - row.spoilage + row.manual)
+      .toBe(row.expectedClosing);
+
+    // A closing count that finds exactly 65 is NO shrinkage.
+    await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), countedOnHand: 65, phase: 'closing', byType: 'Organizer', by: 'v1' } as any);
+    const after = (await StockReportService.reconciliation(String(eventId), startTime)).perBar[0]!;
+    expect(after.physicalCount).toBe(65);
+    expect(after.variance).toBe(0);
+    expect(after.expectedClosing).toBe(65);
+    expect(after.countAdjust).toBe(0);
+    expect(after.opening + after.added + after.transferIn - after.sold - after.transferOut + after.countAdjust - after.spoilage + after.manual)
+      .toBe(after.expectedClosing);
+  });
+
+  // Everything BEFORE the opening count is folded into it (that is what a
+  // baseline means), and everything after it — including a pre-doors receive —
+  // reconciles against it. Otherwise a top-up between the count and doors
+  // vanishes from the row and the identity breaks again.
+  it('with an opening count, movements before it fold into `opening` and receives after it are `added` even pre-doors', async () => {
+    const b = await bar('Bar 1');
+    const p = await prod('Castle Lite');
+    await receive(b._id, p._id, 100, new Date('2026-08-13T16:00:00Z'));   // 16:00 receive
+    const { count } = await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), countedOnHand: 95, phase: 'opening', byType: 'Organizer', by: 'v1' } as any);
+    const countAt = new Date('2026-08-13T17:00:00Z');                       // 17:00 opening count (adjust -5)
+    await StockCount.updateOne({ _id: count._id }, { $set: { at: countAt } });
+    await StockMovement.updateOne({ refType: 'stock_count', refId: String(count._id) }, { $set: { at: countAt } });
+    await receive(b._id, p._id, 20, new Date('2026-08-13T17:30:00Z'));    // 17:30 receive: AFTER the count, BEFORE doors
+    await StockService.applyMovement({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), delta: -30, reason: StockMovementReason.SALE, byType: 'Merchant', by: 'till', refId: 'c1' } as any);
+
+    const { perBar, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    const row = perBar[0]!;
+    expect(row.opening).toBe(95);
+    expect(row.added).toBe(20);
+    expect(row.sold).toBe(30);
+    expect(row.countAdjust).toBe(0);
+    expect(row.expectedClosing).toBe(85);             // onHand = 100 - 5 + 20 - 30
+    expect(row.opening + row.added + row.transferIn - row.sold - row.transferOut + row.countAdjust - row.spoilage + row.manual)
+      .toBe(row.expectedClosing);
+    expect(total.expectedClosing).toBe(85);
   });
 });

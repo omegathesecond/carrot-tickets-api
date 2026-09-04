@@ -3,6 +3,7 @@ import * as reservationSvc from '@services/reservation.service';
 import * as reminderSvc from '@services/eventReminder.service';
 import * as transcodeClient from '@services/transcode.client';
 import * as bookingSvc from '@services/transport/booking.service';
+import * as menuOrderSvc from '@services/menuOrder.service';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 
 describe('startBackgroundTasks', () => {
@@ -19,6 +20,9 @@ describe('startBackgroundTasks', () => {
     // queries in this fake-timers unit test — mirrors every other sweep above.
     const bookingCardReconcileSpy = jest.spyOn(bookingSvc.BookingService, 'reconcilePendingCardBookings').mockResolvedValue(undefined as any);
     const bookingSweepSpy = jest.spyOn(bookingSvc.BookingService, 'sweepExpiredBookings').mockResolvedValue(undefined as any);
+    // Menu preorders paid by MoMo whose callback never arrived — same 60s
+    // cadence as the ticket MoMo/card reconcilers.
+    const menuMomoReconcileSpy = jest.spyOn(menuOrderSvc.MenuOrderService, 'reconcilePendingMomoOrders').mockResolvedValue(undefined as any);
 
     const handles = startBackgroundTasks();
     expect(handles.length).toBeGreaterThanOrEqual(6);
@@ -26,6 +30,7 @@ describe('startBackgroundTasks', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(bookingCardReconcileSpy).toHaveBeenCalledTimes(1);
     expect(bookingSweepSpy).toHaveBeenCalledTimes(1);
+    expect(menuMomoReconcileSpy).toHaveBeenCalledTimes(1);
     handles.forEach((h: NodeJS.Timeout) => clearInterval(h));
   });
 });

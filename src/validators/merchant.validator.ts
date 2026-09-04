@@ -1,5 +1,6 @@
 import Joi from 'joi';
 import { MAX_CHARGE_CENTS } from '@services/merchant.service';
+import { objectId } from '@validators/stock.validator';
 
 const uid = Joi.string().trim().lowercase().pattern(/^[0-9a-f]{8,}$/);
 
@@ -27,7 +28,7 @@ export const chargeSchema = Joi.object({
   amount: Joi.number().integer().min(1).max(MAX_CHARGE_CENTS),
   items: Joi.array()
     .items(Joi.object({
-      productId: Joi.string().trim().required(),
+      productId: objectId.required(),
       qty: Joi.number().integer().min(1).max(MAX_QTY_PER_LINE).required(),
     }))
     .min(1).max(MAX_LINES),

@@ -5,10 +5,9 @@ import { CASHIER_PERMISSIONS, CashierToken } from '@interfaces/cashier.interface
 import { grantedCashierPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
+import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
-const MAX_PIN_ATTEMPTS = 5;
-const LOCK_MINUTES = 15;
 
 /**
  * Cashier PIN-login + token issuance. A near-copy of GateOperatorAuthService —
@@ -29,19 +28,13 @@ export class CashierAuthService {
 
     const ok = await cashier.comparePin(pin);
     if (!ok) {
-      cashier.failedPinAttempts = (cashier.failedPinAttempts ?? 0) + 1;
-      if (cashier.failedPinAttempts >= MAX_PIN_ATTEMPTS) {
-        cashier.lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000);
-        cashier.failedPinAttempts = 0;
-      }
-      await cashier.save();
+      // Counted on the server, not on this loaded document — N guesses in
+      // flight together must reach N and lock, not all write 1.
+      await recordFailedPinAttempt(Cashier, cashier._id as any);
       throw new Error('Invalid credentials');
     }
 
-    cashier.failedPinAttempts = 0;
-    cashier.lockedUntil = null;
-    cashier.lastLoginAt = new Date();
-    await cashier.save();
+    await clearPinLockout(Cashier, cashier._id as any);
 
     const isSuperAdmin = cashier.scope === 'platform';
     const payload: Record<string, unknown> = {

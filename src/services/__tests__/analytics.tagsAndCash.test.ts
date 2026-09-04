@@ -66,6 +66,38 @@ describe('getEventAnalytics — printed tags are reported separately from ticket
     expect(res.sales.totalRevenue).toBe(250);   // real sales revenue unaffected (was already correct)
     expect(res.ticketTypes[0]?.sold).toBe(2);   // per-type breakdown also excludes wristband tags
   });
+
+  it('keeps a checked-in ticket counted as sold — ticketsSold must not shrink as attendees arrive', async () => {
+    const event = await Event.create({
+      vendorId, name: 'Piano Republic Showcase', venue: 'V',
+      eventDate: new Date(Date.now() + 86400000), startTime: new Date(Date.now() + 86400000), endTime: new Date(Date.now() + 90000000),
+      status: EventStatus.PUBLISHED,
+      ticketTypes: [
+        { name: 'General', price: 100, quantity: 50 },
+      ],
+    });
+    const eventId = event._id;
+    const ticketTypeId = event.ticketTypes[0]?._id?.toString() ?? '';
+
+    const cashSale = await saleDoc(eventId, { totalAmount: 100, amountCharged: 100, paymentMethod: PaymentMethod.CASH });
+    const cardSale = await saleDoc(eventId, { totalAmount: 150, amountCharged: 150, paymentMethod: PaymentMethod.PEACH_CARD, organizerProceeds: 150 });
+    await ticketDoc(eventId, 'General', 100, cashSale._id);
+    // Scanned at the gate — still a sold ticket, exactly as getEventSalesSummary counts it.
+    const checkedInTicket = await ticketDoc(eventId, 'General', 150, cardSale._id);
+    checkedInTicket.status = TicketStatus.CHECKED_IN;
+    await checkedInTicket.save();
+
+    await TicketService.issueWristbandBatch({ eventId: eventId.toString(), ticketTypeId, quantity: 20 });
+
+    const res = await AnalyticsService.getEventAnalytics(eventId.toString(), vendorId.toString());
+    const summary = await AnalyticsService.getEventSalesSummary(eventId.toString(), vendorId.toString());
+
+    expect(res.sales.ticketsSold).toBe(2);
+    expect(res.ticketTypes[0]?.sold).toBe(2);
+    expect(res.sales.tagsPrinted).toBe(20);       // wristband exclusion untouched
+    // The two surfaces must agree — the dashboard and the event page show the same number.
+    expect(res.sales.ticketsSold).toBe(summary.ticketsSold);
+  });
 });
 
 describe('getEventSalesSummary — live figures for the event detail / ticket-config page', () => {

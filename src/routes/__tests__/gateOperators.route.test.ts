@@ -59,3 +59,18 @@ it('a caller without manage_access is forbidden (403)', async () => {
   const res = await request(app).get('/api/tickets/gate-operators').set('Authorization', `Bearer ${t}`);
   expect(res.status).toBe(403);
 });
+
+// `!!req.body.isActive` read the STRING "false" as true: a client that sent
+// the value as text re-activated the person it was trying to switch off.
+it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', async () => {
+  const op = await GateOperator.create({ fullName: 'A', loginCode: '810004', pin: '111111', scope: 'organizer', vendorId: VENDOR_A });
+
+  const res = await request(app).patch(`/api/tickets/gate-operators/${op._id}`)
+    .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+    .send({ isActive: 'false' });
+
+  expect(res.status).toBe(400);
+  expect(res.body.message).toBe('isActive must be a boolean');
+  const reloaded = await GateOperator.findById(op._id);
+  expect(reloaded!.isActive).toBe(true);
+});

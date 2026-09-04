@@ -41,6 +41,45 @@ export class WalletDeclinedError extends Error {
 }
 
 /**
+ * A repeat of `clientTxnId` that asks for something OTHER than what the
+ * committed charge sold. A true replay (same amount, or the same basket)
+ * is answered with the original outcome; this is not a replay but a till
+ * reusing an id for a new sale, and answering it with the old success would
+ * show the operator a "paid" screen for money that never moved. The
+ * controller maps it to 409. Nothing is written.
+ */
+export class ChargeIdempotencyMismatchError extends Error {
+  public readonly reason = 'idempotency_mismatch' as const;
+  constructor(public readonly clientTxnId: string) {
+    super('clientTxnId already used for a different charge');
+    this.name = 'ChargeIdempotencyMismatchError';
+  }
+}
+
+/** The basket a request asked for, merged by product and sorted, so two spellings of one basket compare equal. */
+function basketKey(items: ReadonlyArray<{ productId: unknown; qty: number }>): string {
+  const merged = new Map<string, number>();
+  for (const line of items) merged.set(String(line.productId), (merged.get(String(line.productId)) ?? 0) + line.qty);
+  return [...merged.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, qty]) => `${id}:${qty}`).join(',');
+}
+
+/**
+ * Raised INSIDE the charge transaction when the {merchantId, clientTxnId} row
+ * turns out to already exist: this call is a REPLAY of a charge that committed
+ * concurrently (the till re-sent the same id and both requests got past the
+ * pre-transaction idempotency check). Throwing aborts the transaction, so
+ * nothing this attempt may have written (e.g. a wallet debit that succeeded
+ * before an out-of-stock line) survives, and the outer catch turns it into the
+ * committed outcome. Never leaves MerchantService.
+ */
+class ReplayedCharge extends Error {
+  constructor(public readonly charge: IMerchantCharge) {
+    super('replayed charge');
+    this.name = 'ReplayedCharge';
+  }
+}
+
+/**
  * Merchant tap-to-pay money movement (cashless spec) — DOES NOT mutate
  * `balance` outside this one atomic CAS. Same transaction shape as
  * WalletService.topUpCash (open session.withTransaction, atomic
@@ -58,6 +97,10 @@ export class MerchantService {
    * walletTopup.model.ts): a repeat call with the same id for the same
    * merchant returns the ORIGINAL outcome rather than charging twice, and the
    * same id used by a DIFFERENT merchant is a different, legitimate charge.
+   * That holds even when the repeat OVERLAPS the original: the loser of the
+   * wallet/stock CAS is answered with the charge that committed, never with a
+   * decline — a false 402/409 for a sale that happened is what makes a till
+   * retry under a new id (double charge) or refuse a paid-for drink.
    *
    * A DECLINE (insufficient balance / inactive / missing wallet) throws
    * WalletDeclinedError and leaves the wallet, ledger, and MerchantCharge
@@ -87,11 +130,7 @@ export class MerchantService {
 
     // Idempotency: if this clientTxnId already ran FOR THIS MERCHANT, return it.
     const existing = await MerchantCharge.findOne({ merchantId, clientTxnId });
-    if (existing) {
-      const w = await Wallet.findById(existing.walletId);
-      if (!w) throw new Error('wallet not found');
-      return { wallet: w, charge: existing };
-    }
+    if (existing) return MerchantService.replay(existing, params);
 
     // Resolve amount + item snapshots BEFORE the transaction (prices are stable;
     // the atomic guard is the per-product stock CAS inside the txn).
@@ -123,6 +162,16 @@ export class MerchantService {
     try {
       let out!: { wallet: IWallet; charge: IMerchantCharge };
       await session.withTransaction(async () => {
+        // Idempotency, re-checked INSIDE the transaction. The pre-check above
+        // ran outside it, so two overlapping requests with the same id both
+        // pass it. The loser's wallet CAS then write-conflicts with the winner
+        // and the driver retries this callback on a fresh snapshot — one that
+        // now contains the winner's row. Seen here, the retry is answered with
+        // the committed charge instead of running its CAS against a wallet the
+        // winner already emptied and declining a sale that happened.
+        const replayed = await MerchantCharge.findOne({ merchantId, clientTxnId }).session(session);
+        if (replayed) throw new ReplayedCharge(replayed);
+
         // Merchant must exist and be active — a suspended merchant (or one
         // deleted after its JWT was issued) must not be able to charge even
         // with an otherwise-valid, unexpired token. commissionPercent is read
@@ -167,6 +216,13 @@ export class MerchantService {
         );
 
         if (!wallet) {
+          // Before declining, rule out a replay once more: the CAS failing
+          // because a concurrent duplicate of THIS charge already took the
+          // money is not a decline — it is the committed sale, and must be
+          // reported as such.
+          const committed = await MerchantCharge.findOne({ merchantId, clientTxnId }).session(session);
+          if (committed) throw new ReplayedCharge(committed);
+
           // DECLINE. Nothing has been written yet, so this re-read is purely
           // to report a true reason + current balance — the same pattern
           // WalletService.bindBand uses to explain an already-failed CAS.
@@ -181,12 +237,24 @@ export class MerchantService {
         // Decrement stock per line inside the SAME transaction. A
         // StockDeclinedError aborts the txn → the wallet debit above rolls back.
         if (itemSnapshots) {
-          for (const line of itemSnapshots) {
-            await StockService.applyMovement({
-              eventId, merchantId, productId: String(line.productId), delta: -line.qty,
-              reason: StockMovementReason.SALE, refType: 'merchant_charge', refId: clientTxnId,
-              byType: 'Merchant', by: merchantOperatorId, session,
-            });
+          try {
+            for (const line of itemSnapshots) {
+              await StockService.applyMovement({
+                eventId, merchantId, productId: String(line.productId), delta: -line.qty,
+                reason: StockMovementReason.SALE, refType: 'merchant_charge', refId: clientTxnId,
+                byType: 'Merchant', by: merchantOperatorId, session,
+              });
+            }
+          } catch (e) {
+            // Same rule as the wallet CAS: out of stock because a concurrent
+            // duplicate of THIS charge already sold the units is a replay, not
+            // a decline. Throwing still aborts the transaction, so the wallet
+            // debit above rolls back exactly as it does for a real decline.
+            if (e instanceof StockDeclinedError) {
+              const committed = await MerchantCharge.findOne({ merchantId, clientTxnId }).session(session);
+              if (committed) throw new ReplayedCharge(committed);
+            }
+            throw e;
           }
         }
 
@@ -220,18 +288,43 @@ export class MerchantService {
       });
       return out;
     } catch (e) {
+      // A replay detected inside the (now aborted) transaction.
+      if (e instanceof ReplayedCharge) return MerchantService.replay(e.charge, params);
       // Concurrent duplicate: the {merchantId, clientTxnId} unique index lost
       // the race — re-read the winner with the SAME scoped filter so we never
       // return a different merchant's row.
       if ((e as { code?: number })?.code === 11000) {
         const charge = await MerchantCharge.findOne({ merchantId, clientTxnId });
-        const wallet = charge ? await Wallet.findById(charge.walletId) : null;
-        if (charge && wallet) return { wallet, charge };
+        if (charge) return MerchantService.replay(charge, params);
       }
       throw e; // WalletDeclinedError / StockDeclinedError / resolution errors propagate
     } finally {
       await session.endSession();
     }
+  }
+
+  /**
+   * The outcome of an already-committed charge — the row, and the wallet as
+   * it stands now — for every path that answers a repeat of `clientTxnId`.
+   */
+  private static async replay(
+    charge: IMerchantCharge,
+    requested: { amount?: number; items?: ReadonlyArray<{ productId: unknown; qty: number }> },
+  ): Promise<{ wallet: IWallet; charge: IMerchantCharge }> {
+    // Only a repeat of the SAME sale is a replay. An amount-charge must match
+    // the committed amount exactly; an itemised charge must match the
+    // committed basket (merged by product, so duplicate lines don't matter);
+    // and an amount-charge can never replay an itemised one or vice versa.
+    const committedItems = charge.items ?? [];
+    const requestedItems = requested.items ?? [];
+    const same = requestedItems.length > 0
+      ? committedItems.length > 0 && basketKey(requestedItems) === basketKey(committedItems)
+      : committedItems.length === 0 && requested.amount === charge.amount;
+    if (!same) throw new ChargeIdempotencyMismatchError(charge.clientTxnId);
+
+    const wallet = await Wallet.findById(charge.walletId);
+    if (!wallet) throw new Error('wallet not found');
+    return { wallet, charge };
   }
 
   /**

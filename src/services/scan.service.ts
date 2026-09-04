@@ -496,9 +496,15 @@ export class ScanService {
 
     const wallet = await Wallet.findOne({ ticketId: ticket._id });
     if (!wallet) throw new Error('No wallet for this ticket');
+    // The gate reissue is strictly a swap: a wallet with nothing bound has
+    // nothing to reissue (the organizer's dashboard handles that state).
+    if (!wallet.bandUid) throw new Error('wallet has no band bound');
 
-    await WalletService.unbindBand(String(wallet._id), params.reason); // throws if no band bound
-    const rebound = await WalletService.bindBand(String(wallet._id), params.newBandUid, params.boundBy);
+    // Validates the replacement BEFORE releasing the old band, and restores
+    // the old band if the bind still fails — never unbind-then-discover.
+    const rebound = await WalletService.reissueBand(
+      String(wallet._id), params.newBandUid, params.reason, params.boundBy,
+    );
 
     return { wallet: rebound };
   }

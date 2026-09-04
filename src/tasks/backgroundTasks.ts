@@ -3,6 +3,7 @@ import { TicketService } from '@services/ticket.service';
 import { EventReminderService } from '@services/eventReminder.service';
 import { reconcileStuckUpdates, reconcileStuckStories } from '@services/transcode.client';
 import { BookingService } from '@services/transport/booking.service';
+import { MenuOrderService } from '@services/menuOrder.service';
 
 // Start the reservation expiry sweep
 const RESERVATION_SWEEP_MS = 60_000;
@@ -51,6 +52,13 @@ const STORY_RECONCILE_MS = 120_000;
 // See BookingService.reconcilePendingCardBookings / sweepExpiredBookings.
 const BOOKING_CARD_RECONCILE_MS = 60_000;
 const BOOKING_SWEEP_MS = 60_000;
+
+// Menu preorders paid by MTN MoMo whose callback never arrived (the buyer
+// approved on the handset and closed the tab, so the status poll stopped
+// too). Same cadence as the ticket MoMo/card reconcilers; asks MTN and
+// finalises through the same idempotent finaliser the poll uses. See
+// MenuOrderService.reconcilePendingMomoOrders.
+const MENU_MOMO_RECONCILE_MS = 60_000;
 
 /**
  * Registers all periodic background sweeps (reservation expiry, card-sale
@@ -103,6 +111,10 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     BookingService.sweepExpiredBookings().catch(err => console.error('[booking sweep] error', err));
   }, BOOKING_SWEEP_MS));
+
+  handles.push(setInterval(() => {
+    MenuOrderService.reconcilePendingMomoOrders().catch(err => console.error('[menu momo-reconcile] error', err));
+  }, MENU_MOMO_RECONCILE_MS));
 
   return handles;
 }

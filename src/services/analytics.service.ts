@@ -6,6 +6,11 @@ import { TicketScan } from '@models/ticketScan.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
+// A ticket stays SOLD once the holder is scanned in — CHECKED_IN is a sold
+// ticket that has arrived, not one fewer sale. Every "tickets sold" figure
+// counts both, so the number never shrinks over the night as attendees check in.
+const SOLD_TICKET_STATUSES = [TicketStatus.SOLD, TicketStatus.CHECKED_IN];
+
 // Revenue that belongs to the ORGANIZER. A reseller allocation-block sale
 // (isAllocation) is money held for the reseller's settlement — never the
 // organizer's — so it's summed as 0 here. Counts/attendance ($quantity) are
@@ -634,7 +639,7 @@ export class AnalyticsService {
         ]),
         Ticket.countDocuments({
           ...eventIdFilter,
-          status: TicketStatus.SOLD,
+          status: { $in: SOLD_TICKET_STATUSES },
           saleId: { $nin: wristbandSaleIds }
         }),
         // Same-shape count including wristband tickets — kept only to
@@ -654,7 +659,7 @@ export class AnalyticsService {
         // Per-type breakdown, wristband batches excluded — same status
         // filter as `ticketsSold` above, so the two stay consistent.
         Ticket.aggregate([
-          { $match: { ...eventIdFilter, status: TicketStatus.SOLD, saleId: { $nin: wristbandSaleIds } } },
+          { $match: { ...eventIdFilter, status: { $in: SOLD_TICKET_STATUSES }, saleId: { $nin: wristbandSaleIds } } },
           { $group: { _id: '$ticketType', sold: { $sum: 1 } } }
         ]),
         TicketSale.aggregate([
@@ -744,17 +749,16 @@ export class AnalyticsService {
         paymentStatus: PaymentStatus.COMPLETED,
         channel: { $ne: SalesChannel.WRISTBAND }
       };
-      const soldStatuses = [TicketStatus.SOLD, TicketStatus.CHECKED_IN];
 
       const [ticketsSold, tagsPrinted, cashSalesAgg, soldByType, tagsByType] = await Promise.all([
-        Ticket.countDocuments({ ...eventIdFilter, status: { $in: soldStatuses }, saleId: { $nin: wristbandSaleIds } }),
+        Ticket.countDocuments({ ...eventIdFilter, status: { $in: SOLD_TICKET_STATUSES }, saleId: { $nin: wristbandSaleIds } }),
         Ticket.countDocuments({ ...eventIdFilter, saleId: { $in: wristbandSaleIds } }),
         TicketSale.aggregate([
           { $match: { ...realSaleFilter, paymentMethod: PaymentMethod.CASH } },
           { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
         ]),
         Ticket.aggregate([
-          { $match: { ...eventIdFilter, status: { $in: soldStatuses }, saleId: { $nin: wristbandSaleIds } } },
+          { $match: { ...eventIdFilter, status: { $in: SOLD_TICKET_STATUSES }, saleId: { $nin: wristbandSaleIds } } },
           { $group: { _id: '$ticketType', sold: { $sum: 1 } } }
         ]),
         Ticket.aggregate([

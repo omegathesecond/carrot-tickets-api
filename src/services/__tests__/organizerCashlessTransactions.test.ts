@@ -101,6 +101,17 @@ describe('OrganizerCashlessService.transactions — the organizer-facing columns
     expect(String((transactions[0] as any).walletId)).toBe(String(reissued._id));
   });
 
+  it('bounds the page window — a page far past the end is clamped instead of over-fetching every collection', async () => {
+    const wallet = await walletWithTag('04AABBCC');
+    await topup(wallet._id as mongoose.Types.ObjectId);
+
+    const page = await OrganizerCashlessService.transactions({ eventId: String(EVENT), page: 1e6, limit: 200 });
+
+    expect(page.page).toBe(500);
+    expect(page.transactions).toEqual([]);
+    expect(page.hasMore).toBe(false);
+  });
+
   it('returns an empty page for a UID never seen at this event, not the whole log', async () => {
     const wallet = await walletWithTag('04AABBCC');
     await topup(wallet._id as mongoose.Types.ObjectId);

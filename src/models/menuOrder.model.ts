@@ -99,3 +99,38 @@ menuOrderSchema.index({ eventId: 1, createdAt: -1 });
 menuOrderSchema.index({ buyerId: 1, createdAt: -1 });
 
 export const MenuOrder = mongoose.model<IMenuOrder>('MenuOrder', menuOrderSchema);
+
+/**
+ * The organizer's preparation lifecycle only moves forward:
+ * new → preparing → ready → collected. Any non-terminal state may be
+ * cancelled; collected and cancelled are terminal.
+ */
+export const FULFILLMENT_TRANSITIONS: Readonly<Record<MenuOrderFulfillmentStatus, readonly MenuOrderFulfillmentStatus[]>> = {
+  [MenuOrderFulfillmentStatus.NEW]: [MenuOrderFulfillmentStatus.PREPARING, MenuOrderFulfillmentStatus.CANCELLED],
+  [MenuOrderFulfillmentStatus.PREPARING]: [MenuOrderFulfillmentStatus.READY, MenuOrderFulfillmentStatus.CANCELLED],
+  [MenuOrderFulfillmentStatus.READY]: [MenuOrderFulfillmentStatus.COLLECTED, MenuOrderFulfillmentStatus.CANCELLED],
+  [MenuOrderFulfillmentStatus.COLLECTED]: [],
+  [MenuOrderFulfillmentStatus.CANCELLED]: [],
+};
+
+/**
+ * Why `order` may not move to `next` — null when the move is allowed. Kitchen
+ * states (anything but cancelled) also require the order to be PAID: an unpaid
+ * preorder is not yet an order the bar should be making.
+ */
+export function fulfillmentTransitionRefusal(
+  order: Pick<IMenuOrder, 'fulfillmentStatus' | 'paymentStatus'>,
+  next: MenuOrderFulfillmentStatus,
+): string | null {
+  const current = order.fulfillmentStatus;
+  const allowed = FULFILLMENT_TRANSITIONS[current];
+  if (!allowed.includes(next)) {
+    return allowed.length === 0
+      ? `Order is already ${current} and cannot be changed`
+      : `Order is ${current}; it cannot move to ${next}`;
+  }
+  if (next !== MenuOrderFulfillmentStatus.CANCELLED && order.paymentStatus !== PaymentStatus.COMPLETED) {
+    return `Order payment is ${order.paymentStatus}; only a paid order can be marked ${next}`;
+  }
+  return null;
+}

@@ -6,7 +6,7 @@ import { bindBandSchema } from '@validators/tickets.validator';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { Wallet } from '@models/wallet.model';
-import { WalletService } from '@services/wallet.service';
+import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { WalletDeclinedError } from '@services/merchant.service';
 import { CashierService } from '@services/cashier.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
@@ -65,13 +65,22 @@ export class CashierController {
         return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
       }
 
+      // Read from her ROW, not the token: the token lives for days with no DB
+      // lookup, and resolveOperatorEventScope is where a deleted, deactivated
+      // or event-less cashier fails closed to []. ScanService treats an empty
+      // list as "unrestricted", so the denial has to be answered here.
+      const allowedEventIds = await resolveOperatorEventScope(req);
+      if (allowedEventIds && allowedEventIds.length === 0) {
+        return ApiResponseUtil.error(res, 'You are not assigned to this event', 403);
+      }
+
       const result = await ScanService.bindBandToTicket({
         ticketId: value.ticketId,
         bandUid: value.bandUid,
         vendorId: cashier.vendorId as string,
         isSuperAdmin: cashier.isSuperAdmin || false,
         expectedEventId: value.expectedEventId,
-        allowedEventIds: cashier.eventId ? [cashier.eventId] : undefined,
+        allowedEventIds: allowedEventIds ?? undefined,
         boundBy: cashier.cashierId,
       });
 
@@ -134,6 +143,7 @@ export class CashierController {
         amount: result.topup.amount,
       });
     } catch (e: any) {
+      if (e instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, e.message, 409);
       const msg = e?.message || 'Top-up failed';
       const status = /not active|not found|cashless|amount/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);
@@ -171,6 +181,7 @@ export class CashierController {
         amount: result.withdrawal.amount,
       });
     } catch (e: any) {
+      if (e instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, e.message, 409);
       if (e instanceof WalletDeclinedError) {
         return ApiResponseUtil.error(res, DECLINE_MESSAGE[e.reason], 402, {
           reason: e.reason,

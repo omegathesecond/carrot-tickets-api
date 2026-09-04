@@ -139,7 +139,15 @@ export class CashierAdminController {
         }
         cashier.fullName = req.body.fullName;
       }
-      if ('isActive' in req.body) cashier.isActive = !!req.body.isActive;
+      if ('isActive' in req.body) {
+        // `!!` read the STRING "false" as true — a client sending the flag as
+        // text re-activated the person it meant to switch off. Only a real
+        // boolean lands; anything else is the caller's bug and gets a 400.
+        if (typeof req.body.isActive !== 'boolean') {
+          ApiResponseUtil.badRequest(res, 'isActive must be a boolean'); return;
+        }
+        cashier.isActive = req.body.isActive;
+      }
       // The owning event is deliberately NOT patchable — it is immutable at
       // the schema level, so a body carrying one is ignored. Moving a cashier
       // to another event means hiring a new one for that event.

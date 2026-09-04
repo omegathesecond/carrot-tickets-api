@@ -9,10 +9,25 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
+import { signVendorToken } from '@/__tests__/helpers/auth';
+import { GateOperator } from '@models/gateOperator.model';
+import mongoose from 'mongoose';
 
 beforeAll(connectTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
-const gate = (perms = [TicketsPermission.SCAN_TICKETS], vendorId = 'v1') =>
-  jwt.sign({ app:'tickets', userType:'gate-operator', vendorId, permissions: perms }, JWT_SECRET);
+
+// requireTicketsPermission re-resolves a gate operator's permissions from
+// its ROW (SCANNER role set + grants), not the token, so the token has to
+// name a real, active row; the permissions it carries are informational.
+let __loginCodeSeq = 100;
+const gate = async (vendorId: string) => {
+  const op = await GateOperator.create({
+    fullName: 'Gate', loginCode: `4KW${__loginCodeSeq++}`, pin: '111111', scope: 'organizer', vendorId,
+  });
+  return jwt.sign({
+    app: 'tickets', userType: 'gate-operator', userId: String(op._id), vendorId,
+    permissions: [TicketsPermission.SCAN_TICKETS],
+  }, JWT_SECRET);
+};
 
 it('returns the wallet view for a bound band', async () => {
   const { eventId, vendorId } = await seedPublishedEvent({});
@@ -22,7 +37,7 @@ it('returns the wallet view for a bound band', async () => {
   await WalletService.bindBand(String(w._id), '04a22b1c3d4e5f', 'op1');
 
   const res = await request(app).get(`/api/tickets/wallets/by-band/04a22b1c3d4e5f?eventId=${eventId}`)
-    .set('Authorization', `Bearer ${gate([TicketsPermission.SCAN_TICKETS], String(vendorId))}`);
+    .set('Authorization', `Bearer ${await gate(String(vendorId))}`);
   expect(res.status).toBe(200);
   expect(res.body.data.status).toBe('active');
   expect(res.body.data.balance).toBe(0);
@@ -31,14 +46,14 @@ it('returns the wallet view for a bound band', async () => {
 it('404s an unbound uid', async () => {
   const { eventId, vendorId } = await seedPublishedEvent({});
   const res = await request(app).get(`/api/tickets/wallets/by-band/aaaaaaaaaaaaaa?eventId=${eventId}`)
-    .set('Authorization', `Bearer ${gate([TicketsPermission.SCAN_TICKETS], String(vendorId))}`);
+    .set('Authorization', `Bearer ${await gate(String(vendorId))}`);
   expect(res.status).toBe(404);
 });
 
 it('403 without SCAN_TICKETS', async () => {
   const { eventId } = await seedPublishedEvent({});
   const res = await request(app).get(`/api/tickets/wallets/by-band/aaaaaaaaaaaaaa?eventId=${eventId}`)
-    .set('Authorization', `Bearer ${gate([TicketsPermission.VIEW_EVENTS])}`);
+    .set('Authorization', `Bearer ${signVendorToken(String(new mongoose.Types.ObjectId()), { permissions: [TicketsPermission.VIEW_EVENTS] })}`);
   expect(res.status).toBe(403);
 });
 
@@ -53,7 +68,7 @@ it('rejects Vendor A reading Vendor B\'s event band with 403 (no wallet leak)', 
   await WalletService.bindBand(String(w._id), '04a22b1c3d4e5f', 'op1');
 
   const res = await request(app).get(`/api/tickets/wallets/by-band/04a22b1c3d4e5f?eventId=${eventId}`)
-    .set('Authorization', `Bearer ${gate([TicketsPermission.SCAN_TICKETS], 'vendor-a-different')}`);
+    .set('Authorization', `Bearer ${await gate(String(new mongoose.Types.ObjectId()))}`);
   expect(res.status).toBe(403);
   expect(res.body.data).toBeUndefined();
 });

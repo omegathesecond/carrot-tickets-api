@@ -10,6 +10,7 @@ import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
+const MAX_TRANSACTIONS_PAGE = 500;
 const sumField = (field: string) => [{ $group: { _id: null, total: { $sum: field }, count: { $sum: 1 } } }];
 
 /**
@@ -155,7 +156,10 @@ export class OrganizerCashlessService {
     const { eventId, type } = params;
     const eid = oid(eventId);
     const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
-    const page = Math.max(params.page ?? 1, 1);
+    // Page is bounded too: the over-fetch window below is page*limit PER
+    // collection, so an unbounded page would drag the whole log through
+    // memory three times over for a page that is empty anyway.
+    const page = Math.min(Math.max(params.page ?? 1, 1), MAX_TRANSACTIONS_PAGE);
     const tagUid = params.tagUid?.trim();
 
     // A UID that has never been bound in this event matches nothing — an empty

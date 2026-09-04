@@ -4,10 +4,9 @@ import { Reseller } from '@models/reseller.model';
 import { ResellerRole, RESELLER_ROLE_PERMISSIONS, ResellerToken } from '@interfaces/resellerPermission.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
+import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
-const MAX_PIN_ATTEMPTS = 5;
-const LOCK_MINUTES = 15;
 
 export class ResellerAuthService {
   static async login(loginCode: string, pin: string) {
@@ -17,25 +16,30 @@ export class ResellerAuthService {
     const operator = await ResellerOperator.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
+    // The PARENT company gates the till, exactly as it gates ownerLogin.
+    // Suspending or deactivating a reseller is the admin's only control over
+    // a whole partner; reading just the operator row here let every till
+    // under a suspended partner carry on logging in and selling. Same generic
+    // error as everything else so the response never says which check failed.
+    // `status` is compared to 'suspended' rather than filtered on 'active' so
+    // a row written before the field existed (no status at all) still logs
+    // in — the same rule resolveOperatorEventScope applies at request time.
+    const company = await Reseller.findById(operator.resellerId).select('isActive status').lean();
+    if (!company || !company.isActive || company.status === 'suspended') throw new Error('Invalid credentials');
+
     if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {
       throw new Error('Account locked. Try again later.');
     }
 
     const ok = await operator.comparePin(pin);
     if (!ok) {
-      operator.failedPinAttempts = (operator.failedPinAttempts ?? 0) + 1;
-      if (operator.failedPinAttempts >= MAX_PIN_ATTEMPTS) {
-        operator.lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000);
-        operator.failedPinAttempts = 0;
-      }
-      await operator.save();
+      // Counted on the server, not on this loaded document — N guesses in
+      // flight together must reach N and lock, not all write 1.
+      await recordFailedPinAttempt(ResellerOperator, operator._id as any);
       throw new Error('Invalid credentials');
     }
 
-    operator.failedPinAttempts = 0;
-    operator.lockedUntil = null;
-    operator.lastLoginAt = new Date();
-    await operator.save();
+    await clearPinLockout(ResellerOperator, operator._id as any);
 
     const role = operator.role as ResellerRole;
     const payload: ResellerToken = {

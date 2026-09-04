@@ -6,10 +6,9 @@ import { Event } from '@models/event.model';
 import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
+import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
-const MAX_PIN_ATTEMPTS = 5;
-const LOCK_MINUTES = 15;
 
 /**
  * Stall-operator login — loginCode + PIN, mirroring GateOperatorAuthService /
@@ -40,12 +39,9 @@ export class MerchantAuthService {
 
     const ok = await operator.comparePin(pin);
     if (!ok) {
-      operator.failedPinAttempts = (operator.failedPinAttempts ?? 0) + 1;
-      if (operator.failedPinAttempts >= MAX_PIN_ATTEMPTS) {
-        operator.lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000);
-        operator.failedPinAttempts = 0;
-      }
-      await operator.save();
+      // Counted on the server, not on this loaded document — N guesses in
+      // flight together must reach N and lock, not all write 1.
+      await recordFailedPinAttempt(MerchantOperator, operator._id as any);
       throw new Error('Invalid credentials');
     }
 
@@ -54,10 +50,7 @@ export class MerchantAuthService {
     const merchant = await Merchant.findOne({ _id: operator.merchantId, status: 'active' });
     if (!merchant) throw new Error('Invalid credentials');
 
-    operator.failedPinAttempts = 0;
-    operator.lockedUntil = null;
-    operator.lastLoginAt = new Date();
-    await operator.save();
+    await clearPinLockout(MerchantOperator, operator._id as any);
 
     // The app's vendor header shows this instead of a raw eventId — best
     // effort: a missing/deleted event must not block login, it just means

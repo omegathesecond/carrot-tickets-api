@@ -328,3 +328,25 @@ describe('GET /api/tickets/cashiers', () => {
     expect(await Cashier.findById(theirs._id)).not.toBeNull();
   });
 });
+
+// `!!req.body.isActive` read the STRING "false" as true: a client that sent
+// the value as text re-activated the person it was trying to switch off.
+describe('PATCH /api/tickets/cashiers/:id isActive', () => {
+  it('400s a non-boolean isActive rather than coercing "false" to true', async () => {
+    const created = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .send({ fullName: 'Nomsa', eventId: myEventId });
+    const id = created.body.data.cashier._id;
+
+    for (const isActive of ['false', 'true', 0, 1, null]) {
+      const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
+        .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+        .send({ isActive });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('isActive must be a boolean');
+    }
+
+    const reloaded = await Cashier.findById(id);
+    expect(reloaded!.isActive).toBe(true);
+  });
+});

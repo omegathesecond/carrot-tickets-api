@@ -1,7 +1,10 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { EventTagService, UNREGISTERED_TAG_MESSAGE } from '@services/eventTag.service';
+import { WalletService } from '@services/wallet.service';
 import { EventTag } from '@models/eventTag.model';
+import { Wallet } from '@models/wallet.model';
+import { BandBinding } from '@models/bandBinding.model';
 
 const eventId = new mongoose.Types.ObjectId().toString();
 const otherEventId = new mongoose.Types.ObjectId().toString();
@@ -113,10 +116,11 @@ describe('EventTagService.assertTagRegistered', () => {
 describe('EventTagService.retireTag', () => {
   it('stamps the reason and drops the tag out of the active count', async () => {
     await EventTagService.registerTag({ eventId, bandUid: '04a22b1c' });
-    const tag = await EventTagService.retireTag({ eventId, bandUid: '04A2:2B:1C', reason: 'snapped' });
+    const { tag, releasedWalletId } = await EventTagService.retireTag({ eventId, bandUid: '04A2:2B:1C', reason: 'snapped' });
 
     expect(tag.status).toBe('retired');
     expect(tag.retiredReason).toBe('snapped');
+    expect(releasedWalletId).toBeNull(); // nothing was wearing it
     expect(await EventTagService.counts(eventId)).toEqual({ active: 0, retired: 1, total: 1 });
   });
 
@@ -124,6 +128,43 @@ describe('EventTagService.retireTag', () => {
     await EventTagService.registerTag({ eventId: otherEventId, bandUid: '04a22b1c' });
     await expect(EventTagService.retireTag({ eventId, bandUid: '04a22b1c' }))
       .rejects.toThrow(/not in this event/i);
+  });
+
+  // Retiring only flipped the register row; a wallet already wearing the tag
+  // kept topping up, spending and checking in, because the money paths look
+  // the wallet up by uid and never consult the register again.
+  it('releases the wallet wearing the tag so it stops working everywhere, balance intact', async () => {
+    await EventTagService.registerTag({ eventId, bandUid: '04a22b1c' });
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId });
+    await WalletService.bindBand(String(w._id), '04a22b1c', 'desk-1');
+    await Wallet.updateOne({ _id: w._id }, { $set: { balance: 4000, cashFundedBalance: 4000 } });
+
+    const { releasedWalletId } = await EventTagService.retireTag({ eventId, bandUid: '04A2:2B:1C', reason: 'stolen' });
+
+    expect(releasedWalletId).toBe(String(w._id));
+    // The cashier / merchant / gate lookup by uid now finds nothing.
+    expect(await Wallet.findOne({ eventId, bandUid: '04a22b1c' })).toBeNull();
+    expect(await WalletService.getWalletViewByBand('04a22b1c', eventId)).toBeNull();
+    // The money stays on the wallet — a later reissue is possible.
+    const fresh = await Wallet.findById(w._id);
+    expect(fresh?.bandUid).toBeNull();
+    expect(fresh?.balance).toBe(4000);
+    // The binding trail says why.
+    const row = await BandBinding.findOne({ walletId: w._id, bandUid: '04a22b1c' });
+    expect(row?.unboundAt).toBeInstanceOf(Date);
+    expect(row?.unboundReason).toBe('retired: stolen');
+  });
+
+  it('does not touch a wallet wearing the same uid at ANOTHER event', async () => {
+    await EventTagService.registerTag({ eventId, bandUid: '04a22b1c' });
+    await EventTagService.registerTag({ eventId: otherEventId, bandUid: '04a22b1c' });
+    const w = await WalletService.ensureWalletForTicket({ ticketId: new mongoose.Types.ObjectId().toString(), eventId: otherEventId });
+    await WalletService.bindBand(String(w._id), '04a22b1c');
+
+    const { releasedWalletId } = await EventTagService.retireTag({ eventId, bandUid: '04a22b1c' });
+
+    expect(releasedWalletId).toBeNull();
+    expect((await Wallet.findById(w._id))?.bandUid).toBe('04a22b1c');
   });
 });
 

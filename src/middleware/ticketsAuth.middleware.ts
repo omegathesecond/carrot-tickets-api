@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
+import { gateOperatorPermissions } from '@services/gateOperatorAuth.service';
+import { GateOperator } from '@models/gateOperator.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
@@ -40,20 +42,69 @@ export const authenticateTickets = async (
 };
 
 /**
+ * The permission set a request is checked against.
+ *
+ * Organizer / vendor / sub-user tokens are checked on the TOKEN, as before.
+ *
+ * A GATE OPERATOR token is not. Its `permissions` array is the SCANNER role
+ * set plus the per-person grants (e.g. issue_tags, which gates bind-band and
+ * the tag registry) as they stood at login — and the token then lives 7 days.
+ * An organizer removing a grant through PATCH /gate-operators/:id {grants:[]}
+ * therefore changed nothing until the person next logged in: verified live,
+ * the old token still passed the ISSUE_TAGS gate. So for a gate operator the
+ * set is re-resolved from the row on every request (one findById on an
+ * indexed _id), through the same function login mints it with, and a row that
+ * is missing or deactivated yields null → the request is refused outright.
+ *
+ * A database failure propagates rather than resolving to "no permissions" or
+ * "the token's permissions" — an outage must read as a 500, not as a silent
+ * narrowing or widening.
+ */
+async function effectivePermissions(ticketsUser: any): Promise<string[] | null> {
+  if (ticketsUser.userType !== 'gate-operator') return ticketsUser.permissions || [];
+
+  // Every gate token names its row; one that does not is refused rather than
+  // trusted on its own say-so.
+  if (!ticketsUser.userId) return null;
+  const row = await GateOperator.findById(String(ticketsUser.userId))
+    .select('isActive grants')
+    .lean<{ isActive?: boolean; grants?: string[] } | null>();
+  if (!row || !row.isActive) return null;
+  return gateOperatorPermissions(row.grants);
+}
+
+/** Shared prologue for the three permission gates below. */
+async function resolvePermissions(req: Request, res: Response, next: NextFunction): Promise<string[] | undefined> {
+  const ticketsUser = (req as any).ticketsUser;
+  if (!ticketsUser) {
+    ApiResponseUtil.unauthorized(res, 'Authentication required');
+    return undefined;
+  }
+
+  let permissions: string[] | null;
+  try {
+    permissions = await effectivePermissions(ticketsUser);
+  } catch (e) {
+    next(e);
+    return undefined;
+  }
+
+  if (permissions === null) {
+    ApiResponseUtil.unauthorized(res, 'Operator deactivated');
+    return undefined;
+  }
+  return permissions;
+}
+
+/**
  * Require specific Tickets permission
  * Checks if user has the required permission
  */
 export const requireTicketsPermission = (permission: TicketsPermission) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const ticketsUser = (req as any).ticketsUser;
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const permissions = await resolvePermissions(req, res, next);
+    if (!permissions) return;
 
-    if (!ticketsUser) {
-      ApiResponseUtil.unauthorized(res, 'Authentication required');
-      return;
-    }
-
-    // Check permission in user's permission array
-    const permissions = ticketsUser.permissions || [];
     if (!permissions.includes(permission)) {
       ApiResponseUtil.forbidden(res, `Permission required: ${permission}`);
       return;
@@ -67,15 +118,10 @@ export const requireTicketsPermission = (permission: TicketsPermission) => {
  * Require multiple Tickets permissions (all required)
  */
 export const requireTicketsPermissions = (permissions: TicketsPermission[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const ticketsUser = (req as any).ticketsUser;
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const userPermissions = await resolvePermissions(req, res, next);
+    if (!userPermissions) return;
 
-    if (!ticketsUser) {
-      ApiResponseUtil.unauthorized(res, 'Authentication required');
-      return;
-    }
-
-    const userPermissions = ticketsUser.permissions || [];
     const hasAllPermissions = permissions.every(p => userPermissions.includes(p));
 
     if (!hasAllPermissions) {
@@ -92,15 +138,10 @@ export const requireTicketsPermissions = (permissions: TicketsPermission[]) => {
  * Require ANY of the specified permissions
  */
 export const requireAnyPermission = (permissions: TicketsPermission[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const ticketsUser = (req as any).ticketsUser;
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const userPermissions = await resolvePermissions(req, res, next);
+    if (!userPermissions) return;
 
-    if (!ticketsUser) {
-      ApiResponseUtil.unauthorized(res, 'Authentication required');
-      return;
-    }
-
-    const userPermissions = ticketsUser.permissions || [];
     const hasAnyPermission = permissions.some(p => userPermissions.includes(p));
 
     if (!hasAnyPermission) {

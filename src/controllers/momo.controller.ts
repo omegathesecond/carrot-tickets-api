@@ -1,6 +1,23 @@
 import { Request, Response } from 'express';
 import { TicketService } from '@services/ticket.service';
 import { BookingService } from '@services/transport/booking.service';
+import { MenuOrderService } from '@services/menuOrder.service';
+
+type MomoFinalizeResult = { status: 'completed' | 'failed' | 'pending'; reason?: string };
+
+/**
+ * Every domain that collects via MTN MoMo, in the order the callback tries
+ * them. A callback carries only a referenceId (or an externalId we resolve to
+ * one), never which domain it belongs to, so the finalisers are walked in
+ * turn: each throws a "... not found ..." error when the reference is not its
+ * own, and each is idempotent, so a retried callback can walk the chain again
+ * safely.
+ */
+const MOMO_FINALIZERS: ReadonlyArray<{ label: string; run: (referenceId: string) => Promise<MomoFinalizeResult> }> = [
+  { label: 'ticket sale', run: (ref) => TicketService.finalizeMomoSale(ref) },
+  { label: 'bus booking', run: (ref) => BookingService.finalizeMomoBooking(ref) },
+  { label: 'menu order', run: (ref) => MenuOrderService.finalizeMomoOrder(ref) },
+];
 
 export class MomoController {
   /**
@@ -32,26 +49,32 @@ export class MomoController {
       (req.params as any)?.referenceId ||
       req.get('X-Reference-Id');
 
-    // MTN's requesttopay callback keys on `externalId` (= our sale.saleId), and
-    // carries NO X-Reference-Id at all. When referenceId is absent, correlate the
-    // sale by externalId and pull its stored momoReferenceId.
+    // MTN's requesttopay callback keys on `externalId` (= what WE sent: a
+    // TicketSale's saleId, a BookingSale's saleRef, or a MenuOrder's orderId)
+    // and carries NO X-Reference-Id at all. When referenceId is absent,
+    // correlate by externalId and pull the stored momoReferenceId.
     const externalId = req.body?.externalId;
     if (!referenceId && externalId) {
       const sale = await TicketService.getMomoSaleByExternalId(externalId);
       referenceId = sale?.momoReferenceId;
-      // Bus MoMo callbacks carry the BookingSale's saleRef as externalId (not a
-      // TicketSale's), so when no ticket sale matched, also try the bus resolver.
       let bookingSaleFound = false;
+      let menuOrderFound = false;
       if (!referenceId) {
         const bSale = await BookingService.getMomoBookingSaleByExternalId(externalId);
-        referenceId = referenceId || bSale?.momoReferenceId;
+        referenceId = bSale?.momoReferenceId;
         bookingSaleFound = !!bSale;
+      }
+      if (!referenceId) {
+        const order = await MenuOrderService.getMomoOrderByExternalId(externalId);
+        referenceId = order?.momoReferenceId;
+        menuOrderFound = !!order;
       }
       console.log('[momo callback] resolved referenceId via externalId', {
         externalId,
         referenceId: referenceId ?? null,
         saleFound: !!sale,
         bookingSaleFound,
+        menuOrderFound,
         receivedAt,
       });
     }
@@ -66,51 +89,43 @@ export class MomoController {
       return res.status(400).json({ ok: false });
     }
 
-    console.log('[momo callback] → finalizing sale', { referenceId, receivedAt });
-    try {
-      const result = await TicketService.finalizeMomoSale(referenceId);
-      console.log('[momo callback] ✓ finalized', {
-        referenceId,
-        status: result.status,
-        receivedAt,
-        durationMs: Date.now() - Date.parse(receivedAt),
-      });
-    } catch (e) {
-      // TicketService.finalizeMomoSale throws "Sale not found for reference"
-      // when referenceId belongs to a bus BookingSale instead of a TicketSale
-      // (or a live legacy TicketSale table lookup miss). Fall through to the
-      // bus-booking finalizer before giving up — both finalizers are idempotent,
-      // so a double-invocation from a retried callback is safe.
-      if (/not found/i.test(e instanceof Error ? e.message : String(e))) {
-        console.log('[momo callback] ↩ no ticket sale for reference — trying bus booking finalizer', {
+    console.log('[momo callback] → finalizing', { referenceId, receivedAt });
+    await MomoController.finalizeAcrossDomains(referenceId, receivedAt);
+    return res.status(200).json({ ok: true }); // always 200 so MTN doesn't retry-storm
+  }
+
+  /**
+   * Walk MOMO_FINALIZERS until one owns the reference. A "not found" from a
+   * finaliser means "not mine" — fall through. Any other failure is real:
+   * log it loudly and stop; MTN's retry and the domain's reconciler sweep
+   * will come back for it.
+   */
+  private static async finalizeAcrossDomains(referenceId: string, receivedAt: string): Promise<void> {
+    for (const { label, run } of MOMO_FINALIZERS) {
+      try {
+        const result = await run(referenceId);
+        console.log(`[momo callback] ✓ ${label} finalized`, {
           referenceId,
+          status: result.status,
           receivedAt,
+          durationMs: Date.now() - Date.parse(receivedAt),
         });
-        try {
-          const result = await BookingService.finalizeMomoBooking(referenceId);
-          console.log('[momo callback] ✓ booking finalized', {
-            referenceId,
-            status: result.status,
-            receivedAt,
-            durationMs: Date.now() - Date.parse(receivedAt),
-          });
-        } catch (be) {
-          console.error('[momo callback] ✗ booking finalize threw', {
-            referenceId,
-            receivedAt,
-            error: be instanceof Error ? be.message : be,
-            stack: be instanceof Error ? be.stack : undefined,
-          });
+        return;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (/not found/i.test(message)) {
+          console.log(`[momo callback] ↩ no ${label} for reference — trying next finalizer`, { referenceId, receivedAt });
+          continue;
         }
-      } else {
-        console.error('[momo callback] ✗ finalize threw', {
+        console.error(`[momo callback] ✗ ${label} finalize threw`, {
           referenceId,
           receivedAt,
-          error: e instanceof Error ? e.message : e,
+          error: message,
           stack: e instanceof Error ? e.stack : undefined,
         });
+        return;
       }
     }
-    return res.status(200).json({ ok: true }); // always 200 so MTN doesn't retry-storm
+    console.error('[momo callback] ✗ no ticket sale, bus booking or menu order for reference', { referenceId, receivedAt });
   }
 }

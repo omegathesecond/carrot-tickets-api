@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedCashlessEvent } from '@controllers/organizerCashless.controller';
-import { WalletService } from '@services/wallet.service';
+import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { Wallet } from '@models/wallet.model';
 import { FloatTag } from '@interfaces/ledger.interface';
+import { assertValidBandUid } from '@utils/bandUid.util';
 
 const hex24 = /^[0-9a-fA-F]{24}$/;
 
@@ -50,8 +51,17 @@ export class TagAdminController {
       if (!event) return;
       if (!hex24.test(walletId)) return ApiResponseUtil.badRequest(res, 'invalid tag id');
 
-      const bandUid = typeof req.body?.bandUid === 'string' ? req.body.bandUid.trim() : '';
-      if (!bandUid) return ApiResponseUtil.badRequest(res, 'bandUid is required');
+      const rawUid = typeof req.body?.bandUid === 'string' ? req.body.bandUid.trim() : '';
+      if (!rawUid) return ApiResponseUtil.badRequest(res, 'bandUid is required');
+      // Canonical form BEFORE the pre-check below, or a `7A:0E:00:01` typed
+      // for a tag issued as `7a0e0001` would sail past it — and the wallet
+      // service would refuse the malformed ones anyway; better a 400 up front.
+      let bandUid: string;
+      try {
+        bandUid = assertValidBandUid(rawUid);
+      } catch (e: any) {
+        return ApiResponseUtil.badRequest(res, e?.message || 'invalid band uid');
+      }
 
       const current = await Wallet.findOne({ _id: walletId, eventId });
       if (!current) return ApiResponseUtil.error(res, 'Tag not found', 404);
@@ -62,13 +72,15 @@ export class TagAdminController {
       if (taken) return ApiResponseUtil.error(res, 'That tag is already issued at this event', 409);
 
       const ticketsUser = (req as any).ticketsUser;
-      if (current.bandUid) {
-        await WalletService.unbindBand(walletId, `reissued to ${bandUid}`);
-      }
-      const wallet = await WalletService.bindBand(walletId, bandUid, ticketsUser?.userId || ticketsUser?.vendorId);
+      // Validates the replacement (registered, not retired, not live elsewhere)
+      // BEFORE releasing the current tag, and restores it if the bind still
+      // loses a race — the attendee is never left tagless by a failed reissue.
+      const wallet = await WalletService.reissueBand(
+        walletId, bandUid, `reissued to ${bandUid}`, ticketsUser?.userId || ticketsUser?.vendorId,
+      );
       return ApiResponseUtil.success(res, { walletId: String(wallet._id), bandUid: wallet.bandUid });
     } catch (err: any) {
-      if (err?.code === 11000) {
+      if (err?.code === 11000 || /already bound to another wallet/i.test(err?.message || '')) {
         return ApiResponseUtil.error(res, 'That tag is already issued at this event', 409);
       }
       console.error('Tag reissue error:', err);
@@ -113,6 +125,8 @@ export class TagAdminController {
         walletId: String(wallet._id), balance: wallet.balance, withdrawalId: String(withdrawal._id),
       });
     } catch (err: any) {
+      // A reused clientTxnId with a different amount is a conflict, not a replay.
+      if (err instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, err.message, 409);
       // A decline is not a server error — say which one it was.
       if (err?.reason === 'insufficient_balance') return ApiResponseUtil.error(res, 'The tag does not hold that much', 402);
       if (err?.reason === 'wallet_not_active') return ApiResponseUtil.error(res, 'This tag is not active', 409);

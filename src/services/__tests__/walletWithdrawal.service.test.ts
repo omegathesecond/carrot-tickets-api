@@ -1,5 +1,5 @@
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { WalletService, MAX_TOPUP_CENTS } from '@services/wallet.service';
+import { WalletService, MAX_TOPUP_CENTS, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { WalletDeclinedError } from '@services/merchant.service';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
@@ -96,6 +96,28 @@ it('is idempotent on {walletId, clientTxnId} — no double cash-out', async () =
   const w = await Wallet.findById(walletId).lean();
   expect(w!.balance).toBe(700); // debited ONCE, not 400
   expect(await WalletWithdrawal.countDocuments({ clientTxnId: 'wd-dup' })).toBe(1);
+});
+
+it('rejects a replay of the same clientTxnId with a DIFFERENT amount (no debit, no new row)', async () => {
+  const { eventId, walletId } = await seedFundedWallet(1000);
+  await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+
+  await expect(WalletService.withdrawCash({ walletId, eventId, amount: 400, recordedBy: 'cash1', clientTxnId: 'wd-dup' }))
+    .rejects.toBeInstanceOf(WalletIdempotencyMismatchError);
+  await expect(WalletService.withdrawCash({ walletId, eventId, amount: 400, recordedBy: 'cash1', clientTxnId: 'wd-dup' }))
+    .rejects.toThrow(/clientTxnId already used with a different amount/);
+
+  expect((await Wallet.findById(walletId).lean())!.balance).toBe(700);
+  expect(await WalletWithdrawal.countDocuments({ walletId, clientTxnId: 'wd-dup' })).toBe(1);
+});
+
+it('still returns the ORIGINAL outcome on a true replay (same amount)', async () => {
+  const { eventId, walletId } = await seedFundedWallet(1000);
+  const first = await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+  const again = await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+
+  expect(String(again.withdrawal._id)).toBe(String(first.withdrawal._id));
+  expect(again.wallet.balance).toBe(700);
 });
 
 it('rejects an amount over the ceiling', async () => {

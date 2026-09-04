@@ -8,6 +8,7 @@ import { MerchantCharge } from '@models/merchantCharge.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
 import { WalletDeclinedError } from '@services/merchant.service';
+import { assertValidBandUid } from '@utils/bandUid.util';
 
 /**
  * Safety ceiling on a single cash top-up, in minor units (cents): R100,000.
@@ -17,6 +18,31 @@ import { WalletDeclinedError } from '@services/merchant.service';
  * caller that bypasses validation still cannot inflate.
  */
 export const MAX_TOPUP_CENTS = 10_000_000;
+
+/**
+ * A replay of a {walletId, clientTxnId} that asks for a DIFFERENT amount than
+ * the one already recorded. That is not a retry — it is a second, contradicting
+ * instruction under a reused id. Answering it with the original outcome would
+ * tell the desk "done" while the wallet holds something else, so it is refused
+ * and the controllers map it to a 409. A true replay (same amount) still
+ * returns the original row.
+ */
+export class WalletIdempotencyMismatchError extends Error {
+  readonly reason = 'idempotency_mismatch' as const;
+  constructor(
+    public readonly recordedAmount: number,
+    public readonly requestedAmount: number,
+  ) {
+    super('clientTxnId already used with a different amount');
+    this.name = 'WalletIdempotencyMismatchError';
+  }
+}
+
+function assertReplayMatches(recordedAmount: number, requestedAmount: number): void {
+  if (recordedAmount !== requestedAmount) {
+    throw new WalletIdempotencyMismatchError(recordedAmount, requestedAmount);
+  }
+}
 
 /**
  * Wallet lifecycle for the per-event closed-loop cashless wallet (spec §4, §5.1).
@@ -76,8 +102,14 @@ export class WalletService {
    * caller never leaves a BandBinding for a band it does not hold.
    */
   static async bindBand(walletId: string, bandUid: string, boundBy?: string): Promise<IWallet> {
-    const uid = bandUid.trim();
-    if (!uid) throw new Error('bandUid is required');
+    // THE NORMALISATION POINT. Readers hand a uid over as `04:B2:C3:D4`, or
+    // upper-case, or with spaces; every money path (top-up, charge, cash-out,
+    // check-in-by-tag) looks the wallet up by the CANONICAL form. Storing the
+    // raw string here meant those lookups found no wallet — and, because the
+    // {eventId, bandUid} unique index compares strings, the same physical tag
+    // could then be bound to a second wallet under another spelling. So the
+    // uid is canonicalised (and shape-checked) before any read or write.
+    const uid = assertValidBandUid(bandUid);
 
     // THE ALLOWLIST GATE. A tag only carries money at an event its organizer
     // enrolled it into (see EventTag) — otherwise anyone could arrive with a
@@ -195,14 +227,95 @@ export class WalletService {
       throw new Error('wallet has no band bound');
     }
 
-    // Stamp the live binding row closed. Scoped to the row without unboundAt so
-    // an earlier, already-closed binding for the same uid is never re-stamped.
-    await BandBinding.findOneAndUpdate(
-      { walletId: released._id, unboundAt: { $exists: false } },
-      { $set: { unboundAt: new Date(), unboundReason: reason } },
-    );
+    // Stamp the live binding row closed — the MOST RECENT open one. Scoped to
+    // rows without unboundAt so an earlier, already-closed binding for the same
+    // uid is never re-stamped; sorted because more than one open row can exist
+    // (a compensated reissue re-binds the old uid on a fresh row) and without
+    // a sort MongoDB hands back whichever it likes, closing the wrong one.
+    //
+    // The wallet is already released at this point. A failed stamp would leave
+    // it unbound with an open audit row — a silent lie in the forensic trail —
+    // so the failure is logged with the wallet it concerns and rethrown, never
+    // swallowed.
+    let stamped: unknown;
+    try {
+      stamped = await BandBinding.findOneAndUpdate(
+        { walletId: released._id, unboundAt: { $exists: false } },
+        { $set: { unboundAt: new Date(), unboundReason: reason } },
+        { sort: { boundAt: -1 }, new: true },
+      );
+    } catch (stampErr) {
+      console.error(
+        `unbindBand: wallet ${String(released._id)} was released (reason: ${reason}) but its BandBinding audit row could not be stamped`,
+        stampErr,
+      );
+      throw stampErr;
+    }
+    if (!stamped) {
+      // Nothing to close: the wallet carried a uid with no open audit row (a
+      // seed or a hand edit). Not a failure of this release, but not normal
+      // either — say so where on-call will see it.
+      console.warn(`unbindBand: wallet ${String(released._id)} had no open BandBinding row to stamp (reason: ${reason})`);
+    }
 
     return released;
+  }
+
+  /**
+   * Reissue: release the wallet's current tag (if any) and bind `newBandUid`
+   * to the SAME wallet, balance untouched — the whole payoff of keeping the
+   * balance on the wallet rather than the plastic.
+   *
+   * Everything that can refuse the replacement is checked BEFORE the old tag
+   * is released: uid shape, registration for this event (which also excludes
+   * a retired tag), and not already live on another wallet. The old order —
+   * unbind, then let bindBand do the checking — returned the operator a 400
+   * and left the attendee holding a tag that no longer worked.
+   *
+   * The pre-flight is read-only, so a race between it and the claim is still
+   * possible (another desk grabs the uid in between). If the bind fails after
+   * the release, the old uid is re-bound as compensation — the trail shows the
+   * release and the restore honestly — and the bind's error is rethrown.
+   */
+  static async reissueBand(
+    walletId: string,
+    newBandUid: string,
+    reason: string,
+    boundBy?: string,
+  ): Promise<IWallet> {
+    const uid = assertValidBandUid(newBandUid);
+
+    const current = await Wallet.findById(walletId)
+      .select('eventId bandUid status')
+      .lean<{ eventId: unknown; bandUid: string | null; status: string } | null>();
+    if (!current) throw new Error('wallet not found');
+    if (current.status !== 'active') throw new Error('wallet is not active');
+    const eventId = String(current.eventId);
+
+    // Pre-flight — nothing written yet.
+    await EventTagService.assertTagRegistered(eventId, uid);
+    const taken = await Wallet.exists({ eventId, bandUid: uid, _id: { $ne: walletId } });
+    if (taken) throw new Error('band is already bound to another wallet at this event');
+
+    const previous = current.bandUid;
+    if (previous) await WalletService.unbindBand(walletId, reason);
+
+    try {
+      return await WalletService.bindBand(walletId, uid, boundBy);
+    } catch (bindErr) {
+      if (!previous) throw bindErr;
+      try {
+        // Same path as any bind, so the restore leaves its own audit row.
+        await WalletService.bindBand(walletId, previous, boundBy);
+      } catch (restoreErr) {
+        throw new Error(
+          `reissue failed AND the old tag could not be restored — wallet ${walletId} is now unbound (was ${previous}). ` +
+            `reissue error: ${(bindErr as Error)?.message ?? String(bindErr)}; ` +
+            `restore error: ${(restoreErr as Error)?.message ?? String(restoreErr)}`,
+        );
+      }
+      throw bindErr;
+    }
   }
 
   /**
@@ -246,8 +359,11 @@ export class WalletService {
     // Idempotency: if this clientTxnId already ran FOR THIS WALLET, return the
     // existing outcome. Scoped to walletId — the same clientTxnId on a different
     // wallet is a different, legitimate top-up, not a duplicate of this one.
+    // A replay is only a replay if it asks for the same amount — see
+    // WalletIdempotencyMismatchError.
     const existing = await WalletTopup.findOne({ walletId, clientTxnId });
     if (existing) {
+      assertReplayMatches(existing.amount, amount);
       const w = await Wallet.findById(existing.walletId);
       if (!w) throw new Error('wallet not found');
       return { wallet: w, topup: existing };
@@ -260,8 +376,12 @@ export class WalletService {
         // Atomic credit; pipeline update keeps balance & cashFundedBalance
         // consistent (the model's cashFundedBalance<=balance pre('validate')
         // hook does NOT fire on updates — see wallet.model.ts).
+        //
+        // eventId is part of the CAS, as in withdrawCash and MerchantService:
+        // the ledger legs below are posted under `eventId`, so a walletId-keyed
+        // caller must never be able to credit a wallet under the wrong event.
         const wallet = await Wallet.findOneAndUpdate(
-          { _id: walletId, status: 'active' },
+          { _id: walletId, eventId, status: 'active' },
           [
             {
               $set: {
@@ -301,7 +421,10 @@ export class WalletService {
       if ((e as { code?: number })?.code === 11000) {
         const topup = await WalletTopup.findOne({ walletId, clientTxnId });
         const wallet = topup ? await Wallet.findById(topup.walletId) : null;
-        if (topup && wallet) return { wallet, topup };
+        if (topup && wallet) {
+          assertReplayMatches(topup.amount, amount);
+          return { wallet, topup };
+        }
       }
       throw e;
     } finally {
@@ -361,9 +484,11 @@ export class WalletService {
       throw new Error('amount exceeds the maximum allowed withdrawal');
     }
 
-    // Idempotency: a genuine retry for THIS wallet returns the original outcome.
+    // Idempotency: a genuine retry for THIS wallet (same amount) returns the
+    // original outcome; a reused id with a different amount is refused.
     const existing = await WalletWithdrawal.findOne({ walletId, clientTxnId });
     if (existing) {
+      assertReplayMatches(existing.amount, amount);
       const w = await Wallet.findById(existing.walletId);
       if (!w) throw new Error('wallet not found');
       return { wallet: w, withdrawal: existing };
@@ -422,7 +547,10 @@ export class WalletService {
       if ((e as { code?: number })?.code === 11000) {
         const withdrawal = await WalletWithdrawal.findOne({ walletId, clientTxnId });
         const wallet = withdrawal ? await Wallet.findById(withdrawal.walletId) : null;
-        if (withdrawal && wallet) return { wallet, withdrawal };
+        if (withdrawal && wallet) {
+          assertReplayMatches(withdrawal.amount, amount);
+          return { wallet, withdrawal };
+        }
       }
       throw e;
     } finally {

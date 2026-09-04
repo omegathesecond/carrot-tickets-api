@@ -1,4 +1,5 @@
 import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
 import { MenuItem } from '@models/menuItem.model';
 import { MenuOrder, IMenuOrderItem } from '@models/menuOrder.model';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
@@ -7,6 +8,8 @@ import { computeMenuServiceFee, centsToMajorUnits } from '@utils/menuServiceFee.
 import { KeshlessPaymentService } from '@services/keshlessPayment.service';
 import { MtnMomoClient } from '@services/payments/mtnMomo.client';
 import { normalizePhone } from '@utils/phone.util';
+import { HttpError } from '@utils/httpError.util';
+import { MAX_QTY_PER_LINE, MenuOrderLine, mergeMenuOrderLines } from '@validators/menu.validator';
 
 const MOMO_TTL_MS = 5 * 60 * 1000;
 
@@ -14,20 +17,36 @@ function generateOrderId(): string {
   return `MENU-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
-interface RequestedLine {
-  menuItemId: string;
-  quantity: number;
-}
-
+/**
+ * Every refusal a preorder can hit is thrown as an HttpError so the public
+ * controller maps it straight onto a status — no string-matching on messages.
+ */
 export class MenuOrderService {
   private static momoClient = new MtnMomoClient();
 
+  /**
+   * Only a PUBLISHED event takes preorders — the same gate as the public menu
+   * read (MenuPublicController.getEventMenu), so checkout is never a way
+   * around it for a draft, pending-approval or finished event.
+   */
+  private static async loadOpenEvent(eventId: string) {
+    const event = await Event.findOne({ _id: eventId, status: EventStatus.PUBLISHED });
+    if (!event) throw new HttpError(404, 'Event not found or not open for orders');
+    return event;
+  }
+
   // Prices are ALWAYS re-read from the DB, never trusted from the client —
-  // mirrors TicketService reading ticketType.price server-side.
+  // mirrors TicketService reading ticketType.price server-side. Duplicate
+  // lines of one item are merged first so the per-line cap applies to the
+  // real quantity, not to each fragment.
   private static async buildLineItems(
     eventId: string,
-    requested: RequestedLine[],
+    lines: MenuOrderLine[],
   ): Promise<{ items: IMenuOrderItem[]; subtotal: number }> {
+    const requested = mergeMenuOrderLines(lines);
+    const over = requested.find(r => r.quantity > MAX_QTY_PER_LINE);
+    if (over) throw new HttpError(400, `Quantity for a single item cannot exceed ${MAX_QTY_PER_LINE}`);
+
     const ids = requested.map(r => r.menuItemId);
     const menuItems = await MenuItem.find({ _id: { $in: ids }, eventId, active: true });
     const byId = new Map(menuItems.map(m => [String(m._id), m]));
@@ -36,7 +55,7 @@ export class MenuOrderService {
     let subtotal = 0;
     for (const r of requested) {
       const mi = byId.get(String(r.menuItemId));
-      if (!mi) throw new Error('One or more menu items are no longer available');
+      if (!mi) throw new HttpError(409, 'One or more menu items are no longer available');
       const lineTotal = mi.price * r.quantity;
       items.push({ menuItemId: mi._id, name: mi.name, unitPrice: mi.price, quantity: r.quantity, lineTotal });
       subtotal += lineTotal;
@@ -50,13 +69,12 @@ export class MenuOrderService {
     buyerId: string;
     buyerName?: string;
     buyerPhone?: string;
-    items: RequestedLine[];
+    items: MenuOrderLine[];
     keshlessCardNumber: string;
     keshlessPin?: string;
     notes?: string;
   }) {
-    const event = await Event.findById(p.eventId);
-    if (!event) throw new Error('Event not found');
+    const event = await this.loadOpenEvent(p.eventId);
 
     const { items, subtotal } = await this.buildLineItems(p.eventId, p.items);
 
@@ -64,7 +82,7 @@ export class MenuOrderService {
     // but subtotal here is integer cents, so convert to major units (E) before
     // comparing against the E50 Keshless PIN threshold.
     if (centsToMajorUnits(subtotal) >= 50 && !p.keshlessPin) {
-      throw new Error('PIN required for orders of E50 or more');
+      throw new HttpError(400, 'PIN required for orders of E50 or more');
     }
 
     const cfg = await PaymentConfigService.get();
@@ -97,7 +115,7 @@ export class MenuOrderService {
     if (payment.status !== 'completed') {
       order.paymentStatus = PaymentStatus.FAILED;
       await order.save();
-      throw new Error(payment.message || 'Payment failed');
+      throw new HttpError(402, payment.message || 'Payment failed');
     }
 
     order.paymentStatus = PaymentStatus.COMPLETED;
@@ -113,14 +131,13 @@ export class MenuOrderService {
     buyerId: string;
     buyerName?: string;
     buyerPhone?: string;
-    items: RequestedLine[];
+    items: MenuOrderLine[];
     momoPhone: string;
     notes?: string;
   }): Promise<{ referenceId: string; orderId: string; expiresAt: Date }> {
-    if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
+    if (!this.momoClient.isConfigured()) throw new HttpError(503, 'MTN MoMo is not available');
 
-    const event = await Event.findById(p.eventId);
-    if (!event) throw new Error('Event not found');
+    const event = await this.loadOpenEvent(p.eventId);
 
     const { items, subtotal } = await this.buildLineItems(p.eventId, p.items);
     const cfg = await PaymentConfigService.get();
@@ -147,6 +164,8 @@ export class MenuOrderService {
     try {
       const payerMsisdn = normalizePhone(p.momoPhone).replace(/^\+/, '');
       // MTN MoMo expects major units (E) — amountCharged is stored in cents.
+      // externalId is what MTN echoes back in its callback — see
+      // getMomoOrderByExternalId and MomoController.callback.
       const { referenceId } = await this.momoClient.requestToPay({
         amount: centsToMajorUnits(amountCharged),
         currency: process.env['MTN_MOMO_CURRENCY'] || 'SZL',
@@ -167,7 +186,7 @@ export class MenuOrderService {
   /** Mirrors TicketService.finalizeMomoSale exactly, for MenuOrder instead of TicketSale. */
   static async finalizeMomoOrder(referenceId: string): Promise<{ status: 'completed' | 'failed' | 'pending'; reason?: string }> {
     const order = await MenuOrder.findOne({ momoReferenceId: referenceId });
-    if (!order) throw new Error('Order not found for reference');
+    if (!order) throw new HttpError(404, 'Order not found for reference');
 
     if (order.paymentStatus !== PaymentStatus.PENDING) {
       return order.paymentStatus === PaymentStatus.COMPLETED
@@ -210,5 +229,60 @@ export class MenuOrderService {
 
   static async getMomoOrderByReference(referenceId: string) {
     return MenuOrder.findOne({ momoReferenceId: referenceId }).lean();
+  }
+
+  /**
+   * Look up a MoMo order by the externalId we sent to MTN (= order.orderId).
+   * MTN's requesttopay callback carries `externalId`, NOT our X-Reference-Id,
+   * so this is how MomoController.callback correlates an inbound callback
+   * back to its order. Mirrors TicketService.getMomoSaleByExternalId.
+   */
+  static async getMomoOrderByExternalId(externalId: string) {
+    return MenuOrder.findOne({ orderId: externalId }).lean();
+  }
+
+  /**
+   * Reconciliation backstop for a lost MTN callback: the buyer approved on
+   * the handset and closed the tab, so the status poll stopped too, and the
+   * order would otherwise sit PENDING forever while MTN has taken the money.
+   * Asks MTN through finalizeMomoOrder — the same idempotent, amount-guarded
+   * finaliser the poll and the callback use — so a paid order completes, a
+   * declined one fails, and a still-pending one is left untouched.
+   *
+   * `olderThanMs` skips brand-new orders where the buyer is still looking at
+   * the MoMo prompt (avoids hammering MTN). Mirrors
+   * TicketService.reconcilePendingCardSales / reconcilePendingYeboPaySales.
+   */
+  static async reconcilePendingMomoOrders(olderThanMs = 90_000): Promise<{ completed: number; failed: number; pending: number }> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await MenuOrder.find({
+      paymentMethod: PaymentMethod.MTN_MOMO,
+      paymentStatus: PaymentStatus.PENDING,
+      momoReferenceId: { $exists: true, $nin: [null, ''] },
+      createdAt: { $lt: cutoff },
+    }).limit(100);
+
+    let completed = 0, failed = 0, pending = 0;
+    for (const order of stuck) {
+      // One order MTN cannot answer for must not stop the batch — the next may
+      // be a paid one waiting to complete. Never swallowed silently.
+      try {
+        const r = await this.finalizeMomoOrder(order.momoReferenceId!);
+        if (r.status === 'completed') completed += 1;
+        else if (r.status === 'failed') failed += 1;
+        else pending += 1;
+      } catch (err) {
+        console.error('[menu momo-reconcile] could not resolve order', {
+          orderId: order.orderId,
+          referenceId: order.momoReferenceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (completed || failed) {
+      console.log('[menu momo-reconcile] resolved', { completed, failed, pending, scanned: stuck.length });
+    }
+    return { completed, failed, pending };
   }
 }

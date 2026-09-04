@@ -5,6 +5,7 @@ import app from '@/app';
 import { JWT_SECRET } from '@config/jwt.config';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { Merchant } from '@models/merchant.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { MerchantPermission } from '@interfaces/merchant.interface';
 
@@ -17,10 +18,20 @@ beforeAll(connectTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-async function seedMerchant(): Promise<{ merchantId: string; eventId: string }> {
+type SeededMerchant = { merchantId: string; eventId: string; merchantOperatorId: string };
+
+let __loginCodeSeq = 300;
+
+// authenticateMerchant re-reads the PERSON and the STALL on every request and
+// refuses a missing or deactivated one, so the token has to name rows that
+// really exist — a fresh ObjectId in the token is a 401, not a fixture.
+async function seedMerchant(): Promise<SeededMerchant> {
   const eventId = new mongoose.Types.ObjectId();
   const merchant = await Merchant.create({ name: 'Fixture Merchant', eventId, commissionPercent: 10 });
-  return { merchantId: String(merchant._id), eventId: String(eventId) };
+  const operator = await MerchantOperator.create({
+    fullName: 'Thabo Dlamini', merchantId: merchant._id, eventId, loginCode: `4KT${__loginCodeSeq++}`, pin: '111111',
+  });
+  return { merchantId: String(merchant._id), eventId: String(eventId), merchantOperatorId: String(operator._id) };
 }
 
 async function seedCharge(opts: {
@@ -40,9 +51,9 @@ async function seedCharge(opts: {
 
 // A merchant token names the STALL and the PERSON on its till; without the
 // person authenticateMerchant rejects it.
-const token = (merchantId: string, eventId: string, perms = [MerchantPermission.CHARGE]) =>
+const token = ({ merchantId, eventId, merchantOperatorId }: SeededMerchant, perms = [MerchantPermission.CHARGE]) =>
   jwt.sign({
-    scope: 'merchant', merchantId, merchantOperatorId: new mongoose.Types.ObjectId().toString(),
+    scope: 'merchant', merchantId, merchantOperatorId,
     operatorName: 'Thabo Dlamini', eventId, name: 'Fixture Merchant', permissions: perms,
   }, JWT_SECRET);
 
@@ -55,7 +66,7 @@ it('returns only the requesting merchant\'s charges — isolation across merchan
   await seedCharge({ merchantId: b.merchantId, eventId: b.eventId, amount: 999, fee: 99, clientTxnId: 'b-1' });
 
   const res = await request(app).get('/api/merchant/transactions')
-    .set('Authorization', `Bearer ${token(a.merchantId, a.eventId)}`);
+    .set('Authorization', `Bearer ${token(a)}`);
 
   expect(res.status).toBe(200);
   expect(res.body.success).toBe(true);
@@ -67,13 +78,14 @@ it('returns only the requesting merchant\'s charges — isolation across merchan
 });
 
 it('summary totals reflect ALL charges even when limit truncates the transactions list', async () => {
-  const { merchantId, eventId } = await seedMerchant();
+  const seeded = await seedMerchant();
+  const { merchantId, eventId } = seeded;
   await seedCharge({ merchantId, eventId, amount: 100, fee: 10, clientTxnId: 't-1' });
   await seedCharge({ merchantId, eventId, amount: 200, fee: 20, clientTxnId: 't-2' });
   await seedCharge({ merchantId, eventId, amount: 300, fee: 30, clientTxnId: 't-3' });
 
   const res = await request(app).get('/api/merchant/transactions?limit=1')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`);
+    .set('Authorization', `Bearer ${token(seeded)}`);
 
   expect(res.status).toBe(200);
   expect(res.body.data.transactions).toHaveLength(1);
@@ -82,11 +94,12 @@ it('summary totals reflect ALL charges even when limit truncates the transaction
 });
 
 it('maps each transaction to the documented shape', async () => {
-  const { merchantId, eventId } = await seedMerchant();
+  const seeded = await seedMerchant();
+  const { merchantId, eventId } = seeded;
   await seedCharge({ merchantId, eventId, amount: 300, fee: 30, clientTxnId: 'shape-1', bandUid: '04a22b1c3d4e5f' });
 
   const res = await request(app).get('/api/merchant/transactions')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`);
+    .set('Authorization', `Bearer ${token(seeded)}`);
 
   expect(res.status).toBe(200);
   const [t] = res.body.data.transactions;
@@ -102,10 +115,11 @@ it('maps each transaction to the documented shape', async () => {
 });
 
 it('returns an empty list and a zeroed summary when the merchant has no charges', async () => {
-  const { merchantId, eventId } = await seedMerchant();
+  const seeded = await seedMerchant();
+  const { merchantId, eventId } = seeded;
 
   const res = await request(app).get('/api/merchant/transactions')
-    .set('Authorization', `Bearer ${token(merchantId, eventId)}`);
+    .set('Authorization', `Bearer ${token(seeded)}`);
 
   expect(res.status).toBe(200);
   expect(res.body.data.transactions).toEqual([]);
@@ -118,8 +132,9 @@ it('rejects an unauthenticated request with 401', async () => {
 });
 
 it('rejects a token missing merchant:charge with 403', async () => {
-  const { merchantId, eventId } = await seedMerchant();
+  const seeded = await seedMerchant();
+  const { merchantId, eventId } = seeded;
   const res = await request(app).get('/api/merchant/transactions')
-    .set('Authorization', `Bearer ${token(merchantId, eventId, [])}`);
+    .set('Authorization', `Bearer ${token(seeded, [])}`);
   expect(res.status).toBe(403);
 });

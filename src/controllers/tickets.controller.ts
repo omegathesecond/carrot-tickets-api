@@ -486,6 +486,15 @@ export class TicketsController {
         }
       };
 
+      // A gate operator holds VIEW_EVENTS only so the POS can pick which show
+      // to scan. The organizer's takings are not part of that job: the money
+      // fields come off for the door, everything the picker needs stays.
+      if (ticketsUser.userType === 'gate-operator') {
+        const { totalRevenue: _revenue, totalTicketsSold: _sold, salesSummary: _summary, ...forTheDoor } = responseEvent;
+        ApiResponseUtil.success(res, forTheDoor);
+        return;
+      }
+
       ApiResponseUtil.success(res, responseEvent);
     } catch (error: any) {
       console.error('Get event error:', error);
@@ -501,6 +510,15 @@ export class TicketsController {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
+
+      // The creator card is the organizer's email, phone, primary contact and
+      // the revenue of every event they own. A gate token reaches this route
+      // only because VIEW_EVENTS doubles as the POS event picker — the door
+      // has no business with the organizer's contact book or their takings.
+      if (ticketsUser.userType === 'gate-operator') {
+        ApiResponseUtil.forbidden(res, 'Gate operators cannot view organizer details');
+        return;
+      }
 
       const summary = await EventService.getEventCreatorSummary(
         eventId as string,

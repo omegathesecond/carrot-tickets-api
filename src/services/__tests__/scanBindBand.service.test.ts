@@ -3,6 +3,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helper
 import { ScanService } from '@services/scan.service';
 import { Ticket } from '@models/ticket.model';
 import { Wallet } from '@models/wallet.model';
+import { BandBinding } from '@models/bandBinding.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
 
@@ -15,9 +16,9 @@ import { enrolTags } from '@/__tests__/helpers/eventTags';
  * none of which the register can mask.
  */
 const TAGS = [
-  'BAND0001', 'BAND0002', 'BAND0003', 'BAND0004', 'BAND0005', 'BAND0006', 'BAND0007', 'BAND0008',
-  'CROSS001', 'CROSS002', 'DUPUID01', 'LOST0001', 'NEW00001', 'REFD0001', 'REFD0002', 'TEMP0001',
-  'X1', 'X2',
+  'ba0d0001', 'ba0d0002', 'ba0d0003', 'ba0d0004', 'ba0d0005', 'ba0d0006', 'ba0d0007', 'ba0d0008',
+  'c0550001', 'c0550002', 'd0d0d001', '105d0001', '0e000001', '0efd0001', '0efd0002', '7e0d0001',
+  'a1a1a1a1', 'a2a2a2a2',
 ];
 
 async function seedTicket(
@@ -46,10 +47,10 @@ describe('ScanService.bindBandToTicket', () => {
     const vendorId = new mongoose.Types.ObjectId();
     const t = await seedTicket(eventId, TicketStatus.SOLD, vendorId);
     const res = await ScanService.bindBandToTicket({
-      ticketId: t.ticketId, bandUid: 'BAND0001', vendorId: String(vendorId),
+      ticketId: t.ticketId, bandUid: 'ba0d0001', vendorId: String(vendorId),
       expectedEventId: String(eventId), boundBy: 'op1',
     });
-    expect(res.wallet.bandUid).toBe('BAND0001');
+    expect(res.wallet.bandUid).toBe('ba0d0001');
     expect(String(res.wallet.ticketId)).toBe(String(t._id));
   });
 
@@ -57,10 +58,10 @@ describe('ScanService.bindBandToTicket', () => {
     const eventId = new mongoose.Types.ObjectId();
     const vendorId = new mongoose.Types.ObjectId();
     const t = await seedTicket(eventId, TicketStatus.SOLD, vendorId);
-    await ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'BAND0002', vendorId: String(vendorId) });
+    await ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'ba0d0002', vendorId: String(vendorId) });
     // second bind attempt on the same (already-banded) ticket surfaces bindBand's message
     await expect(
-      ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'BAND0003', vendorId: String(vendorId) }),
+      ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'ba0d0003', vendorId: String(vendorId) }),
     ).rejects.toThrow('wallet already has a band bound');
   });
 
@@ -69,7 +70,7 @@ describe('ScanService.bindBandToTicket', () => {
     const t = await seedTicket(new mongoose.Types.ObjectId(), TicketStatus.SOLD, vendorId);
     await expect(
       ScanService.bindBandToTicket({
-        ticketId: t.ticketId, bandUid: 'BAND0004', vendorId: String(vendorId),
+        ticketId: t.ticketId, bandUid: 'ba0d0004', vendorId: String(vendorId),
         expectedEventId: new mongoose.Types.ObjectId().toString(),
       }),
     ).rejects.toThrow('different event');
@@ -77,7 +78,7 @@ describe('ScanService.bindBandToTicket', () => {
 
   it('rejects an unknown ticket code', async () => {
     await expect(
-      ScanService.bindBandToTicket({ ticketId: 'NOSUCHCODE', bandUid: 'BAND0005', vendorId: String(new mongoose.Types.ObjectId()) }),
+      ScanService.bindBandToTicket({ ticketId: 'NOSUCHCODE', bandUid: 'ba0d0005', vendorId: String(new mongoose.Types.ObjectId()) }),
     ).rejects.toThrow('Ticket not found');
   });
 
@@ -85,7 +86,7 @@ describe('ScanService.bindBandToTicket', () => {
     const vendorId = new mongoose.Types.ObjectId();
     const t = await seedTicket(new mongoose.Types.ObjectId(), TicketStatus.REFUNDED, vendorId);
     await expect(
-      ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'BAND0006', vendorId: String(vendorId) }),
+      ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'ba0d0006', vendorId: String(vendorId) }),
     ).rejects.toThrow(/cannot bind a band/);
   });
 
@@ -94,9 +95,9 @@ describe('ScanService.bindBandToTicket', () => {
     const vendorId = new mongoose.Types.ObjectId();
     const a = await seedTicket(eventId, TicketStatus.SOLD, vendorId);
     const b = await seedTicket(eventId, TicketStatus.SOLD, vendorId);
-    await ScanService.bindBandToTicket({ ticketId: a.ticketId, bandUid: 'DUPUID01', vendorId: String(vendorId), expectedEventId: String(eventId) });
+    await ScanService.bindBandToTicket({ ticketId: a.ticketId, bandUid: 'd0d0d001', vendorId: String(vendorId), expectedEventId: String(eventId) });
     await expect(
-      ScanService.bindBandToTicket({ ticketId: b.ticketId, bandUid: 'DUPUID01', vendorId: String(vendorId), expectedEventId: String(eventId) }),
+      ScanService.bindBandToTicket({ ticketId: b.ticketId, bandUid: 'd0d0d001', vendorId: String(vendorId), expectedEventId: String(eventId) }),
     ).rejects.toThrow('band is already bound to another wallet at this event');
   });
 
@@ -107,7 +108,7 @@ describe('ScanService.bindBandToTicket', () => {
     const t = await seedTicket(eventId, TicketStatus.SOLD, vendorB);
 
     await expect(
-      ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'BAND0007', vendorId: String(vendorA) }),
+      ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: 'ba0d0007', vendorId: String(vendorA) }),
     ).rejects.toThrow(/different vendor/);
 
     // No band should have been bound as a side effect of the rejected attempt.
@@ -122,9 +123,9 @@ describe('ScanService.bindBandToTicket', () => {
     const t = await seedTicket(eventId, TicketStatus.SOLD, vendorB);
 
     const res = await ScanService.bindBandToTicket({
-      ticketId: t.ticketId, bandUid: 'BAND0008', vendorId: String(vendorA), isSuperAdmin: true,
+      ticketId: t.ticketId, bandUid: 'ba0d0008', vendorId: String(vendorA), isSuperAdmin: true,
     });
-    expect(res.wallet.bandUid).toBe('BAND0008');
+    expect(res.wallet.bandUid).toBe('ba0d0008');
   });
 });
 
@@ -137,35 +138,35 @@ describe('ScanService.reissueBandForTicket', () => {
     const eventId = new mongoose.Types.ObjectId();
     const t = await seedTicket(eventId);
     const { wallet } = await ScanService.bindBandToTicket({
-      ticketId: t.ticketId, bandUid: 'LOST0001', vendorId: String(t.vendorId),
+      ticketId: t.ticketId, bandUid: '105d0001', vendorId: String(t.vendorId),
     });
     // simulate a funded wallet (real top-up is SP3)
     await Wallet.updateOne({ _id: wallet._id }, { $set: { balance: 5000 } });
 
     const res = await ScanService.reissueBandForTicket({
-      ticketId: t.ticketId, newBandUid: 'NEW00001', reason: 'lost', vendorId: String(t.vendorId),
+      ticketId: t.ticketId, newBandUid: '0e000001', reason: 'lost', vendorId: String(t.vendorId),
     });
-    expect(res.wallet.bandUid).toBe('NEW00001');
+    expect(res.wallet.bandUid).toBe('0e000001');
     expect(res.wallet.balance).toBe(5000);
 
     // the released uid is free to bind on a different ticket
     const t2 = await seedTicket(eventId);
     const again = await ScanService.bindBandToTicket({
-      ticketId: t2.ticketId, bandUid: 'LOST0001', vendorId: String(t2.vendorId),
+      ticketId: t2.ticketId, bandUid: '105d0001', vendorId: String(t2.vendorId),
     });
-    expect(again.wallet.bandUid).toBe('LOST0001');
+    expect(again.wallet.bandUid).toBe('105d0001');
   });
 
   it('rejects reissue for a ticket that has no band bound', async () => {
     const t = await seedTicket(new mongoose.Types.ObjectId());
     // Give the ticket a wallet, but with NO band bound, so reissue hits the no-band path.
     const { wallet } = await ScanService.bindBandToTicket({
-      ticketId: t.ticketId, bandUid: 'TEMP0001', vendorId: String(t.vendorId),
+      ticketId: t.ticketId, bandUid: '7e0d0001', vendorId: String(t.vendorId),
     });
     await Wallet.updateOne({ _id: wallet._id }, { $set: { bandUid: null } });
     await expect(
       ScanService.reissueBandForTicket({
-        ticketId: t.ticketId, newBandUid: 'X1', reason: 'lost', vendorId: String(t.vendorId),
+        ticketId: t.ticketId, newBandUid: 'a1a1a1a1', reason: 'lost', vendorId: String(t.vendorId),
       }),
     ).rejects.toThrow(/no band/);
   });
@@ -174,7 +175,7 @@ describe('ScanService.reissueBandForTicket', () => {
     const t = await seedTicket(new mongoose.Types.ObjectId());
     await expect(
       ScanService.reissueBandForTicket({
-        ticketId: t.ticketId, newBandUid: 'X2', reason: 'lost', vendorId: String(t.vendorId),
+        ticketId: t.ticketId, newBandUid: 'a2a2a2a2', reason: 'lost', vendorId: String(t.vendorId),
       }),
     ).rejects.toThrow('No wallet for this ticket');
   });
@@ -185,21 +186,52 @@ describe('ScanService.reissueBandForTicket', () => {
     const vendorA = new mongoose.Types.ObjectId();
     const t = await seedTicket(eventId, TicketStatus.SOLD, vendorB);
     await ScanService.bindBandToTicket({
-      ticketId: t.ticketId, bandUid: 'CROSS001', vendorId: String(vendorB),
+      ticketId: t.ticketId, bandUid: 'c0550001', vendorId: String(vendorB),
     });
 
     await expect(
       ScanService.reissueBandForTicket({
-        ticketId: t.ticketId, newBandUid: 'CROSS002', reason: 'lost', vendorId: String(vendorA),
+        ticketId: t.ticketId, newBandUid: 'c0550002', reason: 'lost', vendorId: String(vendorA),
       }),
     ).rejects.toThrow(/different vendor/);
+  });
+
+  // The gate reissue used to unbind FIRST and only then discover the spare was
+  // not in the register — the attendee walked away with no working tag at all.
+  it('rejects reissue onto an UNREGISTERED uid and leaves the old band working', async () => {
+    const eventId = new mongoose.Types.ObjectId();
+    const t = await seedTicket(eventId);
+    const { wallet } = await ScanService.bindBandToTicket({
+      ticketId: t.ticketId, bandUid: '105d0001', vendorId: String(t.vendorId),
+    });
+
+    await expect(
+      ScanService.reissueBandForTicket({
+        ticketId: t.ticketId, newBandUid: 'deadbeef', reason: 'lost', vendorId: String(t.vendorId),
+      }),
+    ).rejects.toThrow(/not registered/i);
+
+    expect((await Wallet.findById(wallet._id))?.bandUid).toBe('105d0001');
+    const row = await BandBinding.findOne({ walletId: wallet._id, bandUid: '105d0001' });
+    expect(row?.unboundAt).toBeUndefined();
+  });
+
+  it('stores the CANONICAL uid on reissue, whatever the reader formatted', async () => {
+    const eventId = new mongoose.Types.ObjectId();
+    const t = await seedTicket(eventId);
+    await ScanService.bindBandToTicket({ ticketId: t.ticketId, bandUid: '105d0001', vendorId: String(t.vendorId) });
+
+    const res = await ScanService.reissueBandForTicket({
+      ticketId: t.ticketId, newBandUid: '0E:00:00:01', reason: 'lost', vendorId: String(t.vendorId),
+    });
+    expect(res.wallet.bandUid).toBe('0e000001');
   });
 
   it('rejects reissue for a refunded ticket and leaves the bound band untouched', async () => {
     const eventId = new mongoose.Types.ObjectId();
     const t = await seedTicket(eventId);
     const { wallet } = await ScanService.bindBandToTicket({
-      ticketId: t.ticketId, bandUid: 'REFD0001', vendorId: String(t.vendorId),
+      ticketId: t.ticketId, bandUid: '0efd0001', vendorId: String(t.vendorId),
     });
 
     // Ticket gets refunded after the band was bound — the refund flow flips
@@ -208,13 +240,13 @@ describe('ScanService.reissueBandForTicket', () => {
 
     await expect(
       ScanService.reissueBandForTicket({
-        ticketId: t.ticketId, newBandUid: 'REFD0002', reason: 'lost', vendorId: String(t.vendorId),
+        ticketId: t.ticketId, newBandUid: '0efd0002', reason: 'lost', vendorId: String(t.vendorId),
       }),
     ).rejects.toThrow(/cannot bind a band/);
 
     // The wallet must still carry the ORIGINAL band — no unbind/rebind should
     // have happened as a side effect of the rejected attempt.
     const reread = await Wallet.findOne({ _id: wallet._id });
-    expect(reread?.bandUid).toBe('REFD0001');
+    expect(reread?.bandUid).toBe('0efd0001');
   });
 });
