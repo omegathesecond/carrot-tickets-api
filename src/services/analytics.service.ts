@@ -583,6 +583,39 @@ export class AnalyticsService {
   }
 
   /**
+   * Face value of refunded tickets whose parent sale still reads COMPLETED.
+   * TicketService.refundTicket flips the ticket to REFUNDED and decrements
+   * event.totalRevenue by ticket.price, but leaves the TicketSale COMPLETED
+   * with its full totalAmount — so any sale-based sum keeps reporting the
+   * refunded money as collected. Subtracting these amounts keeps
+   * totalRevenue / cashSales in step with ticketsSold and event.totalRevenue.
+   * Same scope as the sale sums: wristband batches and reseller allocation
+   * blocks (organizer revenue 0) contribute nothing here either.
+   */
+  private static async getRefundedAmounts(eventIdFilter: Record<string, unknown>): Promise<{ total: number; cash: number }> {
+    const [row] = await Ticket.aggregate([
+      { $match: { ...eventIdFilter, status: TicketStatus.REFUNDED } },
+      { $lookup: { from: TicketSale.collection.name, localField: 'saleId', foreignField: '_id', as: 'sale' } },
+      { $unwind: '$sale' },
+      {
+        $match: {
+          'sale.paymentStatus': PaymentStatus.COMPLETED,
+          'sale.channel': { $ne: SalesChannel.WRISTBAND },
+          'sale.isAllocation': { $ne: true }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$price' },
+          cash: { $sum: { $cond: [{ $eq: ['$sale.paymentMethod', PaymentMethod.CASH] }, '$price', 0] } }
+        }
+      }
+    ]);
+    return { total: row?.total || 0, cash: row?.cash || 0 };
+  }
+
+  /**
    * Get event-specific analytics
    */
   static async getEventAnalytics(eventId: string, vendorId: string, isSuperAdmin: boolean = false) {
@@ -630,7 +663,8 @@ export class AnalyticsService {
         salesByType,
         realSoldByType,
         tagsPrintedAgg,
-        cashSalesAgg
+        cashSalesAgg,
+        refunded
       ] = await Promise.all([
         TicketSale.countDocuments(realSaleFilter),
         TicketSale.aggregate([
@@ -675,12 +709,14 @@ export class AnalyticsService {
         TicketSale.aggregate([
           { $match: { ...realSaleFilter, paymentMethod: PaymentMethod.CASH } },
           { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
-        ])
+        ]),
+        this.getRefundedAmounts(eventIdFilter)
       ]);
 
-      const revenue = totalRevenue[0]?.total || 0;
+      // Sale sums still carry refunded tickets' money — see getRefundedAmounts.
+      const revenue = (totalRevenue[0]?.total || 0) - refunded.total;
       const tagsPrinted = tagsPrintedAgg[0]?.total || 0;
-      const cashSales = cashSalesAgg[0]?.total || 0;
+      const cashSales = (cashSalesAgg[0]?.total || 0) - refunded.cash;
       const checkInRate = allTicketsSoldStatus > 0 ? (checkedInCount / allTicketsSoldStatus) * 100 : 0;
 
       return {
@@ -750,7 +786,7 @@ export class AnalyticsService {
         channel: { $ne: SalesChannel.WRISTBAND }
       };
 
-      const [ticketsSold, tagsPrinted, cashSalesAgg, soldByType, tagsByType] = await Promise.all([
+      const [ticketsSold, tagsPrinted, cashSalesAgg, soldByType, tagsByType, refunded] = await Promise.all([
         Ticket.countDocuments({ ...eventIdFilter, status: { $in: SOLD_TICKET_STATUSES }, saleId: { $nin: wristbandSaleIds } }),
         Ticket.countDocuments({ ...eventIdFilter, saleId: { $in: wristbandSaleIds } }),
         TicketSale.aggregate([
@@ -764,13 +800,15 @@ export class AnalyticsService {
         Ticket.aggregate([
           { $match: { ...eventIdFilter, saleId: { $in: wristbandSaleIds } } },
           { $group: { _id: '$ticketType', count: { $sum: 1 } } }
-        ])
+        ]),
+        this.getRefundedAmounts(eventIdFilter)
       ]);
 
       return {
         ticketsSold,
         tagsPrinted,
-        cashSales: cashSalesAgg[0]?.total || 0,
+        // Sale sums still carry refunded tickets' money — see getRefundedAmounts.
+        cashSales: (cashSalesAgg[0]?.total || 0) - refunded.cash,
         ticketTypes: soldByType.map(s => ({ name: s._id as string, sold: s.sold as number })),
         tagsPrintedByType: tagsByType.map(t => ({ name: t._id as string, count: t.count as number }))
       };

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { connectTestDb, connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { AnalyticsService } from '../analytics.service';
 import { TicketService } from '../ticket.service';
 import { Event } from '@models/event.model';
@@ -134,5 +134,55 @@ describe('getEventSalesSummary — live figures for the event detail / ticket-co
     expect(summary.cashSales).toBe(100);
     expect(summary.ticketTypes).toEqual([{ name: 'General', sold: 2 }]);
     expect(summary.tagsPrintedByType).toEqual([{ name: 'General', count: 20 }]);
+  });
+});
+
+describe('refunds — cash sales and total revenue must drop with the tickets, in step with event.totalRevenue', () => {
+  // refundTicket commits the ticket + event update in one transaction — replica set required.
+  beforeAll(connectLedgerTestDb, 60000);
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  it('excludes refunded tickets from cashSales/totalRevenue on both surfaces while wristband tags stay excluded', async () => {
+    // Persisted counters seeded the way updateEventStats leaves them after
+    // 10 cash tickets (E1000) + 1 card ticket (E150): sold 11, revenue E1150.
+    const event = await Event.create({
+      vendorId, name: 'Piano Republic Showcase', venue: 'V',
+      eventDate: new Date(Date.now() + 86400000), startTime: new Date(Date.now() + 86400000), endTime: new Date(Date.now() + 90000000),
+      status: EventStatus.PUBLISHED,
+      ticketTypes: [
+        { name: 'General', price: 100, quantity: 50, sold: 11 },
+      ],
+      totalRevenue: 1150,
+    });
+    const eventId = event._id;
+    const ticketTypeId = event.ticketTypes[0]?._id?.toString() ?? '';
+
+    const cashSale = await saleDoc(eventId, { quantity: 10, totalAmount: 1000, amountCharged: 1000, faceAmount: 1000, organizerProceeds: 1000, paymentMethod: PaymentMethod.CASH });
+    const cardSale = await saleDoc(eventId, { totalAmount: 150, amountCharged: 150, paymentMethod: PaymentMethod.PEACH_CARD, organizerProceeds: 150 });
+    const cashTickets = [];
+    for (let i = 0; i < 10; i++) cashTickets.push(await ticketDoc(eventId, 'General', 100, cashSale._id));
+    await ticketDoc(eventId, 'General', 150, cardSale._id);
+
+    await TicketService.issueWristbandBatch({ eventId: eventId.toString(), ticketTypeId, quantity: 20 });
+
+    // Refund 3 of the 10 cash tickets through the real refund path.
+    for (const t of cashTickets.slice(0, 3)) {
+      await TicketService.refundTicket(t.ticketId, vendorId.toString(), 'changed plans');
+    }
+
+    const res = await AnalyticsService.getEventAnalytics(eventId.toString(), vendorId.toString());
+    const summary = await AnalyticsService.getEventSalesSummary(eventId.toString(), vendorId.toString());
+    const reloaded = await Event.findById(eventId);
+
+    expect(res.sales.ticketsSold).toBe(8);        // 7 cash + 1 card
+    expect(res.sales.tagsPrinted).toBe(20);       // wristband exclusion untouched
+    expect(res.sales.cashSales).toBe(700);        // 10 × E100 minus the 3 refunded
+    expect(res.sales.totalRevenue).toBe(850);     // E700 cash + E150 card
+    expect(summary.cashSales).toBe(700);
+    expect(summary.ticketsSold).toBe(8);
+    // The live figure must agree with the persisted counter refundTicket maintains.
+    expect(reloaded?.totalRevenue).toBe(850);
+    expect(res.sales.totalRevenue).toBe(reloaded?.totalRevenue);
   });
 });
