@@ -60,6 +60,7 @@ import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
 import deltapayRoutes from '@routes/deltapay.route';
 import yocoRoutes from '@routes/yoco.route';
+import { boot } from './boot';
 import yebopayRoutes from '@routes/yebopay.route';
 import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
@@ -239,73 +240,67 @@ if (process.env['NODE_ENV'] !== 'test') {
   }
 }
 
-// MongoDB connection — skipped in test env; tests use connectTestDb() from helpers/mongo.ts
-if (process.env['NODE_ENV'] !== 'test') {
-  const MONGODB_URI = getDatabaseURI();
+/**
+ * Everything that needs a live MongoDB connection but must be in place before
+ * the port opens. boot() runs this once mongoose.connect() has resolved and
+ * only then calls app.listen() — see src/boot.ts for why that order matters
+ * on Cloud Run.
+ */
+function initAfterConnect(): void {
+  console.log(`📦 Database: ${mongoose.connection.name}`);
+  // Log detailed database configuration
+  logDatabaseConfig();
 
-  mongoose
-    .connect(MONGODB_URI)
-    .then(() => {
-      console.log('✅ Connected to MongoDB');
-      console.log(`📦 Database: ${mongoose.connection.name}`);
-      // Log detailed database configuration
-      logDatabaseConfig();
+  // One-time (safe-to-repeat) index migration for the `reviews`
+  // collection — see src/scripts/migrate-review-indexes.ts. This was
+  // previously a manual `npm run migrate:review-indexes` step; running it
+  // here instead means an environment nobody remembered to run it
+  // against (e.g. dev) self-heals on its next deploy rather than staying
+  // broken indefinitely. Without it, the legacy non-partial
+  // eventId_1_buyerId_1 unique index stays in place, and a SECOND
+  // service-business review from any reviewer with no eventId/buyerId
+  // (an organizer reviewing a business) collides on that index and 409s
+  // as "You have already reviewed this business" even when they haven't.
+  // Logged, not fatal — a failed migration must not block the API from
+  // serving everything else. review.model.ts turns the Review schema's
+  // own autoIndex off outside tests so this call is the only thing that
+  // ever builds indexes for this collection.
+  migrateReviewIndexes().catch((err) => {
+    console.error('❌ migrateReviewIndexes failed (review submission may still 409 spuriously):', err);
+  });
 
-      // One-time (safe-to-repeat) index migration for the `reviews`
-      // collection — see src/scripts/migrate-review-indexes.ts. This was
-      // previously a manual `npm run migrate:review-indexes` step; running it
-      // here instead means an environment nobody remembered to run it
-      // against (e.g. dev) self-heals on its next deploy rather than staying
-      // broken indefinitely. Without it, the legacy non-partial
-      // eventId_1_buyerId_1 unique index stays in place, and a SECOND
-      // service-business review from any reviewer with no eventId/buyerId
-      // (an organizer reviewing a business) collides on that index and 409s
-      // as "You have already reviewed this business" even when they haven't.
-      // Logged, not fatal — a failed migration must not block the API from
-      // serving everything else. review.model.ts turns the Review schema's
-      // own autoIndex off outside tests so this call is the only thing that
-      // ever builds indexes for this collection.
-      migrateReviewIndexes().catch((err) => {
-        console.error('❌ migrateReviewIndexes failed (review submission may still 409 spuriously):', err);
-      });
+  // Background sweeps: reservation expiry, card-sale reconciliation,
+  // event reminders, stuck-update reconciliation. Same functions, same
+  // intervals — see src/tasks/backgroundTasks.ts.
+  startBackgroundTasks();
 
-      // Background sweeps: reservation expiry, card-sale reconciliation,
-      // event reminders, stuck-update reconciliation. Same functions, same
-      // intervals — see src/tasks/backgroundTasks.ts.
-      startBackgroundTasks();
+  // Web Push (VAPID): missing keys log loudly and disable push, never
+  // crash boot — see @config/vapid.config.
+  initWebPush();
 
-      // Web Push (VAPID): missing keys log loudly and disable push, never
-      // crash boot — see @config/vapid.config.
-      initWebPush();
-
-      // Realtime bus: REST-created messages broadcast to the gateway's
-      // channel rooms. Init failure keeps the API serving (REST is this
-      // service's job) but retries with backoff — a boot-time Mongo blip
-      // must not permanently disable live delivery on this instance.
-      const db = mongoose.connection.db;
-      if (db) {
-        const initEmitterWithRetry = (attempt: number): void => {
-          ensureAdapterCollection(db as any)
-            .then((collection) => {
-              initSocketEmitter(collection);
-              console.log('📡 Socket emitter ready (realtime broadcast enabled)');
-            })
-            .catch((err) => {
-              const delayMs = Math.min(60_000, 2 ** attempt * 1_000);
-              console.error(
-                `❌ Socket emitter init failed (attempt ${attempt + 1}; retrying in ${delayMs / 1000}s; live broadcast disabled until then, resync still works):`,
-                err
-              );
-              setTimeout(() => initEmitterWithRetry(attempt + 1), delayMs).unref();
-            });
-        };
-        initEmitterWithRetry(0);
-      }
-    })
-    .catch((error) => {
-      console.error('❌ MongoDB connection error:', error);
-      process.exit(1);
-    });
+  // Realtime bus: REST-created messages broadcast to the gateway's
+  // channel rooms. Init failure keeps the API serving (REST is this
+  // service's job) but retries with backoff — a boot-time Mongo blip
+  // must not permanently disable live delivery on this instance.
+  const db = mongoose.connection.db;
+  if (db) {
+    const initEmitterWithRetry = (attempt: number): void => {
+      ensureAdapterCollection(db as any)
+        .then((collection) => {
+          initSocketEmitter(collection);
+          console.log('📡 Socket emitter ready (realtime broadcast enabled)');
+        })
+        .catch((err) => {
+          const delayMs = Math.min(60_000, 2 ** attempt * 1_000);
+          console.error(
+            `❌ Socket emitter init failed (attempt ${attempt + 1}; retrying in ${delayMs / 1000}s; live broadcast disabled until then, resync still works):`,
+            err
+          );
+          setTimeout(() => initEmitterWithRetry(attempt + 1), delayMs).unref();
+        });
+    };
+    initEmitterWithRetry(0);
+  }
 }
 
 // Graceful shutdown
@@ -317,25 +312,33 @@ process.on('SIGTERM', () => {
   });
 });
 
-// Start server — skipped in test env; supertest binds its own ephemeral port
+// Boot — skipped in test env: tests use connectTestDb() from helpers/mongo.ts
+// and supertest binds its own ephemeral port. The order is connect → init →
+// listen, deliberately: see src/boot.ts.
 if (process.env['NODE_ENV'] !== 'test') {
   const PORT = process.env['PORT'] || 5000;
 
-  app.listen(PORT, () => {
-    console.log('');
-    console.log('🎫 ====================================== 🎫');
-    console.log('   Carrot Tickets API Server');
-    console.log('🎫 ====================================== 🎫');
-    console.log('');
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
-    console.log(`📍 Base URL: http://localhost:${PORT}`);
-    console.log(`💚 Health check: http://localhost:${PORT}/health`);
-    if (process.env['API_DOCS_ENABLED'] === 'true') {
-      console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
-    }
-    console.log(`🔗 API Endpoint: http://localhost:${PORT}/api`);
-    console.log('');
+  void boot({
+    connect: () => mongoose.connect(getDatabaseURI()),
+    afterConnect: initAfterConnect,
+    listen: () => {
+      app.listen(PORT, () => {
+        console.log('');
+        console.log('🎫 ====================================== 🎫');
+        console.log('   Carrot Tickets API Server');
+        console.log('🎫 ====================================== 🎫');
+        console.log('');
+        console.log(`🚀 Server running on port ${PORT}`);
+        console.log(`🌍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
+        console.log(`📍 Base URL: http://localhost:${PORT}`);
+        console.log(`💚 Health check: http://localhost:${PORT}/health`);
+        if (process.env['API_DOCS_ENABLED'] === 'true') {
+          console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+        }
+        console.log(`🔗 API Endpoint: http://localhost:${PORT}/api`);
+        console.log('');
+      });
+    },
   });
 }
 
