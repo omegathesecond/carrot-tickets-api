@@ -21,6 +21,8 @@ export interface IMerchant extends Document {
 /** Permission namespace for merchant-scoped tokens, mirroring ResellerPermission. */
 export enum MerchantPermission {
   CHARGE = 'merchant:charge',
+  /** Receive, write off and transfer THIS stall's stock (OperatorGrant.MANAGE_STOCK). */
+  MANAGE_STOCK = 'merchant:manage_stock',
 }
 
 /** JWT payload minted by MerchantAuthService.login and verified by authenticateMerchant. */

@@ -1,6 +1,7 @@
 // api/src/interfaces/operatorGrant.interface.ts
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { CashierPermission } from '@interfaces/cashier.interface';
+import { MerchantPermission } from '@interfaces/merchant.interface';
 
 /**
  * Capabilities an organizer can grant to an INDIVIDUAL operator, on top of
@@ -22,18 +23,30 @@ export enum OperatorGrant {
    * `type: 'register'` rather than `type: 'gate'`.
    */
   ISSUE_TAGS = 'issue_tags',
+  /**
+   * The stall's STOCK CONTROLLER. Receives deliveries into this stall, writes
+   * off breakage, and moves stock to another stall — all scoped to the stall
+   * the operator belongs to. Held by a MerchantOperator; it means nothing on a
+   * gate operator or cashier, whose namespaces deliberately have no mapping.
+   */
+  MANAGE_STOCK = 'manage_stock',
 }
 
 export const OPERATOR_GRANTS: OperatorGrant[] = Object.values(OperatorGrant);
 
 /** Grants → the tickets namespace (gate operators). */
-const TICKETS_BY_GRANT: Record<OperatorGrant, TicketsPermission> = {
+const TICKETS_BY_GRANT: Partial<Record<OperatorGrant, TicketsPermission>> = {
   [OperatorGrant.ISSUE_TAGS]: TicketsPermission.ISSUE_TAGS,
 };
 
 /** Grants → the cashier namespace (cashiers log in through their own middleware). */
-const CASHIER_BY_GRANT: Record<OperatorGrant, CashierPermission> = {
+const CASHIER_BY_GRANT: Partial<Record<OperatorGrant, CashierPermission>> = {
   [OperatorGrant.ISSUE_TAGS]: CashierPermission.ISSUE_TAGS,
+};
+
+/** Grants → the merchant namespace (stall operators on the POS). */
+const MERCHANT_BY_GRANT: Partial<Record<OperatorGrant, MerchantPermission>> = {
+  [OperatorGrant.MANAGE_STOCK]: MerchantPermission.MANAGE_STOCK,
 };
 
 /**
@@ -45,13 +58,22 @@ const CASHIER_BY_GRANT: Record<OperatorGrant, CashierPermission> = {
 export function grantedTicketsPermissions(grants?: string[] | null): TicketsPermission[] {
   return (grants ?? [])
     .filter((g): g is OperatorGrant => OPERATOR_GRANTS.includes(g as OperatorGrant))
-    .map((g) => TICKETS_BY_GRANT[g]);
+    .map((g) => TICKETS_BY_GRANT[g])
+    .filter((p): p is TicketsPermission => p !== undefined);
 }
 
 export function grantedCashierPermissions(grants?: string[] | null): CashierPermission[] {
   return (grants ?? [])
     .filter((g): g is OperatorGrant => OPERATOR_GRANTS.includes(g as OperatorGrant))
-    .map((g) => CASHIER_BY_GRANT[g]);
+    .map((g) => CASHIER_BY_GRANT[g])
+    .filter((p): p is CashierPermission => p !== undefined);
+}
+
+export function grantedMerchantPermissions(grants?: string[] | null): MerchantPermission[] {
+  return (grants ?? [])
+    .filter((g): g is OperatorGrant => OPERATOR_GRANTS.includes(g as OperatorGrant))
+    .map((g) => MERCHANT_BY_GRANT[g])
+    .filter((p): p is MerchantPermission => p !== undefined);
 }
 
 /** Normalize an admin-supplied list: known values only, no duplicates. */
