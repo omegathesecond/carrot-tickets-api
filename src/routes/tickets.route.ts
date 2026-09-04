@@ -16,6 +16,7 @@ import { CashierAdminController } from '@controllers/cashierAdmin.controller';
 import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
+import { CashlessReconciliationController } from '@controllers/cashlessReconciliation.controller';
 import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { MenuAdminController } from '@controllers/menuAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
@@ -598,6 +599,11 @@ router.post('/merchant-operators/:id/reset-pin', requireTicketsPermission(Ticket
  */
 router.get('/events/:eventId/cashless/summary', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.summary);
 router.get('/events/:eventId/cashless/transactions', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), OrganizerCashlessController.transactions);
+// Super-admin only: the three internal ledger checks (accounting identity,
+// journal integrity, stored wallet balance vs journal) for one cashless event.
+// Read-only — it reports drift, never repairs it. The same checks run on a
+// timer over recently-ended cashless events (see tasks/backgroundTasks.ts).
+router.get('/events/:eventId/cashless/reconciliation', requireSuperAdmin, CashlessReconciliationController.get);
 
 /**
  * Cashless Stock Reporting (design 2026-08-13, Slice 4) — organiser read-only

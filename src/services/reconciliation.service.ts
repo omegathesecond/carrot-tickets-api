@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { Event } from '@models/event.model';
 import { LedgerEntry } from '@models/ledgerEntry.model';
 import { Wallet } from '@models/wallet.model';
 import { LedgerService } from '@services/ledger.service';
@@ -42,6 +43,27 @@ export interface WalletBalanceReport {
    */
   invariantViolations: string[];
 }
+
+/** All three checks for one event, run together (see class doc for why together). */
+export interface EventReconciliationReport {
+  /** True only when every check passes. */
+  ok: boolean;
+  invariant: InvariantReport;
+  journal: IntegrityReport;
+  wallets: WalletBalanceReport;
+}
+
+export interface SweepReport {
+  /** Cashless events in the window that were examined, including those whose check threw. */
+  checked: number;
+  /** Events where at least one check failed. */
+  notOk: string[];
+  /** Events whose check threw before producing a report. */
+  errored: string[];
+}
+
+/** How far back sweepRecentCashlessEvents looks for ended cashless events. */
+export const RECENT_CASHLESS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Reconciliation checks over the cashless ledger (spec §3).
@@ -150,5 +172,69 @@ export class ReconciliationService {
       drifted,
       invariantViolations,
     };
+  }
+
+  /**
+   * All three checks for one event. This is the ONLY entry point production
+   * code should use: the class doc explains why checkInvariant and
+   * checkJournalIntegrity are meaningless alone, and checkWalletBalances is the
+   * one that compares two independent sources. Read-only — nothing is repaired.
+   */
+  static async checkEvent(eventId: string): Promise<EventReconciliationReport> {
+    const [invariant, journal, wallets] = await Promise.all([
+      this.checkInvariant(eventId),
+      this.checkJournalIntegrity(eventId),
+      this.checkWalletBalances(eventId),
+    ]);
+    return { ok: invariant.ok && journal.ok && wallets.ok, invariant, journal, wallets };
+  }
+
+  /**
+   * Background alarm: run checkEvent over every cashless event whose end time
+   * falls within the last RECENT_CASHLESS_WINDOW_MS and log at ERROR level,
+   * with the event id and the drifted wallet ids, whenever anything does not
+   * reconcile. Before this existed the checks were referenced only by tests,
+   * so a drifted wallet in production had no way to surface.
+   *
+   * Report-only, like TicketService.reportStuckYocoSales — it never mutates a
+   * balance or a posting. A check that throws for one event is logged and
+   * counted in `errored` so the remaining events are still examined; it is
+   * never swallowed.
+   */
+  static async sweepRecentCashlessEvents(): Promise<SweepReport> {
+    const now = new Date();
+    const since = new Date(now.getTime() - RECENT_CASHLESS_WINDOW_MS);
+    const events = await Event.find({ cashless: true, endTime: { $gte: since, $lte: now } })
+      .select('_id name')
+      .lean<{ _id: mongoose.Types.ObjectId; name: string }[]>();
+
+    const notOk: string[] = [];
+    const errored: string[] = [];
+    for (const event of events) {
+      const eventId = String(event._id);
+      let report: EventReconciliationReport;
+      try {
+        report = await ReconciliationService.checkEvent(eventId);
+      } catch (error) {
+        console.error('[cashless-reconcile] check threw — event NOT verified', {
+          eventId, eventName: event.name, error,
+        });
+        errored.push(eventId);
+        continue;
+      }
+      if (report.ok) continue;
+
+      notOk.push(eventId);
+      console.error('[cashless-reconcile] ledger does NOT reconcile — needs manual investigation', {
+        eventId,
+        eventName: event.name,
+        driftedWalletIds: report.wallets.drifted.map((d) => d.walletId),
+        drifted: report.wallets.drifted,
+        invariantViolations: report.wallets.invariantViolations,
+        unbalancedTxnIds: report.journal.unbalancedTxnIds,
+        identityDrift: report.invariant.drift,
+      });
+    }
+    return { checked: events.length, notOk, errored };
   }
 }

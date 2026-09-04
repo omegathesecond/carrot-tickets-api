@@ -4,6 +4,7 @@ import { EventReminderService } from '@services/eventReminder.service';
 import { reconcileStuckUpdates, reconcileStuckStories } from '@services/transcode.client';
 import { BookingService } from '@services/transport/booking.service';
 import { MenuOrderService } from '@services/menuOrder.service';
+import { ReconciliationService } from '@services/reconciliation.service';
 
 // Start the reservation expiry sweep
 const RESERVATION_SWEEP_MS = 60_000;
@@ -60,6 +61,16 @@ const BOOKING_SWEEP_MS = 60_000;
 // MenuOrderService.reconcilePendingMomoOrders.
 const MENU_MOMO_RECONCILE_MS = 60_000;
 
+// Cashless ledger: run the three internal reconciliation checks (accounting
+// identity, journal integrity, stored wallet balance vs journal) over every
+// cashless event that ended in the last 7 days, and log at error level with
+// the event id and the drifted wallet ids when anything does not reconcile.
+// Report-only like the Yoco sweep — nothing is repaired. 15 minutes rather
+// than 60s: checkWalletBalances aggregates the journal once per wallet, so
+// this is the heaviest sweep here, and drift needs surfacing, not sub-minute
+// latency. See ReconciliationService.sweepRecentCashlessEvents.
+const CASHLESS_RECONCILE_MS = 900_000;
+
 /**
  * Registers all periodic background sweeps (reservation expiry, card-sale
  * reconciliation, event reminders, stuck-update reconciliation) with their
@@ -115,6 +126,10 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     MenuOrderService.reconcilePendingMomoOrders().catch(err => console.error('[menu momo-reconcile] error', err));
   }, MENU_MOMO_RECONCILE_MS));
+
+  handles.push(setInterval(() => {
+    ReconciliationService.sweepRecentCashlessEvents().catch(err => console.error('[cashless-reconcile] error', err));
+  }, CASHLESS_RECONCILE_MS));
 
   return handles;
 }
