@@ -110,7 +110,7 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
       ok: true, float: 5000, walletsOwed: 5000, merchantsOwed: 0, feesEarned: 0, drift: 0,
     });
     expect(res.body.data.journal).toEqual({ ok: true, unbalancedTxnIds: [] });
-    expect(res.body.data.wallets).toEqual({ ok: true, checked: 1, drifted: [], invariantViolations: [] });
+    expect(res.body.data.wallets).toEqual({ ok: true, checked: 1, drifted: [], invariantViolations: [], unknownWalletRefs: [] });
   });
 
   it('names the drifted wallet when its stored balance disagrees with the journal', async () => {

@@ -26,7 +26,7 @@ describe('ReconciliationService.checkWalletBalances', () => {
 
   it('reports ok on an event with no wallets', async () => {
     expect(await ReconciliationService.checkWalletBalances(eventId)).toEqual({
-      ok: true, checked: 0, drifted: [], invariantViolations: [],
+      ok: true, checked: 0, drifted: [], invariantViolations: [], unknownWalletRefs: [],
     });
   });
 
@@ -90,7 +90,7 @@ describe('ReconciliationService.checkWalletBalances', () => {
     await topUp(String(w._id), 5000);
 
     expect(await ReconciliationService.checkWalletBalances(other)).toEqual({
-      ok: true, checked: 0, drifted: [], invariantViolations: [],
+      ok: true, checked: 0, drifted: [], invariantViolations: [], unknownWalletRefs: [],
     });
   });
 });

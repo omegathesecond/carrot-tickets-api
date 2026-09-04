@@ -98,6 +98,21 @@ describe('ReconciliationService.sweepRecentCashlessEvents', () => {
     );
   });
 
+  it('names journal wallet refs that have no Wallet row', async () => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const eventId = await eventEnding(new Date(Date.now() - DAY));
+    const ghost = new mongoose.Types.ObjectId().toString();
+    await journalTopup(eventId, ghost, 700);
+
+    const result = await ReconciliationService.sweepRecentCashlessEvents();
+
+    expect(result.notOk).toEqual([eventId]);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('[cashless-reconcile]'),
+      expect.objectContaining({ eventId, unknownWalletRefs: [ghost], driftedWalletIds: [] }),
+    );
+  });
+
   it('stays silent when every recent cashless event reconciles', async () => {
     const error = jest.spyOn(console, 'error').mockImplementation(() => {});
     const eventId = await eventEnding(new Date(Date.now() - 3 * DAY));

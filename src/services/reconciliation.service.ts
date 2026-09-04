@@ -42,6 +42,14 @@ export interface WalletBalanceReport {
    * and refunds would route cash-funded money to the wrong channel.
    */
   invariantViolations: string[];
+  /**
+   * Journal WALLET account refs (sorted) that have no Wallet row in this
+   * event. Every wallet posting is keyed by the Wallet _id (wallet.service /
+   * merchant.service), so this is money the journal says is owed to a wallet
+   * the stored side does not know about — the inverse of `drifted`, which the
+   * old per-wallet loop could never see.
+   */
+  unknownWalletRefs: string[];
 }
 
 /** All three checks for one event, run together (see class doc for why together). */
@@ -141,22 +149,37 @@ export class ReconciliationService {
    * stored Wallet.balance and -Σ of that wallet's ledger deltas. A bug that
    * mutates a balance without a matching posting (or vice versa) is invisible
    * to checkInvariant and shows up only here. This is the real internal alarm.
+   *
+   * ONE grouped pass over the journal, not one aggregation per wallet: this
+   * runs every 15 minutes in production over every recently-ended cashless
+   * event (sweepRecentCashlessEvents), so its cost must not scale with the
+   * size of the event. The grouped pass also exposes postings to a wallet ref
+   * that has no Wallet row (`unknownWalletRefs`).
    */
   static async checkWalletBalances(eventId: string): Promise<WalletBalanceReport> {
-    const wallets = await Wallet.find({
-      eventId: new mongoose.Types.ObjectId(eventId),
-    }).select('_id balance cashFundedBalance');
+    const oid = new mongoose.Types.ObjectId(eventId);
+    const [wallets, rows] = await Promise.all([
+      Wallet.find({ eventId: oid })
+        .select('_id balance cashFundedBalance')
+        .lean<{ _id: mongoose.Types.ObjectId; balance: number; cashFundedBalance: number }[]>(),
+      LedgerEntry.aggregate<{ _id: string | null; total: number }>([
+        { $match: { eventId: oid, accountType: LedgerAccountType.WALLET } },
+        { $group: { _id: '$accountRef', total: { $sum: '$delta' } } },
+      ]),
+    ]);
+
+    // wallet is credit-normal: owed to the attendee is -Σ delta. `0 - total`,
+    // not `-total`, so a wallet whose postings net to zero reads 0, not -0.
+    const journalByWallet = new Map<string, number>(rows.map((r) => [String(r._id), 0 - r.total]));
 
     const drifted: WalletDrift[] = [];
     const invariantViolations: string[] = [];
     for (const w of wallets) {
       const walletId = String(w._id);
-      const signed = await LedgerService.accountBalance(eventId, {
-        type: LedgerAccountType.WALLET,
-        ref: walletId,
-      });
-      // wallet is credit-normal: owed to the attendee is -signed.
-      const journal = 0 - signed;
+      // A wallet with no postings has a journal balance of 0 — a stored balance
+      // on such a wallet is drift, not "nothing to compare".
+      const journal = journalByWallet.get(walletId) ?? 0;
+      journalByWallet.delete(walletId);
       const drift = w.balance - journal;
       if (drift !== 0) drifted.push({ walletId, stored: w.balance, journal, drift });
 
@@ -165,12 +188,15 @@ export class ReconciliationService {
       // backstop for the invariant.
       if (w.cashFundedBalance > w.balance) invariantViolations.push(walletId);
     }
+    // Whatever the wallets did not claim was posted to a ref with no Wallet row.
+    const unknownWalletRefs = [...journalByWallet.keys()].sort();
 
     return {
-      ok: drifted.length === 0 && invariantViolations.length === 0,
+      ok: drifted.length === 0 && invariantViolations.length === 0 && unknownWalletRefs.length === 0,
       checked: wallets.length,
       drifted,
       invariantViolations,
+      unknownWalletRefs,
     };
   }
 
@@ -231,6 +257,7 @@ export class ReconciliationService {
         driftedWalletIds: report.wallets.drifted.map((d) => d.walletId),
         drifted: report.wallets.drifted,
         invariantViolations: report.wallets.invariantViolations,
+        unknownWalletRefs: report.wallets.unknownWalletRefs,
         unbalancedTxnIds: report.journal.unbalancedTxnIds,
         identityDrift: report.invariant.drift,
       });
