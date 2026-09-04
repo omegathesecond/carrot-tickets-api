@@ -49,6 +49,7 @@ router.get('/stories', authenticateTickets, StoryController.listAsVendor);
 router.post('/stories/:id/seen', authenticateTickets, StoryController.seenAsVendor);
 router.post('/stories/:id/like', authenticateTickets, StoryController.likeAsVendor);
 router.get('/stories/:id/viewers', authenticateTickets, StoryController.viewersAsVendor);
+router.get('/stories/:id/likers', authenticateTickets, StoryController.likersAsVendor);
 router.delete('/stories/:id', authenticateTickets, StoryController.removeAsVendor);
 
 export default router;

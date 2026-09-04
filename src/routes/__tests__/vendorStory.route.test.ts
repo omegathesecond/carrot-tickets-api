@@ -200,6 +200,38 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
     });
   });
 
+  describe('GET /api/tickets/social/stories/:id/likers', () => {
+    it("lists who liked the brand's own story, notifies the brand, and 403s a non-author brand", async () => {
+      const vendor = await makeVendor();
+      const liker = await Buyer.create({ phone: '+26878400404', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker', username: 'liker1' });
+      const mine = await seedReadyStory('vendor', String(vendor._id));
+
+      await request(app)
+        .post(`/api/social/stories/${mine.id}/like`)
+        .set('Authorization', `Bearer ${signBuyerToken('+26878400404')}`)
+        .expect(200);
+
+      const res = await request(app)
+        .get(`/api/tickets/social/stories/${mine.id}/likers`)
+        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .expect(200);
+      expect(res.body.data.count).toBe(1);
+      expect(res.body.data.likers[0]).toMatchObject({ type: 'buyer', id: String(liker._id), username: 'liker1' });
+
+      const asVendor = await request(app)
+        .get('/api/tickets/social/stories')
+        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .expect(200);
+      expect(asVendor.body.data.stories[0].items[0].likeCount).toBe(1);
+
+      const otherBrand = await makeVendor('Nosy Brand');
+      await request(app)
+        .get(`/api/tickets/social/stories/${mine.id}/likers`)
+        .set('Authorization', `Bearer ${signVendorToken(String(otherBrand._id))}`)
+        .expect(403);
+    });
+  });
+
   describe('DELETE /api/tickets/social/stories/:id', () => {
     it('lets the brand delete its own story', async () => {
       const vendor = await makeVendor();

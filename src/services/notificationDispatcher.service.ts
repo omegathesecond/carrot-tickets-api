@@ -23,6 +23,7 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   // directly), so this entry exists only for Record<NotificationType,…>
   // exhaustiveness.
   enquiry_received: 'social',
+  story_like: 'social',
 };
 
 const CHUNK = 50;
