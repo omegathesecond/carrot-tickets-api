@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { signVendorToken, signSuperAdminToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -232,5 +232,53 @@ describe('only a registered tag works at the event', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/not registered for this event/i);
+  });
+});
+
+describe('Carrot staff working the register on an organizer\'s behalf', () => {
+  // A super-admin token carries an EMPTY permissions array — platform staff are
+  // authorised by the isSuperAdmin claim, not by holding every organizer's
+  // permissions. loadOwnedCashlessEvent already reads that claim ("or is
+  // platform staff"), so the route gate has to let them reach it.
+  it('lists the register of an organizer they do not own', async () => {
+    const { eventId } = await seedCashlessEvent();
+
+    const res = await request(app)
+      .get(`/api/tickets/events/${eventId}/tags/registry`)
+      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.counts).toEqual({ active: 0, retired: 0, total: 0 });
+  });
+
+  it('enrols a tag order and retires a tag on that event', async () => {
+    const { eventId } = await seedCashlessEvent();
+    const admin = signSuperAdminToken();
+
+    const registered = await request(app)
+      .post(`/api/tickets/events/${eventId}/tags/registry`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ bandUid: '04a22b1c' });
+    expect(registered.status).toBe(200);
+    expect(registered.body.data.outcome).toBe('registered');
+
+    const retired = await request(app)
+      .post(`/api/tickets/events/${eventId}/tags/registry/retire`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ bandUid: '04a22b1c' });
+    expect(retired.status).toBe(200);
+    expect(retired.body.data.counts).toEqual({ active: 0, retired: 1, total: 1 });
+  });
+
+  it('still 403s an ordinary organizer who lacks the permission', async () => {
+    // The bypass is the isSuperAdmin claim alone — it must not widen the gate
+    // for everyone else, or a SALES sub-user could fill the register.
+    const { vendorId, eventId } = await seedCashlessEvent();
+
+    const res = await request(app)
+      .get(`/api/tickets/events/${eventId}/tags/registry`)
+      .set('Authorization', `Bearer ${signVendorToken(vendorId, { permissions: [] })}`);
+
+    expect(res.status).toBe(403);
   });
 });

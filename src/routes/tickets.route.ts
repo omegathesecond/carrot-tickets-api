@@ -626,12 +626,19 @@ router.get('/events/:eventId/tags/registrations', requireTicketsPermission(Ticke
  * become one at all. Gated on ISSUE_TAGS so the Register desk reaches it as
  * well as the organizer — it is the desk's own screen.
  *
+ * Carrot staff pass on the isSuperAdmin claim instead of the permission: a
+ * super-admin token carries an EMPTY permissions array (platform staff are not
+ * given every organizer's grants), so a bare requireTicketsPermission refused
+ * the very people who supply the tags. The controller below was already
+ * written for them — loadOwnedCashlessEvent lets platform staff onto another
+ * vendor's event — so the gate, not the controller, was the odd one out.
+ *
  * ORDER MATTERS: /tags/registry must stay above /tags/:walletId, or Express
  * matches "registry" as a wallet id.
  */
-router.get('/events/:eventId/tags/registry', requireTicketsPermission(TicketsPermission.ISSUE_TAGS), EventTagController.list);
-router.post('/events/:eventId/tags/registry', requireTicketsPermission(TicketsPermission.ISSUE_TAGS), EventTagController.register);
-router.post('/events/:eventId/tags/registry/retire', requireTicketsPermission(TicketsPermission.ISSUE_TAGS), EventTagController.retire);
+router.get('/events/:eventId/tags/registry', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.list);
+router.post('/events/:eventId/tags/registry', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.register);
+router.post('/events/:eventId/tags/registry/retire', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.retire);
 router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.list);
 router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
 router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);
