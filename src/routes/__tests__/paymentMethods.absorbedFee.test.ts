@@ -45,7 +45,7 @@ describe('GET /api/public/payment-methods', () => {
     const res = await request(app).get(`/api/public/payment-methods?eventId=${event._id}`);
     expect(res.status).toBe(200);
     expect(res.body.data.serviceFees).toEqual({
-      keshless_wallet: 0, mtn_momo: 0, peach_card: 0, deltapay: 0, yoco: 0,
+      keshless_wallet: 0, mtn_momo: 0, peach_card: 0, deltapay: 0, yoco: 0, yebopay: 0,
     });
   });
 
