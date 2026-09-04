@@ -18,6 +18,7 @@
     "backfill:event-category": "ts-node -r tsconfig-paths/register src/scripts/backfillEventCategory.ts",
     "backfill:update-hashtags": "ts-node -r tsconfig-paths/register src/scripts/backfillUpdateHashtags.ts",
     "backfill:event-tag-register": "ts-node -r tsconfig-paths/register src/scripts/backfillEventTagRegister.ts",
+    "backfill:sale-refunds": "ts-node -r tsconfig-paths/register src/scripts/backfillSaleRefunds.ts",
     "migrate:review-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-review-indexes.ts",
     "migrate:merchant-credentials": "ts-node -r tsconfig-paths/register src/scripts/migrate-merchant-credentials.ts",
     "cleanup:eventless-cashiers": "ts-node -r tsconfig-paths/register src/scripts/cleanup-eventless-cashiers.ts",

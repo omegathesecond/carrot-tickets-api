@@ -139,6 +139,14 @@ export interface ITicketSale extends Document {
   // its seats still count toward attendance. Absent on ordinary sales.
   isAllocation?: boolean;
 
+  // Tickets refunded out of this sale (TicketService.refundTicket). The sale
+  // stays COMPLETED — the money that was collected was collected — so every
+  // revenue / tickets-sold figure reads totalAmount − refundedAmount and
+  // quantity − refundedQuantity. Absent on sales written before the counters
+  // existed; aggregates treat that as 0 (see analytics NET_SALE_AMOUNT).
+  refundedQuantity?: number;
+  refundedAmount?: number;
+
   // Economic Snapshot — immutable, written at sale time
   faceAmount?: number;
   resellerCommissionPercent?: number;

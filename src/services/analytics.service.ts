@@ -11,11 +11,21 @@ import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@inter
 // counts both, so the number never shrinks over the night as attendees check in.
 const SOLD_TICKET_STATUSES = [TicketStatus.SOLD, TicketStatus.CHECKED_IN];
 
+// What a sale is still worth after refunds. TicketService.refundTicket keeps
+// the sale COMPLETED (the money was collected) and records the refunded
+// tickets on it as refundedQuantity / refundedAmount, so every sale-based
+// figure below reads the net. $ifNull: sales written before the counters
+// existed carry no field and count as unrefunded (backfill:sale-refunds
+// fills them in from the refunded Ticket docs).
+const NET_SALE_AMOUNT = { $subtract: ['$totalAmount', { $ifNull: ['$refundedAmount', 0] }] };
+const NET_SALE_QUANTITY = { $subtract: ['$quantity', { $ifNull: ['$refundedQuantity', 0] }] };
+const TICKETS_SOLD_SUM = { $sum: NET_SALE_QUANTITY };
+
 // Revenue that belongs to the ORGANIZER. A reseller allocation-block sale
 // (isAllocation) is money held for the reseller's settlement — never the
-// organizer's — so it's summed as 0 here. Counts/attendance ($quantity) are
-// deliberately left untouched, so the organizer still sees those seats as sold.
-const ORGANIZER_REVENUE_SUM = { $sum: { $cond: [{ $ne: ['$isAllocation', true] }, '$totalAmount', 0] } };
+// organizer's — so it's summed as 0 here. Counts/attendance are deliberately
+// left untouched, so the organizer still sees those seats as sold.
+const ORGANIZER_REVENUE_SUM = { $sum: { $cond: [{ $ne: ['$isAllocation', true] }, NET_SALE_AMOUNT, 0] } };
 
 export interface AnalyticsQuery {
   vendorId: string;
@@ -158,14 +168,22 @@ export class AnalyticsService {
         if (stat._id === EventStatus.CANCELLED) events.cancelled = stat.count;
       });
 
-      // Get ticket stats
-      const salesFilter: any = { ...vendorFilter, paymentStatus: PaymentStatus.COMPLETED };
+      // Everything a customer can be scanned in with — wristband/tag batches
+      // included. Only the check-in rate uses this, so its denominator matches
+      // the scans it is compared against.
+      const admissionsFilter: any = { ...vendorFilter, paymentStatus: PaymentStatus.COMPLETED };
       if (startDate || endDate) {
-        salesFilter.soldAt = {};
-        if (startDate) salesFilter.soldAt.$gte = startDate;
-        if (endDate) salesFilter.soldAt.$lte = endDate;
+        admissionsFilter.soldAt = {};
+        if (startDate) admissionsFilter.soldAt.$gte = startDate;
+        if (endDate) admissionsFilter.soldAt.$lte = endDate;
       }
-      if (channel) salesFilter.channel = channel;
+      if (channel) admissionsFilter.channel = channel;
+      // Sales figures: wristband/tag batches are platform-printed, zero-amount
+      // admissions, not sales (see getEventAnalytics) — left out unless the
+      // caller asks for that channel explicitly.
+      const salesFilter: any = channel
+        ? admissionsFilter
+        : { ...admissionsFilter, channel: { $ne: SalesChannel.WRISTBAND } };
 
       // Build ticket filter for count
       const ticketFilter: any = { status: TicketStatus.CHECKED_IN, ...dateFilter };
@@ -173,10 +191,14 @@ export class AnalyticsService {
         ticketFilter.vendorId = vendorId;
       }
 
-      const [ticketsSoldResult, totalRevenueResult, checkedInCount] = await Promise.all([
+      const [ticketsSoldResult, admissionsResult, totalRevenueResult, checkedInCount] = await Promise.all([
         TicketSale.aggregate([
           { $match: salesFilter },
-          { $group: { _id: null, total: { $sum: '$quantity' } } }
+          { $group: { _id: null, total: TICKETS_SOLD_SUM } }
+        ]),
+        TicketSale.aggregate([
+          { $match: admissionsFilter },
+          { $group: { _id: null, total: TICKETS_SOLD_SUM } }
         ]),
         TicketSale.aggregate([
           { $match: salesFilter },
@@ -186,8 +208,9 @@ export class AnalyticsService {
       ]);
 
       const totalSold = ticketsSoldResult[0]?.total || 0;
+      const totalAdmissions = admissionsResult[0]?.total || 0;
       const totalRevenue = totalRevenueResult[0]?.total || 0;
-      const checkInRate = totalSold > 0 ? (checkedInCount / totalSold) * 100 : 0;
+      const checkInRate = totalAdmissions > 0 ? (checkedInCount / totalAdmissions) * 100 : 0;
 
       const tickets = {
         totalSold,
@@ -308,7 +331,9 @@ export class AnalyticsService {
       }
 
       if (eventId) filter.eventId = new mongoose.Types.ObjectId(eventId);
-      if (channel) filter.channel = channel;
+      // Wristband/tag batches are platform-printed, zero-amount admissions,
+      // not sales (see getEventAnalytics) — left out unless asked for.
+      filter.channel = channel ?? { $ne: SalesChannel.WRISTBAND };
 
       if (startDate || endDate) {
         filter.soldAt = {};
@@ -324,7 +349,7 @@ export class AnalyticsService {
             _id: null,
             totalSales: { $sum: 1 },
             totalRevenue: ORGANIZER_REVENUE_SUM,
-            ticketsSold: { $sum: '$quantity' }
+            ticketsSold: TICKETS_SOLD_SUM
           }
         }
       ]);
@@ -366,7 +391,7 @@ export class AnalyticsService {
         {
           $group: {
             _id: '$eventId',
-            ticketsSold: { $sum: '$quantity' },
+            ticketsSold: TICKETS_SOLD_SUM,
             revenue: ORGANIZER_REVENUE_SUM
           }
         },
@@ -424,7 +449,9 @@ export class AnalyticsService {
       }
 
       if (eventId) filter.eventId = new mongoose.Types.ObjectId(eventId);
-      if (channel) filter.channel = channel;
+      // Wristband/tag batches are platform-printed, zero-amount admissions,
+      // not sales (see getEventAnalytics) — left out unless asked for.
+      filter.channel = channel ?? { $ne: SalesChannel.WRISTBAND };
 
       if (startDate || endDate) {
         filter.soldAt = {};
@@ -461,7 +488,7 @@ export class AnalyticsService {
           $group: {
             _id: dateGrouping,
             revenue: ORGANIZER_REVENUE_SUM,
-            ticketsSold: { $sum: '$quantity' }
+            ticketsSold: TICKETS_SOLD_SUM
           }
         },
         { $sort: { _id: 1 } }
@@ -480,7 +507,7 @@ export class AnalyticsService {
           $group: {
             _id: '$eventId',
             revenue: ORGANIZER_REVENUE_SUM,
-            ticketsSold: { $sum: '$quantity' }
+            ticketsSold: TICKETS_SOLD_SUM
           }
         },
         { $sort: { revenue: -1 } },
@@ -508,7 +535,7 @@ export class AnalyticsService {
         {
           $group: {
             _id: null,
-            total: { $sum: '$quantity' }
+            total: TICKETS_SOLD_SUM
           }
         }
       ]);
@@ -538,7 +565,7 @@ export class AnalyticsService {
       // Revenue by channel — "where bought"
       const channelStats = await TicketSale.aggregate([
         { $match: filter },
-        { $group: { _id: '$channel', amount: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
+        { $group: { _id: '$channel', amount: { $sum: NET_SALE_AMOUNT }, count: { $sum: 1 } } },
         { $sort: { amount: -1 } }
       ]);
       const revenueByChannel = channelStats.map(stat => ({
@@ -550,7 +577,7 @@ export class AnalyticsService {
       // Top reseller sources (reseller + hub) for the reseller_pos slice
       const sourceStats = await TicketSale.aggregate([
         { $match: { ...filter, channel: SalesChannel.RESELLER_POS } },
-        { $group: { _id: { resellerId: '$resellerId', hubId: '$hubId' }, amount: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
+        { $group: { _id: { resellerId: '$resellerId', hubId: '$hubId' }, amount: { $sum: NET_SALE_AMOUNT }, count: { $sum: 1 } } },
         { $sort: { amount: -1 } },
         { $limit: 10 },
         { $lookup: { from: 'resellers', localField: '_id.resellerId', foreignField: '_id', as: 'reseller' } },
@@ -580,39 +607,6 @@ export class AnalyticsService {
       console.error('Get revenue stats error:', error);
       throw new Error(error.message || 'Failed to fetch revenue statistics');
     }
-  }
-
-  /**
-   * Face value of refunded tickets whose parent sale still reads COMPLETED.
-   * TicketService.refundTicket flips the ticket to REFUNDED and decrements
-   * event.totalRevenue by ticket.price, but leaves the TicketSale COMPLETED
-   * with its full totalAmount — so any sale-based sum keeps reporting the
-   * refunded money as collected. Subtracting these amounts keeps
-   * totalRevenue / cashSales in step with ticketsSold and event.totalRevenue.
-   * Same scope as the sale sums: wristband batches and reseller allocation
-   * blocks (organizer revenue 0) contribute nothing here either.
-   */
-  private static async getRefundedAmounts(eventIdFilter: Record<string, unknown>): Promise<{ total: number; cash: number }> {
-    const [row] = await Ticket.aggregate([
-      { $match: { ...eventIdFilter, status: TicketStatus.REFUNDED } },
-      { $lookup: { from: TicketSale.collection.name, localField: 'saleId', foreignField: '_id', as: 'sale' } },
-      { $unwind: '$sale' },
-      {
-        $match: {
-          'sale.paymentStatus': PaymentStatus.COMPLETED,
-          'sale.channel': { $ne: SalesChannel.WRISTBAND },
-          'sale.isAllocation': { $ne: true }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: '$price' },
-          cash: { $sum: { $cond: [{ $eq: ['$sale.paymentMethod', PaymentMethod.CASH] }, '$price', 0] } }
-        }
-      }
-    ]);
-    return { total: row?.total || 0, cash: row?.cash || 0 };
   }
 
   /**
@@ -660,11 +654,9 @@ export class AnalyticsService {
         ticketsSold,
         allTicketsSoldStatus,
         checkedInCount,
-        salesByType,
         realSoldByType,
         tagsPrintedAgg,
-        cashSalesAgg,
-        refunded
+        cashSalesAgg
       ] = await Promise.all([
         TicketSale.countDocuments(realSaleFilter),
         TicketSale.aggregate([
@@ -680,21 +672,12 @@ export class AnalyticsService {
         // preserve the existing check-in-rate math below unchanged.
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.SOLD }),
         Ticket.countDocuments({ ...eventIdFilter, status: TicketStatus.CHECKED_IN }),
-        Ticket.aggregate([
-          { $match: eventIdFilter },
-          {
-            $group: {
-              _id: '$ticketType',
-              sold: { $sum: 1 },
-              revenue: { $sum: '$price' }
-            }
-          }
-        ]),
         // Per-type breakdown, wristband batches excluded — same status
-        // filter as `ticketsSold` above, so the two stay consistent.
+        // filter as `ticketsSold` above, so the two stay consistent. Revenue
+        // is the face value of the tickets still held, so it drops with refunds.
         Ticket.aggregate([
           { $match: { ...eventIdFilter, status: { $in: SOLD_TICKET_STATUSES }, saleId: { $nin: wristbandSaleIds } } },
-          { $group: { _id: '$ticketType', sold: { $sum: 1 } } }
+          { $group: { _id: '$ticketType', sold: { $sum: 1 }, revenue: { $sum: '$price' } } }
         ]),
         TicketSale.aggregate([
           {
@@ -704,19 +687,18 @@ export class AnalyticsService {
               channel: SalesChannel.WRISTBAND
             }
           },
+          // Printed-tag count, not a sale figure — gross on purpose.
           { $group: { _id: null, total: { $sum: '$quantity' } } }
         ]),
         TicketSale.aggregate([
           { $match: { ...realSaleFilter, paymentMethod: PaymentMethod.CASH } },
           { $group: { _id: null, total: ORGANIZER_REVENUE_SUM } }
-        ]),
-        this.getRefundedAmounts(eventIdFilter)
+        ])
       ]);
 
-      // Sale sums still carry refunded tickets' money — see getRefundedAmounts.
-      const revenue = (totalRevenue[0]?.total || 0) - refunded.total;
+      const revenue = totalRevenue[0]?.total || 0;
       const tagsPrinted = tagsPrintedAgg[0]?.total || 0;
-      const cashSales = (cashSalesAgg[0]?.total || 0) - refunded.cash;
+      const cashSales = cashSalesAgg[0]?.total || 0;
       const checkInRate = allTicketsSoldStatus > 0 ? (checkedInCount / allTicketsSoldStatus) * 100 : 0;
 
       return {
@@ -737,17 +719,17 @@ export class AnalyticsService {
           checkInRate: Math.round(checkInRate * 100) / 100
         },
         ticketTypes: event.ticketTypes.map(tt => {
-          const typeStats = salesByType.find(s => s._id === tt.name);
           const realSoldStats = realSoldByType.find(s => s._id === tt.name);
           return {
             name: tt.name,
             price: tt.price,
             quantity: tt.quantity,
-            // Wristband/tag batches excluded — see `ticketsSold` above.
-            // Persisted tt.sold (used for inventory/available) is untouched.
+            // Wristband/tag batches and refunded tickets excluded — see
+            // `ticketsSold` above. Persisted tt.sold (inventory/available)
+            // is untouched.
             sold: realSoldStats?.sold || 0,
             available: tt.available,
-            revenue: typeStats?.revenue || 0
+            revenue: realSoldStats?.revenue || 0
           };
         })
       };
@@ -786,7 +768,7 @@ export class AnalyticsService {
         channel: { $ne: SalesChannel.WRISTBAND }
       };
 
-      const [ticketsSold, tagsPrinted, cashSalesAgg, soldByType, tagsByType, refunded] = await Promise.all([
+      const [ticketsSold, tagsPrinted, cashSalesAgg, soldByType, tagsByType] = await Promise.all([
         Ticket.countDocuments({ ...eventIdFilter, status: { $in: SOLD_TICKET_STATUSES }, saleId: { $nin: wristbandSaleIds } }),
         Ticket.countDocuments({ ...eventIdFilter, saleId: { $in: wristbandSaleIds } }),
         TicketSale.aggregate([
@@ -800,15 +782,13 @@ export class AnalyticsService {
         Ticket.aggregate([
           { $match: { ...eventIdFilter, saleId: { $in: wristbandSaleIds } } },
           { $group: { _id: '$ticketType', count: { $sum: 1 } } }
-        ]),
-        this.getRefundedAmounts(eventIdFilter)
+        ])
       ]);
 
       return {
         ticketsSold,
         tagsPrinted,
-        // Sale sums still carry refunded tickets' money — see getRefundedAmounts.
-        cashSales: (cashSalesAgg[0]?.total || 0) - refunded.cash,
+        cashSales: cashSalesAgg[0]?.total || 0,
         ticketTypes: soldByType.map(s => ({ name: s._id as string, sold: s.sold as number })),
         tagsPrintedByType: tagsByType.map(t => ({ name: t._id as string, count: t.count as number }))
       };
