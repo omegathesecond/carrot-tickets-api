@@ -47,4 +47,13 @@ describe('storyPoints.service', () => {
   it('is zero for a buyer with no awards', async () => {
     expect(await totalStoryPoints(buyerId())).toBe(0);
   });
+
+  it(`enforces the daily cap atomically under concurrent finalizeStory() calls (TOCTOU regression)`, async () => {
+    const b = buyerId();
+    await Promise.all(
+      Array.from({ length: MAX_DAILY_STORY_AWARDS + 1 }, () => awardStoryPointsIfEligible(b, storyId())),
+    );
+    expect(await totalStoryPoints(b)).toBe(STORY_POINTS * MAX_DAILY_STORY_AWARDS);
+    expect(await StoryPointsAward.countDocuments({ buyerId: b })).toBe(MAX_DAILY_STORY_AWARDS);
+  });
 });
