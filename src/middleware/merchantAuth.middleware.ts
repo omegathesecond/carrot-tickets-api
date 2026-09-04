@@ -4,6 +4,7 @@ import { MerchantAuthService } from '@services/merchantAuth.service';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
+import { grantedMerchantPermissions } from '@interfaces/operatorGrant.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 /**
@@ -41,11 +42,13 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
 
   // A database failure is NOT swallowed into a 401 — it goes to the error
   // handler as a 500, so an outage reads as an outage rather than "signed out".
-  let operator: { isActive?: boolean } | null;
+  let operator: { isActive?: boolean; grants?: string[] } | null;
   let merchant: { status?: string } | null;
   try {
     [operator, merchant] = await Promise.all([
-      MerchantOperator.findById(decoded.merchantOperatorId).select('isActive').lean<{ isActive?: boolean } | null>(),
+      MerchantOperator.findById(decoded.merchantOperatorId)
+        .select('isActive grants')
+        .lean<{ isActive?: boolean; grants?: string[] } | null>(),
       Merchant.findById(decoded.merchantId).select('status').lean<{ status?: string } | null>(),
     ]);
   } catch (e) {
@@ -58,7 +61,17 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
   if (!operator || !operator.isActive) { ApiResponseUtil.unauthorized(res, 'Operator deactivated'); return; }
   if (!merchant || merchant.status !== 'active') { ApiResponseUtil.unauthorized(res, 'Merchant suspended'); return; }
 
-  (req as any).merchant = decoded;
+  // The token's own `permissions` is the POS's copy for rendering; it is NEVER
+  // what authorizes. Tokens live 7 days, so a grant removed this morning would
+  // otherwise keep working until next week. The row is already in hand from
+  // the liveness read above, so deriving here costs no extra query.
+  (req as any).merchant = {
+    ...decoded,
+    permissions: [
+      MerchantPermission.CHARGE,
+      ...grantedMerchantPermissions(operator.grants),
+    ],
+  };
   next();
 };
 

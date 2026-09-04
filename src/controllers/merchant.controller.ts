@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { Merchant } from '@models/merchant.model';
 import { Wallet } from '@models/wallet.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
@@ -159,6 +160,24 @@ export class MerchantController {
       });
       return ApiResponseUtil.success(res, { stock });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Failed to load stock', 500); }
+  }
+
+  /**
+   * GET /api/merchant/stalls — transfer destinations: the OTHER live stalls at
+   * this event. The caller's own stall is excluded because a transfer to
+   * yourself is rejected downstream; offering it would be a dead option.
+   */
+  static async stalls(req: Request, res: Response): Promise<any> {
+    try {
+      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const rows = await Merchant.find({ eventId, status: 'active' }).select('name').sort({ name: 1 }).lean();
+      const stalls = rows
+        .filter((m: any) => String(m._id) !== String(merchantId))
+        .map((m: any) => ({ merchantId: String(m._id), name: m.name }));
+      return ApiResponseUtil.success(res, { stalls });
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e?.message || 'Could not load stalls', 500);
+    }
   }
 
   /** POST /api/merchant/stock/count — a stock-take by this bar (merchantId from JWT). */

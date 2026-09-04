@@ -134,13 +134,21 @@ it('rejects a charge against a cancelled (non-published) cashless event with 400
   expect(w!.balance).toBe(1000); // UNCHANGED
 });
 
-it('rejects a token missing merchant:charge with 403', async () => {
+// Pre-Task-3, a hand-forged `permissions: []` was the only way to make an
+// authenticated request look like it lacked merchant:charge, so this used to
+// 403. authenticateMerchant now derives permissions from the operator row
+// (merchant:charge is an unconditional floor — every operator can charge,
+// same as MerchantAuthService.login has always minted), so the token's own
+// `permissions` claim can no longer take a capability away any more than it
+// can grant one it doesn't have (see merchantStockAccess.route.test.ts for
+// the grant side). The forged empty array is now inert either way.
+it('ignores a forged permissions array — authorization comes from the operator row', async () => {
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId, [])}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-forbidden' });
+    .send({ bandUid, amount: 300, clientTxnId: 'c-forged-empty-perms' });
 
-  expect(res.status).toBe(403);
+  expect(res.status).toBe(200);
 });
 
 it('rejects an unauthenticated request with 401', async () => {

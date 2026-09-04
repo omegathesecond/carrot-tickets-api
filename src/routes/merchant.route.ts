@@ -33,4 +33,10 @@ router.post(
   MerchantController.recordCount,
 );
 
+router.get(
+  '/stalls',
+  requireMerchantPermission(MerchantPermission.MANAGE_STOCK),
+  MerchantController.stalls,
+);
+
 export default router;
