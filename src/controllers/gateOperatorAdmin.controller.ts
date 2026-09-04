@@ -1,6 +1,8 @@
 // api/src/controllers/gateOperatorAdmin.controller.ts
 import { NextFunction, Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { GateOperator } from '@models/gateOperator.model';
+import { Event } from '@models/event.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
@@ -36,6 +38,34 @@ export class GateOperatorAdminController {
       if (actor.isSuperAdmin) {
         scope = req.body.scope === 'platform' ? 'platform' : 'organizer';
         vendorId = scope === 'organizer' ? req.body.vendorId : undefined;
+
+        // The in-event Register panel sends { fullName, eventIds:[id], grants }
+        // and has no vendorId to send — the event is the only context it has.
+        // Derive the organizer from it, matching CashierAdminController and
+        // MerchantAdminController, which already take the vendor from the event
+        // when hiring a cashier or creating a stall. This surface refusing
+        // while its two neighbours derive is what put "vendorId is required for
+        // organizer scope" in front of an admin adding a register desk.
+        //
+        // Only the FIRST event is read: validateEventAssignment below then
+        // holds every id in the list to the vendor taken from it, so a mixed
+        // list is refused rather than silently split across organizers.
+        const eventIds: unknown[] = Array.isArray(req.body.eventIds) ? req.body.eventIds : [];
+        if (scope === 'organizer' && !vendorId && eventIds.length > 0) {
+          const first = String(eventIds[0]);
+          const event = mongoose.Types.ObjectId.isValid(first)
+            ? await Event.findById(first).select('vendorId').lean<{ vendorId?: unknown } | null>()
+            : null;
+          if (!event) { ApiResponseUtil.badRequest(res, 'Event not found'); return; }
+          // A buyer self-listed community event has no owning vendor (see
+          // event.model.ts). An organizer-scope row with no vendorId is
+          // invisible to every scopeFilter above and so unmanageable — refuse
+          // rather than create one.
+          if (!event.vendorId) { ApiResponseUtil.badRequest(res, 'That event has no organizer to add a register account for'); return; }
+          vendorId = String(event.vendorId);
+        }
+
+        // Nothing named the organizer and there was no event to read it from.
         if (scope === 'organizer' && !vendorId) { ApiResponseUtil.badRequest(res, 'vendorId is required for organizer scope'); return; }
       } else {
         // Non-super-admin is always pinned to their own organizer.

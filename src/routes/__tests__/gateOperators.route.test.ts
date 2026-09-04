@@ -74,3 +74,86 @@ it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', asy
   const reloaded = await GateOperator.findById(op._id);
   expect(reloaded!.isActive).toBe(true);
 });
+
+describe('a super-admin creating a register account from inside an event', () => {
+  // The in-event Register panel sends { fullName, eventIds:[id], grants } and
+  // has no vendorId to send — the event is the only context it has. The
+  // cashier admin surface already derives the organizer from the event
+  // (see cashierAdmin.controller.ts); this one used to refuse instead.
+  async function seedEvent(vendorId: string | null) {
+    const { Event } = await import('@models/event.model');
+    const future = new Date(Date.now() + 7 * 864e5);
+    const mongoose = (await import('mongoose')).default;
+    const ev = await Event.create({
+      // A buyer self-listed community event is the vendor-less case: published,
+      // but nobody sells or gets paid for it, so the model exempts it from
+      // requiring a vendorId (see event.model.ts).
+      ...(vendorId ? { vendorId } : { submittedByBuyerId: new mongoose.Types.ObjectId() }),
+      name: 'Umhlanga', venue: 'V', eventDate: future, startTime: future, endTime: future,
+      ticketTypes: [],
+    });
+    return String(ev._id);
+  }
+
+  it('derives the organizer from the event it is created against', async () => {
+    const eventId = await seedEvent(VENDOR_A);
+
+    const res = await request(app).post('/api/tickets/gate-operators')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Teddy', eventIds: [eventId], grants: ['issue_tags'] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.operator.scope).toBe('organizer');
+    expect(res.body.data.operator.vendorId).toBe(VENDOR_A);
+    expect(res.body.data.operator.eventIds).toEqual([eventId]);
+  });
+
+  it('still refuses when there is no event to derive from', async () => {
+    const res = await request(app).post('/api/tickets/gate-operators')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Teddy', eventIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('vendorId is required for organizer scope');
+  });
+
+  it('refuses an event that does not exist when deriving', async () => {
+    const res = await request(app).post('/api/tickets/gate-operators')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Teddy', eventIds: ['64b000000000000000000f99'] });
+
+    expect(res.status).toBe(400);
+    // Status alone would also be satisfied by the pre-derivation
+    // "vendorId is required for organizer scope" refusal.
+    expect(res.body.message).toBe('Event not found');
+    expect(await GateOperator.countDocuments({})).toBe(0);
+  });
+
+  it('refuses an event with no organizer behind it', async () => {
+    // A buyer self-listed community event has no owning vendor. An
+    // organizer-scope row with no vendorId is invisible to every scopeFilter
+    // and therefore unmanageable — none may exist.
+    const eventId = await seedEvent(null);
+
+    const res = await request(app).post('/api/tickets/gate-operators')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Teddy', eventIds: [eventId] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/no organizer/i);
+    expect(await GateOperator.countDocuments({})).toBe(0);
+  });
+
+  it('an explicit vendorId still wins, and is still held to that vendor', async () => {
+    const eventId = await seedEvent(VENDOR_A);
+
+    const res = await request(app).post('/api/tickets/gate-operators')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Teddy', eventIds: [eventId], vendorId: VENDOR_B });
+
+    // VENDOR_B does not own the event, so the assignment validator refuses it
+    // rather than quietly pointing B's staff at A's show.
+    expect(res.status).toBe(400);
+    expect(await GateOperator.countDocuments({})).toBe(0);
+  });
+});
