@@ -22,6 +22,7 @@ import { CashlessReconciliationController } from '@controllers/cashlessReconcili
 import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { MenuAdminController } from '@controllers/menuAdmin.controller';
 import { StockReportController } from '@controllers/stockReport.controller';
+import { TableReportController } from '@controllers/tableReport.controller';
 import { EventTagController } from '@controllers/eventTag.controller';
 import { TagReportController } from '@controllers/tagReport.controller';
 import { TagAdminController } from '@controllers/tagAdmin.controller';
@@ -673,6 +674,18 @@ router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermi
 router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
 router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
 router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.movements);
+
+/**
+ * The organizer's Tables view (task 13) — a waiter opens a table, adds items
+ * from several stalls, and settles against an NFC tag; this is the read-only
+ * rollup: what is still open, what was settled, and what walked out unpaid.
+ * requireSuperAdminOrPermission, NOT the bare requireTicketsPermission above:
+ * a super-admin token carries an EMPTY permissions array, and gating a
+ * revenue view on the bare check is the defect fixed in 5b4820c. Ownership
+ * (own cashless event only, platform staff exempted) is enforced in the
+ * controller via the shared loadOwnedCashlessEvent guard.
+ */
+router.get('/events/:eventId/tables', requireSuperAdminOrPermission(TicketsPermission.VIEW_REVENUE), TableReportController.list);
 
 /**
  * Cashless Stock/Inventory — organiser manages the product catalogue and
