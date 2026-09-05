@@ -2,13 +2,13 @@
 import mongoose from 'mongoose';
 import { StockService } from '@services/stock.service';
 import { StockAlertService } from '@services/stockAlert.service';
-import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
+import { StockMovementReason } from '@interfaces/stock.interface';
 import { StockTransfer, IStockTransfer } from '@models/stockTransfer.model';
 
 export class StockTransferService {
   static async transfer(params: {
     eventId: string; productId: string; fromMerchantId: string; toMerchantId: string;
-    qty: number; byType: StockMovementByType; by: string; note?: string;
+    qty: number; byType: IStockTransfer['byType']; by: string; note?: string;
   }): Promise<{ transfer: IStockTransfer; fromOnHand: number; toOnHand: number }> {
     const { eventId, productId, fromMerchantId, toMerchantId, qty, byType, by, note } = params;
     if (fromMerchantId === toMerchantId) throw new Error('cannot transfer to the same bar');

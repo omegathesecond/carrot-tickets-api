@@ -6,6 +6,7 @@ import { Reseller } from '@models/reseller.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
+import { Waiter } from '@models/waiter.model';
 import {
   resolveOperatorEventScope,
   operatorMayActOnEvent,
@@ -450,5 +451,100 @@ describe('a DEACTIVATED row denies every event, whatever its assignment', () => 
 
     expect(await resolveOperatorEventScope(ownerReq(resellerId))).toEqual([]);
     expect(await resolveOperatorEventScope(tillReq(resellerId, operatorId))).toEqual([]);
+  });
+});
+
+
+/**
+ * The waiter tier. Same hazard as the cashier's, arrived at the same way: the
+ * token is minted for 7 days and authenticateWaiter verifies it with no
+ * database lookup, so the row is the only place a revocation can land in time.
+ * Before this branch existed the resolver fell through to `return null` for a
+ * waiter — UNRESTRICTED — so every case below would have read as "allowed".
+ */
+describe('the waiter tier', () => {
+  const waiterReq = (waiterId: string) =>
+    ({ waiter: { scope: 'waiter', waiterId } }) as unknown as Request;
+
+  const hire = (over: Record<string, unknown> = {}) =>
+    Waiter.create({
+      fullName: 'Thabo', loginCode: `83${Math.floor(Math.random() * 100000)}`, pin: '222222',
+      scope: 'organizer', vendorId: oid(), eventId: oid(), ...over,
+    });
+
+  // The assignment lives in the SINGULAR eventId, as for a cashier — reading
+  // the shared eventIds set would find nothing and resolve to null.
+  it('scopes a waiter to their singular eventId', async () => {
+    const theirs = oid();
+    const w = await hire({ eventId: theirs });
+
+    expect(await resolveOperatorEventScope(waiterReq(String(w._id)))).toEqual([theirs.toString()]);
+    expect(await operatorMayActOnEvent(waiterReq(String(w._id)), theirs.toString())).toBe(true);
+    expect(await operatorMayActOnEvent(waiterReq(String(w._id)), oid().toString())).toBe(false);
+    expect(await operatorMayActOnEvent(waiterReq(String(w._id)), undefined)).toBe(false);
+  });
+
+  // Disable is the dashboard's ONLY revocation control for a waiter. Without
+  // this branch it would stop nothing but their next login while the handheld
+  // in their pocket kept settling tabs for the rest of the week.
+  it('DENIES a DEACTIVATED waiter, whose token still has days to run', async () => {
+    const theirs = oid();
+    const w = await hire({ eventId: theirs });
+    const req = waiterReq(String(w._id));
+    expect(await resolveOperatorEventScope(req)).toEqual([theirs.toString()]);
+
+    await Waiter.updateOne({ _id: w._id }, { $set: { isActive: false } });
+
+    // An EMPTY array, not null — null would mean unrestricted, the exact
+    // opposite of what Disable is for.
+    expect(await resolveOperatorEventScope(req)).toEqual([]);
+    expect(await operatorMayActOnEvent(req, theirs.toString())).toBe(false);
+  });
+
+  it('DENIES a waiter whose row has been deleted', async () => {
+    const w = await hire();
+    const req = waiterReq(String(w._id));
+    expect(await resolveOperatorEventScope(req)).toHaveLength(1);
+
+    await Waiter.deleteOne({ _id: w._id });
+
+    expect(await resolveOperatorEventScope(req)).toEqual([]);
+    expect(await operatorMayActOnEvent(req, oid().toString())).toBe(false);
+  });
+
+  // A legacy row: the schema's `required` fires on WRITE, so this shape is
+  // only reachable through the raw driver — but any database predating the
+  // rule can hold one, and loadWaiterEvent does no vendor check of its own.
+  it('DENIES an organizer waiter whose row carries no event, rather than freeing them', async () => {
+    const raw = await mongoose.connection.db!.collection('waiters').insertOne({
+      fullName: 'Legacy', loginCode: '839999', pin: '$2b$10$notarealhashbutfine',
+      scope: 'organizer', vendorId: oid(), isActive: true,
+      failedPinAttempts: 0, lockedUntil: null, createdAt: new Date(), updatedAt: new Date(),
+    });
+    const req = waiterReq(String(raw.insertedId));
+
+    expect(await resolveOperatorEventScope(req)).toEqual([]);
+    expect(await operatorMayActOnEvent(req, oid().toString())).toBe(false);
+  });
+
+  // The isActive check has to sit BEFORE the platform branch, which returns
+  // null: checking it after would hand a revoked Carrot staffer every event.
+  it('DENIES a deactivated PLATFORM waiter rather than handing them every event', async () => {
+    const w = await Waiter.create({
+      fullName: 'Revoked Staff', loginCode: '839998', pin: '222222',
+      scope: 'platform', isActive: false,
+    });
+
+    expect(await resolveOperatorEventScope(waiterReq(String(w._id)))).toEqual([]);
+    expect(await operatorMayActOnEvent(waiterReq(String(w._id)), oid().toString())).toBe(false);
+  });
+
+  it('lets a PLATFORM waiter work any event', async () => {
+    const w = await Waiter.create({
+      fullName: 'Carrot Staff', loginCode: '839997', pin: '222222', scope: 'platform',
+    });
+
+    expect(await resolveOperatorEventScope(waiterReq(String(w._id)))).toBeNull();
+    expect(await operatorMayActOnEvent(waiterReq(String(w._id)), oid().toString())).toBe(true);
   });
 });

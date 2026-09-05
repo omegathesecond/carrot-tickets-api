@@ -1,7 +1,6 @@
 // api/src/middleware/waiterAuth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '@config/jwt.config';
+import { WaiterAuthService } from '@services/waiterAuth.service';
 import { WaiterPermission } from '@interfaces/waiter.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
@@ -17,8 +16,12 @@ export const authenticateWaiter = (req: Request, res: Response, next: NextFuncti
     if (!header) { ApiResponseUtil.unauthorized(res, 'No authorization header provided'); return; }
     const token = header.replace('Bearer ', '');
     if (!token) { ApiResponseUtil.unauthorized(res, 'No token provided'); return; }
-    const decoded = jwt.verify(token, JWT_SECRET) as { scope?: string };
-    if (decoded.scope !== 'waiter') throw new Error('Invalid or expired token');
+    // Through the service, not jwt.verify here: a raw decoded payload is
+    // whatever the signer put in it, and req.waiter is read downstream as a
+    // WaiterToken — by the event-scope resolver and by the settlement that
+    // stamps staffName onto a money row. verifyToken narrows it to the
+    // declared shape before either sees it.
+    const decoded = WaiterAuthService.verifyToken(token); // throws if scope !== 'waiter'
     (req as any).waiter = decoded;
     next();
   } catch (e: any) {

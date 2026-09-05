@@ -11,7 +11,14 @@ export interface IStockTransfer extends Document {
   fromMerchantId: mongoose.Types.ObjectId;
   toMerchantId: mongoose.Types.ObjectId;
   qty: number;
-  byType: StockMovementByType;
+  /**
+   * Narrower than a movement's: a waiter never writes a transfer (or a count).
+   * They pour from one stall's shelf onto a tab, which is a SALE movement — no
+   * bar-to-bar move and no stock-take. Typing the field as the full alias while
+   * the schema enum below lists only three values would let a 'Waiter' transfer
+   * compile and then die on schema validation at runtime.
+   */
+  byType: Exclude<StockMovementByType, 'Waiter'>;
   by: string;
   note?: string;
   at: Date;

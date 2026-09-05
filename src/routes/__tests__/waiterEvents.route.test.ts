@@ -6,6 +6,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helper
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { WAITER_PERMISSIONS, WaiterPermission } from '@interfaces/waiter.interface';
+import { Waiter } from '@models/waiter.model';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 
@@ -13,6 +14,12 @@ beforeAll(connectTestDb);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
+let waiterSeq = 0;
+
+/**
+ * The Waiter ROW is real, not just the token: the event scope is re-resolved
+ * from that row on every request, so a token naming no row is refused.
+ */
 async function seed() {
   const vendorId = new mongoose.Types.ObjectId();
   const future = new Date(Date.now() + 7 * 864e5);
@@ -20,12 +27,16 @@ async function seed() {
     vendorId, name: 'Fest', venue: 'V', eventDate: future, startTime: future,
     endTime: future, status: EventStatus.PUBLISHED, cashless: true, ticketTypes: [],
   });
+  const waiter = await Waiter.create({
+    fullName: 'Thabo', loginCode: `WTRE${waiterSeq++}`, pin: '123456',
+    scope: 'organizer', vendorId, eventId: event._id,
+  });
   const token = jwt.sign({
-    scope: 'waiter', userType: 'waiter', waiterId: String(new mongoose.Types.ObjectId()),
+    scope: 'waiter', userType: 'waiter', waiterId: String(waiter._id),
     role: 'waiter', permissions: WAITER_PERMISSIONS, isSuperAdmin: false,
     fullName: 'Thabo', vendorId: String(vendorId), eventId: String(event._id),
   }, JWT_SECRET);
-  return { eventId: String(event._id), token };
+  return { eventId: String(event._id), token, waiterId: String(waiter._id) };
 }
 
 describe('the waiter floor screen', () => {
@@ -56,9 +67,9 @@ describe('the waiter floor screen', () => {
     // fine — just without the one capability this route requires. A 401
     // here would mean the request never reached requireWaiterPermission at
     // all, which would prove nothing about the gate.
-    const { eventId } = await seed();
+    const { eventId, waiterId } = await seed();
     const token = jwt.sign({
-      scope: 'waiter', userType: 'waiter', waiterId: String(new mongoose.Types.ObjectId()),
+      scope: 'waiter', userType: 'waiter', waiterId,
       role: 'waiter', permissions: [], isSuperAdmin: false,
       fullName: 'Thabo', eventId,
     }, JWT_SECRET);

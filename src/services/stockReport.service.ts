@@ -7,6 +7,7 @@ import { StockMovement } from '@models/stockMovement.model';
 import { StockCount } from '@models/stockCount.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
+import { Waiter } from '@models/waiter.model';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { HEX24 } from '@utils/controllerHelpers.util';
 
@@ -354,24 +355,31 @@ export class StockReportService {
 
     const productIds = [...new Set(page.map((d: any) => String(d.productId)))];
     const merchantIds = [...new Set(page.map((d: any) => String(d.merchantId)))];
-    // `by` is a free-form string: an ObjectId for Merchant-written rows, but a
-    // vendorId or the literal 'platform' for Organizer/Platform rows — guard
-    // with HEX24 so those never reach an ObjectId cast and 500 the endpoint.
-    const operatorIds = [...new Set(
+    // `by` is a free-form string: an ObjectId for Merchant- and Waiter-written
+    // rows, but a vendorId or the literal 'platform' for Organizer/Platform
+    // rows — guard with HEX24 so those never reach an ObjectId cast and 500
+    // the endpoint.
+    const byIdsOf = (type: string) => [...new Set(
       page
-        .filter((d: any) => d.byType === 'Merchant' && HEX24.test(String(d.by)))
+        .filter((d: any) => d.byType === type && HEX24.test(String(d.by)))
         .map((d: any) => String(d.by)),
     )];
-    const [prods, merchs, ops] = await Promise.all([
+    const operatorIds = byIdsOf('Merchant');
+    const waiterIds = byIdsOf('Waiter');
+    const [prods, merchs, ops, waiters] = await Promise.all([
       Product.find({ _id: { $in: productIds.map(oid) } }).select('name').lean(),
       Merchant.find({ _id: { $in: merchantIds.map(oid) } }).select('name').lean(),
       operatorIds.length
         ? MerchantOperator.find({ _id: { $in: operatorIds.map(oid) } }).select('fullName').lean()
         : Promise.resolve([] as any[]),
+      waiterIds.length
+        ? Waiter.find({ _id: { $in: waiterIds.map(oid) } }).select('fullName').lean()
+        : Promise.resolve([] as any[]),
     ]);
     const productName = new Map(prods.map((p: any) => [String(p._id), p.name]));
     const merchantName = new Map(merchs.map((m: any) => [String(m._id), m.name]));
     const operatorName = new Map(ops.map((o: any) => [String(o._id), o.fullName]));
+    const waiterName = new Map(waiters.map((w: any) => [String(w._id), w.fullName]));
 
     const movements = page.map((d: any) => ({
       id: String(d._id), at: d.at,
@@ -380,10 +388,16 @@ export class StockReportService {
       delta: d.delta, reason: d.reason, balanceAfter: d.balanceAfter,
       refType: d.refType ?? null, refId: d.refId ?? null,
       byType: d.byType, by: d.by,
-      // Who actually did it. Organizer-written rows keep byName null — their
-      // `by` is a vendorId, not a person, and inventing a name for it would be
-      // worse than showing none.
-      byName: d.byType === 'Merchant' ? (operatorName.get(String(d.by)) ?? 'Unknown operator') : null,
+      // Who actually did it. Merchant and Waiter rows name a PERSON — a
+      // waiter's tab sale or line removal is the organizer's only record of
+      // which member of floor staff took the stock, so leaving it unnamed
+      // would blank out a whole class of movement in the journal. Organizer
+      // and Platform rows keep byName null: their `by` is a vendorId or the
+      // literal 'platform', not a person, and inventing a name for it would
+      // be worse than showing none.
+      byName: d.byType === 'Merchant' ? (operatorName.get(String(d.by)) ?? 'Unknown operator')
+        : d.byType === 'Waiter' ? (waiterName.get(String(d.by)) ?? 'Unknown waiter')
+        : null,
       note: d.note ?? null,
     }));
     const last = page[page.length - 1];

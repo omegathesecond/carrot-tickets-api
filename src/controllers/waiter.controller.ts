@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
+import { EventStatus } from '@interfaces/event.interface';
 import { WaiterToken } from '@interfaces/waiter.interface';
+import { operatorMayActOnEvent } from '@services/operatorEventScope.service';
+import { HEX24 } from '@utils/controllerHelpers.util';
 import {
   TableService, TableLabelTakenError, TableShortfallError,
   TableAlreadySettledError, TableWalletNotFoundError,
@@ -12,16 +15,33 @@ import { WalletDeclinedError } from '@services/merchant.service';
 
 /**
  * Load the event this waiter is working and assert they may act on it. Every
- * table route goes through here, so the "is this my show, and is it even
- * cashless" question is answered in exactly one place. Returns null having
- * ALREADY answered the response.
+ * table route goes through here, so the "is this my show, is it even cashless,
+ * is it live, and am I still employed" question is answered in exactly one
+ * place. Returns null having ALREADY answered the response.
+ *
+ * The lifecycle and assignment checks mirror loadCashlessEvent, message for
+ * message. Both matter because the token cannot carry either answer: it is
+ * minted for 7 days and verified with no database lookup, so an event that has
+ * since been cancelled and a waiter who has since been fired both still
+ * present a perfectly valid token. operatorMayActOnEvent re-reads the waiter's
+ * row (see waiterScope) and is what makes Disable take effect on the handheld
+ * already in their pocket rather than only at their next login.
  */
 export async function loadWaiterEvent(req: Request, res: Response): Promise<any | null> {
   const waiter = (req as any).waiter as WaiterToken;
   if (!waiter.eventId) { ApiResponseUtil.forbidden(res, 'No event on this waiter'); return null; }
+  // A malformed claim would throw a CastError out of findById, and Express 4
+  // does not await these handlers — the rejection escapes, nothing answers,
+  // and the request hangs. That is the one way this function can break its
+  // always-respond contract, so the id is shape-checked before it is cast.
+  if (!HEX24.test(String(waiter.eventId))) { ApiResponseUtil.notFound(res, 'Event not found'); return null; }
   const event = await Event.findById(waiter.eventId).lean();
   if (!event) { ApiResponseUtil.notFound(res, 'Event not found'); return null; }
   if (!event.cashless) { ApiResponseUtil.error(res, 'Event is not cashless', 400); return null; }
+  if (event.status !== EventStatus.PUBLISHED) { ApiResponseUtil.error(res, 'Event is not published', 400); return null; }
+  if (!(await operatorMayActOnEvent(req, String(event._id)))) {
+    ApiResponseUtil.error(res, 'You are not assigned to this event', 403); return null;
+  }
   return event;
 }
 

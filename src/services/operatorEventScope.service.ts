@@ -4,8 +4,10 @@ import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
 import { Reseller } from '@models/reseller.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
+import { Waiter } from '@models/waiter.model';
 import { Event } from '@models/event.model';
 import { ICashier } from '@interfaces/cashier.interface';
+import { IWaiter } from '@interfaces/waiter.interface';
 
 /**
  * Resolves which events the caller is allowed to work.
@@ -162,13 +164,46 @@ async function cashierScope(cashierId: string): Promise<EventScope> {
 }
 
 /**
+ * A waiter's tier — the same shape as cashierScope above, and for the same
+ * reason.
+ *
+ * A waiter is hired for exactly ONE event and carries the singular `eventId`,
+ * so reading the shared multi-event `eventIds` off one would find nothing and
+ * resolve to "no assignment", i.e. UNRESTRICTED. Worse, before this function
+ * existed resolveOperatorEventScope had no waiter branch at all and fell
+ * through to null, so every waiter was unrestricted regardless.
+ *
+ * Every failure here returns an EMPTY ARRAY, which denies every event.
+ * authenticateWaiter verifies the JWT with no database lookup and
+ * WaiterAuthService mints 7-day tokens, so the waiter's ROW is the only place
+ * a revocation can land in time: PATCH /waiters/:id {isActive:false} — the
+ * only revocation the feature has — would otherwise stop nothing but their
+ * NEXT LOGIN while the handheld in their pocket kept settling tabs, debiting
+ * attendee wallets and moving stall stock for the rest of the week. A deleted
+ * row denies for the same reason, and an organizer waiter carrying no event
+ * denies rather than resolving to null, since loadWaiterEvent does no vendor
+ * comparison of its own and event ids are public.
+ */
+async function waiterScope(waiterId: string): Promise<EventScope> {
+  const waiter = await Waiter.findById(waiterId).select('eventId scope isActive')
+    .lean<Pick<IWaiter, 'eventId' | 'scope' | 'isActive'> | null>();
+
+  if (!waiter) return [];
+  if (!waiter.isActive) return [];
+  if (waiter.scope === 'organizer' && !waiter.eventId) return [];
+
+  // Only a PLATFORM waiter — Carrot's own staff — is legitimately global.
+  return waiter.eventId ? [String(waiter.eventId)] : null;
+}
+
+/**
  * The events this caller may act on, or null when they are unrestricted.
  *
  * null covers every actor that is not an event-assignable operator
  * (organizers and platform staff acting in the dashboard, unauthenticated
  * requests), a multi-event operator with no assignment (empty set = every
- * event, the pre-assignment behaviour), a PLATFORM cashier, and a token
- * naming a gate or reseller operator row that no longer exists.
+ * event, the pre-assignment behaviour), a PLATFORM cashier or waiter, and a
+ * token naming a gate or reseller operator row that no longer exists.
  *
  * Reseller callers resolve TWO tiers — the company and, for a till, the
  * operator — intersected. The company tier binds the owner login too: the
@@ -204,6 +239,11 @@ export async function resolveOperatorEventScope(req: Request): Promise<EventScop
   const cashier = (req as any).cashier;
   if (cashier?.cashierId) {
     return cashierScope(String(cashier.cashierId));
+  }
+
+  const waiter = (req as any).waiter;
+  if (waiter?.waiterId) {
+    return waiterScope(String(waiter.waiterId));
   }
 
   const reseller = (req as any).reseller;

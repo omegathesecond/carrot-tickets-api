@@ -9,7 +9,16 @@ export type StockCountPhase = 'opening' | 'interim' | 'closing';
 export interface IStockCount extends Document {
   eventId: mongoose.Types.ObjectId; merchantId: mongoose.Types.ObjectId; productId: mongoose.Types.ObjectId;
   expectedOnHand: number; countedOnHand: number; variance: number;   // counted − expected
-  phase: StockCountPhase; byType: StockMovementByType; by: string; at: Date;
+  phase: StockCountPhase;
+  /**
+   * Narrower than a movement's: a waiter never writes a count (or a transfer).
+   * They pour from a stall's shelf onto a tab, which is a SALE movement — no
+   * stock-take. Typing the field as the full alias while the schema enum below
+   * lists only three values would let a 'Waiter' count compile and then die on
+   * schema validation at runtime.
+   */
+  byType: Exclude<StockMovementByType, 'Waiter'>;
+  by: string; at: Date;
 }
 
 const stockCountSchema = new Schema<IStockCount>({

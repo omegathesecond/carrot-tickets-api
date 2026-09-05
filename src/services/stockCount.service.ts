@@ -2,13 +2,13 @@
 import mongoose from 'mongoose';
 import { StockService } from '@services/stock.service';
 import { StockAlertService } from '@services/stockAlert.service';
-import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
+import { StockMovementReason } from '@interfaces/stock.interface';
 import { StockCount, IStockCount, StockCountPhase } from '@models/stockCount.model';
 
 export class StockCountService {
   static async recordCount(params: {
     eventId: string; merchantId: string; productId: string; countedOnHand: number;
-    phase?: StockCountPhase; byType: StockMovementByType; by: string;
+    phase?: StockCountPhase; byType: IStockCount['byType']; by: string;
   }): Promise<{ count: IStockCount; onHand: number }> {
     const { eventId, merchantId, productId, countedOnHand, phase = 'interim', byType, by } = params;
     if (!Number.isSafeInteger(countedOnHand) || countedOnHand < 0) throw new Error('countedOnHand must be a non-negative whole number');

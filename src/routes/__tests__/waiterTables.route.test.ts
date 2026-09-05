@@ -12,6 +12,8 @@ import { StockService } from '@services/stock.service';
 import { ProductCategory, StockMovementReason } from '@interfaces/stock.interface';
 import { WalletService } from '@services/wallet.service';
 import { Wallet } from '@models/wallet.model';
+import { Waiter } from '@models/waiter.model';
+import { Table } from '@models/table.model';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
@@ -23,20 +25,32 @@ beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-/** One waiter, working one freshly-created cashless event, token in hand. */
-async function seedFloor(permissions: string[] = WAITER_PERMISSIONS) {
+let waiterSeq = 0;
+
+/**
+ * One waiter, working one freshly-created cashless event, token in hand.
+ *
+ * The Waiter ROW is real, not just the token: revocation is re-resolved from
+ * that row on every request, so a token naming no row is refused outright.
+ * `waiterId` is returned so a test can fire the waiter mid-shift.
+ */
+async function seedFloor(permissions: string[] = WAITER_PERMISSIONS, status = EventStatus.PUBLISHED) {
   const vendorId = new mongoose.Types.ObjectId();
   const future = new Date(Date.now() + 7 * 864e5);
   const event = await Event.create({
     vendorId, name: 'Fest', venue: 'V', eventDate: future, startTime: future,
-    endTime: future, status: EventStatus.PUBLISHED, cashless: true, ticketTypes: [],
+    endTime: future, status, cashless: true, ticketTypes: [],
+  });
+  const waiter = await Waiter.create({
+    fullName: 'Thabo', loginCode: `WTRT${waiterSeq++}`, pin: '123456',
+    scope: 'organizer', vendorId, eventId: event._id,
   });
   const token = jwt.sign({
-    scope: 'waiter', userType: 'waiter', waiterId: String(new mongoose.Types.ObjectId()),
+    scope: 'waiter', userType: 'waiter', waiterId: String(waiter._id),
     role: 'waiter', permissions, isSuperAdmin: false,
     fullName: 'Thabo', vendorId: String(vendorId), eventId: String(event._id),
   }, JWT_SECRET);
-  return { eventId: String(event._id), token };
+  return { eventId: String(event._id), token, waiterId: String(waiter._id) };
 }
 
 /** A stocked stall on a given event, for the addItem route tests. */
@@ -321,5 +335,106 @@ describe('waiter tables — settle a table', () => {
     expect(res.body.message).toMatch(/waiter:settle_tables/);
     // And nothing moved.
     expect((await Wallet.findOne({ bandUid: '04a22b1c' }))!.balance).toBe(10000);
+  });
+});
+
+/**
+ * Revocation and event lifecycle.
+ *
+ * A waiter token is minted for 7 days and verified with no database lookup, so
+ * the only thing standing between a fired waiter and a guest's wallet is a
+ * per-request re-read of their row. Every test here therefore asserts on a
+ * MONEY path — a settle — and checks the wallet balance afterwards: a refusal
+ * that still moved the money would pass a status-code-only assertion.
+ */
+describe('waiter tables — revocation and event lifecycle', () => {
+  const canSettle = [...WAITER_PERMISSIONS, WaiterPermission.SETTLE_TABLES];
+
+  /** A settle-ready floor: a tab worth 6000 and a tag holding 10000. */
+  async function readyToSettle(status = EventStatus.PUBLISHED) {
+    const floor = await seedFloor(canSettle, status);
+    const { tableId } = await tableWithDrinks(floor.eventId, floor.token, {
+      label: '7', price: 3000, qty: 2,
+    });
+    await fundedTag(floor.eventId, '04a22b1c', 10000);
+    return { ...floor, tableId };
+  }
+
+  /** Nothing moved: the tag is untouched and the tab is still open. */
+  async function nothingMoved(tableId: string) {
+    expect((await Wallet.findOne({ bandUid: '04a22b1c' }))!.balance).toBe(10000);
+    expect((await Table.findById(tableId))!.status).toBe('open');
+  }
+
+  it('refuses a settle by a waiter deactivated AFTER they logged in', async () => {
+    const { token, tableId, waiterId } = await readyToSettle();
+
+    // The organizer hits Disable. The token in the waiter's hand is untouched
+    // and still cryptographically valid for another week.
+    await Waiter.updateOne({ _id: waiterId }, { $set: { isActive: false } });
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/not assigned to this event/i);
+    await nothingMoved(tableId);
+  });
+
+  it('refuses a settle by a waiter whose row was deleted after login', async () => {
+    const { token, tableId, waiterId } = await readyToSettle();
+    await Waiter.deleteOne({ _id: waiterId });
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/not assigned to this event/i);
+    await nothingMoved(tableId);
+  });
+
+  it('refuses a settle at an event that is no longer published', async () => {
+    const { eventId, token, tableId } = await readyToSettle();
+    await Event.updateOne({ _id: eventId }, { $set: { status: EventStatus.CANCELLED } });
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not published/i);
+    await nothingMoved(tableId);
+  });
+
+  it('refuses to open a table at a draft event', async () => {
+    const { token } = await seedFloor(WAITER_PERMISSIONS, EventStatus.DRAFT);
+
+    const res = await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${token}`).send({ label: '7' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not published/i);
+  });
+
+  // A malformed eventId claim casts to nothing. Unguarded it throws out of an
+  // async handler Express 4 does not await, so the request never answers at
+  // all — the one way loadWaiterEvent can break its always-respond contract.
+  it('answers 404 instead of hanging on a malformed event id in the token', async () => {
+    await seedFloor();
+    const waiter = await Waiter.create({
+      fullName: 'Thabo', loginCode: `WTRT${waiterSeq++}`, pin: '123456',
+      scope: 'organizer', vendorId: new mongoose.Types.ObjectId(),
+      eventId: new mongoose.Types.ObjectId(),
+    });
+    const token = jwt.sign({
+      scope: 'waiter', userType: 'waiter', waiterId: String(waiter._id),
+      role: 'waiter', permissions: WAITER_PERMISSIONS, isSuperAdmin: false,
+      fullName: 'Thabo', eventId: 'not-an-object-id',
+    }, JWT_SECRET);
+
+    const res = await request(app).get('/api/waiter/tables')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/not found/i);
   });
 });

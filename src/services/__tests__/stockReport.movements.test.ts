@@ -6,6 +6,7 @@ import { StockService } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
+import { Waiter } from '@models/waiter.model';
 
 const eventId = new mongoose.Types.ObjectId();
 let seq = 530000;
@@ -39,5 +40,27 @@ describe('StockReportService.movements', () => {
     const onlyB = await StockReportService.movements({ eventId: String(eventId), productId: String(bb._id) });
     expect(onlyB.movements).toHaveLength(1);
     expect(onlyB.movements[0]!.productName).toBe('B');
+  });
+
+  // A waiter's `by` is a PERSON id, unlike an Organizer row's vendorId — so the
+  // journal can and must name them. Without this the organizer's movement log
+  // shows every waiter sale and line-removal as an unnamed row.
+  it('names the waiter behind a Waiter-attributed movement', async () => {
+    const b = await bar('Bar W');
+    const p = await prod('W');
+    const waiter = await Waiter.create({
+      fullName: 'Thabo Dlamini', loginCode: 'WTRMOV1', pin: '123456', scope: 'organizer',
+      vendorId: new mongoose.Types.ObjectId(), eventId,
+    });
+    await move(b._id, p._id, 10);
+    await StockService.applyMovement({
+      eventId: String(eventId), merchantId: String(b._id), productId: String(p._id),
+      delta: -1, reason: StockMovementReason.SALE,
+      byType: 'Waiter', by: String(waiter._id),
+    } as any);
+
+    const page = await StockReportService.movements({ eventId: String(eventId), productId: String(p._id), limit: 1 });
+    expect(page.movements[0]!.byType).toBe('Waiter');
+    expect(page.movements[0]!.byName).toBe('Thabo Dlamini');
   });
 });
