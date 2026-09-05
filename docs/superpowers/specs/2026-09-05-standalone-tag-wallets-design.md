@@ -62,11 +62,21 @@ races the drop and loses (verified against a real mongod for reviews).
 `WalletService.ensureStandaloneWalletForBand({eventId, bandUid})`:
 create the wallet with no ticket and `bandUid: null`, then `bindBand` it.
 
-Creation deliberately does NOT set the uid directly. `bindBand` is THE choke
-point where a uid reaches a wallet — it normalises, shape-checks, and asserts the
-tag is in the event's register, which is what makes check-in-by-tag, stall
-charges and wallet lookups safe for free. Setting the uid at insert would open a
-second door past that gate. One door stays one door.
+**Corrected during implementation.** The design above said to create the wallet
+unbound and then call `bindBand`, so that `bindBand` stayed the single choke
+point where a uid reaches a wallet. That is not buildable alongside the identity
+validator introduced in the same design: a wallet with neither a ticket nor a
+band is refused at insert, and that is exactly what the unbound draft is. The
+two rules contradicted each other.
+
+Resolution: `ensureStandaloneWalletForBand` creates the wallet with its uid
+already set, and applies the register gate itself through the SAME two
+assertions `bindBand` uses — `assertValidBandUid` and
+`EventTagService.assertTagRegistered`. The invariant that actually matters is
+not "one function" but "no uid reaches a wallet without passing the register
+gate". There are now two writers of `bandUid`; both enforce it, and any third
+must too. The upside is that there is no orphan window at all: no draft row is
+ever written, so a refused tag leaves nothing behind.
 
 Idempotency comes free from the identity model: a retry finds the existing wallet
 at `{eventId, bandUid}` and returns it. A race loser deletes its orphan and

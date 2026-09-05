@@ -13,8 +13,13 @@ export type WalletStatus = 'active' | 'frozen' | 'closed';
  */
 export interface IWallet extends Document {
   eventId: mongoose.Types.ObjectId;
-  /** The ticket this wallet belongs to — the wallet identity (one wallet per ticket). */
-  ticketId: mongoose.Types.ObjectId;
+  /**
+   * The ticket this wallet belongs to, when there is one. ABSENT for a
+   * standalone tag handed out at the Register desk: such a wallet is identified
+   * by its band instead (design 2026-09-05). Exactly one of ticketId/bandUid is
+   * required — see the pre-validate hook below.
+   */
+  ticketId?: mongoose.Types.ObjectId;
   /** The attendee, when known. A cash-desk wallet may exist before sign-up. */
   buyerId?: mongoose.Types.ObjectId;
   /** Bound band UID, or null when unbound (never bound, or reported lost). */
@@ -51,7 +56,7 @@ const walletSchema = new Schema<IWallet>(
     // definitions of the same index name with different options; MongoDB rejects
     // the second and Mongoose swallows the error, so the index silently never
     // exists.
-    ticketId: { type: Schema.Types.ObjectId, ref: 'Ticket', required: true },
+    ticketId: { type: Schema.Types.ObjectId, ref: 'Ticket' },
     buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer' },
     // NOTE: no unique/index/sparse here on purpose — the partial unique index is
     // declared once, below. Declaring it in both places yields two definitions of
@@ -64,7 +69,20 @@ const walletSchema = new Schema<IWallet>(
     currency: { type: String, default: 'ZAR' },
     closedAt: { type: Date },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+    // The ticketId index changed from plain-unique to PARTIAL-unique
+    // (design 2026-09-05). Mongoose's default connection-level autoIndex would
+    // race migrateWalletIndexes() (called at app.ts boot, non-test envs only)
+    // to rebuild this collection's indexes the instant the model registers on
+    // an open connection — and if that background build wins while the legacy
+    // non-partial ticketId_1 still exists, it throws IndexKeySpecsConflict and
+    // the partial version never lands. Same trap, same fix as review.model.ts.
+    // Left on for NODE_ENV==='test': the suite's ephemeral in-memory Mongo
+    // relies on autoIndex (and explicit syncIndexes) to build these before
+    // assertions run. See src/scripts/migrate-wallet-indexes.ts.
+    autoIndex: process.env['NODE_ENV'] === 'test',
+  },
 );
 
 /**
@@ -124,11 +142,35 @@ walletSchema.index(
   { eventId: 1, bandUid: 1 },
   { unique: true, partialFilterExpression: { bandUid: { $type: 'string' } } },
 );
-// One wallet per ticket (the chosen identity). Single declaration site; makes
+// One wallet per ticket. PARTIAL for the same reason as the bandUid index
+// above: a wallet handed out as a standalone tag carries no ticketId, and a
+// plain unique index would index every one of those as null and reject the
+// second. Indexes only wallets that actually belong to a ticket, which keeps
 // ensureWalletForTicket's upsert concurrency-safe.
-walletSchema.index({ ticketId: 1 }, { unique: true });
+//
+// CHANGED from a plain unique index (design 2026-09-05). Mongoose never
+// rewrites an existing index's options in place, so the legacy `ticketId_1`
+// must be dropped before this one can be built under the same name — see
+// scripts/migrate-wallet-indexes.ts, which runs at boot.
+walletSchema.index(
+  { ticketId: 1 },
+  { unique: true, partialFilterExpression: { ticketId: { $exists: true } } },
+);
 // Non-partial: checkWalletBalances scans ALL wallets in an event (bound or not),
 // which the partial {eventId,bandUid} index cannot serve.
 walletSchema.index({ eventId: 1 });
+
+// A wallet with neither a ticket nor a band is reachable by no lookup — every
+// money path finds a wallet by one or the other — and so could never be topped
+// up, spent, cashed out or reconciled. Refuse it at the door rather than create
+// an unmanageable row (the same reasoning that refuses an organizer-scope gate
+// operator with no vendorId).
+walletSchema.pre('validate', function (next) {
+  if (!this.ticketId && !this.bandUid) {
+    next(new Error('A wallet needs a ticket or a band — one of ticketId/bandUid is required'));
+    return;
+  }
+  next();
+});
 
 export const Wallet = mongoose.model<IWallet>('Wallet', walletSchema);

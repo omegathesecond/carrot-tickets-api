@@ -51,6 +51,7 @@ if (isSentryEnabled()) {
 // reminders, stuck-update reconciliation) — consolidated in src/tasks.
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
+import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -267,6 +268,16 @@ function initAfterConnect(): void {
   // ever builds indexes for this collection.
   migrateReviewIndexes().catch((err) => {
     console.error('❌ migrateReviewIndexes failed (review submission may still 409 spuriously):', err);
+  });
+
+  // Same shape, same reasoning, for `wallets`: the ticketId unique index became
+  // PARTIAL so a tag handed out without a ticket can carry a wallet. Until the
+  // legacy non-partial index is dropped, the SECOND standalone tag issued at an
+  // event collides on it and fails. Logged, not fatal — a failed migration must
+  // not stop the API serving everything else; the symptom is confined to
+  // issuing standalone tags. See src/scripts/migrate-wallet-indexes.ts.
+  migrateWalletIndexes().catch((err) => {
+    console.error('❌ migrateWalletIndexes failed (issuing a standalone tag may collide on ticketId_1):', err);
   });
 
   // Background sweeps: reservation expiry, card-sale reconciliation,

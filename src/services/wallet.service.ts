@@ -101,6 +101,63 @@ export class WalletService {
    * The audit row is written only after the uid is safely claimed, so a losing
    * caller never leaves a BandBinding for a band it does not hold.
    */
+  /**
+   * Get-or-create the wallet for a tag handed out ON ITS OWN — no ticket behind
+   * it (design 2026-09-05). The band IS this wallet's identity.
+   *
+   * Idempotent for free, which is the payoff of that identity choice: a desk
+   * operator tapping the same tag twice finds the wallet already there rather
+   * than minting a second one, with no clientTxnId to carry.
+   *
+   * WHY THIS CREATES THE WALLET WITH ITS UID ALREADY SET, rather than creating
+   * it unbound and calling bindBand: a wallet with neither a ticket nor a band
+   * is refused by the schema (it would be reachable by no lookup), so the
+   * unbound draft that a create-then-bind sequence needs cannot legally exist.
+   * The register gate is therefore applied HERE, through the same two
+   * assertions bindBand uses — assertValidBandUid and assertTagRegistered. The
+   * invariant that matters is not "one function" but "no uid ever reaches a
+   * wallet without passing the register gate", and both writers enforce it.
+   * Any third writer must too.
+   */
+  static async ensureStandaloneWalletForBand(params: {
+    eventId: string;
+    bandUid: string;
+  }): Promise<{ wallet: IWallet; created: boolean }> {
+    // Normalise + shape-check FIRST, so a malformed uid is refused before any
+    // read or write — and so the lookup below uses the canonical form every
+    // money path reads (see the normalisation note in bindBand).
+    const uid = assertValidBandUid(params.bandUid);
+    const eventId = new mongoose.Types.ObjectId(params.eventId);
+
+    const existing = await Wallet.findOne({ eventId, bandUid: uid });
+    if (existing) {
+      // A tag already carrying somebody's ticket is not a blank to hand out.
+      // Distinguished from "not registered" on purpose: at a busy desk these
+      // call for opposite actions.
+      if (existing.ticketId) throw new Error('That tag belongs to a ticket at this event');
+      return { wallet: existing, created: false };
+    }
+
+    await EventTagService.assertTagRegistered(params.eventId, uid);
+
+    try {
+      const wallet = await Wallet.create({
+        eventId, bandUid: uid, balance: 0, cashFundedBalance: 0, status: 'active',
+      });
+      return { wallet, created: true };
+    } catch (err) {
+      // Lost the race to a concurrent tap of the same tag — the partial unique
+      // index on {eventId, bandUid} arbitrates and the loser re-reads the
+      // winner, the same shape ensureWalletForTicket uses. Discriminated by
+      // keyPattern so an E11000 from any OTHER index is not mislabelled.
+      if (!(err as { keyPattern?: Record<string, unknown> })?.keyPattern?.bandUid) throw err;
+      const winner = await Wallet.findOne({ eventId, bandUid: uid });
+      if (!winner) throw err;
+      if (winner.ticketId) throw new Error('That tag belongs to a ticket at this event');
+      return { wallet: winner, created: false };
+    }
+  }
+
   static async bindBand(walletId: string, bandUid: string, boundBy?: string): Promise<IWallet> {
     // THE NORMALISATION POINT. Readers hand a uid over as `04:B2:C3:D4`, or
     // upper-case, or with spaces; every money path (top-up, charge, cash-out,
