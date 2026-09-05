@@ -767,6 +767,58 @@ on an organizer's behalf — a super-admin token carries no permissions array."
 
 ---
 
+### Task 5b: The dashboard's Waiters panel
+
+**Files:**
+- Create: `dashboard/src/components/WaitersPanel.tsx`
+- Modify: `dashboard/src/lib/api.ts` (a `waiters` client beside `cashiers`)
+- Modify: `dashboard/src/components/EventCashlessTab.tsx` (a Waiters sub-tab)
+- Test: `dashboard/src/components/__tests__/WaitersPanel.test.tsx`
+
+**Interfaces:**
+- Consumes: the four routes from Task 5
+- Produces: `apiClient.waiters.{list,create,setActive,setGrants,resetPin}`
+
+- [ ] **Step 1: Write the failing test**
+
+Model it on `dashboard/src/components/__tests__/EventCashlessTab.test.tsx`,
+which already mocks `@/lib/api` and `sonner`. Cover: hiring shows the login
+code and PIN once; the **Settling on/off** toggle calls `setGrants` with
+`['settle_tables']` and with `[]`; and the toast says what the setting buys
+rather than "saved", because the difference is who may take money.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run src/components/__tests__/WaitersPanel.test.tsx`
+Expected: FAIL — cannot resolve `@/components/WaitersPanel`.
+
+- [ ] **Step 3: Build the panel**
+
+Copy `dashboard/src/components/CashiersPanel.tsx` and swap the actor. Keep the
+credentials-shown-once dialog: the PIN is hashed and cannot be read back, so an
+operator who closes that dialog without writing it down needs a reset.
+
+- [ ] **Step 4: Add the sub-tab**
+
+In `EventCashlessTab.tsx`, add a **Waiters** sub-tab beside Cashiers, gated
+`canManageAccess(user)` — hiring floor staff is the same capability as hiring a
+cashier.
+
+- [ ] **Step 5: Run the test, typecheck and commit**
+
+```bash
+npx vitest run src/components/__tests__/WaitersPanel.test.tsx
+npx tsc --noEmit -p tsconfig.app.json
+git add -A
+git commit -m "feat(waiter): hire and manage floor staff from the dashboard"
+```
+
+Note: the dashboard's shared `node_modules` is missing `react-easy-crop`, so
+four unrelated suites fail to import. That is pre-existing; ignore those four
+and check only that yours passes.
+
+---
+
 # Slice 2 — The tab
 
 Ends with a working tab that cannot yet be paid. The half with no money in it, deliberately.
@@ -1077,7 +1129,23 @@ not by a read-then-write."
 - Consumes: `TableService.open` (Task 7), `StockService` movement writer, `Product`, `Merchant`
 - Produces: `TableService.addItem({ tableId, eventId, merchantId, productId, qty, addedBy })` → `ITable`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the shared test helpers**
+
+Tasks 8, 9 and 10 all need the same fixtures. Put them in
+`src/__tests__/helpers/tables.ts` so they are written once:
+
+- `seedStall({ price, onHand })` → creates a Merchant on `EVENT`, a Product on
+  that merchant at `price` cents, and a stock row with `onHand` units. Returns
+  `{ merchantId, productId }`.
+- `seedStallAndTable({ price, onHand })` → `seedStall` plus an open Table.
+  Returns `{ table, merchantId, productId }`.
+- `onHandFor(merchantId, productId)` → reads the current on-hand count, so a
+  test asserts the stall's shelf rather than the movement log.
+
+Model them on the fixtures in `src/services/__tests__/merchantCharge.items.service.test.ts`,
+which already seeds a stall with priced, stocked products.
+
+- [ ] **Step 2: Write the failing test**
 
 ```ts
 // src/services/__tests__/tableAddItem.test.ts
@@ -1136,12 +1204,12 @@ it('refuses to add to a settled table', async () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 3: Run it and watch it fail**
 
 Run: `npx jest --runInBand src/services/__tests__/tableAddItem.test.ts`
 Expected: FAIL — `TableService.addItem is not a function`.
 
-- [ ] **Step 3: Implement addItem**
+- [ ] **Step 4: Implement addItem**
 
 Validate the product belongs to the named stall and the stall to this event;
 snapshot `name` and `price`; `$push` the line and `$inc` the subtotal in one
@@ -1153,12 +1221,12 @@ Use SALE rather than a new reason: the item genuinely left as a sale, and a new
 reason would have to be taught to every stock report before any of them were
 correct.
 
-- [ ] **Step 4: Run the test and watch it pass**
+- [ ] **Step 5: Run the test and watch it pass**
 
 Run: `npx jest --runInBand src/services/__tests__/tableAddItem.test.ts`
 Expected: PASS, 5 tests.
 
-- [ ] **Step 5: Add the route and commit**
+- [ ] **Step 6: Add the route and commit**
 
 `POST /api/waiter/tables/:id/items`, gated `MANAGE_TABLES`, behind
 `loadWaiterEvent`.
@@ -1257,7 +1325,7 @@ history you cannot read backwards is not an audit trail."
 - Test: `src/services/__tests__/tableVoid.test.ts`
 
 **Interfaces:**
-- Produces: `TableService.void({ tableId, reason, voidedBy })` → `ITable`
+- Produces: `TableService.voidTable({ tableId, reason, voidedBy })` → `ITable`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1268,7 +1336,7 @@ it('closes the table unpaid and does NOT return the stock', async () => {
   const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
   await TableService.addItem({ tableId: String(table._id), eventId: EVENT, merchantId, productId, qty: 2, addedBy: 'w1' });
 
-  const after = await TableService.void({ tableId: String(table._id), reason: 'walked out', voidedBy: 'w1' });
+  const after = await TableService.voidTable({ tableId: String(table._id), reason: 'walked out', voidedBy: 'w1' });
 
   expect(after.status).toBe('voided');
   expect(after.voidReason).toBe('walked out');
@@ -1278,14 +1346,14 @@ it('closes the table unpaid and does NOT return the stock', async () => {
 
 it('requires a reason', async () => {
   const { table } = await seedStallAndTable({ price: 3000, onHand: 10 });
-  await expect(TableService.void({ tableId: String(table._id), reason: '  ', voidedBy: 'w1' }))
+  await expect(TableService.voidTable({ tableId: String(table._id), reason: '  ', voidedBy: 'w1' }))
     .rejects.toThrow(/reason is required/i);
 });
 
 it('will not void a settled table', async () => {
   const { table } = await seedStallAndTable({ price: 3000, onHand: 10 });
   await Table.updateOne({ _id: table._id }, { $set: { status: 'settled' } });
-  await expect(TableService.void({ tableId: String(table._id), reason: 'oops', voidedBy: 'w1' }))
+  await expect(TableService.voidTable({ tableId: String(table._id), reason: 'oops', voidedBy: 'w1' }))
     .rejects.toThrow(/not open/i);
 });
 ```
@@ -1295,7 +1363,7 @@ it('will not void a settled table', async () => {
 Run: `npx jest --runInBand src/services/__tests__/tableVoid.test.ts`
 Expected: FAIL — `void is not a function`.
 
-- [ ] **Step 3: Implement void, add the route, and commit**
+- [ ] **Step 3: Implement voidTable, add the route, and commit**
 
 Guarded `findOneAndUpdate({ _id, status: 'open' }, { status: 'voided', voidedAt, voidReason })`.
 Route `POST /api/waiter/tables/:id/void`, gated `MANAGE_TABLES`.
@@ -1474,6 +1542,29 @@ it('replays a retried settle instead of billing twice', async () => {
   expect(await MerchantCharge.countDocuments({})).toBe(2);
 });
 
+it('still pays a stall that was suspended after the drinks were served', async () => {
+  // Suspension blocks NEW items, not money already owed. The goods went out.
+  const { table, stallA } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+  await fundedWallet(10000, '04a22b1c');
+  await Merchant.updateOne({ _id: stallA }, { $set: { status: 'suspended' } });
+
+  const { charges } = await TableService.settle({
+    tableId: String(table._id), eventId: EVENT, bandUid: '04a22b1c', settledBy: 'w1', clientTxnId: 's1',
+  });
+
+  expect(charges).toHaveLength(2);
+});
+
+it('bills the snapshot when the product was deleted mid-service', async () => {
+  const { table, productA } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+  const wallet = await fundedWallet(10000, '04a22b1c');
+  await Product.deleteOne({ _id: productA });
+
+  await TableService.settle({ tableId: String(table._id), eventId: EVENT, bandUid: '04a22b1c', settledBy: 'w1', clientTxnId: 's1' });
+
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(5500);
+});
+
 it('refuses an empty table', async () => {
   const table = await TableService.open({ eventId: EVENT, label: '9', openedBy: 'w1' });
   await fundedWallet(10000, '04a22b1c');
@@ -1518,7 +1609,7 @@ Order of operations matters:
 - [ ] **Step 4: Run the test and watch it pass**
 
 Run: `npx jest --runInBand src/services/__tests__/tableSettle.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Add the route**
 
