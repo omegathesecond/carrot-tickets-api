@@ -2,8 +2,12 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { WaiterToken } from '@interfaces/waiter.interface';
-import { TableService, TableLabelTakenError } from '@services/table.service';
+import {
+  TableService, TableLabelTakenError, TableShortfallError,
+  TableAlreadySettledError, TableWalletNotFoundError,
+} from '@services/table.service';
 import { StockDeclinedError } from '@services/stock.service';
+import { WalletDeclinedError } from '@services/merchant.service';
 
 /**
  * Load the event this waiter is working and assert they may act on it. Every
@@ -124,6 +128,58 @@ export class WaiterController {
       // "not open"/"not found" mirror removeItem's split: the table exists
       // but has already moved past voidable state, or the id names nothing.
       const status = /reason is required/i.test(msg) ? 400 : /not open/i.test(msg) ? 409 : /not found/i.test(msg) ? 404 : 500;
+      return ApiResponseUtil.error(res, msg, status);
+    }
+  }
+
+  /**
+   * POST /api/waiter/tables/:id/settle — charge the whole tab to one tapped
+   * tag, paying every stall on it at its own commission in one balanced
+   * journal entry.
+   *
+   * Gated on SETTLE_TABLES, not MANAGE_TABLES: serving and taking money are
+   * different jobs, and the money one is granted per person.
+   *
+   * settledBy/staffName come from the VERIFIED token, never the body — a
+   * waiter must not be able to sign somebody else's name to a charge.
+   */
+  static async settleTable(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const waiter = (req as any).waiter as WaiterToken;
+    const bandUid = typeof req.body?.bandUid === 'string' ? req.body.bandUid.trim() : '';
+    const clientTxnId = typeof req.body?.clientTxnId === 'string' ? req.body.clientTxnId.trim() : '';
+    if (!bandUid) return ApiResponseUtil.badRequest(res, 'bandUid is required');
+    // Required, not generated here: the id has to survive the retry that a
+    // handheld makes after losing its network, so it must come from the
+    // handheld. One generated server-side would be new on every attempt and
+    // every retry would be a second bill.
+    if (!clientTxnId) return ApiResponseUtil.badRequest(res, 'clientTxnId is required');
+
+    try {
+      const settlement = await TableService.settle({
+        tableId: req.params['id']!, eventId: String(event._id), bandUid,
+        settledBy: waiter.waiterId, staffName: waiter.fullName, clientTxnId,
+      });
+      return ApiResponseUtil.success(res, settlement);
+    } catch (e) {
+      // 402, with the shortfall in the payload so the handheld can tell the
+      // guest what to add at the desk rather than just "declined".
+      if (e instanceof TableShortfallError) {
+        return ApiResponseUtil.error(res, e.message, 402, {
+          reason: 'insufficient_balance', total: e.total, balance: e.balance, short: e.short,
+        });
+      }
+      if (e instanceof WalletDeclinedError) {
+        return ApiResponseUtil.error(res, e.message, 402, { reason: e.reason, balance: e.currentBalance });
+      }
+      // The tag names no wallet here — nothing to decline, so 404 not 402.
+      if (e instanceof TableWalletNotFoundError) return ApiResponseUtil.notFound(res, e.message);
+      if (e instanceof TableAlreadySettledError) return ApiResponseUtil.error(res, e.message, 409);
+      const msg = (e as Error)?.message || 'Could not settle table';
+      const status = /nothing on this table/i.test(msg) ? 400
+        : /not open/i.test(msg) ? 409
+        : /not found/i.test(msg) ? 404 : 500;
       return ApiResponseUtil.error(res, msg, status);
     }
   }

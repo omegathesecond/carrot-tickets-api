@@ -5,11 +5,14 @@ import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { WAITER_PERMISSIONS } from '@interfaces/waiter.interface';
+import { WAITER_PERMISSIONS, WaiterPermission } from '@interfaces/waiter.interface';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 import { StockService } from '@services/stock.service';
 import { ProductCategory, StockMovementReason } from '@interfaces/stock.interface';
+import { WalletService } from '@services/wallet.service';
+import { Wallet } from '@models/wallet.model';
+import { enrolTags } from '@/__tests__/helpers/eventTags';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 
@@ -47,6 +50,30 @@ async function seedStallOn(eventId: string, opts: { price: number; onHand: numbe
     reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: String(merchant._id),
   });
   return { merchantId: String(merchant._id), productId: String(product._id) };
+}
+
+/** A tag holding `amount` cents at this event, issued the way the desk issues one. */
+async function fundedTag(eventId: string, bandUid: string, amount: number) {
+  await enrolTags(eventId, bandUid);
+  const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId, bandUid });
+  await WalletService.topUpCash({
+    walletId: String(wallet._id), eventId, amount,
+    recordedBy: 'route-test-desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
+  });
+  return String(wallet._id);
+}
+
+/** An open table at `eventId` carrying `qty` of one stall's product. */
+async function tableWithDrinks(
+  eventId: string, token: string, opts: { label: string; price: number; qty: number },
+) {
+  const { merchantId, productId } = await seedStallOn(eventId, { price: opts.price, onHand: 20 });
+  const opened = await request(app).post('/api/waiter/tables')
+    .set('Authorization', `Bearer ${token}`).send({ label: opts.label });
+  const tableId = opened.body.data._id;
+  await request(app).post(`/api/waiter/tables/${tableId}/items`)
+    .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: opts.qty });
+  return { tableId, merchantId, productId };
 }
 
 describe('waiter tables — open and list', () => {
@@ -214,5 +241,85 @@ describe('waiter tables — void a table', () => {
       .set('Authorization', `Bearer ${token}`).send({ reason: 'walked out' });
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe('waiter tables — settle a table', () => {
+  /** A waiter who may both serve AND take money. */
+  const canSettle = [...WAITER_PERMISSIONS, WaiterPermission.SETTLE_TABLES];
+
+  it('charges the whole tab to one tapped tag', async () => {
+    const { eventId, token } = await seedFloor(canSettle);
+    const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 2 });
+    const walletId = await fundedTag(eventId, '04a22b1c', 10000);
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.walletBalance).toBe(4000);
+    expect(res.body.data.table.status).toBe('settled');
+    expect(res.body.data.charges).toHaveLength(1);
+    expect(res.body.data.charges[0].amount).toBe(6000);
+    expect((await Wallet.findById(walletId))!.balance).toBe(4000);
+  });
+
+  // 402, not a bare "declined": the payload has to tell the waiter how much
+  // short the tag is, or the guest has nothing to act on at the desk.
+  it('402s a tag that cannot cover the tab, and says by how much', async () => {
+    const { eventId, token } = await seedFloor(canSettle);
+    const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 2 });
+    await fundedTag(eventId, '04a22b1c', 4500);
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(402);
+    expect(res.body.message).toMatch(/R15\.00 short/);
+  });
+
+  it('409s a second settle of an already-settled table', async () => {
+    const { eventId, token } = await seedFloor(canSettle);
+    const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 1 });
+    await fundedTag(eventId, '04a22b1c', 10000);
+    const body = { bandUid: '04a22b1c', clientTxnId: 's1' };
+    await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send(body);
+
+    const again = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ ...body, clientTxnId: 's2' });
+
+    expect(again.status).toBe(409);
+    expect(again.body.message).toMatch(/already settled/i);
+  });
+
+  it('404s a tag that carries no wallet at this event', async () => {
+    const { eventId, token } = await seedFloor(canSettle);
+    const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 1 });
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/no wallet/i);
+  });
+
+  // THE gate that matters: serving a table and taking money for it are
+  // separate grants. A waiter with the full default permission set still has
+  // no business settling, because SETTLE_TABLES is not in it. A 200 here would
+  // mean the route were gated on MANAGE_TABLES — every waiter on the floor
+  // able to charge a guest's tag.
+  it('403s a waiter holding MANAGE_TABLES but NOT SETTLE_TABLES', async () => {
+    const { eventId, token } = await seedFloor(WAITER_PERMISSIONS);
+    const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 1 });
+    await fundedTag(eventId, '04a22b1c', 10000);
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
+      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/waiter:settle_tables/);
+    // And nothing moved.
+    expect((await Wallet.findOne({ bandUid: '04a22b1c' }))!.balance).toBe(10000);
   });
 });

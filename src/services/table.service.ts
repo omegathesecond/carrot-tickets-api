@@ -1,15 +1,102 @@
 import mongoose from 'mongoose';
 import { Table } from '@models/table.model';
-import { ITable } from '@interfaces/table.interface';
+import { ITable, ITableLine, TableStatus } from '@interfaces/table.interface';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
+import { Wallet, IWallet } from '@models/wallet.model';
+import { MerchantCharge, IMerchantCharge } from '@models/merchantCharge.model';
 import { StockService } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
+import { LedgerService, Posting } from '@services/ledger.service';
+import { LedgerAccountType } from '@interfaces/ledger.interface';
+import { WalletDeclinedError } from '@services/merchant.service';
+import { normalizeBandUid } from '@utils/bandUid.util';
 
 /** Thrown when a label is already open at this event — the caller maps it to 409. */
 export class TableLabelTakenError extends Error {
   constructor(label: string) { super(`Table ${label} is already open`); }
+}
+
+/** Cents as the waiter reads them off the handheld, e.g. 1500 -> "15.00". */
+function rands(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+/**
+ * The tag cannot cover the tab. NOTHING was written — no wallet debit, no
+ * postings, no charge rows, and the table is still open — so the waiter can
+ * top the tag up and tap again.
+ *
+ * The message names the amount SHORT on purpose: "declined" alone sends the
+ * waiter back to the table with nothing to tell the guest, and the guest with
+ * no idea how much to add at the desk. Mapped to 402.
+ */
+export class TableShortfallError extends Error {
+  /** Cents still needed. */
+  public readonly short: number;
+  constructor(public readonly total: number, public readonly balance: number) {
+    super(`Tag is R${rands(total - balance)} short — the tab is R${rands(total)}, the tag holds R${rands(balance)}`);
+    this.name = 'TableShortfallError';
+    this.short = total - balance;
+  }
+}
+
+/**
+ * The table has already moved past settling. Distinct from a RETRY of the
+ * settle that closed it (same clientTxnId), which replays the original
+ * charges instead — see TableService.settle. Mapped to 409.
+ */
+export class TableAlreadySettledError extends Error {
+  constructor(public readonly status: TableStatus) {
+    super(status === 'settled' ? 'table is already settled' : `table is not open (status: ${status})`);
+    this.name = 'TableAlreadySettledError';
+  }
+}
+
+/**
+ * The tapped tag carries no wallet at this event — an unregistered or
+ * unbound band. Not a decline (there is no account to decline): the waiter
+ * needs to send the guest to the desk to have the tag issued. Mapped to 404.
+ */
+export class TableWalletNotFoundError extends Error {
+  constructor(public readonly bandUid: string) {
+    super('no wallet on that tag at this event');
+    this.name = 'TableWalletNotFoundError';
+  }
+}
+
+/**
+ * Thrown INSIDE the settle transaction when the status guard misses because
+ * THIS settle already committed (the POS retried, or a duplicate request
+ * overlapped). Throwing aborts the transaction, so nothing this attempt wrote
+ * survives, and the outer catch answers with the committed outcome. Never
+ * leaves TableService — mirrors MerchantService's ReplayedCharge.
+ */
+class ReplayedSettlement extends Error {
+  constructor(public readonly table: ITable) {
+    super('replayed settlement');
+    this.name = 'ReplayedSettlement';
+  }
+}
+
+/** What one stall is owed off a table, and the lines it is owed for. */
+interface StallShare {
+  merchantId: string;
+  lines: ITableLine[];
+  /** What the guest is charged for this stall's lines, cents. */
+  gross: number;
+  /** Platform commission at THIS stall's rate, cents. */
+  fee: number;
+  /** gross - fee: what the stall is owed, cents. */
+  net: number;
+}
+
+/** The outcome of settling a table: the closed table, one charge per paid stall, and the tag's remaining balance. */
+export interface TableSettlement {
+  table: ITable;
+  charges: IMerchantCharge[];
+  walletBalance: number;
 }
 
 export class TableService {
@@ -210,5 +297,246 @@ export class TableService {
       throw new Error(`table is not open (status: ${existing.status})`);
     }
     return updated;
+  }
+
+  /**
+   * Settle a whole table against ONE tapped tag.
+   *
+   * A table holds lines from SEVERAL stalls, each with its own commission and
+   * its own MERCHANT ledger account, so the money cannot move as one lump —
+   * but the guest taps once, so it must still be all-or-nothing. The
+   * resolution is a single balanced journal entry that fans out:
+   *
+   *   WALLET   ref=wallet   +total
+   *   MERCHANT ref=stallA   -netA        FEES  -feeA
+   *   MERCHANT ref=stallB   -netB        FEES  -feeB
+   *
+   * posted with the table flip, the wallet debit and every MerchantCharge in
+   * ONE transaction. The postings sum to zero by construction, not by luck:
+   * `total` is the sum of the same per-stall `gross` figures each stall's
+   * `net + fee` is split out of, so no rounding rule can unbalance it.
+   *
+   * Idempotent on `clientTxnId`: a POS that loses its network after the charge
+   * lands will retry, and telling that waiter it failed while the guest HAS
+   * been charged is worse than any other outcome here. A retry replays the
+   * committed charges; a settle under a DIFFERENT id on an already-settled
+   * table is refused.
+   */
+  static async settle(params: {
+    tableId: string; eventId: string; bandUid: string;
+    /** The waiter (a Waiter _id) taking the money — attribution on every charge row. */
+    settledBy: string;
+    /** Their name, snapshotted so the record survives a rename. */
+    staffName: string;
+    clientTxnId: string;
+  }): Promise<TableSettlement> {
+    const { tableId, eventId, settledBy, staffName, clientTxnId } = params;
+    if (!clientTxnId?.trim()) throw new Error('clientTxnId is required');
+    if (!staffName?.trim()) throw new Error('staffName is required');
+
+    const tableObjId = new mongoose.Types.ObjectId(tableId);
+    const eventObjId = new mongoose.Types.ObjectId(eventId);
+    const bandUid = normalizeBandUid(params.bandUid);
+
+    // eventId is in the filter, as everywhere else in this service: a table at
+    // another event must read exactly like a missing one.
+    const table = await Table.findOne({ _id: tableObjId, eventId: eventObjId });
+    if (!table) throw new Error('table not found');
+    if (table.status !== 'open') {
+      // The ordinary retry path: the first settle committed, the POS resent it.
+      const replay = await TableService.replaySettlement(table, clientTxnId);
+      if (replay) return replay;
+      throw new TableAlreadySettledError(table.status);
+    }
+    if (!table.items.length) throw new Error('there is nothing on this table');
+
+    const stalls = await TableService.shareOutByStall(table, eventObjId);
+    const total = stalls.reduce((t, s) => t + s.gross, 0);
+    // Every line comped to zero. There is no money to move and no charge row
+    // that would validate (MerchantCharge floors at 1 cent), so this is not a
+    // settle — the waiter voids it.
+    if (total <= 0) throw new Error('there is nothing on this table to charge for');
+
+    const wallet = await Wallet.findOne({ eventId: eventObjId, bandUid });
+    if (!wallet) throw new TableWalletNotFoundError(bandUid);
+    // Checked BEFORE the transaction so a short tag is answered with the
+    // amount short and nothing is written. The wallet CAS inside the
+    // transaction is still the authoritative guard against a concurrent spend.
+    if (wallet.balance < total) throw new TableShortfallError(total, wallet.balance);
+
+    const postings: Posting[] = [
+      { account: { type: LedgerAccountType.WALLET, ref: String(wallet._id) }, delta: total },
+      ...stalls.flatMap((s): Posting[] => [
+        { account: { type: LedgerAccountType.MERCHANT, ref: s.merchantId }, delta: -s.net },
+        ...(s.fee > 0 ? [{ account: { type: LedgerAccountType.FEES }, delta: -s.fee }] : []),
+      ]),
+    ];
+
+    const session = await mongoose.startSession();
+    try {
+      let out!: TableSettlement;
+      await session.withTransaction(async () => {
+        // The status guard is what stops two simultaneous settles from both
+        // charging the guest: exactly one findOneAndUpdate can move the table
+        // off 'open'. settleTxnId goes down in the SAME $set, so the loser can
+        // tell "I already did this" (retry -> replay) from "somebody else did"
+        // (different id -> refuse).
+        const settled = await Table.findOneAndUpdate(
+          { _id: tableObjId, eventId: eventObjId, status: 'open' },
+          { $set: { status: 'settled', settledAt: new Date(), settledBy, walletId: wallet._id, settleTxnId: clientTxnId } },
+          { new: true, session },
+        );
+        if (!settled) {
+          const current = await Table.findOne({ _id: tableObjId, eventId: eventObjId }).session(session);
+          if (!current) throw new Error('table not found');
+          if (current.status === 'settled' && current.settleTxnId === clientTxnId) {
+            throw new ReplayedSettlement(current);
+          }
+          throw new TableAlreadySettledError(current.status);
+        }
+
+        // Atomic CAS debit — the guard and the decrement are ONE operation, so
+        // no concurrent tap can push the balance negative. cashFundedBalance is
+        // drawn down first and floored at 0, the pattern wallet.model.ts
+        // documents and MerchantService.charge follows.
+        const debited = await Wallet.findOneAndUpdate(
+          { _id: wallet._id, eventId: eventObjId, status: 'active', balance: { $gte: total } },
+          [
+            {
+              $set: {
+                balance: { $subtract: ['$balance', total] },
+                cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', total] }] },
+              },
+            },
+          ],
+          { new: true, session },
+        );
+        if (!debited) {
+          // Someone spent the tag down (or froze it) between the pre-check and
+          // here. Throwing aborts the transaction, so the table flip above
+          // rolls back with everything else and the tab stays open.
+          const fresh = await Wallet.findOne({ _id: wallet._id, eventId: eventObjId }).session(session);
+          if (!fresh) throw new TableWalletNotFoundError(bandUid);
+          if (fresh.status !== 'active') {
+            throw new WalletDeclinedError('wallet_not_active', 'that tag is not active', fresh.balance);
+          }
+          throw new TableShortfallError(total, fresh.balance);
+        }
+
+        await LedgerService.post({
+          eventId, postings, refType: 'table_settlement', refId: tableId, session,
+        });
+
+        // One row per stall, each keyed on `${clientTxnId}:${merchantId}` so
+        // MerchantCharge's existing {merchantId, clientTxnId} unique index
+        // makes a concurrent duplicate an E11000 (a replay) rather than a
+        // second bill — and so a stall's takings report reads a table charge
+        // exactly like a till charge.
+        const charges = await MerchantCharge.create(
+          stalls.map((s) => ({
+            merchantId: s.merchantId, eventId, walletId: wallet._id, bandUid,
+            amount: s.gross, fee: s.fee, netAmount: s.net,
+            clientTxnId: `${clientTxnId}:${s.merchantId}`, status: 'completed',
+            items: s.lines.map((l) => ({
+              productId: l.productId, name: l.name, unitPrice: l.unitPrice,
+              qty: l.qty, lineTotal: l.unitPrice * l.qty,
+            })),
+            // A table has no till operator — the waiter collected from several
+            // stalls and settled them together (see IMerchantCharge).
+            waiterId: settledBy, staffName,
+          })),
+          { session },
+        );
+
+        out = { table: settled, charges, walletBalance: debited.balance };
+      });
+      return out;
+    } catch (e) {
+      if (e instanceof ReplayedSettlement) {
+        const replay = await TableService.replaySettlement(e.table, clientTxnId);
+        if (replay) return replay;
+        throw new TableAlreadySettledError(e.table.status);
+      }
+      // The per-stall unique index lost the race to a concurrent duplicate of
+      // THIS settle. Because the id embeds clientTxnId, an E11000 there can
+      // only mean the same settle committed elsewhere — answer with it.
+      if ((e as { code?: number })?.code === 11000) {
+        const current = await Table.findOne({ _id: tableObjId, eventId: eventObjId });
+        const replay = current ? await TableService.replaySettlement(current, clientTxnId) : null;
+        if (replay) return replay;
+      }
+      throw e;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
+   * Split a table's lines by stall and price each share at THAT stall's own
+   * commission, read fresh from its Merchant document right now — never
+   * cached and never copied onto the table, so a rate change takes effect
+   * immediately and one stall's rate can never leak onto another's line.
+   *
+   * A SUSPENDED stall is deliberately still paid: suspension blocks new items,
+   * not money already owed. The drinks went out.
+   */
+  private static async shareOutByStall(
+    table: ITable,
+    eventObjId: mongoose.Types.ObjectId,
+  ): Promise<StallShare[]> {
+    const byStall = new Map<string, ITableLine[]>();
+    for (const line of table.items) {
+      const key = String(line.merchantId);
+      const lines = byStall.get(key);
+      if (lines) lines.push(line); else byStall.set(key, [line]);
+    }
+
+    const merchants = await Merchant.find({ _id: { $in: [...byStall.keys()] }, eventId: eventObjId });
+    const rateOf = new Map(merchants.map((m) => [String(m._id), m.commissionPercent || 0]));
+
+    const shares: StallShare[] = [];
+    for (const [merchantId, lines] of byStall) {
+      const rate = rateOf.get(merchantId);
+      // A line whose stall is gone (or belongs to another event) has no rate
+      // to charge at. Guessing one would misallocate real money, so refuse the
+      // whole settle rather than pay part of the table.
+      if (rate == null) throw new Error('a stall on this table was not found for this event');
+      const gross = lines.reduce((t, l) => t + l.unitPrice * l.qty, 0);
+      // Floor, matching MerchantService.charge: deterministic, and the platform
+      // never rounds a cent it is not owed out of the stall's share. `net` is
+      // then a SUBTRACTION from the same gross, which is what keeps
+      // net + fee === gross exactly and the journal entry balanced.
+      const fee = Math.floor((gross * rate) / 100);
+      // A fully comped stall is owed nothing: no charge row (the model floors
+      // at 1 cent) and no zero-delta ledger legs. Not a silent drop — there is
+      // no money to move.
+      if (gross <= 0) continue;
+      shares.push({ merchantId, lines, gross, fee, net: gross - fee });
+    }
+    return shares;
+  }
+
+  /**
+   * The outcome of the settle that ALREADY closed this table, when the caller
+   * is retrying it — or null when this is a genuinely different request and
+   * must be refused instead.
+   */
+  private static async replaySettlement(
+    table: ITable,
+    clientTxnId: string,
+  ): Promise<TableSettlement | null> {
+    if (table.status !== 'settled' || table.settleTxnId !== clientTxnId) return null;
+
+    const perStallIds = [...new Set(table.items.map((l) => String(l.merchantId)))]
+      .map((merchantId) => `${clientTxnId}:${merchantId}`);
+    const charges = await MerchantCharge.find({ clientTxnId: { $in: perStallIds } });
+
+    // A settled table always names the wallet it was charged to. Missing means
+    // the row was tampered with, and reporting a balance we cannot read would
+    // be a lie — fail loudly instead.
+    const wallet: IWallet | null = table.walletId ? await Wallet.findById(table.walletId) : null;
+    if (!wallet) throw new Error('settled table has no wallet on record');
+
+    return { table, charges, walletBalance: wallet.balance };
   }
 }

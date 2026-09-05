@@ -26,6 +26,12 @@ export interface SeedStallOptions {
   onHand: number;
   name?: string;
   category?: ProductCategory;
+  /**
+   * The stall's own platform commission. Optional and defaulted to the
+   * model's own 0 — only settlement cares, and pinning a non-zero default
+   * here would silently change the arithmetic of every existing fixture.
+   */
+  commissionPercent?: number;
 }
 
 export interface SeededStall {
@@ -35,7 +41,10 @@ export interface SeededStall {
 
 /** A Merchant on EVENT, a Product on it at `price` cents, stocked `onHand` units. */
 export async function seedStall(opts: SeedStallOptions): Promise<SeededStall> {
-  const merchant = await Merchant.create({ name: 'Test Stall', eventId: EVENT });
+  const merchant = await Merchant.create({
+    name: 'Test Stall', eventId: EVENT,
+    ...(opts.commissionPercent == null ? {} : { commissionPercent: opts.commissionPercent }),
+  });
   const product = await Product.create({
     eventId: EVENT,
     name: opts.name ?? 'Beer',
