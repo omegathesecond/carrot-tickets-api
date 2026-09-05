@@ -200,7 +200,9 @@ export class TableService {
         // and one clobber the other's push.
         const updated = await Table.findOneAndUpdate(
           { _id: tableObjId, eventId: eventObjId, status: 'open' },
-          { $push: { items: line }, $inc: { subtotal: lineTotal } },
+          // revision rides along in the SAME $inc: a separate write could land
+          // without the push (or vice versa) and the token would lie.
+          { $push: { items: line }, $inc: { subtotal: lineTotal, revision: 1 } },
           { new: true, session },
         );
         if (!updated) {
@@ -268,7 +270,8 @@ export class TableService {
         // fails to match rather than double-applying or leaking existence.
         const updated = await Table.findOneAndUpdate(
           { _id: tableObjId, eventId: eventObjId, status: 'open', 'items._id': lineObjId },
-          { $pull: { items: { _id: lineObjId } }, $inc: { subtotal: -lineTotal } },
+          // revision rides along in the SAME $inc, as in addItem.
+          { $pull: { items: { _id: lineObjId } }, $inc: { subtotal: -lineTotal, revision: 1 } },
           { new: true, session },
         );
         if (!updated) {
@@ -410,18 +413,23 @@ export class TableService {
         // tell "I already did this" (retry -> replay) from "somebody else did"
         // (different id -> refuse).
         //
-        // subtotal + item count are in the filter too, because the lines were
-        // read and priced OUTSIDE this transaction. A colleague's addItem or
-        // removeItem committing in that window would otherwise be silently
-        // charged over: the guest pays the stale total, the stall that poured
-        // the last round is never paid though its stock has gone, and the
-        // table's subtotal ends up disagreeing with the charges written
-        // against it. Every line change $incs subtotal, so a mismatch here IS
-        // "the table moved under me" — refuse the whole settle, never a part
-        // of it.
+        // revision + subtotal + item count are in the filter, because the lines
+        // were read and priced OUTSIDE this transaction. A colleague's addItem
+        // or removeItem committing in that window would otherwise be silently
+        // charged over: the guest pays a stale total, the stall that poured the
+        // last round is never paid though its stock has gone, and the table's
+        // subtotal ends up disagreeing with the charges written against it.
+        //
+        // revision is the load-bearing one — every line change bumps it, so it
+        // catches the case the money figures cannot: a line removed at one
+        // stall and an identically-priced one added at ANOTHER leaves subtotal
+        // AND the count untouched while the split between merchants moves.
+        // subtotal and the count stay as independent belt-and-braces. A miss
+        // is "the table moved under me": refuse the whole settle, never part.
         const settled = await Table.findOneAndUpdate(
           {
             _id: tableObjId, eventId: eventObjId, status: 'open',
+            revision: table.revision,
             subtotal: table.subtotal, items: { $size: table.items.length },
           },
           { $set: { status: 'settled', settledAt: new Date(), settledBy, walletId: wallet._id, settleTxnId: clientTxnId } },

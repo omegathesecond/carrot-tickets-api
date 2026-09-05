@@ -23,6 +23,8 @@ const tableSchema = new Schema<ITable>({
   openedBy: { type: String, required: true },
   items: { type: [tableLineSchema], default: [] },
   subtotal: { type: Number, default: 0, min: 0, validate: integerCents },
+  // Optimistic-concurrency token for settlement — see ITable.revision.
+  revision: { type: Number, default: 0 },
   settledAt: { type: Date },
   settledBy: { type: String },
   walletId: { type: Schema.Types.ObjectId, ref: 'Wallet' },

@@ -25,6 +25,17 @@ export interface ITable extends Document {
   openedBy: string;
   items: ITableLine[];
   subtotal: number;
+  /**
+   * Bumped by EVERY update that changes the line set. Settlement prices the
+   * lines outside its transaction, then names this value in its guarded flip,
+   * so any change committed in that window makes the flip miss.
+   *
+   * subtotal cannot do this job alone: removing a line at one stall and adding
+   * one of identical value at ANOTHER leaves subtotal and the line count both
+   * unchanged, while the split between merchants has moved. The guest's total
+   * would be right and the money would go to the wrong stall.
+   */
+  revision: number;
   settledAt?: Date;
   settledBy?: string;
   walletId?: Types.ObjectId;

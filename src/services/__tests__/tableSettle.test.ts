@@ -238,6 +238,53 @@ describe('TableService.settle', () => {
     expect(after!.items).toHaveLength(3);
   });
 
+  // ROUND 2. The residual the subtotal guard could not close: a line removed at
+  // one stall and an identically-priced one added at ANOTHER, inside the
+  // pricing window. subtotal AND the line count both come out unchanged, so
+  // only `revision` can see it — and without it the guest's total is right
+  // while stall B is paid for a drink that was taken off and stall C is never
+  // paid for the one that was served off its shelf.
+  it('refuses an equal-value swap between stalls mid-settle, which leaves subtotal untouched', async () => {
+    const { table, stallB } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+    const wallet = await fundedWallet(10000, TAG);
+    const stallC = await seedStall({ price: 1500, onHand: 10, name: 'Cider' });
+    const lineB = table.items.find((l) => String(l.merchantId) === stallB)!;
+
+    const realStartSession = mongoose.startSession.bind(mongoose);
+    const spy = jest.spyOn(mongoose, 'startSession').mockImplementationOnce(async (...args) => {
+      await TableService.removeItem({
+        tableId: String(table._id), eventId: String(EVENT),
+        lineId: String(lineB._id), removedBy: String(WAITER),
+      });
+      await TableService.addItem({
+        tableId: String(table._id), eventId: String(EVENT),
+        merchantId: stallC.merchantId, productId: stallC.productId, qty: 1, addedBy: String(WAITER),
+      });
+      return realStartSession(...args);
+    });
+
+    try {
+      await expect(TableService.settle(settleArgs(table, 's1')))
+        .rejects.toThrow(/table changed during settlement/i);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(10000);
+    expect(await MerchantCharge.countDocuments({})).toBe(0);
+    expect(await LedgerEntry.countDocuments({ refType: 'table_settlement' })).toBe(0);
+    const after = await Table.findById(table._id);
+    expect(after!.status).toBe('open');
+    // The money figures are IDENTICAL to what was priced — this is exactly why
+    // subtotal and the line count cannot catch this one.
+    expect(after!.subtotal).toBe(table.subtotal);
+    expect(after!.items).toHaveLength(table.items.length);
+    // But the split moved: stall B is off the tab, stall C is on it.
+    const stalls = new Set(after!.items.map((l) => String(l.merchantId)));
+    expect(stalls.has(stallB)).toBe(false);
+    expect(stalls.has(stallC.merchantId)).toBe(true);
+  });
+
   // FINDING 2. Two settles issued with the SAME clientTxnId — a POS retry that
   // overlaps its own original, which is when the in-transaction replay path
   // runs. Both callers must be answered with the ONE settlement.

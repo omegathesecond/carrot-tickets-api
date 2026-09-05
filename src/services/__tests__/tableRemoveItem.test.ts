@@ -11,6 +11,21 @@ afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 describe('TableService.removeItem', () => {
+  // Settlement's guarded flip names the revision it priced at, so a removal
+  // that did not bump it would be invisible to that guard — and a removal is
+  // half of the equal-value swap subtotal cannot see. See ITable.revision.
+  it('bumps the table revision on every removal', async () => {
+    const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
+    const withItem = await TableService.addItem({ tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1' });
+    expect(withItem.revision).toBe(1);
+
+    const after = await TableService.removeItem({
+      tableId: String(table._id), eventId: String(EVENT), lineId: String(withItem.items[0]!._id), removedBy: 'w1',
+    });
+
+    expect(after.revision).toBe(2);
+  });
+
   it('returns the stock — this is the mis-punch, the drink never left the counter', async () => {
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
     const withItem = await TableService.addItem({ tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 2, addedBy: 'w1' });

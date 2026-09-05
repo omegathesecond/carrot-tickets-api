@@ -55,6 +55,23 @@ describe('TableService.addItem', () => {
     })).rejects.toThrow(/not sold at that stall/i);
   });
 
+  // Settlement's guarded flip names the revision it priced at, so an add that
+  // did not bump it would be invisible to that guard — see ITable.revision.
+  it('bumps the table revision on every add', async () => {
+    const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
+    expect(table.revision).toBe(0);
+
+    const once = await TableService.addItem({
+      tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1',
+    });
+    expect(once.revision).toBe(1);
+
+    const twice = await TableService.addItem({
+      tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1',
+    });
+    expect(twice.revision).toBe(2);
+  });
+
   it('refuses to add to a settled table', async () => {
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
     await Table.updateOne({ _id: table._id }, { $set: { status: 'settled' } });
