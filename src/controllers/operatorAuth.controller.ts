@@ -4,10 +4,12 @@ import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { Cashier } from '@models/cashier.model';
+import { Waiter } from '@models/waiter.model';
 import { ResellerAuthService } from '@services/resellerAuth.service';
 import { GateOperatorAuthService } from '@services/gateOperatorAuth.service';
 import { MerchantAuthService } from '@services/merchantAuth.service';
 import { CashierAuthService } from '@services/cashierAuth.service';
+import { WaiterAuthService } from '@services/waiterAuth.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
@@ -28,11 +30,12 @@ export class OperatorAuthController {
       // never reaches the (already-normalizing) service at all.
       const code = normalizeLoginCode(loginCode);
 
-      const [reseller, gate, merchant, cashier] = await Promise.all([
+      const [reseller, gate, merchant, cashier, waiter] = await Promise.all([
         ResellerOperator.exists({ loginCode: code, isActive: true }),
         GateOperator.exists({ loginCode: code, isActive: true }),
         MerchantOperator.exists({ loginCode: code, isActive: true }),
         Cashier.exists({ loginCode: code, isActive: true }),
+        Waiter.exists({ loginCode: code, isActive: true }),
       ]);
 
       try {
@@ -59,6 +62,11 @@ export class OperatorAuthController {
         if (merchant) {
           const result = await MerchantAuthService.login(code, pin);
           ApiResponseUtil.success(res, { type: 'merchant', ...result });
+          return;
+        }
+        if (waiter) {
+          const result = await WaiterAuthService.login(code, pin);
+          ApiResponseUtil.success(res, { type: 'waiter', ...result });
           return;
         }
       } catch (e: any) {

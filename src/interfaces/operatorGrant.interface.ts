@@ -2,6 +2,7 @@
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { CashierPermission } from '@interfaces/cashier.interface';
 import { MerchantPermission } from '@interfaces/merchant.interface';
+import { WaiterPermission } from '@interfaces/waiter.interface';
 
 /**
  * Capabilities an organizer can grant to an INDIVIDUAL operator, on top of
@@ -31,6 +32,13 @@ export enum OperatorGrant {
    * gate operator or cashier, whose namespaces deliberately have no mapping.
    */
   MANAGE_STOCK = 'manage_stock',
+  /**
+   * SETTLING a table — taking the money at the end of service. Separate from
+   * serving because they are different jobs: an organizer may want the money
+   * moment held by a supervisor. Held by a Waiter; it means nothing on any
+   * other actor, whose namespaces have no mapping for it.
+   */
+  SETTLE_TABLES = 'settle_tables',
 }
 
 export const OPERATOR_GRANTS: OperatorGrant[] = Object.values(OperatorGrant);
@@ -48,6 +56,11 @@ const CASHIER_BY_GRANT: Partial<Record<OperatorGrant, CashierPermission>> = {
 /** Grants → the merchant namespace (stall operators on the POS). */
 const MERCHANT_BY_GRANT: Partial<Record<OperatorGrant, MerchantPermission>> = {
   [OperatorGrant.MANAGE_STOCK]: MerchantPermission.MANAGE_STOCK,
+};
+
+/** Grants → the waiter namespace (floor waiters logging in through the POS). */
+const WAITER_BY_GRANT: Partial<Record<OperatorGrant, WaiterPermission>> = {
+  [OperatorGrant.SETTLE_TABLES]: WaiterPermission.SETTLE_TABLES,
 };
 
 /**
@@ -75,6 +88,18 @@ export function grantedMerchantPermissions(grants?: string[] | null): MerchantPe
     .filter((g): g is OperatorGrant => OPERATOR_GRANTS.includes(g as OperatorGrant))
     .map((g) => MERCHANT_BY_GRANT[g])
     .filter((p): p is MerchantPermission => p !== undefined);
+}
+
+/**
+ * Waiters accept `unknown` rather than `string[] | null` like their siblings
+ * above — the token mint reads `grants` off a Mongoose document, so routing
+ * it through `sanitizeGrants` (built for the admin-write path, but an equally
+ * valid filter here) is reuse rather than a third hand-rolled filter clause.
+ */
+export function grantedWaiterPermissions(grants: unknown): WaiterPermission[] {
+  return sanitizeGrants(grants)
+    .map((g) => WAITER_BY_GRANT[g])
+    .filter((p): p is WaiterPermission => !!p);
 }
 
 /**
