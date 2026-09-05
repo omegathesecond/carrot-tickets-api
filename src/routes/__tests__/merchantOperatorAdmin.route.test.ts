@@ -399,3 +399,20 @@ it('revokes a grant on patch', async () => {
   const saved = await MerchantOperator.findById(operatorId).lean();
   expect(saved!.grants).toEqual([]);
 });
+
+it('PATCH omitting grants leaves existing grants intact', async () => {
+  const { merchantId } = await seedMerchant();
+  const auth = `Bearer ${organizerToken(VENDOR_A)}`;
+  const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', auth)
+    .send({ fullName: 'Original Name', grants: [OperatorGrant.MANAGE_STOCK] });
+  const operatorId = created.body.data.operator._id;
+
+  const res = await request(app).patch(`/api/tickets/merchant-operators/${operatorId}`)
+    .set('Authorization', auth).send({ fullName: 'New Name' });
+
+  expect(res.status).toBe(200);
+  const saved = await MerchantOperator.findById(operatorId).lean();
+  expect(saved!.grants).toEqual([OperatorGrant.MANAGE_STOCK]);
+  expect(saved!.fullName).toBe('New Name');
+});
