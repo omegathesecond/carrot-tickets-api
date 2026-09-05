@@ -170,3 +170,67 @@ describe('a standalone tag is still fully accounted for', () => {
     expect(res.body.message).not.toMatch(/not found/i);
   });
 });
+
+describe('scanning a tag at the desk makes it ready in one tap', () => {
+  // The POS Register loop posts {bandUid} per scan. That single tap is a tag
+  // going into somebody's hand, so it must come out of it spendable — the
+  // handhelds already make this call, which is why this lives on the server.
+  const register = (eventId: string, token: string, body: Record<string, unknown>) =>
+    request(app)
+      .post(`/api/tickets/events/${eventId}/tags/registry`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+
+  it('gives the scanned tag a wallet, not just a place in the register', async () => {
+    const { eventId, organizerToken } = await seedCashlessEvent();
+
+    const res = await register(eventId, organizerToken, { bandUid: '04a22b1c' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.outcome).toBe('registered');
+    const wallet = await Wallet.findOne({ eventId, bandUid: '04a22b1c' });
+    expect(wallet).not.toBeNull();
+    expect(wallet!.ticketId).toBeUndefined();
+  });
+
+  it('stays a no-op on a re-scan, the way the desk loop relies on', async () => {
+    // The sheet re-arms after every tap, so a double-read must read as
+    // "already done" rather than an error.
+    const { eventId, organizerToken } = await seedCashlessEvent();
+    await register(eventId, organizerToken, { bandUid: '04a22b1c' });
+
+    const again = await register(eventId, organizerToken, { bandUid: '04a22b1c' });
+
+    expect(again.status).toBe(200);
+    expect(again.body.data.outcome).toBe('already_registered');
+    expect(await Wallet.countDocuments({ eventId })).toBe(1);
+  });
+
+  it('does not choke on a tag that already carries somebody ticket wallet', async () => {
+    // Re-scanning a tag that was bound to a ticket must not turn a harmless
+    // re-tap into an error: it already has a wallet, so it is already ready.
+    const { eventId, organizerToken } = await seedCashlessEvent();
+    await register(eventId, organizerToken, { bandUid: '04a22b1c' });
+    await Wallet.updateOne(
+      { eventId, bandUid: '04a22b1c' },
+      { $set: { ticketId: new mongoose.Types.ObjectId() } },
+    );
+
+    const again = await register(eventId, organizerToken, { bandUid: '04a22b1c' });
+
+    expect(again.status).toBe(200);
+    expect(await Wallet.countDocuments({ eventId })).toBe(1);
+  });
+
+  it('leaves the bulk paste box as a stocking tool — no wallets', async () => {
+    // A pasted tag order is 500 tags nobody is holding yet. Minting wallets for
+    // them would fill the Balances screen with tags in a box.
+    const { eventId, organizerToken } = await seedCashlessEvent();
+
+    const res = await register(eventId, organizerToken, { bandUids: ['04a22b01', '04a22b02'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.registered).toEqual(['04a22b01', '04a22b02']);
+    expect(await Wallet.countDocuments({ eventId })).toBe(0);
+  });
+});

@@ -124,6 +124,14 @@ export class WalletService {
     bandUid: string;
     /** The desk operator who handed it out, for the binding trail. */
     issuedBy?: string;
+    /**
+     * Treat a tag that already carries a TICKET's wallet as already-ready
+     * rather than refusing it. Set by the register scan, whose only question is
+     * "can this tag hold money yet" — it can. The explicit hand-out action
+     * leaves it off, because there "this is not a blank" is exactly what the
+     * operator needs told.
+     */
+    acceptTicketBound?: boolean;
   }): Promise<{ wallet: IWallet; created: boolean }> {
     // Normalise + shape-check FIRST, so a malformed uid is refused before any
     // read or write — and so the lookup below uses the canonical form every
@@ -136,7 +144,9 @@ export class WalletService {
       // A tag already carrying somebody's ticket is not a blank to hand out.
       // Distinguished from "not registered" on purpose: at a busy desk these
       // call for opposite actions.
-      if (existing.ticketId) throw new Error('That tag belongs to a ticket at this event');
+      if (existing.ticketId && !params.acceptTicketBound) {
+        throw new Error('That tag belongs to a ticket at this event');
+      }
       return { wallet: existing, created: false };
     }
 
@@ -168,7 +178,9 @@ export class WalletService {
       if (!(err as { keyPattern?: Record<string, unknown> })?.keyPattern?.bandUid) throw err;
       const winner = await Wallet.findOne({ eventId, bandUid: uid });
       if (!winner) throw err;
-      if (winner.ticketId) throw new Error('That tag belongs to a ticket at this event');
+      if (winner.ticketId && !params.acceptTicketBound) {
+        throw new Error('That tag belongs to a ticket at this event');
+      }
       return { wallet: winner, created: false };
     }
   }

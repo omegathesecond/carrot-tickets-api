@@ -112,3 +112,30 @@ operator is none of those, so this needs operator attribution threaded through
 sales reporting, plus the clientTxnId reservation collection the deleted
 `ResellerBandSale` provided (TicketSale has no clientTxnId, so a retry would mint
 a second ticket — reserve the key BEFORE the sale, per commit 5c3d33e).
+
+## Revision, 2026-09-05: the tag IS the wallet
+
+Clarified by the client after the first deploy, and it changes the shape:
+
+> A tag is not a ticket. It is just the NFC tag — what we use for cashless
+> payments, and what a person gets when they come in. Every event has tickets;
+> not every event has tags. Some tags can also scan people in, but that is two
+> or three events a year.
+
+Two consequences.
+
+**One tap does everything.** The POS Register loop is the desk's real flow (the
+dashboard is for monitoring), and it posts a single `{bandUid}` per scan. That
+scan now enrols the tag AND gives it a wallet, so the tag comes out of it
+spendable. Doing this server-side rather than in the app means the handhelds
+already in the field get it with no release. The BULK `{bandUids}` branch is
+unchanged — a pasted tag order is stock nobody is holding, and a wallet per line
+would fill the Balances screen with tags still in the box.
+
+**Binding a ticket ADOPTS the tag's wallet.** Since the tag now always has one,
+minting a second wallet for the ticket would leave the uid taken and collide on
+`{eventId, bandUid}` — it would have killed bind-band outright. The ticket
+instead attaches to the wallet the tag already carries, keeping any cash on it,
+which is the right reading of "the tag is the wallet and the ticket is attached
+to it". If the ticket ALREADY has its own separate wallet, the bind is refused
+naming both rather than merging two balances.

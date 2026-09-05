@@ -6,6 +6,7 @@ import { findTicketByCode } from '@utils/ticketLookup.util';
 import { WalletService } from '@services/wallet.service';
 import { Wallet, IWallet } from '@models/wallet.model';
 import mongoose from 'mongoose';
+import { normalizeBandUid } from '@utils/bandUid.util';
 
 export interface ValidateTicketParams {
   ticketId: string;
@@ -444,6 +445,32 @@ export class ScanService {
 
     if (!ScanService.BAND_ELIGIBLE.has(ticket.status)) {
       throw new Error(`Ticket is ${ticket.status}, cannot bind a band`);
+    }
+
+    // THE TAG IS THE WALLET FIRST. A tag scanned at the Register desk already
+    // carries a wallet of its own — that is what makes it spendable, and it may
+    // already hold cash. A ticket is a separate thing that can be ATTACHED to
+    // that tag for the few events that also scan people in on it. So the ticket
+    // joins the tag's existing wallet rather than a second wallet being minted
+    // for it: minting one would leave the uid already taken and the bind would
+    // collide on the {eventId, bandUid} index.
+    //
+    // No BandBinding row is written here — adoption does not change which uid
+    // this wallet wears, and the row from the issuing scan already records it.
+    const uid = normalizeBandUid(params.bandUid);
+    const tagWallet = await Wallet.findOne({ eventId: ticket.eventId, bandUid: uid });
+    if (tagWallet && !tagWallet.ticketId) {
+      const ticketWallet = await Wallet.findOne({ ticketId: ticket._id });
+      if (ticketWallet && String(ticketWallet._id) !== String(tagWallet._id)) {
+        // Two balances would have to become one. Merging money silently is
+        // exactly the thing not to do — say which two, and let a human decide.
+        throw new Error(
+          'That ticket already has its own wallet and this tag is carrying another — they cannot be merged',
+        );
+      }
+      tagWallet.ticketId = ticket._id as mongoose.Types.ObjectId;
+      await tagWallet.save();
+      return { ticket, wallet: tagWallet };
     }
 
     const wallet = await WalletService.ensureWalletForTicket({
