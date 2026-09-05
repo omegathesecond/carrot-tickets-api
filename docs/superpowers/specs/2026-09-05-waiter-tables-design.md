@@ -45,7 +45,9 @@ Mirrors `Cashier` exactly, which is the established shape for a per-event
 in-venue operator: `fullName`, `phoneNumber?`, `loginCode`, `pin` (through the
 shared `applyOperatorCredentials` mixin — hash, lockout, `comparePin`),
 `scope: 'organizer'`, `vendorId`, `eventId` (immutable, required for organizer
-scope), `isActive`, `grants`.
+scope), `isActive`. It also inherits `grants` from the shared mixin; nothing in
+this design uses one, and none should be invented until a capability actually
+needs to differ per person.
 
 A waiter is NOT a `MerchantOperator` with a grant. That actor is scoped to one
 stall, and crossing stalls is the waiter's entire job — reusing it would mean
@@ -55,10 +57,17 @@ weakening a scope that is load-bearing for stall security.
 existing `cashier` and `merchant` ones, so the POS routes on one field the way
 it already does.
 
-`WaiterPermission` namespace, same pattern as `CashierPermission`:
-`waiter:view_events`, `waiter:manage_tables`, `waiter:settle_tables`. Settling
-is separate from serving on purpose — an organizer may want the money moment
-held by a supervisor.
+`WaiterPermission` namespace, same pattern as `CashierPermission`.
+`WAITER_PERMISSIONS` — the default set every waiter holds — is
+`waiter:view_events` and `waiter:manage_tables`. `waiter:settle_tables` is NOT
+in it: settling is the money moment, and an organizer may want it held by a
+supervisor rather than by whoever is carrying trays. It is granted per person,
+the same shape as `issue_tags` on a cashier.
+
+That choice has a cost worth naming: a venue that wants every waiter to settle
+must grant it to each one. If that turns out to be everybody, every time, the
+default was wrong and it should move into the default set — a one-line change,
+and better discovered from use than guessed now.
 
 ### `Table`
 
@@ -175,6 +184,23 @@ service is costing them money.
 
 Stall-side reporting needs no change: settlement writes ordinary
 `MerchantCharge` rows.
+
+## Build order
+
+Three slices, each shippable and independently useful:
+
+1. **The actor.** `Waiter` model, `WaiterPermission`, the `type: 'waiter'` login
+   branch, and hire/disable/reset-PIN on the dashboard. Ends with a waiter able
+   to log into the POS and see their event — and nothing else.
+2. **The tab.** `Table` model, open / add / remove / void, stock movements, and
+   the organizer's Tables view. Ends with a working tab that cannot yet be paid,
+   which is deliberately the half with no money in it.
+3. **Settlement.** The multi-leg ledger entry, per-stall `MerchantCharge` rows,
+   the `merchantOperatorId` change, the shortfall refusal, and the concurrency
+   and replay guards.
+
+Slice 3 is where every money risk lives, so it lands last and alone rather than
+riding in with a new actor and a new entity.
 
 ## Out of scope
 
