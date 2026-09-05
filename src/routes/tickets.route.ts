@@ -4,6 +4,7 @@ import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import {
   authenticateTickets,
   requireTicketsPermission,
+  requireAnyPermission,
   requireSuperAdmin,
   requireSuperAdminOrPermission,
 } from '@middleware/ticketsAuth.middleware';
@@ -578,7 +579,12 @@ router.post('/cashiers/:id/reset-pin', requireTicketsPermission(TicketsPermissio
  * merchant is scoped to ONE event; ownership of that event is enforced in the
  * controller. Same MANAGE_ACCESS gate as gate operators + cashiers.
  */
-router.get('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.list);
+// GET is also reachable with MANAGE_STOCK alone: the Catalogue tab's "Sold
+// at" stall picker needs this list to allocate products to stalls, and a
+// MANAGER-role organizer holds MANAGE_STOCK without MANAGE_ACCESS (see
+// TICKETS_ROLE_PERMISSIONS) — mirroring the tab's own gate is a read, not
+// access management. Create/edit/operators below stay MANAGE_ACCESS-only.
+router.get('/merchants', requireAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.list);
 router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
 router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
 router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
