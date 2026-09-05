@@ -4,6 +4,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedCashlessEvent } from '@controllers/organizerCashless.controller';
 import { operatorMayActOnEvent } from '@services/operatorEventScope.service';
 import { EventTagService } from '@services/eventTag.service';
+import { WalletService } from '@services/wallet.service';
 import { EventTagStatus } from '@interfaces/eventTag.interface';
 
 /** Every registry action is bounded by the same two questions. */
@@ -27,15 +28,19 @@ async function loadRegisterableEvent(req: Request, res: Response): Promise<any |
 }
 
 /**
- * A bad uid, or a tag that isn't in this register, is the operator's problem to
- * fix and gets a 400 carrying the reader's own words. Anything else — the
+ * A bad uid, a tag that isn't in this register, or one already spoken for by a
+ * ticket, is the operator's problem to fix and gets a 400 carrying the reader's
+ * own words — each distinct, because at a busy desk they call for different
+ * actions (retype it / register it / it is not a blank). Anything else — the
  * database being unreachable, say — is ours, and must not be dressed up as
  * "your input was wrong": the desk would sit there re-typing a uid that was
  * fine all along.
  */
 function statusFor(err: unknown): number {
   const msg = (err as { message?: string })?.message ?? '';
-  return /invalid band uid|not in this event/i.test(msg) ? 400 : 500;
+  return /invalid band uid|not in this event|not registered for this event|belongs to a ticket/i.test(msg)
+    ? 400
+    : 500;
 }
 
 /** Who enrolled it — the operator row when there is one, else the organizer. */
@@ -129,6 +134,52 @@ export class EventTagController {
     } catch (err: any) {
       console.error('Tag register error:', err);
       return ApiResponseUtil.error(res, err?.message || 'Failed to register the tag', statusFor(err));
+    }
+  }
+
+  /**
+   * POST /api/tickets/events/:eventId/tags/issue — `{ bandUid }`
+   *
+   * Hand a registered tag to somebody who has no ticket. The tag gets a wallet
+   * of its own (design 2026-09-05), which is what makes it spendable: every
+   * money path finds a wallet by {eventId, bandUid}, so before this the cashier
+   * had nothing to top up and answered "No wallet for that band/ticket".
+   *
+   * Deliberately does NOT take an opening amount. Loading cash is the cashier
+   * desk's job and already works once the wallet exists; recording a top-up
+   * against a register-desk operator would need a new actor type in
+   * TopupRecordedByType and in every report that groups by it.
+   */
+  static async issue(req: Request, res: Response): Promise<any> {
+    try {
+      const event = await loadRegisterableEvent(req, res);
+      if (!event) return;
+
+      const { bandUid } = req.body || {};
+      if (typeof bandUid !== 'string' || !bandUid.trim()) {
+        return ApiResponseUtil.badRequest(res, 'bandUid is required');
+      }
+
+      const { wallet, created } = await WalletService.ensureStandaloneWalletForBand({
+        eventId: String(event._id),
+        bandUid,
+        // Same actor the register routes record — the operator row when there
+        // is one, else the organizer.
+        ...(actorIdOf(req) ? { issuedBy: actorIdOf(req) as string } : {}),
+      });
+
+      const body = {
+        bandUid: wallet.bandUid,
+        walletId: String(wallet._id),
+        balance: wallet.balance,
+        created,
+      };
+      // 201 only when a wallet was actually minted; a repeat tap is a 200 so the
+      // desk can tell "issued" from "already issued" without reading the body.
+      return created ? ApiResponseUtil.created(res, body) : ApiResponseUtil.success(res, body);
+    } catch (err: any) {
+      console.error('Tag issue error:', err);
+      return ApiResponseUtil.error(res, err?.message || 'Failed to issue the tag', statusFor(err));
     }
   }
 

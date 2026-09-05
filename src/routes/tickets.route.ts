@@ -639,6 +639,10 @@ router.get('/events/:eventId/tags/registrations', requireTicketsPermission(Ticke
 router.get('/events/:eventId/tags/registry', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.list);
 router.post('/events/:eventId/tags/registry', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.register);
 router.post('/events/:eventId/tags/registry/retire', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.retire);
+// Hand a registered tag to somebody with no ticket: gives it a wallet of its
+// own so the cashier desk can load it (design 2026-09-05). Same gate and same
+// ownership guard as the register routes above — issuing is the desk's job.
+router.post('/events/:eventId/tags/issue', requireSuperAdminOrPermission(TicketsPermission.ISSUE_TAGS), EventTagController.issue);
 router.get('/events/:eventId/tags', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.list);
 router.get('/events/:eventId/tags/:walletId', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), TagReportController.detail);
 router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.deactivate);

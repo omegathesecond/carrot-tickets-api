@@ -122,6 +122,8 @@ export class WalletService {
   static async ensureStandaloneWalletForBand(params: {
     eventId: string;
     bandUid: string;
+    /** The desk operator who handed it out, for the binding trail. */
+    issuedBy?: string;
   }): Promise<{ wallet: IWallet; created: boolean }> {
     // Normalise + shape-check FIRST, so a malformed uid is refused before any
     // read or write — and so the lookup below uses the canonical form every
@@ -143,6 +145,19 @@ export class WalletService {
     try {
       const wallet = await Wallet.create({
         eventId, bandUid: uid, balance: 0, cashFundedBalance: 0, status: 'active',
+      });
+      // The append-only binding trail is not optional bookkeeping: a UID-only
+      // band is cloneable, so "which band was live on this wallet, and when"
+      // must stay answerable for reissue and clone forensics (cashless spec
+      // §4). bindBand writes this row for every other binding; a standalone tag
+      // that skipped it would be invisible to the tag-registrations report and
+      // to any later investigation.
+      await BandBinding.create({
+        walletId: wallet._id,
+        eventId: wallet.eventId,
+        bandUid: uid,
+        boundAt: new Date(),
+        ...(params.issuedBy ? { boundBy: params.issuedBy } : {}),
       });
       return { wallet, created: true };
     } catch (err) {
@@ -642,7 +657,9 @@ export class WalletService {
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, 15);
     return {
-      ticket: { id: String(wallet.ticketId) },
+      // null for a standalone tag — String(undefined) would have shipped the
+      // literal "undefined" to the POS as a ticket id.
+      ticket: wallet.ticketId ? { id: String(wallet.ticketId) } : null,
       balance: wallet.balance, cashFundedBalance: wallet.cashFundedBalance, status: wallet.status,
       history,
     };

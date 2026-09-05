@@ -1047,6 +1047,19 @@ export class TicketsController {
           return ApiResponseUtil.error(res, 'No wallet bound to that band in this event', 400);
         }
 
+        // A tag handed out on its own carries a wallet but no ticket (design
+        // 2026-09-05), so it can spend but cannot admit. Answer that plainly:
+        // falling through to the lookup below would findById(undefined) and
+        // report "Ticket not found for that wallet", which reads like corrupt
+        // data and sends the gate hunting for a problem that does not exist.
+        if (!wallet.ticketId) {
+          return ApiResponseUtil.error(
+            res,
+            'That tag is a spending tag — there is no ticket behind it, so it cannot be used for entry',
+            400,
+          );
+        }
+
         const ticket = await Ticket.findById(wallet.ticketId);
         if (!ticket) {
           return ApiResponseUtil.error(res, 'Ticket not found for that wallet', 400);

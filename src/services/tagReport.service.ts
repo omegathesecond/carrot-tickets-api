@@ -193,7 +193,10 @@ export class TagReportService {
       .select('balance ticketId')
       .lean();
     const walletById = new Map(wallets.map((w: any) => [String(w._id), w]));
-    const tickets = await Ticket.find({ _id: { $in: wallets.map((w: any) => w.ticketId) } })
+    // A standalone tag's wallet has no ticketId; passing undefined inside $in
+    // is at best a wasted lookup and at worst a CastError on the Balances
+    // screen, so drop them before querying.
+    const tickets = await Ticket.find({ _id: { $in: wallets.map((w: any) => w.ticketId).filter(Boolean) } })
       .select('ticketId customerName customerPhone')
       .lean();
     const ticketById = new Map(tickets.map((t: any) => [String(t._id), t]));
