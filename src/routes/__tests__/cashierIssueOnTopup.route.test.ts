@@ -72,17 +72,30 @@ describe('a granted cashier turns a blank tag into a funded wallet in one tap', 
     expect(await BandBinding.countDocuments({ eventId, bandUid: TAG })).toBe(1);
   });
 
-  it('leaves an ungranted cashier exactly as she was', async () => {
-    // issue_tags is off by default and putting tags into circulation is what it
-    // authorises — without it this must still refuse.
+  it('needs no extra grant — this is the cashier job, not a special power', async () => {
+    // A cashier already moves money at this desk: she tops up, and on withdraw
+    // she hands out CASH. Enrolling a blank tag is strictly less dangerous than
+    // what the role does by default, so gating it behind a per-person grant
+    // protected the smaller thing and put a second queue at the door.
     const { eventId, token } = await seedDesk({ canIssue: false });
 
     const res = await topup(token, eventId, { bandUid: TAG, amount: 3000, clientTxnId: 'x1' });
 
-    expect(res.status).toBe(404);
-    expect(res.body.message).toMatch(/no wallet for that band/i);
-    expect(await Wallet.countDocuments({ eventId })).toBe(0);
-    expect(await EventTag.countDocuments({ eventId })).toBe(0);
+    expect(res.status).toBe(200);
+    expect(res.body.data.newBalance).toBe(3000);
+    expect(await EventTag.countDocuments({ eventId, bandUid: TAG, status: 'active' })).toBe(1);
+  });
+
+  it('is still bounded by the event she was hired for', async () => {
+    // The loosening is about which CAPABILITY a cashier has, not about which
+    // show she can touch — that guard is unchanged.
+    const { token } = await seedDesk({ canIssue: false });
+    const other = await seedDesk({ canIssue: false });
+
+    const res = await topup(token, other.eventId, { bandUid: TAG, amount: 3000, clientTxnId: 'x9' });
+
+    expect(res.status).toBe(403);
+    expect(await Wallet.countDocuments({ eventId: other.eventId })).toBe(0);
   });
 
   it('does not re-register or double-charge on a POS retry', async () => {

@@ -13,7 +13,7 @@ import { EventTagService } from '@services/eventTag.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { cashTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
-import { CashierToken, CashierPermission } from '@interfaces/cashier.interface';
+import { CashierToken } from '@interfaces/cashier.interface';
 import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 /** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
@@ -137,19 +137,23 @@ export class CashierController {
       // into a funded wallet inside the call the POS already makes: scan, enter
       // the amount, tap.
       //
-      // Gated on the grant, which is absent from CASHIER_PERMISSIONS: putting
-      // tags into circulation is exactly what issue_tags authorises, and an
-      // ungranted cashier still gets the plain refusal below. Deliberately only
-      // for a BAND — a missing ticket wallet is not something to conjure.
+      // NO EXTRA GRANT. This was briefly gated on issue_tags, which protected
+      // the smaller thing: a cashier already tops up, and on withdraw she hands
+      // out CASH. Enrolling a blank tag is less dangerous than what the role
+      // does by default, so the gate bought no safety and cost a second queue —
+      // somebody had to grant it per person, and she had to log in again for
+      // her token to carry it. Binding a tag to a TICKET is still the
+      // registrar's job and still needs the grant (POST /api/cashier/bind-tag).
       //
-      // "Blank" means blank AT THIS EVENT: registers and wallets are per-event,
-      // so the same physical tag may carry a wallet at another show and still
-      // be new here, and gets its own wallet for this one.
-      if (
-        !wallet
-        && value.bandUid
-        && (cashier.permissions || []).includes(CashierPermission.ISSUE_TAGS)
-      ) {
+      // Still bounded by the event she was hired for: loadCashlessEvent above
+      // has already refused another organizer's show, a non-cashless one, and
+      // an event she is not assigned to.
+      //
+      // Deliberately only for a BAND — a missing ticket wallet is not something
+      // to conjure. "Blank" means blank AT THIS EVENT: registers and wallets are
+      // per-event, so the same physical tag may carry a wallet at another show
+      // and still be new here, and gets its own wallet for this one.
+      if (!wallet && value.bandUid) {
         await EventTagService.registerTag({
           eventId: String(event._id),
           bandUid: value.bandUid,
