@@ -13,7 +13,7 @@ import { EventTagService } from '@services/eventTag.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { cashTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
-import { CashierToken } from '@interfaces/cashier.interface';
+import { CashierToken, CashierPermission } from '@interfaces/cashier.interface';
 import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 /** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
@@ -137,13 +137,13 @@ export class CashierController {
       // into a funded wallet inside the call the POS already makes: scan, enter
       // the amount, tap.
       //
-      // NO EXTRA GRANT. This was briefly gated on issue_tags, which protected
-      // the smaller thing: a cashier already tops up, and on withdraw she hands
-      // out CASH. Enrolling a blank tag is less dangerous than what the role
-      // does by default, so the gate bought no safety and cost a second queue —
-      // somebody had to grant it per person, and she had to log in again for
-      // her token to carry it. Binding a tag to a TICKET is still the
-      // registrar's job and still needs the grant (POST /api/cashier/bind-tag).
+      // Gated on the grant, which is absent from CASHIER_PERMISSIONS. Issuing a
+      // tag is the REGISTRAR's job in the venue's flow: the gate takes the
+      // ticket, hands over a tag and registers it, and the guest reaches this
+      // desk already carrying a wallet. So this path is a fallback for a tag
+      // that arrives without one, not the normal route — an ungranted cashier
+      // still gets the plain refusal below, and the grant exists for an
+      // organizer who wants one person doing both jobs on a quiet night.
       //
       // Still bounded by the event she was hired for: loadCashlessEvent above
       // has already refused another organizer's show, a non-cashless one, and
@@ -153,7 +153,11 @@ export class CashierController {
       // to conjure. "Blank" means blank AT THIS EVENT: registers and wallets are
       // per-event, so the same physical tag may carry a wallet at another show
       // and still be new here, and gets its own wallet for this one.
-      if (!wallet && value.bandUid) {
+      if (
+        !wallet
+        && value.bandUid
+        && (cashier.permissions || []).includes(CashierPermission.ISSUE_TAGS)
+      ) {
         await EventTagService.registerTag({
           eventId: String(event._id),
           bandUid: value.bandUid,
