@@ -18,8 +18,8 @@ export class TableLabelTakenError extends Error {
   constructor(label: string) { super(`Table ${label} is already open`); }
 }
 
-/** Cents as the waiter reads them off the handheld, e.g. 1500 -> "15.00". */
-function rands(cents: number): string {
+/** Cents as a human reads them off the handheld, e.g. 1500 -> "15.00". */
+function formatCents(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
@@ -31,12 +31,21 @@ function rands(cents: number): string {
  * The message names the amount SHORT on purpose: "declined" alone sends the
  * waiter back to the table with nothing to tell the guest, and the guest with
  * no idea how much to add at the desk. Mapped to 402.
+ *
+ * The message deliberately carries NO currency symbol. This service prices
+ * everything in integer cents of whatever currency the EVENT declares — it
+ * has no `currency` field in scope here to name correctly, and Carrot events
+ * are not all the same currency (Emalangeni by default, Rand for some — see
+ * pos-app/lib/pages/cashless/money.dart's currencySymbol()). Hardcoding one
+ * symbol was worse than showing none: an operator misreads the shortfall as
+ * the wrong money entirely. `short`/`total`/`balance` below carry the actual
+ * integer cents so the POS can format them with the event's own currency.
  */
 export class TableShortfallError extends Error {
   /** Cents still needed. */
   public readonly short: number;
   constructor(public readonly total: number, public readonly balance: number) {
-    super(`Tag is R${rands(total - balance)} short — the tab is R${rands(total)}, the tag holds R${rands(balance)}`);
+    super(`Tag is ${formatCents(total - balance)} short — the tab is ${formatCents(total)}, the tag holds ${formatCents(balance)}`);
     this.name = 'TableShortfallError';
     this.short = total - balance;
   }

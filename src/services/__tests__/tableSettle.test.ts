@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { EVENT, seedStall } from '@/__tests__/helpers/tables';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
-import { TableService } from '@services/table.service';
+import { TableService, TableShortfallError } from '@services/table.service';
 import { WalletService } from '@services/wallet.service';
 import { Table } from '@models/table.model';
 import { Wallet, IWallet } from '@models/wallet.model';
@@ -159,16 +159,51 @@ describe('TableService.settle', () => {
     expect((await Wallet.findById(wallet._id))!.balance).toBe(5000);
   });
 
-  it('charges nothing at all when the tag is short, and names the shortfall', async () => {
+  it('charges nothing at all when the tag is short, and names the shortfall in cents with no currency asserted', async () => {
     const { table } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
     const wallet = await fundedWallet(3000, TAG);
 
-    await expect(TableService.settle(settleArgs(table, 's1'))).rejects.toThrow(/R15\.00 short/);
+    let thrown!: TableShortfallError;
+    try {
+      await TableService.settle(settleArgs(table, 's1'));
+      throw new Error('expected TableService.settle to reject with TableShortfallError');
+    } catch (e) {
+      thrown = e as TableShortfallError;
+    }
+
+    expect(thrown).toBeInstanceOf(TableShortfallError);
+    // The amount, no currency symbol — the server does not know which
+    // currency this event displays in (see TableShortfallError's doc comment).
+    expect(thrown.message).toMatch(/15\.00 short/);
+    // The structured cents a client needs to format for itself.
+    expect(thrown.short).toBe(1500);
+    expect(thrown.total).toBe(4500);
+    expect(thrown.balance).toBe(3000);
 
     expect((await Wallet.findById(wallet._id))!.balance).toBe(3000);
     expect(await MerchantCharge.countDocuments({})).toBe(0);
     expect(await LedgerEntry.countDocuments({ refType: 'table_settlement' })).toBe(0);
     expect((await Table.findById(table._id))!.status).toBe('open');
+  });
+
+  // The point of this change: no product code should ever again bake a
+  // currency symbol into this message. Carrot events are not all priced in
+  // the same currency (Emalangeni by default, Rand for some), and this
+  // service never sees which one — only the client does.
+  it('never names a currency in the shortfall message', async () => {
+    const { table } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+    await fundedWallet(3000, TAG);
+
+    let thrown!: TableShortfallError;
+    try {
+      await TableService.settle(settleArgs(table, 's1'));
+      throw new Error('expected TableService.settle to reject with TableShortfallError');
+    } catch (e) {
+      thrown = e as TableShortfallError;
+    }
+
+    expect(thrown).toBeInstanceOf(TableShortfallError);
+    expect(thrown.message).not.toMatch(/R\d|E\d/);
   });
 
   it('refuses a second concurrent settle rather than billing twice', async () => {

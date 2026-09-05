@@ -279,8 +279,10 @@ describe('waiter tables — settle a table', () => {
   });
 
   // 402, not a bare "declined": the payload has to tell the waiter how much
-  // short the tag is, or the guest has nothing to act on at the desk.
-  it('402s a tag that cannot cover the tab, and says by how much', async () => {
+  // short the tag is, or the guest has nothing to act on at the desk. The
+  // message itself names no currency (the server does not know the event's) —
+  // the integer-cent fields below are what the POS actually formats.
+  it('402s a tag that cannot cover the tab, and carries the integer cents a client can format', async () => {
     const { eventId, token } = await seedFloor(canSettle);
     const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 2 });
     await fundedTag(eventId, '04a22b1c', 4500);
@@ -289,7 +291,10 @@ describe('waiter tables — settle a table', () => {
       .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
 
     expect(res.status).toBe(402);
-    expect(res.body.message).toMatch(/R15\.00 short/);
+    expect(res.body.message).toMatch(/15\.00 short/);
+    expect(res.body.message).not.toMatch(/R\d|E\d/);
+    const errorPayload = JSON.parse(res.body.error);
+    expect(errorPayload).toMatchObject({ reason: 'insufficient_balance', total: 6000, balance: 4500, short: 1500 });
   });
 
   it('409s a second settle of an already-settled table', async () => {
