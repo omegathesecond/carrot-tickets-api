@@ -5,6 +5,7 @@ import { WaiterToken } from '@interfaces/waiter.interface';
 import {
   TableService, TableLabelTakenError, TableShortfallError,
   TableAlreadySettledError, TableWalletNotFoundError,
+  TableChangedDuringSettlementError, TableIdempotencyMismatchError,
 } from '@services/table.service';
 import { StockDeclinedError } from '@services/stock.service';
 import { WalletDeclinedError } from '@services/merchant.service';
@@ -176,6 +177,14 @@ export class WaiterController {
       // The tag names no wallet here — nothing to decline, so 404 not 402.
       if (e instanceof TableWalletNotFoundError) return ApiResponseUtil.notFound(res, e.message);
       if (e instanceof TableAlreadySettledError) return ApiResponseUtil.error(res, e.message, 409);
+      // Retryable, unlike the other 409s here: re-reading the tab and tapping
+      // again is exactly the right thing for the waiter to do.
+      if (e instanceof TableChangedDuringSettlementError) {
+        return ApiResponseUtil.error(res, e.message, 409, { reason: 'table_changed', retryable: true });
+      }
+      if (e instanceof TableIdempotencyMismatchError) {
+        return ApiResponseUtil.error(res, e.message, 409, { reason: e.reason });
+      }
       const msg = (e as Error)?.message || 'Could not settle table';
       const status = /nothing on this table/i.test(msg) ? 400
         : /not open/i.test(msg) ? 409

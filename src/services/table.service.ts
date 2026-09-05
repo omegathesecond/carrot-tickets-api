@@ -67,6 +67,34 @@ export class TableWalletNotFoundError extends Error {
 }
 
 /**
+ * The table changed between pricing it and charging for it — another waiter
+ * added or removed a line in that window. RETRYABLE, and nothing was written:
+ * the alternative is charging the guest a stale total, leaving the stall that
+ * poured the last round unpaid while its stock has already gone. Two waiters
+ * on one table is the normal case for table service. Mapped to 409.
+ */
+export class TableChangedDuringSettlementError extends Error {
+  constructor() {
+    super('the table changed during settlement — check the tab and try again');
+    this.name = 'TableChangedDuringSettlementError';
+  }
+}
+
+/**
+ * A repeat of `clientTxnId` that names a DIFFERENT tag than the one actually
+ * charged. Not a retry — a reused id, and replaying success would tell the
+ * waiter THIS guest paid when the money came off someone else's band. Mapped
+ * to 409. Mirrors MerchantService's ChargeIdempotencyMismatchError.
+ */
+export class TableIdempotencyMismatchError extends Error {
+  public readonly reason = 'idempotency_mismatch' as const;
+  constructor(public readonly clientTxnId: string) {
+    super('that settlement id was already used for a different tag');
+    this.name = 'TableIdempotencyMismatchError';
+  }
+}
+
+/**
  * Thrown INSIDE the settle transaction when the status guard misses because
  * THIS settle already committed (the POS retried, or a duplicate request
  * overlapped). Throwing aborts the transaction, so nothing this attempt wrote
@@ -344,7 +372,7 @@ export class TableService {
     if (!table) throw new Error('table not found');
     if (table.status !== 'open') {
       // The ordinary retry path: the first settle committed, the POS resent it.
-      const replay = await TableService.replaySettlement(table, clientTxnId);
+      const replay = await TableService.replaySettlement(table, clientTxnId, bandUid, eventObjId);
       if (replay) return replay;
       throw new TableAlreadySettledError(table.status);
     }
@@ -381,8 +409,21 @@ export class TableService {
         // off 'open'. settleTxnId goes down in the SAME $set, so the loser can
         // tell "I already did this" (retry -> replay) from "somebody else did"
         // (different id -> refuse).
+        //
+        // subtotal + item count are in the filter too, because the lines were
+        // read and priced OUTSIDE this transaction. A colleague's addItem or
+        // removeItem committing in that window would otherwise be silently
+        // charged over: the guest pays the stale total, the stall that poured
+        // the last round is never paid though its stock has gone, and the
+        // table's subtotal ends up disagreeing with the charges written
+        // against it. Every line change $incs subtotal, so a mismatch here IS
+        // "the table moved under me" — refuse the whole settle, never a part
+        // of it.
         const settled = await Table.findOneAndUpdate(
-          { _id: tableObjId, eventId: eventObjId, status: 'open' },
+          {
+            _id: tableObjId, eventId: eventObjId, status: 'open',
+            subtotal: table.subtotal, items: { $size: table.items.length },
+          },
           { $set: { status: 'settled', settledAt: new Date(), settledBy, walletId: wallet._id, settleTxnId: clientTxnId } },
           { new: true, session },
         );
@@ -392,7 +433,9 @@ export class TableService {
           if (current.status === 'settled' && current.settleTxnId === clientTxnId) {
             throw new ReplayedSettlement(current);
           }
-          throw new TableAlreadySettledError(current.status);
+          if (current.status !== 'open') throw new TableAlreadySettledError(current.status);
+          // Still open, so it was the priced-shape guard that missed.
+          throw new TableChangedDuringSettlementError();
         }
 
         // Atomic CAS debit — the guard and the decrement are ONE operation, so
@@ -453,7 +496,7 @@ export class TableService {
       return out;
     } catch (e) {
       if (e instanceof ReplayedSettlement) {
-        const replay = await TableService.replaySettlement(e.table, clientTxnId);
+        const replay = await TableService.replaySettlement(e.table, clientTxnId, bandUid, eventObjId);
         if (replay) return replay;
         throw new TableAlreadySettledError(e.table.status);
       }
@@ -462,7 +505,7 @@ export class TableService {
       // only mean the same settle committed elsewhere — answer with it.
       if ((e as { code?: number })?.code === 11000) {
         const current = await Table.findOne({ _id: tableObjId, eventId: eventObjId });
-        const replay = current ? await TableService.replaySettlement(current, clientTxnId) : null;
+        const replay = current ? await TableService.replaySettlement(current, clientTxnId, bandUid, eventObjId) : null;
         if (replay) return replay;
       }
       throw e;
@@ -524,18 +567,33 @@ export class TableService {
   private static async replaySettlement(
     table: ITable,
     clientTxnId: string,
+    bandUid: string,
+    eventObjId: mongoose.Types.ObjectId,
   ): Promise<TableSettlement | null> {
     if (table.status !== 'settled' || table.settleTxnId !== clientTxnId) return null;
-
-    const perStallIds = [...new Set(table.items.map((l) => String(l.merchantId)))]
-      .map((merchantId) => `${clientTxnId}:${merchantId}`);
-    const charges = await MerchantCharge.find({ clientTxnId: { $in: perStallIds } });
 
     // A settled table always names the wallet it was charged to. Missing means
     // the row was tampered with, and reporting a balance we cannot read would
     // be a lie — fail loudly instead.
     const wallet: IWallet | null = table.walletId ? await Wallet.findById(table.walletId) : null;
     if (!wallet) throw new Error('settled table has no wallet on record');
+
+    // Only a repeat of the SAME tap is a replay, the rule MerchantService.replay
+    // applies to a basket. A retry that names a different band under the same id
+    // would otherwise be answered "paid" while the money came off the FIRST
+    // guest's tag — the second guest walks having paid nothing.
+    if (wallet.bandUid !== bandUid) throw new TableIdempotencyMismatchError(clientTxnId);
+
+    const perStallIds = [...new Set(table.items.map((l) => String(l.merchantId)))]
+      .map((merchantId) => `${clientTxnId}:${merchantId}`);
+    // eventId scopes the lookup. clientTxnId is client-chosen and the
+    // {merchantId, clientTxnId} index is unique only per MERCHANT, so nothing
+    // about the id alone guarantees the rows it matches are this table's —
+    // and handing back another table's charges as this table's replay is the
+    // worst possible answer. Today a Merchant belongs to exactly one event, so
+    // the merchantId embedded in the id already implies the event; this filter
+    // is what keeps that true if a stall is ever allowed to span events.
+    const charges = await MerchantCharge.find({ eventId: eventObjId, clientTxnId: { $in: perStallIds } });
 
     return { table, charges, walletBalance: wallet.balance };
   }

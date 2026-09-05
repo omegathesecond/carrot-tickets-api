@@ -197,6 +197,108 @@ describe('TableService.settle', () => {
     expect(new Set(retry.charges.map((c) => String(c._id))))
       .toEqual(new Set(first.charges.map((c) => String(c._id))));
     expect(retry.walletBalance).toBe(5500);
+    // The replay lookup is scoped to this event, so a reused id elsewhere can
+    // never be handed back as this table's charges.
+    expect(retry.charges.every((c) => String(c.eventId) === String(EVENT))).toBe(true);
+  });
+
+  // FINDING 1. The lines are read and priced OUTSIDE the transaction, so a
+  // colleague's addItem can commit in that window. Driven deterministically by
+  // hooking mongoose.startSession — the last thing settle does before opening
+  // its transaction, i.e. exactly the moment when everything has been priced
+  // and nothing has been written. A racing test would be worse than none.
+  it('refuses rather than charging a stale total when another waiter adds a round mid-settle', async () => {
+    const { table, stallB, productB } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+    const wallet = await fundedWallet(10000, TAG);
+
+    const realStartSession = mongoose.startSession.bind(mongoose);
+    const spy = jest.spyOn(mongoose, 'startSession').mockImplementationOnce(async (...args) => {
+      // Priced at 4500; this lands before the flip and makes it 6000.
+      await TableService.addItem({
+        tableId: String(table._id), eventId: String(EVENT),
+        merchantId: stallB, productId: productB, qty: 1, addedBy: String(WAITER),
+      });
+      return realStartSession(...args);
+    });
+
+    try {
+      await expect(TableService.settle(settleArgs(table, 's1')))
+        .rejects.toThrow(/table changed during settlement/i);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Nothing charged, nothing posted, and the tab still carries BOTH rounds.
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(10000);
+    expect(await MerchantCharge.countDocuments({})).toBe(0);
+    expect(await LedgerEntry.countDocuments({ refType: 'table_settlement' })).toBe(0);
+    const after = await Table.findById(table._id);
+    expect(after!.status).toBe('open');
+    expect(after!.subtotal).toBe(6000);
+    expect(after!.items).toHaveLength(3);
+  });
+
+  // FINDING 2. Two settles issued with the SAME clientTxnId — a POS retry that
+  // overlaps its own original, which is when the in-transaction replay path
+  // runs. Both callers must be answered with the ONE settlement.
+  it('answers BOTH callers of a concurrent same-id retry with the one settlement', async () => {
+    const { table } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 10, commissionB: 0 });
+    const wallet = await fundedWallet(10000, TAG);
+    const args = settleArgs(table, 'same');
+
+    const results = await Promise.allSettled([TableService.settle(args), TableService.settle(args)]);
+
+    const settled = results.filter((r) => r.status === 'fulfilled') as
+      PromiseFulfilledResult<Awaited<ReturnType<typeof TableService.settle>>>[];
+    expect(settled).toHaveLength(2);
+    // Debited ONCE.
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(5500);
+    expect(settled.every((r) => r.value.walletBalance === 5500)).toBe(true);
+    // One settlement's worth of rows, and both callers see the same ones.
+    expect(await MerchantCharge.countDocuments({})).toBe(2);
+    const ids = settled.map((r) => new Set(r.value.charges.map((c) => String(c._id))));
+    expect(ids[0]).toEqual(ids[1]);
+    expect(ids[0]!.size).toBe(2);
+    const entries = await LedgerEntry.find({ refType: 'table_settlement', refId: String(table._id) });
+    expect(entries).toHaveLength(4);
+    expect(entries.reduce((t, e) => t + e.delta, 0)).toBe(0);
+  });
+
+  // FINDING 2, path C. The per-stall {merchantId, clientTxnId} index is the
+  // last line of defence. Reached only when that id is already taken while the
+  // table is still open — a cross-table id reuse — where replaying would hand
+  // back ANOTHER table's charges. It must refuse, whole, with nothing written.
+  it('writes nothing when a stall\'s settlement id is already taken', async () => {
+    const { table, stallA } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+    const wallet = await fundedWallet(10000, TAG);
+    await MerchantCharge.create({
+      merchantId: stallA, eventId: EVENT, walletId: wallet._id, bandUid: TAG,
+      amount: 100, fee: 0, netAmount: 100, clientTxnId: `s1:${stallA}`,
+      status: 'completed', staffName: 'Someone Else',
+    });
+
+    await expect(TableService.settle(settleArgs(table, 's1'))).rejects.toThrow();
+
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(10000);
+    expect(await MerchantCharge.countDocuments({})).toBe(1); // only the pre-existing row
+    expect(await LedgerEntry.countDocuments({ refType: 'table_settlement' })).toBe(0);
+    expect((await Table.findById(table._id))!.status).toBe('open');
+  });
+
+  // FINDING 4. Same id, different band. Replaying success here would tell the
+  // waiter THIS guest paid while the money came off the first guest's tag.
+  it('refuses a retry that reuses the id for a DIFFERENT tag', async () => {
+    const { table } = await seedTwoStallTable({ a: 3000, b: 1500, commissionA: 0, commissionB: 0 });
+    const paid = await fundedWallet(10000, TAG);
+    const other = await fundedWallet(10000, '04b33c2d');
+    await TableService.settle(settleArgs(table, 'same'));
+
+    await expect(TableService.settle({ ...settleArgs(table, 'same'), bandUid: '04b33c2d' }))
+      .rejects.toThrow(/different tag/i);
+
+    expect((await Wallet.findById(paid._id))!.balance).toBe(5500);
+    expect((await Wallet.findById(other._id))!.balance).toBe(10000);
+    expect(await MerchantCharge.countDocuments({})).toBe(2);
   });
 
   it('refuses a settle under a DIFFERENT id once the table is settled', async () => {
