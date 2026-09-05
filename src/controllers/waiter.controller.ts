@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { WaiterToken } from '@interfaces/waiter.interface';
+import { TableService, TableLabelTakenError } from '@services/table.service';
 
 /**
  * Load the event this waiter is working and assert they may act on it. Every
@@ -29,5 +30,32 @@ export class WaiterController {
         eventDate: event.eventDate,
       }],
     });
+  }
+
+  /** POST /api/waiter/tables — open a new table under a number/label. */
+  static async openTable(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const waiter = (req as any).waiter as WaiterToken;
+    const label = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+    if (!label) return ApiResponseUtil.badRequest(res, 'label is required');
+    try {
+      const table = await TableService.open({ eventId: String(event._id), label, openedBy: waiter.waiterId });
+      return ApiResponseUtil.created(res, table);
+    } catch (e) {
+      // Two waiters opening "7" at once: the partial unique index arbitrates,
+      // and the loser is told the table is taken, not given a 500.
+      if (e instanceof TableLabelTakenError) return ApiResponseUtil.error(res, e.message, 409);
+      throw e;
+    }
+  }
+
+  /** GET /api/waiter/tables — tables at this waiter's event, optionally ?status=open|settled|voided. */
+  static async listTables(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const status = typeof req.query['status'] === 'string' ? req.query['status'] : undefined;
+    const tables = await TableService.list(String(event._id), status);
+    return ApiResponseUtil.success(res, { tables });
   }
 }

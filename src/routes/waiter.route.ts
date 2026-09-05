@@ -8,4 +8,7 @@ router.use(authenticateWaiter);
 
 router.get('/events', requireWaiterPermission(WaiterPermission.VIEW_EVENTS), WaiterController.getEvents);
 
+router.post('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.openTable);
+router.get('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.listTables);
+
 export default router;
