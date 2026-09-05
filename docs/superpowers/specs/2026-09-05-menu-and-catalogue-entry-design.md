@@ -1,4 +1,4 @@
-# Easier product and menu entry: scan a barcode, upload an image, pick a category
+# Easier product and menu entry: scan a barcode, upload images, pick a category
 
 **Date:** 2026-09-05
 **Status:** Design — approved in chat, pending spec review
@@ -14,9 +14,13 @@ Adding a product to a cashless event's catalogue means reading an EAN/UPC off th
 
 The handheld already scans. `mobile_scanner` has been in the POS since the basket work, and `scan_barcode_sheet.dart` matches EAN/UPC against the fetched catalogue. The dashboard has no camera capability at all: no barcode dependency in `package.json`, no `getUserMedia` anywhere in `src`.
 
-### A menu image is a URL you have to host yourself
+### Images are a URL you have to host yourself, or no field at all
 
-The menu form asks for an "Image URL" (`EventMenuTab.tsx:487`) and renders a preview from whatever string is typed. To put a photo of a burger on the preorder menu, an organizer must first upload that photo somewhere else and paste a link. There is no upload path, even though the API has uploaded event media to R2 since the poster/thumbnail/gallery work.
+The menu form asks for an "Image URL" (`EventMenuTab.tsx:487`) and renders a preview from whatever string is typed. To put a photo of a burger on the preorder menu, an organizer must first upload that photo somewhere else and paste a link.
+
+The catalogue form is worse: it has no image field at all. `Product.imageUrl` exists on the model, the POS basket renders it, and the API already accepts it — `createProductSchema` and `updateProductSchema` both validate `imageUrl` as a URI (`stock.validator.ts:25,36`) — but the dashboard has never offered a way to set it, so every product tile in the POS is text-only.
+
+Both gaps exist even though the API has uploaded event media to R2 since the poster/thumbnail/gallery work.
 
 ### A category is free text with an invisible picker
 
@@ -29,7 +33,6 @@ A datalist is invisible. It looks exactly like a text box, so nobody discovers t
 - **A vendor picker on the menu, and the event-vendor concept behind it.** Deferred to its own design, deliberately. The dashboard has no list of third-party vendors to pick from: `Vendor` is the organizer account (`Event.vendorId`), `Merchant` is a cashless stall with a ledger account and commission rate — the organizer's own bars — and the menu's `vendorName` is a free string with no model at all. Pointing menu items at a `Merchant` would force every third-party food vendor into the organizer's own stall list and set them up to take tap-to-pay money. That conflation is the thing to avoid, so the vendor picker waits for a real "vendors under this event" entity.
 - **Barcodes on menu items.** Menu items have no barcode field and do not need one; they are preorder listings, not stocked SKUs.
 - **Replacing the typed barcode input.** Scanning is added beside it, never instead of it — a laptop with no camera, or a page served without HTTPS, must keep working exactly as it does now.
-- **Images on catalogue products.** `Product.imageUrl` exists and the POS basket renders it, but the catalogue form has never exposed an image field. Adding one is the same work as the menu image and can follow it; it is out of scope here to keep the change one shape at a time.
 - **A fixed category enum.** The model's per-event free-text grouping is kept.
 
 ## Design
@@ -47,21 +50,24 @@ Both paths decode through `@zxing/browser`, which reads from a live `MediaStream
 
 A decoded value lands in the same state the typed value does, so the existing validation (`:222` — at least 3 characters) and the existing uniqueness handling (the API answers 11000 with "A product with that barcode already exists at this event") apply unchanged.
 
-### 2. Menu images: upload instead of paste
+### 2. Item images: upload instead of paste, and a field where there was none
 
-`R2Service.getEventMediaFolder`'s `mediaType` union gains `'menu-item'`, and `uploadEventMedia` accepts it — the method is otherwise unchanged. A `menuItemUpload` multer config joins the others in `media.middleware.ts`, matching `posterUpload`'s limits and image-only filter.
+`R2Service.getEventMediaFolder`'s `mediaType` union gains `'menu-item'` and `'product'` — distinct folders, so a menu photo and a product photo can never collide, and either can be cleaned up independently. `uploadEventMedia` is otherwise unchanged. An `itemImageUpload` multer config joins the others in `media.middleware.ts`, matching `posterUpload`'s limits and image-only filter; both routes share it, since the constraints are identical.
 
-One new route:
+Two new routes:
 
 ```
 POST /api/media/events/:eventId/menu-item   → { url }
+POST /api/media/events/:eventId/product     → { url }
 ```
+
+They keep the existing one-route-per-media-type convention, but delegate to a single controller implementation parameterised by media type rather than duplicating the upload-and-replace logic twice.
 
 running the same middleware chain its siblings do — `authenticateTickets`, then `validateEventAccess`, then `menuItemUpload.single('image')`, `handleMulterError` and `validateFileUpload`. There is no named-permission guard on these routes; ownership is what `validateEventAccess` enforces, and the controller re-checks it with the same `{ _id: eventId, vendorId }` query `uploadPoster` runs for non-super-admins. It returns the public URL; it does not write to the menu item. The dashboard sets `imageUrl` from that URL through the existing menu-item create/update call, so the API's menu controller needs no change at all.
 
-The form's "Image URL" input becomes a file input with the preview it already renders. Replacing an image on an existing item deletes the previous object through `deleteEventMediaByUrl`, the same way `uploadPoster` clears an old poster — best-effort, and a failure to delete never fails the upload.
+On the menu form, the "Image URL" input becomes a file input with the preview it already renders. On the catalogue form, an image field is added where none existed, using the same component. Replacing an image on an existing item or product deletes the previous object through `deleteEventMediaByUrl`, the same way `uploadPoster` clears an old poster — best-effort, and a failure to delete never fails the upload.
 
-**The URL field does not disappear from the model.** `MenuItem.imageUrl` keeps its shape and meaning; only how the dashboard fills it changes. Items whose image was pasted as an external link keep rendering.
+**Neither model changes.** `MenuItem.imageUrl` and `Product.imageUrl` keep their shapes; only how the dashboard fills them changes. The product validators already accept `imageUrl`, so the catalogue's create/update calls need only start sending it. Items whose image was pasted as an external link keep rendering.
 
 ### 3. Category: a picker that looks like one
 
@@ -97,10 +103,10 @@ Dashboard (vitest + Testing Library):
 - picking an existing category does not send a new one
 
 API (jest + supertest):
-- `POST /api/media/events/:eventId/menu-item` returns a URL for a valid image
-- it refuses an event belonging to another vendor, through the same `validateEventAccess` path the sibling upload routes use
+- both new routes return a URL for a valid image
+- each refuses an event belonging to another vendor, through the same `validateEventAccess` path the sibling upload routes use
 - a non-image file is rejected
-- `getEventMediaFolder` returns a distinct folder for `'menu-item'`, so menu images cannot collide with posters
+- `getEventMediaFolder` returns distinct folders for `'menu-item'` and `'product'`, so the two cannot collide with each other or with posters
 
 The camera itself is not tested in jsdom; `getUserMedia` and the decoder are stubbed, and what is asserted is the component's behaviour around them.
 
@@ -109,9 +115,9 @@ The camera itself is not tested in jsdom; `getUserMedia` and the decoder are stu
 Three independent changes, shippable in any order:
 
 1. **Category picker** — dashboard only, no dependency, no API change. Smallest, ships first.
-2. **Menu image upload** — one API route plus the form swap.
+2. **Item image upload** — the media-type union, the shared multer config, two routes and one shared controller path, then the menu form's swap and the catalogue form's new field. The catalogue half additionally starts sending `imageUrl` on create/update, which the API already accepts.
 3. **Barcode scan/photo** — adds `@zxing/browser`; largest, and the only one that needs a device to verify properly.
 
 ## Rollout
 
-Nothing to migrate. `MenuItem` and `Product` are untouched; `imageUrl` and `barcode` keep their shapes. The category picker reads values already in the data. An organizer on a browser with no camera sees exactly today's barcode field, and every existing menu item — including any with a pasted external image URL — renders unchanged.
+Nothing to migrate. `MenuItem` and `Product` are untouched; `imageUrl` and `barcode` keep their shapes, and products that have never had an image simply keep rendering without one. The category picker reads values already in the data. An organizer on a browser with no camera sees exactly today's barcode field, and every existing menu item — including any with a pasted external image URL — renders unchanged.
