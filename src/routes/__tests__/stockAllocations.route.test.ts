@@ -158,3 +158,34 @@ it('refuses the whole request when one of several delisted stalls holds stock', 
   // retry after writing off the 3 would silently leave the catalogue changed.
   expect(await ProductStock.countDocuments({ productId: beer })).toBe(2);
 });
+
+it('refuses with 409 (never deletes) when stock arrives at a stall between the read and the delete', async () => {
+  // The handler reads `existing` (onHand: 0, safe to delist) long before its
+  // deleteMany fires. A receive landing in that window must not be silently
+  // discarded — the row still holds stock the StockMovement ledger accounts
+  // for. Interleave it here by hijacking ProductStock.deleteMany: the mock
+  // performs the "concurrent receive" update first, then lets the real
+  // deleteMany run against the now-stale filter, exactly as it would if two
+  // requests raced for real.
+  const { eventId, token } = await ownedCashlessEvent();
+  const bar = await stall(eventId, 'Bar');
+  const beer = await product(eventId, 'Castle Lite 330ml');
+  const row = await ProductStock.create({ merchantId: bar, productId: beer, eventId, onHand: 0 });
+
+  const realDeleteMany = ProductStock.deleteMany.bind(ProductStock);
+  const spy = jest.spyOn(ProductStock, 'deleteMany').mockImplementationOnce(((filter: any) => (async () => {
+    await ProductStock.updateOne({ _id: row._id }, { $set: { onHand: 5 } });
+    return realDeleteMany(filter);
+  })()) as any);
+
+  const res = await put(eventId, token, { productId: beer, merchantIds: [] });
+  spy.mockRestore();
+
+  expect(res.status).toBe(409);
+  expect(res.body.message).toMatch(/reload and try again/i);
+  // The row must survive with the stock the race delivered — not deleted,
+  // and not silently zeroed either.
+  const survivor = await ProductStock.findOne({ merchantId: bar, productId: beer });
+  expect(survivor).not.toBeNull();
+  expect(survivor!.onHand).toBe(5);
+});

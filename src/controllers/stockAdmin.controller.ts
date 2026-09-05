@@ -195,7 +195,7 @@ export class StockAdminController {
       if (!event) return;
       const products = await Product.find({ eventId: event._id }, { _id: 1 }).lean();
       const rows = await ProductStock.find(
-        { productId: { $in: products.map((p) => p._id) } },
+        { eventId: event._id, productId: { $in: products.map((p) => p._id) } },
         { productId: 1, merchantId: 1 },
       ).lean();
       // Every product gets a key, even with no stalls — the dashboard needs the
@@ -229,8 +229,7 @@ export class StockAdminController {
         }
       }
 
-      const existing = await ProductStock.find({ productId: product._id }).lean();
-      const have = new Set(existing.map((r) => String(r.merchantId)));
+      const existing = await ProductStock.find({ eventId: event._id, productId: product._id }).lean();
       const want = new Set(wanted);
 
       const toRemove = existing.filter((r) => !want.has(String(r.merchantId)));
@@ -250,19 +249,38 @@ export class StockAdminController {
           .join(', ');
         ApiResponseUtil.badRequest(
           res,
-          `Cannot remove a stall that still holds stock: ${detail}. Transfer or write it off first.`,
+          `Cannot remove a stall that still holds stock: ${detail}. Transfer it, or record a count of 0, first.`,
         );
         return;
       }
 
+      // Upsert rather than read-then-create: $setOnInsert cannot touch an
+      // existing document, so "re-allocating never resets an existing
+      // quantity" holds by construction, not by the `existing` snapshot above
+      // staying fresh. This also makes a double-clicked Save (or any
+      // concurrent receive/threshold/count for the same pair) collide safely
+      // on the {merchantId,productId} unique index instead of raising E11000
+      // — mirrors setThreshold's upsert above.
       for (const merchantId of wanted) {
-        if (have.has(merchantId)) continue; // never touch an existing quantity
-        await ProductStock.create({
-          merchantId, productId: product._id, eventId: event._id, onHand: 0,
-        });
+        await ProductStock.updateOne(
+          { merchantId, productId: product._id },
+          { $setOnInsert: { eventId: event._id, onHand: 0 } },
+          { upsert: true },
+        );
       }
       if (toRemove.length) {
-        await ProductStock.deleteMany({ _id: { $in: toRemove.map((r) => r._id) } });
+        // onHand: 0 re-checks at delete time rather than trusting the read at
+        // the top of this handler — a receive landing in that window would
+        // otherwise delete a row StockMovement still accounts for, silently
+        // desyncing the reconciliation report. On the happy path every row in
+        // toRemove already read as 0, so this clause is a no-op there.
+        const { deletedCount } = await ProductStock.deleteMany({
+          _id: { $in: toRemove.map((r) => r._id) }, onHand: 0,
+        });
+        if (deletedCount !== toRemove.length) {
+          ApiResponseUtil.error(res, 'Stock arrived at a stall while this was saving — reload and try again', 409);
+          return;
+        }
       }
 
       ApiResponseUtil.success(res, { allocated: wanted.sort() });
