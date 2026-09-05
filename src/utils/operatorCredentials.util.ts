@@ -4,6 +4,7 @@ import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
+import { Waiter } from '@models/waiter.model';
 
 /**
  * Crockford base32 — 32 glyphs with I, L, O and U removed. Chosen over
@@ -45,13 +46,14 @@ function randomCode(): string {
 export async function generateUniqueLoginCode(): Promise<string> {
   for (let attempt = 0; attempt < 20; attempt++) {
     const code = randomCode();
-    const [r, g, c, m] = await Promise.all([
+    const [r, g, c, m, w] = await Promise.all([
       ResellerOperator.exists({ loginCode: code }),
       GateOperator.exists({ loginCode: code }),
       Cashier.exists({ loginCode: code }),
       MerchantOperator.exists({ loginCode: code }),
+      Waiter.exists({ loginCode: code }),
     ]);
-    if (!r && !g && !c && !m) return code;
+    if (!r && !g && !c && !m && !w) return code;
   }
   throw new Error('Could not generate a unique login code');
 }

@@ -5,6 +5,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
+import { Waiter } from '@models/waiter.model';
 import { generatePin, generateUniqueLoginCode, normalizeLoginCode, LOGIN_CODE_ALPHABET } from '@utils/operatorCredentials.util';
 
 beforeAll(connectTestDb);
@@ -85,6 +86,29 @@ it('generateUniqueLoginCode avoids codes taken by a gate operator', async () => 
 it('generateUniqueLoginCode avoids codes taken by a stall operator', async () => {
   const seededCode = 'ABCDEF';
   await MerchantOperator.collection.insertOne({ loginCode: seededCode, fullName: 'till', isActive: true } as any);
+  const spy = jest.spyOn(crypto, 'randomInt') as unknown as jest.SpyInstance;
+  spy
+    .mockReturnValueOnce(10).mockReturnValueOnce(11).mockReturnValueOnce(12)
+    .mockReturnValueOnce(13).mockReturnValueOnce(14).mockReturnValueOnce(15)
+    .mockReturnValueOnce(1).mockReturnValueOnce(1).mockReturnValueOnce(1)
+    .mockReturnValueOnce(1).mockReturnValueOnce(1).mockReturnValueOnce(1);
+
+  const code = await generateUniqueLoginCode();
+
+  expect(spy).toHaveBeenCalledTimes(12); // it drew twice: the collision, then a fresh one
+  expect(code).toBe('111111');
+});
+
+// Waiter is the first actor whose admin surface mints codes THROUGH this
+// function (waiterAdmin.controller.ts) rather than being seeded by a fixture,
+// so a missing probe here is not theoretical: the very first hire could be
+// handed a code an existing cashier/gate-operator/etc. already holds, and the
+// shared login handler (operatorAuth.controller.ts) resolves an actor by
+// probing each collection in turn and taking the FIRST hit — a collision
+// means that person signs in as the wrong actor with the wrong permissions.
+it('generateUniqueLoginCode avoids codes taken by a waiter', async () => {
+  const seededCode = 'ABCDEF';
+  await Waiter.collection.insertOne({ loginCode: seededCode, fullName: 'w', scope: 'platform', isActive: true } as any);
   const spy = jest.spyOn(crypto, 'randomInt') as unknown as jest.SpyInstance;
   spy
     .mockReturnValueOnce(10).mockReturnValueOnce(11).mockReturnValueOnce(12)
