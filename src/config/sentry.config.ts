@@ -8,6 +8,9 @@
  * - SENTRY_RELEASE: Optional release version
  */
 
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
 export const sentryConfig = {
   // Sentry DSN - get this from your Sentry project settings
   dsn: process.env['SENTRY_DSN'] || '',
@@ -131,3 +134,41 @@ export const isSentryEnabled = (): boolean => {
   console.log(`✅ Sentry enabled for environment: ${sentryConfig.environment}`);
   return true;
 };
+
+let initialised = false;
+
+/**
+ * Initialise the Sentry Node SDK. Must run before `express`/`mongoose` are
+ * required so the express/mongoose auto-instrumentation below can hook them
+ * (@sentry/node v10 dropped the old `new Sentry.Integrations.Http/Express/Mongo(...)`
+ * classes and `Sentry.Handlers.*` middleware — those throw under v10, which is
+ * why this used to silently no-op). No-ops if SENTRY_DSN is unset.
+ */
+export function initSentry(): void {
+  if (!isSentryEnabled()) return;
+
+  Sentry.init({
+    dsn: sentryConfig.dsn,
+    environment: sentryConfig.environment,
+    release: sentryConfig.release,
+    tracesSampleRate: sentryConfig.tracesSampleRate,
+    profilesSampleRate: sentryConfig.tracesSampleRate,
+    debug: sentryConfig.debug,
+    serverName: sentryConfig.serverName,
+    beforeSend: sentryConfig.beforeSend,
+    beforeBreadcrumb: sentryConfig.beforeBreadcrumb,
+    ignoreErrors: sentryConfig.ignoreErrors,
+    integrations: [
+      Sentry.httpIntegration(),
+      Sentry.expressIntegration(),
+      Sentry.mongooseIntegration(),
+      nodeProfilingIntegration(),
+    ],
+  });
+
+  initialised = true;
+}
+
+export function isSentryInitialised(): boolean {
+  return initialised;
+}
