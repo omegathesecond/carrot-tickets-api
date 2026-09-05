@@ -666,6 +666,8 @@ router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPe
 router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setThreshold);
 router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.transferStock);
 router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.recordCount);
+router.get('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listAllocations);
+router.put('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setAllocations);
 
 /**
  * Event Menu — organiser manages the bar/vendor preorder catalogue shown on

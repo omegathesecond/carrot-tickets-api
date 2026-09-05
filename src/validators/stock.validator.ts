@@ -51,6 +51,13 @@ export const thresholdSchema = Joi.object({
   lowStockThreshold: Joi.number().integer().min(0).allow(null).required(),
 });
 
+export const allocationsSchema = Joi.object({
+  productId: objectId.required(),
+  // An empty array is legal and meaningful: it delists the product from every
+  // stall. Task 3 is what stops that from silently discarding held stock.
+  merchantIds: Joi.array().items(objectId).required(),
+});
+
 export const transferStockSchema = Joi.object({
   productId: objectId.required(),
   fromMerchantId: objectId.required(),
