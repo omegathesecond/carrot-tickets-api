@@ -107,7 +107,11 @@ export class WaiterController {
         });
       }
       const msg = (e as Error)?.message || 'Could not add item';
-      const status = /not open/i.test(msg) ? 409 : /not sold at that stall|not found/i.test(msg) ? 400 : 500;
+      // "stall is closed" (suspended) is a 400 alongside its neighbours here —
+      // the request itself named a stall that cannot take new items right
+      // now, same class of problem as "not sold at that stall"/"not found".
+      const status = /not open/i.test(msg) ? 409
+        : /not sold at that stall|not found|stall is closed/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);
     }
   }

@@ -185,6 +185,15 @@ export class TableService {
     // commit, so only the table push + the stock CAS below need to be atomic.
     const merchant = await Merchant.findOne({ _id: merchantObjId, eventId: eventObjId });
     if (!merchant) throw new Error('stall not found for this event');
+    // Deliberately its OWN refusal, not folded into the findOne filter above:
+    // "no such stall at this event" and "this stall exists but is closed" are
+    // different problems for the waiter holding the handheld — one means
+    // check what you tapped, the other means walk to the desk. Design doc's
+    // failure-modes section: suspension blocks NEW items, not money already
+    // owed — TableService.settle deliberately still pays a stall suspended
+    // after its drinks were served (see tableSettle.test.ts), so this check
+    // must never move into settle.
+    if (merchant.status !== 'active') throw new Error('stall is closed — suspended stalls cannot take new orders');
     const product = await Product.findOne({ _id: productObjId, eventId: eventObjId, active: true });
     if (!product) throw new Error('product not found for this event');
     // A ProductStock row is what makes a product "sold at" a stall — the same

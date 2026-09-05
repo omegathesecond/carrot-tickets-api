@@ -3,6 +3,7 @@ import { seedStall, seedStallAndTable, onHandFor, EVENT } from '@/__tests__/help
 import { TableService } from '@services/table.service';
 import { Table } from '@models/table.model';
 import { Product } from '@models/product.model';
+import { Merchant } from '@models/merchant.model';
 
 beforeAll(connectLedgerTestDb, 60000); // StockService.applyMovement needs a replica set for its transaction
 afterEach(clearTestDb);
@@ -78,5 +79,38 @@ describe('TableService.addItem', () => {
     await expect(TableService.addItem({
       tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1',
     })).rejects.toThrow(/not open/i);
+  });
+
+  // Design doc's failure-modes section, second half: suspension blocks NEW
+  // items, distinct from "stall not found for this event" above — that's a
+  // wrong/nonexistent stall, this is a real stall the organizer switched off.
+  // Nothing may be written on a refused add: not the line, not the subtotal,
+  // and — the whole point — not the stock, or a closed stall keeps selling
+  // through the one route that never checked its till login or its charge.
+  it('refuses an item from a suspended stall, leaving the tab and the shelf untouched', async () => {
+    const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
+    await Merchant.updateOne({ _id: merchantId }, { $set: { status: 'suspended' } });
+
+    await expect(TableService.addItem({
+      tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1',
+    })).rejects.toThrow(/closed/i);
+
+    const after = await Table.findById(table._id);
+    expect(after!.items).toHaveLength(0);
+    expect(after!.subtotal).toBe(0);
+    expect(await onHandFor(merchantId, productId)).toBe(10);
+  });
+
+  // Guards against over-refusing: an active stall — the default, and the
+  // common case all night — must keep working once the suspended check exists.
+  it('still allows an item from an active stall', async () => {
+    const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
+
+    const after = await TableService.addItem({
+      tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1',
+    });
+
+    expect(after.items).toHaveLength(1);
+    expect(await onHandFor(merchantId, productId)).toBe(9);
   });
 });

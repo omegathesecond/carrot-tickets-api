@@ -187,6 +187,24 @@ describe('waiter tables — add an item', () => {
     expect(res.status).not.toBe(200);
     expect(res.body.message).toMatch(/not found/i);
   });
+
+  // The controller maps TableService's plain-Error messages to status codes
+  // by regex — proves "stall is closed" lands on 400, not the 500 it would
+  // fall through to if the mapping were never extended for it.
+  it('refuses an item from a suspended stall with a 400, message says it is closed', async () => {
+    const { eventId, token } = await seedFloor();
+    const { merchantId, productId } = await seedStallOn(eventId, { price: 3000, onHand: 10 });
+    await Merchant.updateOne({ _id: merchantId }, { $set: { status: 'suspended' } });
+    const opened = await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${token}`).send({ label: '7' });
+    const tableId = opened.body.data._id;
+
+    const res = await request(app).post(`/api/waiter/tables/${tableId}/items`)
+      .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/closed/i);
+  });
 });
 
 describe('waiter tables — remove an item', () => {
