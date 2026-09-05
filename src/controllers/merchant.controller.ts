@@ -146,9 +146,18 @@ export class MerchantController {
   static async stock(req: Request, res: Response): Promise<any> {
     try {
       const { merchantId, eventId } = (req as any).merchant as MerchantToken;
-      const products = await Product.find({ eventId, active: true }).sort({ name: 1 }).lean();
+      // A stall carries a product iff it has a ProductStock row for it — the
+      // same rule StockService.adjust already enforces (it upserts on receive
+      // and declines a decrement with no row). Loading every product at the
+      // event and left-joining quantities made a stall's handheld list its
+      // neighbours' items as permanent sold-out tiles.
       const rows = await ProductStock.find({ merchantId }).lean();
       const byProduct = new Map(rows.map((r) => [String(r.productId), r]));
+      const products = await Product.find({
+        eventId,
+        active: true,
+        _id: { $in: rows.map((r) => r.productId) },
+      }).sort({ name: 1 }).lean();
       const stock = products.map((p) => {
         const r = byProduct.get(String(p._id));
         const onHand = r?.onHand ?? 0;
