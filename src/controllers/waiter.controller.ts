@@ -86,4 +86,24 @@ export class WaiterController {
       return ApiResponseUtil.error(res, msg, status);
     }
   }
+
+  /** DELETE /api/waiter/tables/:id/items/:lineId — remove a mis-punched line, returning its stock. */
+  static async removeItem(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const waiter = (req as any).waiter as WaiterToken;
+    try {
+      const table = await TableService.removeItem({
+        tableId: req.params['id']!, lineId: req.params['lineId']!, removedBy: waiter.waiterId,
+      });
+      return ApiResponseUtil.success(res, table);
+    } catch (e) {
+      const msg = (e as Error)?.message || 'Could not remove item';
+      // "table not found"/"line not found on this table" are both 404s — the
+      // URL named a resource that isn't there; "not open" is 409 — the
+      // resource exists but the table has already moved past editable state.
+      const status = /not open/i.test(msg) ? 409 : /not found/i.test(msg) ? 404 : 500;
+      return ApiResponseUtil.error(res, msg, status);
+    }
+  }
 }

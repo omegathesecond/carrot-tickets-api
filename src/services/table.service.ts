@@ -113,4 +113,66 @@ export class TableService {
       await session.endSession();
     }
   }
+
+  /**
+   * Remove a mis-punched line. This is the "never left the counter" case —
+   * the bottle goes back on the shelf, so the stall's stock must go back up.
+   * Line-pull + subtotal-decrement + stock-return all happen in ONE
+   * transaction, same idiom as addItem: a stock return that lands while the
+   * line removal fails would credit the stall with a bottle it still doesn't
+   * have back.
+   */
+  static async removeItem(params: { tableId: string; lineId: string; removedBy: string }): Promise<ITable> {
+    const { tableId, lineId, removedBy } = params;
+    const tableObjId = new mongoose.Types.ObjectId(tableId);
+    const lineObjId = new mongoose.Types.ObjectId(lineId);
+
+    // Resolved BEFORE the transaction, same reasoning as addItem's merchant/
+    // product lookups: a line's merchantId/productId/unitPrice/qty are a
+    // snapshot nothing else can mutate — only removal ever touches it — so
+    // reading it up front races with nothing.
+    const table = await Table.findById(tableObjId);
+    if (!table) throw new Error('table not found');
+    const line = table.items.find((i) => String(i._id) === lineId);
+    if (!line) throw new Error('line not found on this table');
+    if (table.status !== 'open') throw new Error(`table is not open (status: ${table.status})`);
+    const lineTotal = line.unitPrice * line.qty;
+
+    const session = await mongoose.startSession();
+    try {
+      let result!: ITable;
+      await session.withTransaction(async () => {
+        // Single guarded update: $pull the line and $inc the subtotal down in
+        // the SAME atomic op, with status:'open' AND the line's own _id in the
+        // FILTER — so a concurrent settle/void, or a concurrent removal of the
+        // same line, simply fails to match rather than double-applying.
+        const updated = await Table.findOneAndUpdate(
+          { _id: tableObjId, status: 'open', 'items._id': lineObjId },
+          { $pull: { items: { _id: lineObjId } }, $inc: { subtotal: -lineTotal } },
+          { new: true, session },
+        );
+        if (!updated) {
+          const existing = await Table.findById(tableObjId).session(session);
+          if (!existing) throw new Error('table not found');
+          if (existing.status !== 'open') throw new Error(`table is not open (status: ${existing.status})`);
+          throw new Error('line not found on this table');
+        }
+
+        // The compensating movement is its OWN event (MANUAL, not a smaller
+        // SALE) so the stock history can be read backwards: "this bottle came
+        // back because a line was removed", not silently absorbed into the sale.
+        await StockService.applyMovement({
+          eventId: table.eventId, merchantId: line.merchantId, productId: line.productId,
+          delta: line.qty, reason: StockMovementReason.MANUAL,
+          refType: 'table_line_removed', refId: lineId,
+          byType: 'Waiter', by: removedBy, session,
+        });
+
+        result = updated;
+      });
+      return result;
+    } finally {
+      await session.endSession();
+    }
+  }
 }

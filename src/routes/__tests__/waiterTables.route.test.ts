@@ -147,3 +147,38 @@ describe('waiter tables — add an item', () => {
     expect(res.body.message).toMatch(/not found/i);
   });
 });
+
+describe('waiter tables — remove an item', () => {
+  it('removes a line and returns its stock', async () => {
+    const { eventId, token } = await seedFloor();
+    const { merchantId, productId } = await seedStallOn(eventId, { price: 3000, onHand: 10 });
+    const opened = await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${token}`).send({ label: '7' });
+    const tableId = opened.body.data._id;
+    const added = await request(app).post(`/api/waiter/tables/${tableId}/items`)
+      .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: 2 });
+    const lineId = added.body.data.items[0]._id;
+
+    const res = await request(app).delete(`/api/waiter/tables/${tableId}/items/${lineId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.items).toHaveLength(0);
+    expect(res.body.data.subtotal).toBe(0);
+  });
+
+  // Proves the route is actually GATED, not just that the service works when
+  // called directly. A 401 here would mean the request never reached
+  // requireWaiterPermission at all — see the gate-removal check in the
+  // report for how this was verified to actually depend on the middleware.
+  it('403s a waiter token missing MANAGE_TABLES — authenticated, but not authorised', async () => {
+    const { token } = await seedFloor([]);
+    const someTableId = new mongoose.Types.ObjectId().toString();
+    const someLineId = new mongoose.Types.ObjectId().toString();
+
+    const res = await request(app).delete(`/api/waiter/tables/${someTableId}/items/${someLineId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+  });
+});
