@@ -14,6 +14,7 @@ import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { SettingsController } from '@controllers/settings.controller';
 import { GateOperatorAdminController } from '@controllers/gateOperatorAdmin.controller';
 import { CashierAdminController } from '@controllers/cashierAdmin.controller';
+import { WaiterAdminController } from '@controllers/waiterAdmin.controller';
 import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAdmin.controller';
 import { OrganizerCashlessController } from '@controllers/organizerCashless.controller';
@@ -572,6 +573,19 @@ router.post('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCES
 router.get('/cashiers/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.transactions);
 router.patch('/cashiers/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.update);
 router.post('/cashiers/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.resetPin);
+
+/**
+ * Waiter Admin Routes — an organizer hires/disables the floor staff who open
+ * tables, add items from several stalls, and settle against an NFC tag.
+ * requireSuperAdminOrPermission (not the bare requireTicketsPermission used by
+ * the cashier/gate-operator routes above): a super-admin token carries an
+ * EMPTY permissions array, and gating staff admin on the bare check is the
+ * defect fixed in 5b4820c for the tag registry routes.
+ */
+router.post('/waiters', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), WaiterAdminController.create);
+router.get('/waiters', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), WaiterAdminController.list);
+router.patch('/waiters/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), WaiterAdminController.update);
+router.post('/waiters/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), WaiterAdminController.resetPin);
 
 /**
  * Vendor (in-event merchant) Admin Routes — an organizer sets up the stalls
