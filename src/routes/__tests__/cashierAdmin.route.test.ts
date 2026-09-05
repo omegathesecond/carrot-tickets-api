@@ -350,3 +350,68 @@ describe('PATCH /api/tickets/cashiers/:id isActive', () => {
     expect(reloaded!.isActive).toBe(true);
   });
 });
+
+describe('granting an existing cashier the tag desk', () => {
+  // issue_tags is what lets the entrance cashier turn a blank tag into a funded
+  // wallet in one tap. Without a way to grant it after hiring, the only route to
+  // it was deleting the person and hiring them again.
+  async function hire(fullName: string, eventId: string) {
+    const res = await request(app).post('/api/tickets/cashiers')
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName, eventId });
+    return res.body.data.cashier;
+  }
+
+  it('adds the grant to somebody already hired', async () => {
+    const cashier = await hire('Nandi', myEventId);
+    expect(cashier.grants ?? []).toEqual([]);
+
+    const res = await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ grants: ['issue_tags'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.grants).toEqual(['issue_tags']);
+    expect((await Cashier.findById(cashier._id))!.grants).toEqual(['issue_tags']);
+  });
+
+  it('takes it away again', async () => {
+    const cashier = await hire('Nandi', myEventId);
+    await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ grants: ['issue_tags'] });
+
+    const res = await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ grants: [] });
+
+    expect(res.status).toBe(200);
+    expect((await Cashier.findById(cashier._id))!.grants).toEqual([]);
+  });
+
+  it('drops a grant that is not a real capability rather than storing it', async () => {
+    const cashier = await hire('Nandi', myEventId);
+
+    const res = await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ grants: ['issue_tags', 'tickets:manage_stock'] });
+
+    expect(res.status).toBe(200);
+    expect((await Cashier.findById(cashier._id))!.grants).toEqual(['issue_tags']);
+  });
+
+  it('leaves grants alone when the body does not mention them', async () => {
+    const cashier = await hire('Nandi', myEventId);
+    await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ grants: ['issue_tags'] });
+
+    await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .send({ fullName: 'Nandi M' });
+
+    const after = await Cashier.findById(cashier._id);
+    expect(after!.fullName).toBe('Nandi M');
+    expect(after!.grants).toEqual(['issue_tags']);
+  });
+});

@@ -148,6 +148,15 @@ export class CashierAdminController {
         }
         cashier.isActive = req.body.isActive;
       }
+      if ('grants' in req.body) {
+        // The tag desk (issue_tags) is what lets the entrance cashier turn a
+        // blank tag into a funded wallet in one tap. It was only settable at
+        // hire time and, oddly, on resetPin — so granting it to somebody
+        // already working meant either re-hiring them or reissuing their PIN
+        // mid-shift. sanitizeGrants drops anything that is not a real
+        // capability rather than storing it, same as create.
+        cashier.grants = sanitizeGrants(req.body.grants);
+      }
       // The owning event is deliberately NOT patchable — it is immutable at
       // the schema level, so a body carrying one is ignored. Moving a cashier
       // to another event means hiring a new one for that event.

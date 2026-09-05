@@ -5,14 +5,15 @@ import { ScanService } from '@services/scan.service';
 import { bindBandSchema } from '@validators/tickets.validator';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { Wallet } from '@models/wallet.model';
+import { Wallet, IWallet } from '@models/wallet.model';
 import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { WalletDeclinedError } from '@services/merchant.service';
 import { CashierService } from '@services/cashier.service';
+import { EventTagService } from '@services/eventTag.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { cashTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
-import { CashierToken } from '@interfaces/cashier.interface';
+import { CashierToken, CashierPermission } from '@interfaces/cashier.interface';
 import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 
 /** Human-facing message per WalletDeclinedError reason, for the 402 envelope. */
@@ -125,9 +126,44 @@ export class CashierController {
       if (!event) return;
 
       const cashier = (req as any).cashier as CashierToken;
-      const wallet = value.bandUid
+      let wallet: IWallet | null = value.bandUid
         ? await Wallet.findOne({ eventId: value.eventId, bandUid: normalizeBandUid(value.bandUid) })
         : await Wallet.findOne({ ticketId: value.ticketId, eventId: value.eventId });
+
+      // THE DOOR IS ONE QUEUE, NOT TWO. The cashier IS the entrance desk — she
+      // tops up and cashes out as people come in — so sending her to a separate
+      // register desk to make a blank tag usable puts a second queue in front of
+      // the first. A cashier the organizer granted issue_tags turns a blank tag
+      // into a funded wallet inside the call the POS already makes: scan, enter
+      // the amount, tap.
+      //
+      // Gated on the grant, which is absent from CASHIER_PERMISSIONS: putting
+      // tags into circulation is exactly what issue_tags authorises, and an
+      // ungranted cashier still gets the plain refusal below. Deliberately only
+      // for a BAND — a missing ticket wallet is not something to conjure.
+      //
+      // "Blank" means blank AT THIS EVENT: registers and wallets are per-event,
+      // so the same physical tag may carry a wallet at another show and still
+      // be new here, and gets its own wallet for this one.
+      if (
+        !wallet
+        && value.bandUid
+        && (cashier.permissions || []).includes(CashierPermission.ISSUE_TAGS)
+      ) {
+        await EventTagService.registerTag({
+          eventId: String(event._id),
+          bandUid: value.bandUid,
+          registeredBy: cashier.cashierId,
+        });
+        const issued = await WalletService.ensureStandaloneWalletForBand({
+          eventId: String(event._id),
+          bandUid: value.bandUid,
+          acceptTicketBound: true,
+          issuedBy: cashier.cashierId,
+        });
+        wallet = issued.wallet;
+      }
+
       if (!wallet) return ApiResponseUtil.error(res, 'No wallet for that band/ticket', 404);
 
       const result = await WalletService.topUpCash({

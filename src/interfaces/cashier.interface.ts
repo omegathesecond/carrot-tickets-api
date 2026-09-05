@@ -1,3 +1,4 @@
+import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 // api/src/interfaces/cashier.interface.ts
 import { Document, Types } from 'mongoose';
 
@@ -11,6 +12,12 @@ import { Document, Types } from 'mongoose';
 export type CashierScope = 'platform' | 'organizer';
 
 export interface ICashier extends Document {
+  /**
+   * Per-person capability grants on top of CASHIER_PERMISSIONS — today just the
+   * tag desk (issue_tags). Stored by the shared applyOperatorCredentials mixin,
+   * which is why this was reached through `as any` before being declared here.
+   */
+  grants?: OperatorGrant[];
   fullName: string;
   phoneNumber?: string;
   loginCode: string;
