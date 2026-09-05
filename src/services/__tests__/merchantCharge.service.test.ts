@@ -355,7 +355,7 @@ it('ignores a staffName supplied by the client', async () => {
 
   const charge = await MerchantCharge.findOne({ clientTxnId: 'chg-forge-1' });
   expect(charge!.staffName).toBe('Thabo Dlamini');
-  expect(charge!.merchantOperatorId.toString()).toBe(merchantOperatorId);
+  expect(String(charge!.merchantOperatorId)).toBe(merchantOperatorId);
 });
 
 it('credits the STALL in the ledger, never the operator', async () => {

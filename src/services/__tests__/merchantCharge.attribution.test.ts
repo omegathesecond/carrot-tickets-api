@@ -17,13 +17,19 @@ const base = () => ({
   staffName: 'Thabo Dlamini',
 });
 
-it('requires the operator who rang it up', async () => {
-  await expect(new MerchantCharge(base()).save()).rejects.toThrow(/merchantOperatorId/);
+// Was "requires the operator who rang it up" — merchantOperatorId became optional
+// so a table settled by a waiter (no till operator) can still be recorded; see
+// src/models/__tests__/merchantChargeWaiter.test.ts for that case. staffName (the
+// field this suite's base() already sets) is now the one attribution every charge
+// keeps, till or table.
+it('allows no till operator when nothing else identifies one (e.g. a table charge)', async () => {
+  const charge = await new MerchantCharge(base()).save();
+  expect(charge.merchantOperatorId).toBeUndefined();
 });
 
 it('stores the operator and the name snapshot together', async () => {
   const merchantOperatorId = new mongoose.Types.ObjectId();
   const charge = await new MerchantCharge({ ...base(), merchantOperatorId }).save();
-  expect(charge.merchantOperatorId.toString()).toBe(merchantOperatorId.toString());
+  expect(String(charge.merchantOperatorId)).toBe(merchantOperatorId.toString());
   expect(charge.staffName).toBe('Thabo Dlamini');
 });

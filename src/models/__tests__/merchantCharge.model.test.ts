@@ -34,12 +34,18 @@ describe('MerchantCharge items + staffName', () => {
     expect(c.staffName).toBe('Sipho');
   });
 
-  it('rejects a charge with no merchantOperatorId (attribution is not optional)', async () => {
-    await expect(MerchantCharge.create({
+  // Was "rejects a charge with no merchantOperatorId" — merchantOperatorId became
+  // optional so a table settled by a waiter (no till operator) can be recorded.
+  // See src/models/__tests__/merchantChargeWaiter.test.ts for the waiter-attributed
+  // case; staffName (asserted below) is now the one attribution every charge keeps.
+  it('accepts a charge with no merchantOperatorId as long as staffName names someone', async () => {
+    const c = await MerchantCharge.create({
       merchantId: id(), eventId: id(), walletId: id(), bandUid: '04aabbccddee',
       amount: 300, fee: 0, netAmount: 300, clientTxnId: 'c3', status: 'completed',
       staffName: 'Sipho',
-    })).rejects.toThrow(/merchantOperatorId/);
+    });
+    expect(c.merchantOperatorId).toBeUndefined();
+    expect(c.staffName).toBe('Sipho');
   });
 
   it('rejects a charge with no staffName (attribution snapshot is not optional)', async () => {

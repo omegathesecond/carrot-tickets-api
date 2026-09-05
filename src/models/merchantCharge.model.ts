@@ -10,8 +10,17 @@ import { Schema, model, Document, Types } from 'mongoose';
  */
 export interface IMerchantCharge extends Document {
   merchantId: Types.ObjectId;
-  /** The PERSON who rang this up. Derived from the JWT, never from the body. */
-  merchantOperatorId: Types.ObjectId;
+  /**
+   * The PERSON who rang this up on a till. Derived from the JWT, never from
+   * the body — but a TABLE settled by a waiter has no till operator (they
+   * collected drinks from several stalls and settled them together), so this
+   * is optional. `waiterId` is the alternative attribution for that case.
+   * A report that groups takings by operator must treat the absent case as
+   * table service, not drop the row — it is still money the stall is owed.
+   */
+  merchantOperatorId?: Types.ObjectId;
+  /** The WAITER who settled this on behalf of a table, when there was no till operator. */
+  waiterId?: Types.ObjectId;
   eventId: Types.ObjectId;
   walletId: Types.ObjectId;
   bandUid: string;
@@ -24,14 +33,22 @@ export interface IMerchantCharge extends Document {
   clientTxnId: string;
   status: 'completed';
   items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }>;
-  /** Snapshot of the operator's name at sale time, so history survives a rename. */
+  /**
+   * Snapshot of the human who took this charge at sale time — the operator's
+   * name for a till charge, the waiter's name for a table charge — so
+   * history survives a rename. Required: whichever of merchantOperatorId /
+   * waiterId is absent, staffName is the one thing every charge still names.
+   */
   staffName: string;
   createdAt: Date;
 }
 
 const merchantChargeSchema = new Schema<IMerchantCharge>({
   merchantId: { type: Schema.Types.ObjectId, required: true, index: true },
-  merchantOperatorId: { type: Schema.Types.ObjectId, required: true, index: true },
+  // Optional: a table settled by a waiter has no till operator (see IMerchantCharge
+  // comment above). Index kept for the per-operator takings report's existing lookup.
+  merchantOperatorId: { type: Schema.Types.ObjectId, index: true },
+  waiterId: { type: Schema.Types.ObjectId, ref: 'Waiter', index: true },
   eventId: { type: Schema.Types.ObjectId, required: true, index: true },
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   bandUid: { type: String, required: true, trim: true },
