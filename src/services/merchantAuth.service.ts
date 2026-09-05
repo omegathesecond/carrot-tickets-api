@@ -60,6 +60,13 @@ export class MerchantAuthService {
     // eventName comes back undefined and the UI falls back to the id.
     const event = await Event.findById(merchant.eventId).select('name').lean();
 
+    // The role is the floor (every person on a till can charge); grants are
+    // the per-person extras. Re-derived from the row on every request too —
+    // see authenticateMerchant — so this is the POS's copy, not the gate.
+    // deriveMerchantPermissions is the single definition of that formula,
+    // shared with authenticateMerchant precisely so the two cannot drift.
+    const permissions = deriveMerchantPermissions((operator as any).grants);
+
     const payload: MerchantToken = {
       scope: 'merchant',
       merchantId: (merchant._id as any).toString(),
@@ -68,12 +75,7 @@ export class MerchantAuthService {
       eventId: merchant.eventId.toString(),
       name: merchant.name,
       ...(event?.name ? { eventName: event.name } : {}),
-      // The role is the floor (every person on a till can charge); grants are
-      // the per-person extras. Re-derived from the row on every request too —
-      // see authenticateMerchant — so this is the POS's copy, not the gate.
-      // deriveMerchantPermissions is the single definition of that formula,
-      // shared with authenticateMerchant precisely so the two cannot drift.
-      permissions: deriveMerchantPermissions((operator as any).grants),
+      permissions,
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 
@@ -86,6 +88,11 @@ export class MerchantAuthService {
         name: merchant.name,
         eventId: payload.eventId,
         eventName: event?.name,
+        // The POS renders from this (which tabs and actions to show). It is NOT
+        // authorization — authenticateMerchant re-derives the same set from the
+        // operator row on every request, and that is the only thing the server
+        // trusts. Returned here so the client need not decode its own JWT.
+        permissions,
       },
     };
   }

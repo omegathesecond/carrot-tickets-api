@@ -41,3 +41,34 @@ it('leaves an ungranted operator with charge alone', async () => {
   const payload = jwt.verify(accessToken, JWT_SECRET) as MerchantToken;
   expect(payload.permissions).toEqual([MerchantPermission.CHARGE]);
 });
+
+it('returns the permission set in the response body, not only inside the token', async () => {
+  const { loginCode } = await seedOperator([OperatorGrant.MANAGE_STOCK]);
+  const { operator } = await MerchantAuthService.login(loginCode, '111111');
+
+  expect(operator.permissions).toEqual([
+    MerchantPermission.CHARGE,
+    MerchantPermission.MANAGE_STOCK,
+  ]);
+});
+
+it('gives an ungranted operator the floor alone in the body', async () => {
+  const { loginCode } = await seedOperator([]);
+  const { operator } = await MerchantAuthService.login(loginCode, '111111');
+
+  expect(operator.permissions).toEqual([MerchantPermission.CHARGE]);
+});
+
+it('keeps every pre-existing operator field intact', async () => {
+  const { loginCode } = await seedOperator([]);
+  const { operator } = await MerchantAuthService.login(loginCode, '111111');
+
+  // Additive change: an older POS build reads these and must not be disturbed.
+  expect(operator).toMatchObject({
+    merchantId: expect.any(String),
+    merchantOperatorId: expect.any(String),
+    operatorName: 'Nomsa Shongwe',
+    name: 'Sandwich Stall',
+    eventId: expect.any(String),
+  });
+});
