@@ -1,51 +1,24 @@
+import dotenv from 'dotenv';
+
+// Load environment variables first (SENTRY_DSN etc. must be in process.env
+// before initSentry() below reads them).
+dotenv.config();
+
+// Initialize Sentry BEFORE express/mongoose are imported, so its
+// express/mongoose auto-instrumentation can hook them.
+import { initSentry, isSentryInitialised } from '@config/sentry.config';
+initSentry();
+
 import express, { Application, Request, Response } from 'express';
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
 import helmet from 'helmet';
 import compression from 'compression';
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
+import * as Sentry from '@sentry/node';
 
-// Load environment variables first
-dotenv.config();
-
-// Initialize Sentry BEFORE importing anything else
-import { sentryConfig, isSentryEnabled } from '@config/sentry.config';
 import { getDatabaseURI, logDatabaseConfig, validateEnvironment } from '@config/database.config';
 import { buildCorsOrigin } from '@utils/corsOrigins.util';
-
-// Conditionally import and initialize Sentry
-let Sentry: any = null;
-if (isSentryEnabled()) {
-  try {
-    Sentry = require('@sentry/node');
-    const { ProfilingIntegration } = require('@sentry/profiling-node');
-
-    Sentry.init({
-      dsn: sentryConfig.dsn,
-      environment: sentryConfig.environment,
-      release: sentryConfig.release,
-      tracesSampleRate: sentryConfig.tracesSampleRate,
-      profilesSampleRate: sentryConfig.tracesSampleRate,
-      debug: sentryConfig.debug,
-      serverName: sentryConfig.serverName,
-      beforeSend: sentryConfig.beforeSend,
-      beforeBreadcrumb: sentryConfig.beforeBreadcrumb,
-      ignoreErrors: sentryConfig.ignoreErrors,
-      integrations: [
-        new Sentry.Integrations.Http({ tracing: true }),
-        new Sentry.Integrations.Express({ app: express() }),
-        new Sentry.Integrations.Mongo({
-          useMongoose: true,
-        }),
-        new ProfilingIntegration(),
-      ],
-    });
-  } catch (error) {
-    console.error('Failed to initialize Sentry:', error);
-    Sentry = null;
-  }
-}
 
 // Background sweeps (reservation expiry, card-sale reconciliation, event
 // reminders, stuck-update reconciliation) — consolidated in src/tasks.
@@ -104,12 +77,6 @@ handleUnhandledRejection();
 
 // Initialize Express app
 const app: Application = express();
-
-// Sentry request handler - MUST be first middleware
-if (Sentry) {
-  app.use(Sentry.Handlers.requestHandler());
-  app.use(Sentry.Handlers.tracingHandler());
-}
 
 // Middleware
 app.use(requestIdMiddleware); // Add request ID for tracking
@@ -216,14 +183,14 @@ app.use('/api/dm', dmRoutes);                        // Direct & group messages
 app.use(notFoundHandler);
 
 // Sentry error handler - must be before custom error handler
-if (Sentry) {
-  app.use(Sentry.Handlers.errorHandler({
+if (isSentryInitialised()) {
+  Sentry.setupExpressErrorHandler(app, {
     shouldHandleError(error: any) {
       // Report all errors with status >= 500 to Sentry
       // Don't report client errors (4xx)
       return !error.statusCode || error.statusCode >= 500;
     },
-  }));
+  });
 }
 
 // Global error handler - must be last
