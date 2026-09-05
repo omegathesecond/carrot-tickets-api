@@ -9,10 +9,11 @@ import { MerchantPermission } from '@interfaces/merchant.interface';
  * always scans, a cashier always tops up); grants are the per-person extras,
  * which is what makes this RBAC rather than four fixed job descriptions.
  *
- * Stored namespace-free on the operator row because the same capability means
- * the same thing to a gate operator and a cashier — but the two log in through
- * different middleware with different permission vocabularies, so each auth
- * service translates a grant into its own namespace when minting the token.
+ * Stored namespace-free on the operator row, and each auth service translates
+ * a grant into its own namespace when minting the token. Not every grant
+ * means something in every namespace — one capability is declared once and
+ * mapped per namespace, and a grant with no mapping in a namespace yields
+ * nothing there.
  */
 export enum OperatorGrant {
   /**

@@ -19,7 +19,7 @@ afterAll(disconnectTestDb);
 
 let seq = 930001;
 
-export const token = (merchantId: string, eventId: string, merchantOperatorId: string) =>
+const token = (merchantId: string, eventId: string, merchantOperatorId: string) =>
   jwt.sign({
     scope: 'merchant', merchantId, merchantOperatorId, operatorName: 'Nomsa Shongwe',
     eventId, name: 'Sandwich Stall', permissions: [MerchantPermission.CHARGE],

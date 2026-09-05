@@ -18,9 +18,11 @@ const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
  * (MerchantOperator); the STALL (Merchant) they work is read from that
  * document, never chosen by the device. The token therefore names both: the
  * stall money is owed to, and the human each charge is attributed to. It is
- * scoped to ONE event and carries a single fixed permission
- * (merchant:charge) — there is no role/permission matrix to look up, unlike
- * reseller.
+ * scoped to ONE event and carries the base permission (merchant:charge) plus
+ * whatever grants the operator holds, translated into the merchant namespace.
+ * Authorization is NOT based on this token — the permissions field is only the
+ * POS's rendering copy; the gate is in authenticateMerchant, which re-derives
+ * the same set from the operator row on every request.
  */
 export class MerchantAuthService {
   static async login(loginCode: string, pin: string) {
