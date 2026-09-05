@@ -6,7 +6,9 @@ import { Merchant } from '@models/merchant.model';
 import { StockMovement } from '@models/stockMovement.model';
 import { StockCount } from '@models/stockCount.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
+import { MerchantOperator } from '@models/merchantOperator.model';
 import { StockMovementReason } from '@interfaces/stock.interface';
+import { HEX24 } from '@utils/controllerHelpers.util';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
 
@@ -352,19 +354,37 @@ export class StockReportService {
 
     const productIds = [...new Set(page.map((d: any) => String(d.productId)))];
     const merchantIds = [...new Set(page.map((d: any) => String(d.merchantId)))];
-    const [prods, merchs] = await Promise.all([
+    // `by` is a free-form string: an ObjectId for Merchant-written rows, but a
+    // vendorId or the literal 'platform' for Organizer/Platform rows — guard
+    // with HEX24 so those never reach an ObjectId cast and 500 the endpoint.
+    const operatorIds = [...new Set(
+      page
+        .filter((d: any) => d.byType === 'Merchant' && HEX24.test(String(d.by)))
+        .map((d: any) => String(d.by)),
+    )];
+    const [prods, merchs, ops] = await Promise.all([
       Product.find({ _id: { $in: productIds.map(oid) } }).select('name').lean(),
       Merchant.find({ _id: { $in: merchantIds.map(oid) } }).select('name').lean(),
+      operatorIds.length
+        ? MerchantOperator.find({ _id: { $in: operatorIds.map(oid) } }).select('fullName').lean()
+        : Promise.resolve([] as any[]),
     ]);
     const productName = new Map(prods.map((p: any) => [String(p._id), p.name]));
     const merchantName = new Map(merchs.map((m: any) => [String(m._id), m.name]));
+    const operatorName = new Map(ops.map((o: any) => [String(o._id), o.fullName]));
 
     const movements = page.map((d: any) => ({
       id: String(d._id), at: d.at,
       merchantId: String(d.merchantId), merchantName: merchantName.get(String(d.merchantId)) || 'Unknown bar',
       productId: String(d.productId), productName: productName.get(String(d.productId)) || 'Unknown product',
       delta: d.delta, reason: d.reason, balanceAfter: d.balanceAfter,
-      refType: d.refType ?? null, refId: d.refId ?? null, byType: d.byType, by: d.by, note: d.note ?? null,
+      refType: d.refType ?? null, refId: d.refId ?? null,
+      byType: d.byType, by: d.by,
+      // Who actually did it. Organizer-written rows keep byName null — their
+      // `by` is a vendorId, not a person, and inventing a name for it would be
+      // worse than showing none.
+      byName: d.byType === 'Merchant' ? (operatorName.get(String(d.by)) ?? 'Unknown operator') : null,
+      note: d.note ?? null,
     }));
     const last = page[page.length - 1];
     return { movements, nextCursor: hasMore && last ? String(last._id) : null, hasMore };
