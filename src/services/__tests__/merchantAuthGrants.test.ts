@@ -78,7 +78,9 @@ it('returns the same array in the body as it minted into the token', async () =>
   const { accessToken, operator } = await MerchantAuthService.login(loginCode, '111111');
   const payload = jwt.verify(accessToken, JWT_SECRET) as MerchantToken;
 
-  // One computation, two consumers. This is the assertion that fails if the
-  // hoist is ever split back into two derive calls.
+  // Body and token must carry the same permissions. This does NOT prove they
+  // are one computation — two identical derive calls would pass it too — but
+  // it fires the moment the two sides disagree, which is how the earlier
+  // drift bug in this codebase actually surfaced.
   expect(operator.permissions).toEqual(payload.permissions);
 });
