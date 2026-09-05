@@ -94,7 +94,7 @@ export class WaiterController {
     const waiter = (req as any).waiter as WaiterToken;
     try {
       const table = await TableService.removeItem({
-        tableId: req.params['id']!, lineId: req.params['lineId']!, removedBy: waiter.waiterId,
+        tableId: req.params['id']!, eventId: String(event._id), lineId: req.params['lineId']!, removedBy: waiter.waiterId,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -115,7 +115,7 @@ export class WaiterController {
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : '';
     try {
       const table = await TableService.voidTable({
-        tableId: req.params['id']!, reason, voidedBy: waiter.waiterId,
+        tableId: req.params['id']!, eventId: String(event._id), reason, voidedBy: waiter.waiterId,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {

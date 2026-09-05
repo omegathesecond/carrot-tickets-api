@@ -122,16 +122,20 @@ export class TableService {
    * line removal fails would credit the stall with a bottle it still doesn't
    * have back.
    */
-  static async removeItem(params: { tableId: string; lineId: string; removedBy: string }): Promise<ITable> {
-    const { tableId, lineId, removedBy } = params;
+  static async removeItem(params: { tableId: string; eventId: string; lineId: string; removedBy: string }): Promise<ITable> {
+    const { tableId, eventId, lineId, removedBy } = params;
     const tableObjId = new mongoose.Types.ObjectId(tableId);
+    const eventObjId = new mongoose.Types.ObjectId(eventId);
     const lineObjId = new mongoose.Types.ObjectId(lineId);
 
     // Resolved BEFORE the transaction, same reasoning as addItem's merchant/
     // product lookups: a line's merchantId/productId/unitPrice/qty are a
     // snapshot nothing else can mutate — only removal ever touches it — so
-    // reading it up front races with nothing.
-    const table = await Table.findById(tableObjId);
+    // reading it up front races with nothing. eventId is in THIS filter too —
+    // a table belonging to another event must read exactly like a missing
+    // one, not surface a distinct "wrong event" error that would confirm to
+    // a waiter at event A that some id exists at event B.
+    const table = await Table.findOne({ _id: tableObjId, eventId: eventObjId });
     if (!table) throw new Error('table not found');
     const line = table.items.find((i) => String(i._id) === lineId);
     if (!line) throw new Error('line not found on this table');
@@ -143,16 +147,17 @@ export class TableService {
       let result!: ITable;
       await session.withTransaction(async () => {
         // Single guarded update: $pull the line and $inc the subtotal down in
-        // the SAME atomic op, with status:'open' AND the line's own _id in the
-        // FILTER — so a concurrent settle/void, or a concurrent removal of the
-        // same line, simply fails to match rather than double-applying.
+        // the SAME atomic op, with status:'open', eventId, AND the line's own
+        // _id in the FILTER — so a concurrent settle/void, a concurrent
+        // removal of the same line, or (as above) a cross-event id simply
+        // fails to match rather than double-applying or leaking existence.
         const updated = await Table.findOneAndUpdate(
-          { _id: tableObjId, status: 'open', 'items._id': lineObjId },
+          { _id: tableObjId, eventId: eventObjId, status: 'open', 'items._id': lineObjId },
           { $pull: { items: { _id: lineObjId } }, $inc: { subtotal: -lineTotal } },
           { new: true, session },
         );
         if (!updated) {
-          const existing = await Table.findById(tableObjId).session(session);
+          const existing = await Table.findOne({ _id: tableObjId, eventId: eventObjId }).session(session);
           if (!existing) throw new Error('table not found');
           if (existing.status !== 'open') throw new Error(`table is not open (status: ${existing.status})`);
           throw new Error('line not found on this table');
@@ -184,18 +189,23 @@ export class TableService {
    * transaction needed: unlike addItem/removeItem this touches only the
    * table document, nothing in ProductStock.
    */
-  static async voidTable(params: { tableId: string; reason: string; voidedBy: string }): Promise<ITable> {
-    const { tableId, voidedBy } = params;
+  static async voidTable(params: { tableId: string; eventId: string; reason: string; voidedBy: string }): Promise<ITable> {
+    const { tableId, eventId, voidedBy } = params;
     const reason = params.reason.trim();
     if (!reason) throw new Error('reason is required');
+    const eventObjId = new mongoose.Types.ObjectId(eventId);
 
+    // eventId lives in BOTH the guarded update's filter and the fallback
+    // lookup below — same reasoning as removeItem: a table belonging to
+    // another event must be indistinguishable from a missing one, in every
+    // branch, or the error message itself becomes the leak.
     const updated = await Table.findOneAndUpdate(
-      { _id: new mongoose.Types.ObjectId(tableId), status: 'open' },
+      { _id: new mongoose.Types.ObjectId(tableId), eventId: eventObjId, status: 'open' },
       { $set: { status: 'voided', voidedAt: new Date(), voidReason: reason, voidedBy } },
       { new: true },
     );
     if (!updated) {
-      const existing = await Table.findById(tableId);
+      const existing = await Table.findOne({ _id: tableId, eventId: eventObjId });
       if (!existing) throw new Error('table not found');
       throw new Error(`table is not open (status: ${existing.status})`);
     }
