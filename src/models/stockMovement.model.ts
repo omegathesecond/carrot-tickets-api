@@ -39,7 +39,7 @@ const stockMovementSchema = new Schema<IStockMovement>(
     },
     refType: { type: String },
     refId: { type: String },
-    byType: { type: String, enum: ['Organizer', 'Merchant', 'Platform'], required: true },
+    byType: { type: String, enum: ['Organizer', 'Merchant', 'Platform', 'Waiter'], required: true },
     by: { type: String, required: true },
     note: { type: String, trim: true },
     at: { type: Date, default: Date.now },

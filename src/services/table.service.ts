@@ -100,12 +100,10 @@ export class TableService {
         await StockService.applyMovement({
           eventId: eventObjId, merchantId: merchantObjId, productId: productObjId,
           delta: -qty, reason: StockMovementReason.SALE, refType: 'table', refId: tableId,
-          // 'Platform' is the closest fit of the three fixed actor types
-          // (stock.interface.ts): a waiter is neither a MerchantOperator (the
-          // stall's own till, 'Merchant') nor the organizer's own admin action
-          // ('Organizer') — and 'Platform' is otherwise unused, so this can't
-          // be confused with either in a stock report.
-          byType: 'Platform', by: addedBy, session,
+          // A waiter is neither the stall's own till ('Merchant') nor the
+          // organizer's own admin action ('Organizer') — attributing their
+          // movement to either would misreport who actually took the stock.
+          byType: 'Waiter', by: addedBy, session,
         });
 
         result = updated;
