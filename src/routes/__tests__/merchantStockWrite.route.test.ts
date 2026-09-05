@@ -118,3 +118,38 @@ describe('POST /api/merchant/stock/receive', () => {
     expect(theirs).toBeNull();
   });
 });
+
+describe('POST /api/merchant/stock/waste', () => {
+  it('writes off breakage and lands as spoilage in the journal', async () => {
+    const s = await seedStall({ onHand: 40 });
+    const res = await request(app).post('/api/merchant/stock/waste')
+      .set('Authorization', s.auth)
+      .send({ productId: s.productId, quantity: 6, note: 'crate dropped' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.onHand).toBe(34);
+
+    const move = await StockMovement.findOne({ merchantId: s.merchantId, reason: StockMovementReason.SPOILAGE }).lean();
+    expect(move).toMatchObject({ delta: -6, balanceAfter: 34, byType: 'Merchant', by: s.merchantOperatorId, note: 'crate dropped' });
+  });
+
+  it('refuses to write off more than is on hand, leaving the balance untouched', async () => {
+    const s = await seedStall({ onHand: 3 });
+    const res = await request(app).post('/api/merchant/stock/waste')
+      .set('Authorization', s.auth).send({ productId: s.productId, quantity: 4 });
+
+    expect(res.status).toBe(409);
+    const payload = JSON.parse(res.body.error);
+    expect(payload).toMatchObject({ reason: 'insufficient_stock', productId: s.productId, available: 3 });
+
+    const row = await ProductStock.findOne({ merchantId: s.merchantId, productId: s.productId }).lean();
+    expect(row?.onHand).toBe(3);
+  });
+
+  it('refuses a stall operator without the grant', async () => {
+    const s = await seedStall({ grants: [], onHand: 10 });
+    const res = await request(app).post('/api/merchant/stock/waste')
+      .set('Authorization', s.auth).send({ productId: s.productId, quantity: 1 });
+    expect(res.status).toBe(403);
+  });
+});

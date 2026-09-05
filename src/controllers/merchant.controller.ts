@@ -242,4 +242,34 @@ export class MerchantController {
       return ApiResponseUtil.error(res, e?.message || 'Receive failed', 500);
     }
   }
+
+  /** POST /api/merchant/stock/waste — breakage and spoilage at this stall. */
+  static async wasteStock(req: Request, res: Response): Promise<any> {
+    try {
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const { error, value } = posStockAdjustSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const units = await MerchantController.resolveProductAndUnits(req, res, value);
+      if (units == null) return;
+
+      const { onHand, movement } = await StockService.applyMovement({
+        eventId, merchantId, productId: value.productId,
+        delta: -units, reason: StockMovementReason.SPOILAGE,
+        refType: 'stock_waste', refId: String(new mongoose.Types.ObjectId()),
+        byType: 'Merchant', by: merchantOperatorId, note: value.note,
+      });
+      return ApiResponseUtil.success(res, { onHand, movementId: String(movement._id) });
+    } catch (e: any) {
+      // The CAS guard in applyMovement declined the decrement: the stall does
+      // not hold that much. Same envelope the charge path returns, so a POS
+      // client has one shape to handle.
+      if (e instanceof StockDeclinedError) {
+        return ApiResponseUtil.error(res, 'Not enough on hand', 409, {
+          reason: e.reason, productId: e.productId, available: e.available,
+        });
+      }
+      return ApiResponseUtil.error(res, e?.message || 'Write-off failed', 500);
+    }
+  }
 }

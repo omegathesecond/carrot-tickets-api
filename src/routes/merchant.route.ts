@@ -45,4 +45,10 @@ router.post(
   MerchantController.receiveStock,
 );
 
+router.post(
+  '/stock/waste',
+  requireMerchantPermission(MerchantPermission.MANAGE_STOCK),
+  MerchantController.wasteStock,
+);
+
 export default router;
