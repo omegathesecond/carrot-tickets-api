@@ -62,9 +62,11 @@ describe.each([
       .set('Authorization', `Bearer ${token}`)
       .attach('image', png, 'burger.png');
 
-    // Saving the url is the caller's next request, not this one's business.
-    expect(res.body.data.menuItem).toBeUndefined();
-    expect(res.body.data.product).toBeUndefined();
+    // These routes exist to NOT write to a record. Asserting the exact shape
+    // is what catches the likely regression — copying uploadPoster wholesale,
+    // which returns { event, media } after event.save(). Naming only a couple
+    // of forbidden keys would let that through.
+    expect(Object.keys(res.body.data)).toEqual(['media']);
   });
 
   it('refuses an event the caller does not own', async () => {
