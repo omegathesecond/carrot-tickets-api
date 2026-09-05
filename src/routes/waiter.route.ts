@@ -8,6 +8,10 @@ router.use(authenticateWaiter);
 
 router.get('/events', requireWaiterPermission(WaiterPermission.VIEW_EVENTS), WaiterController.getEvents);
 
+// VIEW_EVENTS, not MANAGE_TABLES: the event-wide product grid is a read of the
+// catalogue, the same class of thing as /events. Nothing on a table moves.
+router.get('/products', requireWaiterPermission(WaiterPermission.VIEW_EVENTS), WaiterController.getProducts);
+
 router.post('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.openTable);
 router.get('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.listTables);
 router.post('/tables/:id/items', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.addItem);

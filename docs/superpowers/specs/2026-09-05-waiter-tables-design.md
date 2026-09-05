@@ -96,6 +96,17 @@ silently reprice a drink somebody already drank.
 
 **Open** — `POST /api/waiter/tables` `{ label }`. Scoped to the waiter's event.
 
+**Browse the catalogue** — `GET /api/waiter/products`. Every ACTIVE product at
+every ACTIVE stall of the event, one row per (product, stall), each naming its
+`merchantId`/`merchantName`. A waiter serves the floor rather than a stall — a
+normal order spans stalls — so the sheet is one searchable grid and never makes
+them pick a stall first; the tile's `merchantId` is what the add call below
+needs. Derived from `ProductStock` rows, the same "this stall carries this
+product" fact `addItem` enforces, via the `PosCatalogService` the stall's own
+`GET /api/merchant/stock` grid shares — two answers to that question would
+offer tiles the add call then refuses. Read-only, so gated on `VIEW_EVENTS`
+rather than `MANAGE_TABLES`.
+
 **Add items** — `POST /api/waiter/tables/:id/items` `{ merchantId, productId, qty }`.
 Validates the stall belongs to this event and the product to that stall, snapshots
 name and price, appends the line, and deducts the stall's stock immediately with

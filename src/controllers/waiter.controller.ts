@@ -11,6 +11,7 @@ import {
   TableChangedDuringSettlementError, TableIdempotencyMismatchError,
 } from '@services/table.service';
 import { StockDeclinedError } from '@services/stock.service';
+import { PosCatalogService } from '@services/posCatalog.service';
 import { WalletDeclinedError } from '@services/merchant.service';
 
 /**
@@ -56,6 +57,34 @@ export class WaiterController {
         eventDate: event.eventDate,
       }],
     });
+  }
+
+  /**
+   * GET /api/waiter/products — every stall's products at this event in ONE
+   * searchable grid.
+   *
+   * A waiter serves the floor, not a stall: a normal order spans stalls ("two
+   * beers from the bar, a burger from the grill"), so the sheet never makes
+   * them pick a stall first. Each tile therefore names the stall it comes
+   * from, and a product carried by three stalls appears three times — that
+   * choice is the waiter's, and merchantId is what the subsequent addItem
+   * call needs.
+   *
+   * Gated on VIEW_EVENTS rather than MANAGE_TABLES: this is a read of the
+   * catalogue, in the same class as GET /events, and no table moves.
+   */
+  static async getProducts(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    try {
+      const products = await PosCatalogService.forEvent(String(event._id));
+      return ApiResponseUtil.success(res, { products });
+    } catch (e: any) {
+      // Answered, not thrown: Express 4 does not await these handlers, so an
+      // escaping rejection would hang the handheld mid-order rather than
+      // showing it an error.
+      return ApiResponseUtil.error(res, e?.message || 'Failed to load products', 500);
+    }
   }
 
   /** POST /api/waiter/tables — open a new table under a number/label. */

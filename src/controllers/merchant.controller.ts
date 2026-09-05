@@ -8,12 +8,12 @@ import { EventStatus } from '@interfaces/event.interface';
 import { Merchant } from '@models/merchant.model';
 import { Wallet } from '@models/wallet.model';
 import { Product } from '@models/product.model';
-import { ProductStock } from '@models/productStock.model';
 import { MerchantService, WalletDeclinedError, ChargeIdempotencyMismatchError } from '@services/merchant.service';
 import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockCountService } from '@services/stockCount.service';
 import { StockAlertService } from '@services/stockAlert.service';
 import { StockTransferService } from '@services/stockTransfer.service';
+import { PosCatalogService } from '@services/posCatalog.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
 import { posCountSchema, posStockAdjustSchema, posTransferSchema } from '@validators/stock.validator';
@@ -146,32 +146,11 @@ export class MerchantController {
   static async stock(req: Request, res: Response): Promise<any> {
     try {
       const { merchantId, eventId } = (req as any).merchant as MerchantToken;
-      // A stall carries a product iff it has a ProductStock row for it — the
-      // same rule StockService.adjust already enforces (it upserts on receive
-      // and declines a decrement with no row). Loading every product at the
-      // event and left-joining quantities made a stall's handheld list its
-      // neighbours' items as permanent sold-out tiles.
-      const rows = await ProductStock.find({ merchantId }).lean();
-      const byProduct = new Map(rows.map((r) => [String(r.productId), r]));
-      const products = await Product.find({
-        eventId,
-        active: true,
-        _id: { $in: rows.map((r) => r.productId) },
-      }).sort({ name: 1 }).lean();
-      const stock = products.map((p) => {
-        const r = byProduct.get(String(p._id));
-        const onHand = r?.onHand ?? 0;
-        const threshold = r?.lowStockThreshold ?? null;
-        // Same status rule as the Slice-4 organiser board: sold_out at 0, low
-        // at/below a set threshold, else in_stock. Drives the POS tile badges.
-        const status = onHand <= 0 ? 'sold_out' : (threshold != null && threshold > 0 && onHand <= threshold ? 'low' : 'in_stock');
-        return {
-          productId: String(p._id), name: p.name,
-          price: p.price, barcode: p.barcode ?? null, category: p.category, imageUrl: p.imageUrl ?? null,
-          unitLabel: p.unitLabel, unitsPerPack: p.unitsPerPack ?? null, packLabel: p.packLabel ?? null,
-          onHand, lowStockThreshold: threshold, status,
-        };
-      });
+      // Through PosCatalogService so this grid and the waiter's event-wide one
+      // answer "which stall carries this product" the same way — one stock row
+      // per stall-product, exactly what StockService.applyMovement's CAS and
+      // TableService.addItem enforce on the write side.
+      const stock = await PosCatalogService.forMerchant(merchantId, eventId);
       return ApiResponseUtil.success(res, { stock });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Failed to load stock', 500); }
   }
