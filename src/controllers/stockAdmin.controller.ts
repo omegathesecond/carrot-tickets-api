@@ -233,9 +233,27 @@ export class StockAdminController {
       const have = new Set(existing.map((r) => String(r.merchantId)));
       const want = new Set(wanted);
 
-      // Task 3 fills this in. Removing a row that still holds stock would
-      // discard inventory the movement ledger still accounts for.
       const toRemove = existing.filter((r) => !want.has(String(r.merchantId)));
+      // Deleting a row that still holds stock would discard inventory the
+      // StockMovement ledger still accounts for, silently desyncing the
+      // reconciliation report. Refuse the WHOLE request rather than delisting
+      // the empty stalls and rejecting the rest — a partial apply would leave
+      // the catalogue changed in a way the caller never asked for.
+      const held = toRemove.filter((r) => (r.onHand ?? 0) > 0);
+      if (held.length) {
+        const names = await Merchant.find(
+          { _id: { $in: held.map((r) => r.merchantId) } }, { name: 1 },
+        ).lean();
+        const byId = new Map(names.map((m) => [String(m._id), m.name]));
+        const detail = held
+          .map((r) => `${byId.get(String(r.merchantId)) ?? 'stall'} (${r.onHand})`)
+          .join(', ');
+        ApiResponseUtil.badRequest(
+          res,
+          `Cannot remove a stall that still holds stock: ${detail}. Transfer or write it off first.`,
+        );
+        return;
+      }
 
       for (const merchantId of wanted) {
         if (have.has(merchantId)) continue; // never touch an existing quantity

@@ -112,3 +112,49 @@ it('refuses an organizer who does not own the event', async () => {
 
   expect(res.status).toBe(403);
 });
+
+it('refuses to delist a stall that still holds stock, naming it and the quantity', async () => {
+  const { eventId, token } = await ownedCashlessEvent();
+  const bar = await stall(eventId, 'Bar');
+  const beer = await product(eventId, 'Castle Lite 330ml');
+  await ProductStock.create({ merchantId: bar, productId: beer, eventId, onHand: 12 });
+
+  const res = await put(eventId, token, { productId: beer, merchantIds: [] });
+
+  expect(res.status).toBe(400);
+  // ApiResponseUtil.badRequest(res, message) puts the text in `message`; the
+  // separate `error` field is an optional second argument nothing here passes.
+  expect(res.body.message).toContain('Bar');
+  expect(res.body.message).toContain('12');
+  // Nothing removed: the row and its stock survive the refusal intact.
+  expect((await ProductStock.findOne({ merchantId: bar, productId: beer }))!.onHand).toBe(12);
+});
+
+it('allows delisting a stall holding nothing', async () => {
+  const { eventId, token } = await ownedCashlessEvent();
+  const bar = await stall(eventId, 'Bar');
+  const beer = await product(eventId, 'Castle Lite 330ml');
+  await ProductStock.create({ merchantId: bar, productId: beer, eventId, onHand: 0 });
+
+  const res = await put(eventId, token, { productId: beer, merchantIds: [] });
+
+  expect(res.status).toBe(200);
+  expect(res.body.data.allocated).toEqual([]);
+  expect(await ProductStock.countDocuments({ productId: beer })).toBe(0);
+});
+
+it('refuses the whole request when one of several delisted stalls holds stock', async () => {
+  const { eventId, token } = await ownedCashlessEvent();
+  const bar = await stall(eventId, 'Bar');
+  const shi = await stall(eventId, 'Shisanyama');
+  const beer = await product(eventId, 'Castle Lite 330ml');
+  await ProductStock.create({ merchantId: bar, productId: beer, eventId, onHand: 0 });
+  await ProductStock.create({ merchantId: shi, productId: beer, eventId, onHand: 3 });
+
+  const res = await put(eventId, token, { productId: beer, merchantIds: [] });
+
+  expect(res.status).toBe(400);
+  // All-or-nothing: the empty-handed stall must not be delisted either, or a
+  // retry after writing off the 3 would silently leave the catalogue changed.
+  expect(await ProductStock.countDocuments({ productId: beer })).toBe(2);
+});
