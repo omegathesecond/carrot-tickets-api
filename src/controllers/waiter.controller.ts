@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
 import { WaiterToken } from '@interfaces/waiter.interface';
 import { TableService, TableLabelTakenError } from '@services/table.service';
+import { StockDeclinedError } from '@services/stock.service';
 
 /**
  * Load the event this waiter is working and assert they may act on it. Every
@@ -57,5 +58,32 @@ export class WaiterController {
     const status = typeof req.query['status'] === 'string' ? req.query['status'] : undefined;
     const tables = await TableService.list(String(event._id), status);
     return ApiResponseUtil.success(res, { tables });
+  }
+
+  /** POST /api/waiter/tables/:id/items — add an item from a stall, moving its stock. */
+  static async addItem(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const waiter = (req as any).waiter as WaiterToken;
+    const { merchantId, productId, qty } = req.body || {};
+    if (!merchantId || !productId) return ApiResponseUtil.badRequest(res, 'merchantId and productId are required');
+    if (!Number.isInteger(qty) || qty <= 0) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
+    try {
+      const table = await TableService.addItem({
+        tableId: req.params['id']!, eventId: String(event._id), merchantId, productId, qty, addedBy: waiter.waiterId,
+      });
+      return ApiResponseUtil.success(res, table);
+    } catch (e) {
+      // Out of stock at that stall — 409, distinct from a bad request: the
+      // table/stall/product were all fine, the shelf just ran out.
+      if (e instanceof StockDeclinedError) {
+        return ApiResponseUtil.error(res, 'Insufficient stock at that stall', 409, {
+          reason: e.reason, productId: e.productId, available: e.available,
+        });
+      }
+      const msg = (e as Error)?.message || 'Could not add item';
+      const status = /not open/i.test(msg) ? 409 : /not sold at that stall|not found/i.test(msg) ? 400 : 500;
+      return ApiResponseUtil.error(res, msg, status);
+    }
   }
 }
