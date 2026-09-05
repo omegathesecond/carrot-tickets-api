@@ -72,3 +72,13 @@ it('keeps every pre-existing operator field intact', async () => {
     eventId: expect.any(String),
   });
 });
+
+it('returns the same array in the body as it minted into the token', async () => {
+  const { loginCode } = await seedOperator([OperatorGrant.MANAGE_STOCK]);
+  const { accessToken, operator } = await MerchantAuthService.login(loginCode, '111111');
+  const payload = jwt.verify(accessToken, JWT_SECRET) as MerchantToken;
+
+  // One computation, two consumers. This is the assertion that fails if the
+  // hoist is ever split back into two derive calls.
+  expect(operator.permissions).toEqual(payload.permissions);
+});
