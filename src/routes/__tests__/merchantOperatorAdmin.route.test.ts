@@ -7,6 +7,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { Event } from '@models/event.model';
+import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 
@@ -348,4 +349,53 @@ it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', asy
   expect(res.body.message).toBe('isActive must be a boolean');
   const stored = await MerchantOperator.findById(operatorId);
   expect(stored!.isActive).toBe(true);
+});
+
+it('creates a stall operator carrying the stock grant', async () => {
+  const { merchantId } = await seedMerchant();
+  const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+    .send({ fullName: 'Sipho Mabuza', grants: [OperatorGrant.MANAGE_STOCK] });
+
+  expect(res.status).toBe(201);
+  const saved = await MerchantOperator.findById(res.body.data.operator._id).lean();
+  expect(saved!.grants).toEqual([OperatorGrant.MANAGE_STOCK]);
+});
+
+it('drops unknown grant values instead of storing them', async () => {
+  const { merchantId } = await seedMerchant();
+  const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+    .send({ fullName: 'Sipho Mabuza', grants: ['manage_stock', 'root', 42] });
+
+  expect(res.status).toBe(201);
+  const saved = await MerchantOperator.findById(res.body.data.operator._id).lean();
+  expect(saved!.grants).toEqual([OperatorGrant.MANAGE_STOCK]);
+});
+
+it('defaults to no grants when the field is absent', async () => {
+  const { merchantId } = await seedMerchant();
+  const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+    .send({ fullName: 'Sipho Mabuza' });
+
+  expect(res.status).toBe(201);
+  const saved = await MerchantOperator.findById(res.body.data.operator._id).lean();
+  expect(saved!.grants).toEqual([]);
+});
+
+it('revokes a grant on patch', async () => {
+  const { merchantId } = await seedMerchant();
+  const auth = `Bearer ${organizerToken(VENDOR_A)}`;
+  const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
+    .set('Authorization', auth)
+    .send({ fullName: 'Sipho Mabuza', grants: [OperatorGrant.MANAGE_STOCK] });
+  const operatorId = created.body.data.operator._id;
+
+  const res = await request(app).patch(`/api/tickets/merchant-operators/${operatorId}`)
+    .set('Authorization', auth).send({ grants: [] });
+
+  expect(res.status).toBe(200);
+  const saved = await MerchantOperator.findById(operatorId).lean();
+  expect(saved!.grants).toEqual([]);
 });

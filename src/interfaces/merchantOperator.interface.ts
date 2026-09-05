@@ -1,5 +1,6 @@
 // api/src/interfaces/merchantOperator.interface.ts
 import { Document, Types } from 'mongoose';
+import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 
 /**
  * One PERSON working a stall. The stall itself is a Merchant: it holds the
@@ -21,5 +22,6 @@ export interface IMerchantOperator extends Document {
   failedPinAttempts: number;
   lockedUntil: Date | null;
   lastLoginAt?: Date;
+  grants: OperatorGrant[];
   comparePin(candidate: string): Promise<boolean>;
 }

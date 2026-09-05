@@ -5,6 +5,7 @@ import { MerchantOperator } from '@models/merchantOperator.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedEvent } from '@controllers/merchantAdmin.controller';
+import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
 
 /**
  * Admin CRUD for the people on a stall's till. eventId is always inherited
@@ -57,6 +58,7 @@ export class MerchantOperatorAdminController {
         eventId: merchant.eventId,
         loginCode,
         pin,
+        grants: sanitizeGrants(req.body.grants),
       });
       // loginCode + pin are returned ONCE here (the pin is never serialized again).
       ApiResponseUtil.created(res, { operator, loginCode, pin });
@@ -91,6 +93,9 @@ export class MerchantOperatorAdminController {
         }
         operator.isActive = req.body.isActive;
       }
+      // Only known grants survive — a typo must not sit on the row waiting to
+      // widen a token later. Mirrors GateOperatorAdminController.update.
+      if ('grants' in req.body) (operator as any).grants = sanitizeGrants(req.body.grants);
       await operator.save();
       ApiResponseUtil.success(res, { operator });
     } catch (err) { next(err); }
