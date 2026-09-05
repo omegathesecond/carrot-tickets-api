@@ -484,8 +484,10 @@ it('refuses to delist a stall that still holds stock, naming it and the quantity
   const res = await put(eventId, token, { productId: beer, merchantIds: [] });
 
   expect(res.status).toBe(400);
-  expect(res.body.error).toContain('Bar');
-  expect(res.body.error).toContain('12');
+  // ApiResponseUtil.badRequest(res, message) puts the text in `message`; the
+  // separate `error` field is an optional second argument nothing here passes.
+  expect(res.body.message).toContain('Bar');
+  expect(res.body.message).toContain('12');
   // Nothing removed: the row and its stock survive the refusal intact.
   expect((await ProductStock.findOne({ merchantId: bar, productId: beer }))!.onHand).toBe(12);
 });
@@ -598,6 +600,7 @@ Create `src/services/__tests__/cashierTxnBandUid.test.ts`:
 // A cashier's History row must say WHICH band it was. bandUid lives on Wallet,
 // not on WalletTopup/WalletWithdrawal, so listTransactions has to join — and
 // it must stay null (never a placeholder) for a ticket-bound wallet.
+import mongoose from 'mongoose';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { CashierService } from '@services/cashier.service';
@@ -644,8 +647,12 @@ it('carries the band UID on withdrawals too', async () => {
 
 it('reports null — never a placeholder — for a ticket-bound wallet', async () => {
   const { eventId } = await seedPublishedEvent({});
+  // walletSchema.pre('validate') (wallet.model.ts:168) refuses a wallet with
+  // NEITHER a ticket nor a band, so a ticket-bound wallet must carry a
+  // ticketId — that is exactly what makes bandUid null here.
   const walletId = String((await Wallet.create({
-    eventId, bandUid: null, balance: 0, status: 'active',
+    eventId, ticketId: new mongoose.Types.ObjectId(), bandUid: null,
+    balance: 0, status: 'active',
   }))._id);
   await WalletTopup.create({
     walletId, eventId, amount: 2000, method: 'cash', status: 'completed',
