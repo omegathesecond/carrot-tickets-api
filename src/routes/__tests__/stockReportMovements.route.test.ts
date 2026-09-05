@@ -115,3 +115,26 @@ it('falls back rather than leaking a bare id when the operator is gone', async (
 
   expect(res.body.data.movements[0].byName).toBe('Unknown operator');
 });
+
+it('200s (not 500s) a Merchant-typed row whose by is not a valid ObjectId', async () => {
+  const { eventId, vendorId } = await seedPublishedEvent({});
+  await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
+  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+
+  const bar = await Merchant.create({ name: 'Sandwich Stall', eventId } as any);
+  const p = await Product.create({ eventId, name: 'Castle Lite', category: 'beer', price: 2500 } as any);
+  // A corrupt/hand-edited row: byType says Merchant but `by` isn't a real
+  // operator id. Must not reach an ObjectId cast (that would 500 the whole
+  // endpoint) — the HEX24 guard has to exclude it from the $in lookup.
+  await StockService.applyMovement({
+    eventId: String(eventId), merchantId: String(bar._id), productId: String(p._id),
+    delta: 3, reason: StockMovementReason.RECEIVE, byType: 'Merchant', by: 'not-an-id',
+  } as any);
+
+  const res = await request(app)
+    .get(`/api/tickets/events/${eventId}/stock/movements`)
+    .set('Authorization', `Bearer ${token}`);
+
+  expect(res.status).toBe(200);
+  expect(res.body.data.movements[0].byName).toBe('Unknown operator');
+});
