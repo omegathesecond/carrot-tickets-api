@@ -153,3 +153,66 @@ describe('POST /api/merchant/stock/waste', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('POST /api/merchant/stock/transfer', () => {
+  it('moves stock to another stall and journals both legs', async () => {
+    const s = await seedStall({ onHand: 50 });
+    const drinks = await Merchant.create({ name: 'Drinks Stall', eventId: s.eventId });
+
+    const res = await request(app).post('/api/merchant/stock/transfer')
+      .set('Authorization', s.auth)
+      .send({ productId: s.productId, toMerchantId: String(drinks._id), quantity: 2, unit: 'pack' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ fromOnHand: 2, toOnHand: 48 }); // 50-48, 0+48
+
+    const out = await StockMovement.findOne({ merchantId: s.merchantId, reason: StockMovementReason.TRANSFER_OUT }).lean();
+    const inn = await StockMovement.findOne({ merchantId: drinks._id, reason: StockMovementReason.TRANSFER_IN }).lean();
+    expect(out).toMatchObject({ delta: -48, byType: 'Merchant', by: s.merchantOperatorId });
+    expect(inn).toMatchObject({ delta: 48, byType: 'Merchant', by: s.merchantOperatorId });
+    expect(String(out!.refId)).toBe(String(inn!.refId));
+  });
+
+  it('refuses a destination stall at another event', async () => {
+    const s = await seedStall({ onHand: 50 });
+    const other = await seedPublishedEvent({});
+    const foreign = await Merchant.create({ name: 'Other Event Stall', eventId: other.eventId });
+
+    const res = await request(app).post('/api/merchant/stock/transfer')
+      .set('Authorization', s.auth)
+      .send({ productId: s.productId, toMerchantId: String(foreign._id), quantity: 1 });
+    expect(res.status).toBe(400);
+  });
+
+  it('refuses a suspended destination stall', async () => {
+    const s = await seedStall({ onHand: 50 });
+    const closed = await Merchant.create({ name: 'Closed Stall', eventId: s.eventId, status: 'suspended' });
+
+    const res = await request(app).post('/api/merchant/stock/transfer')
+      .set('Authorization', s.auth)
+      .send({ productId: s.productId, toMerchantId: String(closed._id), quantity: 1 });
+    expect(res.status).toBe(400);
+  });
+
+  it('refuses transferring more than is on hand', async () => {
+    const s = await seedStall({ onHand: 5 });
+    const drinks = await Merchant.create({ name: 'Drinks Stall', eventId: s.eventId });
+
+    const res = await request(app).post('/api/merchant/stock/transfer')
+      .set('Authorization', s.auth)
+      .send({ productId: s.productId, toMerchantId: String(drinks._id), quantity: 6 });
+
+    expect(res.status).toBe(409);
+    const row = await ProductStock.findOne({ merchantId: s.merchantId, productId: s.productId }).lean();
+    expect(row?.onHand).toBe(5);
+  });
+
+  it('refuses a stall operator without the grant', async () => {
+    const s = await seedStall({ grants: [], onHand: 50 });
+    const drinks = await Merchant.create({ name: 'Drinks Stall', eventId: s.eventId });
+    const res = await request(app).post('/api/merchant/stock/transfer')
+      .set('Authorization', s.auth)
+      .send({ productId: s.productId, toMerchantId: String(drinks._id), quantity: 1 });
+    expect(res.status).toBe(403);
+  });
+});

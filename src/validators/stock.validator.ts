@@ -73,3 +73,12 @@ export const posStockAdjustSchema = Joi.object({
   unit: Joi.string().valid('unit', 'pack').default('unit'),
   note: Joi.string().trim().optional(),
 });
+
+/** POS transfer. `fromMerchantId` is absent by design — it is always the token's stall. */
+export const posTransferSchema = Joi.object({
+  productId: objectId.required(),
+  toMerchantId: objectId.required(),
+  quantity: Joi.number().integer().min(1).max(MAX_QTY).required(),
+  unit: Joi.string().valid('unit', 'pack').default('unit'),
+  note: Joi.string().trim().optional(),
+});

@@ -51,4 +51,10 @@ router.post(
   MerchantController.wasteStock,
 );
 
+router.post(
+  '/stock/transfer',
+  requireMerchantPermission(MerchantPermission.MANAGE_STOCK),
+  MerchantController.transferStock,
+);
+
 export default router;

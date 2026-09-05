@@ -12,9 +12,10 @@ import { MerchantService, WalletDeclinedError, ChargeIdempotencyMismatchError } 
 import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockCountService } from '@services/stockCount.service';
 import { StockAlertService } from '@services/stockAlert.service';
+import { StockTransferService } from '@services/stockTransfer.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
 import { chargeSchema } from '@validators/merchant.validator';
-import { posCountSchema, posStockAdjustSchema } from '@validators/stock.validator';
+import { posCountSchema, posStockAdjustSchema, posTransferSchema } from '@validators/stock.validator';
 import { toBaseUnits } from '@utils/stockUnits.util';
 import { StockMovementReason } from '@interfaces/stock.interface';
 import { MerchantToken } from '@interfaces/merchant.interface';
@@ -270,6 +271,45 @@ export class MerchantController {
         });
       }
       return ApiResponseUtil.error(res, e?.message || 'Write-off failed', 500);
+    }
+  }
+
+  /** POST /api/merchant/stock/transfer — move stock from THIS stall to another. */
+  static async transferStock(req: Request, res: Response): Promise<any> {
+    try {
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const { error, value } = posTransferSchema.validate(req.body);
+      if (error) return ApiResponseUtil.error(res, error.message, 400);
+      if (String(value.toMerchantId) === String(merchantId)) {
+        return ApiResponseUtil.badRequest(res, 'cannot transfer to the same stall');
+      }
+
+      // The destination must be a live stall at THIS event. Without this check
+      // a valid id from another event would move stock across event
+      // boundaries, which no report would ever reconcile.
+      const destination = await Merchant.findById(value.toMerchantId).lean();
+      if (!destination || String(destination.eventId) !== String(eventId) || destination.status !== 'active') {
+        return ApiResponseUtil.badRequest(res, 'destination stall is not an active stall at this event');
+      }
+
+      const units = await MerchantController.resolveProductAndUnits(req, res, value);
+      if (units == null) return;
+
+      const { transfer, fromOnHand, toOnHand } = await StockTransferService.transfer({
+        eventId, productId: value.productId,
+        fromMerchantId: String(merchantId), toMerchantId: String(value.toMerchantId),
+        qty: units, byType: 'Merchant', by: merchantOperatorId, note: value.note,
+      });
+      return ApiResponseUtil.success(res, {
+        transferId: String(transfer._id), fromOnHand, toOnHand,
+      });
+    } catch (e: any) {
+      if (e instanceof StockDeclinedError) {
+        return ApiResponseUtil.error(res, 'Not enough on hand', 409, {
+          reason: e.reason, productId: e.productId, available: e.available,
+        });
+      }
+      return ApiResponseUtil.error(res, e?.message || 'Transfer failed', 500);
     }
   }
 }
