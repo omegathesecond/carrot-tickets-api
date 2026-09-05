@@ -175,4 +175,30 @@ export class TableService {
       await session.endSession();
     }
   }
+
+  /**
+   * Close an unpaid table WITHOUT returning stock. The drinks were consumed
+   * or the table walked out — that loss is real, and voidReason/voidedBy is
+   * the venue's record of it. Returning stock here would let a walked table
+   * look, on the shelf, exactly like a table that never happened. No
+   * transaction needed: unlike addItem/removeItem this touches only the
+   * table document, nothing in ProductStock.
+   */
+  static async voidTable(params: { tableId: string; reason: string; voidedBy: string }): Promise<ITable> {
+    const { tableId, voidedBy } = params;
+    const reason = params.reason.trim();
+    if (!reason) throw new Error('reason is required');
+
+    const updated = await Table.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(tableId), status: 'open' },
+      { $set: { status: 'voided', voidedAt: new Date(), voidReason: reason, voidedBy } },
+      { new: true },
+    );
+    if (!updated) {
+      const existing = await Table.findById(tableId);
+      if (!existing) throw new Error('table not found');
+      throw new Error(`table is not open (status: ${existing.status})`);
+    }
+    return updated;
+  }
 }

@@ -43,6 +43,7 @@ export interface ITable extends Document {
   settleTxnId?: string;
   voidedAt?: Date;
   voidReason?: string;
+  voidedBy?: string;
   createdAt: Date;
   updatedAt: Date;
 }

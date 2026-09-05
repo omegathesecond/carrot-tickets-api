@@ -33,6 +33,7 @@ const tableSchema = new Schema<ITable>({
   settleTxnId: { type: String, trim: true, index: true },
   voidedAt: { type: Date },
   voidReason: { type: String, trim: true },
+  voidedBy: { type: String },
 }, { timestamps: true });
 
 // One OPEN table per label per event. PARTIAL so a settled "7" frees the name

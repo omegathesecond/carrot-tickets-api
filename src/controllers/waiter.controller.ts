@@ -106,4 +106,25 @@ export class WaiterController {
       return ApiResponseUtil.error(res, msg, status);
     }
   }
+
+  /** POST /api/waiter/tables/:id/void — close an unpaid table, keeping the loss on record (stock is NOT returned). */
+  static async voidTable(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const waiter = (req as any).waiter as WaiterToken;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : '';
+    try {
+      const table = await TableService.voidTable({
+        tableId: req.params['id']!, reason, voidedBy: waiter.waiterId,
+      });
+      return ApiResponseUtil.success(res, table);
+    } catch (e) {
+      const msg = (e as Error)?.message || 'Could not void table';
+      // "reason is required" is a 400 — the caller sent a bad request;
+      // "not open"/"not found" mirror removeItem's split: the table exists
+      // but has already moved past voidable state, or the id names nothing.
+      const status = /reason is required/i.test(msg) ? 400 : /not open/i.test(msg) ? 409 : /not found/i.test(msg) ? 404 : 500;
+      return ApiResponseUtil.error(res, msg, status);
+    }
+  }
 }

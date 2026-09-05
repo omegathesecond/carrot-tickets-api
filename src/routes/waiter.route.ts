@@ -12,5 +12,6 @@ router.post('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), 
 router.get('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.listTables);
 router.post('/tables/:id/items', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.addItem);
 router.delete('/tables/:id/items/:lineId', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.removeItem);
+router.post('/tables/:id/void', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.voidTable);
 
 export default router;
