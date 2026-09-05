@@ -393,4 +393,54 @@ export class MediaController {
       ApiResponseUtil.serverError(res, error.message || 'Failed to upload wristband artwork');
     }
   }
+
+  /**
+   * Store an image belonging to something sold at this event, and return its
+   * URL. Unlike the poster/thumbnail routes, this writes to NO document: the
+   * dashboard saves the returned url through the normal menu-item or product
+   * update, which already accepts `imageUrl`. Keeping the two apart means an
+   * upload can never half-succeed against a record.
+   */
+  private static async uploadItemImage(
+    req: Request,
+    res: Response,
+    mediaType: 'menu-item' | 'product',
+  ): Promise<any> {
+    try {
+      const { eventId } = req.params;
+      const ticketsUser = (req as any).ticketsUser;
+      const file = req.file;
+
+      if (!eventId) return ApiResponseUtil.validationError(res, 'Event ID is required');
+      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
+
+      const query: any = { _id: eventId };
+      if (!ticketsUser.isSuperAdmin) query.vendorId = ticketsUser.vendorId;
+      const event = await Event.findOne(query);
+      if (!event) return ApiResponseUtil.notFound(res, 'Event not found');
+
+      const { key, url } = await R2Service.uploadEventMedia(
+        eventId,
+        mediaType,
+        file.originalname || mediaType,
+        file.buffer,
+        file.mimetype,
+      );
+
+      ApiResponseUtil.success(res, { media: { key, url, type: mediaType } }, 'Image uploaded successfully');
+    } catch (error: any) {
+      console.error(`Upload ${mediaType} image error:`, error);
+      ApiResponseUtil.error(res, error.message || 'Failed to upload image');
+    }
+  }
+
+  /** POST /api/media/events/:eventId/menu-item */
+  static async uploadMenuItemImage(req: Request, res: Response): Promise<any> {
+    return MediaController.uploadItemImage(req, res, 'menu-item');
+  }
+
+  /** POST /api/media/events/:eventId/product */
+  static async uploadProductImage(req: Request, res: Response): Promise<any> {
+    return MediaController.uploadItemImage(req, res, 'product');
+  }
 }

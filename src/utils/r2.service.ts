@@ -144,7 +144,10 @@ export class R2Service {
    * @param eventId - Event ID
    * @param mediaType - Type of media (poster, thumbnail, gallery, qrcode)
    */
-  static getEventMediaFolder(eventId: string, mediaType: 'poster' | 'thumbnail' | 'gallery' | 'qrcode'): string {
+  static getEventMediaFolder(
+    eventId: string,
+    mediaType: 'poster' | 'thumbnail' | 'gallery' | 'qrcode' | 'menu-item' | 'product',
+  ): string {
     return `events/${eventId}/${mediaType}`;
   }
 
@@ -158,7 +161,7 @@ export class R2Service {
    */
   static async uploadEventMedia(
     eventId: string,
-    mediaType: 'poster' | 'thumbnail' | 'gallery' | 'qrcode',
+    mediaType: 'poster' | 'thumbnail' | 'gallery' | 'qrcode' | 'menu-item' | 'product',
     fileName: string,
     buffer: Buffer,
     contentType: string

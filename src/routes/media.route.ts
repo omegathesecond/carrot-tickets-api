@@ -7,6 +7,7 @@ import {
   galleryUpload,
   qrcodeUpload,
   wristbandUpload,
+  itemImageUpload,
   validateFileUpload,
   validateMultipleFileUpload,
   validateEventAccess,
@@ -104,6 +105,40 @@ router.post(
   handleMulterError,
   validateFileUpload,
   MediaController.uploadWristbandAsset
+);
+
+/**
+ * @route   POST /api/media/events/:eventId/menu-item
+ * @desc    Upload an image for a menu item; returns the url, writes no document
+ * @access  Private (Vendor)
+ * @body    multipart/form-data with 'image' field
+ * @limits  5MB, JPEG/PNG/WEBP
+ */
+router.post(
+  '/events/:eventId/menu-item',
+  authenticateTickets,
+  validateEventAccess,
+  itemImageUpload.single('image'),
+  handleMulterError,
+  validateFileUpload,
+  MediaController.uploadMenuItemImage,
+);
+
+/**
+ * @route   POST /api/media/events/:eventId/product
+ * @desc    Upload an image for a catalogue product; returns the url, writes no document
+ * @access  Private (Vendor)
+ * @body    multipart/form-data with 'image' field
+ * @limits  5MB, JPEG/PNG/WEBP
+ */
+router.post(
+  '/events/:eventId/product',
+  authenticateTickets,
+  validateEventAccess,
+  itemImageUpload.single('image'),
+  handleMulterError,
+  validateFileUpload,
+  MediaController.uploadProductImage,
 );
 
 /**

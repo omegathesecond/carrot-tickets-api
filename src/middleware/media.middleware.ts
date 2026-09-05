@@ -12,6 +12,7 @@ const FILE_SIZE_LIMITS = {
   qrcode: 2 * 1024 * 1024,      // 2MB for QR codes
   wristband: 10 * 1024 * 1024,  // 10MB for wristband artwork (photo-quality backgrounds)
   avatar: 5 * 1024 * 1024,      // 5MB for buyer profile pictures (client already downscales)
+  itemImage: 5 * 1024 * 1024,   // 5MB for menu item and product photos
 };
 
 /**
@@ -122,6 +123,17 @@ export const avatarUpload = multer({
   fileFilter: createFileFilter(ALLOWED_IMAGE_TYPES, 'avatar'),
 });
 
+// Menu item / catalogue product photo: same constraints for both, since
+// neither writes to a document — they just store the file and return the url.
+export const itemImageUpload = multer({
+  storage,
+  limits: {
+    fileSize: FILE_SIZE_LIMITS.itemImage,
+    files: 1,
+  },
+  fileFilter: createFileFilter(ALLOWED_IMAGE_TYPES, 'image'),
+});
+
 /**
  * Middleware to validate that a file was uploaded
  */
@@ -193,7 +205,9 @@ export const handleMulterError = (err: any, req: Request, res: Response, next: N
   }
 
   if (err) {
-    ApiResponseUtil.error(res, err.message || 'File upload failed');
+    // Reaching here (not a MulterError) means the fileFilter rejected the
+    // file — e.g. wrong MIME type. That's bad input, not a server failure.
+    ApiResponseUtil.validationError(res, err.message || 'File upload failed');
     return;
   }
 
