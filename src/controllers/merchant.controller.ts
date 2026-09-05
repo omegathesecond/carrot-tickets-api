@@ -1,5 +1,6 @@
 // api/src/controllers/merchant.controller.ts
 import { Request, Response } from 'express';
+import Joi from 'joi';
 import mongoose from 'mongoose';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
@@ -219,15 +220,30 @@ export class MerchantController {
     return units;
   }
 
+  /**
+   * Shared POS stock-write preamble: validate the body against `schema`, then
+   * resolve the named product + convert its quantity to base units. Returns
+   * null after already answering the response (either step can refuse).
+   * Every stock write (receive/waste/transfer) starts here; anything past
+   * this point is specific to what the write does.
+   */
+  private static async validateStockWrite<T extends { productId: string; quantity: number; unit: 'unit' | 'pack' }>(
+    req: Request, res: Response, schema: Joi.ObjectSchema<T>,
+  ): Promise<{ value: T; units: number } | null> {
+    const { error, value } = schema.validate(req.body);
+    if (error) { ApiResponseUtil.error(res, error.message, 400); return null; }
+    const units = await MerchantController.resolveProductAndUnits(req, res, value);
+    if (units == null) return null;
+    return { value, units };
+  }
+
   /** POST /api/merchant/stock/receive — a delivery INTO this stall. */
   static async receiveStock(req: Request, res: Response): Promise<any> {
     try {
       const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
-      const { error, value } = posStockAdjustSchema.validate(req.body);
-      if (error) return ApiResponseUtil.error(res, error.message, 400);
-
-      const units = await MerchantController.resolveProductAndUnits(req, res, value);
-      if (units == null) return;
+      const resolved = await MerchantController.validateStockWrite(req, res, posStockAdjustSchema);
+      if (resolved == null) return;
+      const { value, units } = resolved;
 
       const { onHand, movement } = await StockService.applyMovement({
         eventId, merchantId, productId: value.productId,
@@ -248,11 +264,9 @@ export class MerchantController {
   static async wasteStock(req: Request, res: Response): Promise<any> {
     try {
       const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
-      const { error, value } = posStockAdjustSchema.validate(req.body);
-      if (error) return ApiResponseUtil.error(res, error.message, 400);
-
-      const units = await MerchantController.resolveProductAndUnits(req, res, value);
-      if (units == null) return;
+      const resolved = await MerchantController.validateStockWrite(req, res, posStockAdjustSchema);
+      if (resolved == null) return;
+      const { value, units } = resolved;
 
       const { onHand, movement } = await StockService.applyMovement({
         eventId, merchantId, productId: value.productId,
@@ -278,8 +292,10 @@ export class MerchantController {
   static async transferStock(req: Request, res: Response): Promise<any> {
     try {
       const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
-      const { error, value } = posTransferSchema.validate(req.body);
-      if (error) return ApiResponseUtil.error(res, error.message, 400);
+      const resolved = await MerchantController.validateStockWrite(req, res, posTransferSchema);
+      if (resolved == null) return;
+      const { value, units } = resolved;
+
       if (String(value.toMerchantId) === String(merchantId)) {
         return ApiResponseUtil.badRequest(res, 'cannot transfer to the same stall');
       }
@@ -291,9 +307,6 @@ export class MerchantController {
       if (!destination || String(destination.eventId) !== String(eventId) || destination.status !== 'active') {
         return ApiResponseUtil.badRequest(res, 'destination stall is not an active stall at this event');
       }
-
-      const units = await MerchantController.resolveProductAndUnits(req, res, value);
-      if (units == null) return;
 
       const { transfer, fromOnHand, toOnHand } = await StockTransferService.transfer({
         eventId, productId: value.productId,
