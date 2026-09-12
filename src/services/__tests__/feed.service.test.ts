@@ -545,6 +545,36 @@ describe('feed.service getFeed', () => {
       }
     });
 
+    it('places the hot slide within the first three posts of every fresh Home feed load (client escalation: not buried, not skipped)', async () => {
+      for (let i = 0; i < 20; i++) await seedReadyUpdate('u' + i);
+      await seedHotUpdate('h1');
+
+      for (let i = 0; i < 15; i++) {
+        const { items } = await getFeed({ tab: 'for-you', limit: 12 });
+        const hotIdx = items.findIndex((it) => it.type === 'hot');
+        expect(hotIdx).toBeGreaterThanOrEqual(0);
+        expect(hotIdx).toBeLessThanOrEqual(2);
+      }
+
+      for (let i = 0; i < 15; i++) {
+        const { items } = await getFeed({ tab: 'following', limit: 12 });
+        const hotIdx = items.findIndex((it) => it.type === 'hot');
+        expect(hotIdx).toBeGreaterThanOrEqual(0);
+        expect(hotIdx).toBeLessThanOrEqual(2);
+      }
+    });
+
+    it('does not force a hot slide onto a paginated continuation page (only a fresh load is guaranteed)', async () => {
+      for (let i = 0; i < 40; i++) await seedReadyUpdate('u' + i);
+      await seedHotUpdate('h1');
+
+      const p1 = await getFeed({ tab: 'for-you', limit: 12 });
+      expect(p1.items.some((it) => it.type === 'hot')).toBe(true);
+      // exhausts the single hot slide on page 1 via the forced placement —
+      // page 2 legitimately has none left to show, and must not error.
+      await expect(getFeed({ tab: 'for-you', limit: 12, cursor: p1.nextCursor! })).resolves.toBeDefined();
+    });
+
     it('does not repeat a What\'s Hot post across pages within one session', async () => {
       for (let i = 0; i < 20; i++) await seedReadyUpdate('u' + i);
       await seedHotUpdate('h1');

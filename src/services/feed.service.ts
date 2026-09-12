@@ -356,6 +356,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   }
 
   // ---- interleave by a freshly-shuffled pattern, dropping dry slots ----
+  const hotSlidesOriginal = hotSlides.slice();
   const q = { u: updateSlides, e: eventSlides, v: voteSlides, p: planSlides, h: hotSlides };
   const items: FeedSlide[] = [];
   const pattern: Slot[] = [];
@@ -376,6 +377,31 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     const fallback = q.u.length ? q.u : q.e.length ? q.e : q.v.length ? q.v : q.p.length ? q.p : q.h.length ? q.h : null;
     if (!fallback) break;
     items.push(fallback.shift()!);
+  }
+
+  // Client escalation (2026-09-12): "still not visible on the Home feed...
+  // place it within the first three posts... every time the feed loads...
+  // not hidden because of feed ranking, pagination, caching or the absence
+  // of followed creators." The shuffled window above only makes a *chance*
+  // placement anywhere in the page — on a real page it can easily land past
+  // post #3 or miss the page's `limit` cutoff entirely (u/e can fill the
+  // whole page before the pattern ever reaches its 'h' token). So a fresh
+  // load's first page (never a paginated continuation — that's not "the
+  // feed loads") gets a hard placement guarantee here, on top of the
+  // shuffle: if a hot slide made it into the page but landed past index 2,
+  // pull it forward; if none made it in at all but one was available, force
+  // it in. Index 0 is still avoided (unchanged "never permanently pinned to
+  // the very top" from the original spec) — slot 1 or 2 satisfies both.
+  if (isFreshLoad && (opts.tab === 'for-you' || opts.tab === 'following') && hotSlidesOriginal.length) {
+    const hotIdx = items.findIndex((i) => i.type === 'hot');
+    let hotItem: FeedSlide | undefined;
+    if (hotIdx > 2) hotItem = items.splice(hotIdx, 1)[0];
+    else if (hotIdx === -1) hotItem = hotSlidesOriginal[0];
+    if (hotItem) {
+      const insertAt = Math.min(2, Math.max(1, items.length));
+      items.splice(insertAt, 0, hotItem);
+      if (items.length > limit) items.pop();
+    }
   }
 
   // ---- next cursor from the last consumed position of each source ----
