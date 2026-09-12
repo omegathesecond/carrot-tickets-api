@@ -2,7 +2,7 @@ import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import mongoose from 'mongoose';
 import { Ticket } from '@models/ticket.model';
-import { R2Service } from '@utils/r2.service';
+import { updatesR2 } from '@utils/updatesR2';
 import { ITicket, TicketPdfStatus } from '@interfaces/ticket.interface';
 
 /**
@@ -73,12 +73,12 @@ export class TicketPdfService {
     try {
       const buffer = await this.buildTicketPdfBuffer(ticket);
       const eventId = this.eventIdOf(ticket);
-      const { url } = await R2Service.uploadFile(
-        `tickets/${eventId}`,
-        `${ticket.ticketId}.pdf`,
-        buffer,
-        'application/pdf'
-      );
+      // Carrot bucket, served from cdn.carrottickets.com. This URL is what the
+      // customer sees in their ticket SMS/email, so it must not carry the
+      // legacy `keshless-tickets-media.omevision.com` host of the old bucket.
+      const key = `tickets/${eventId}/${ticket.ticketId}.pdf`;
+      await updatesR2.putBuffer(key, buffer, 'application/pdf');
+      const url = updatesR2.publicUrl(key);
 
       ticket.pdfUrl = url;
       ticket.pdfStatus = TicketPdfStatus.READY;
