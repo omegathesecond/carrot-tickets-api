@@ -564,6 +564,25 @@ describe('feed.service getFeed', () => {
       }
     });
 
+    it('still guarantees the hot slide at small page sizes (regression: forced-placement pop must not evict the hot item it just inserted)', async () => {
+      for (let i = 0; i < 20; i++) await seedReadyUpdate('u' + i);
+      await seedHotUpdate('h1');
+
+      for (let i = 0; i < 15; i++) {
+        const { items } = await getFeed({ tab: 'for-you', limit: 2 });
+        expect(items).toHaveLength(2);
+        expect(items.some((it) => it.type === 'hot')).toBe(true);
+      }
+
+      for (let i = 0; i < 15; i++) {
+        const { items } = await getFeed({ tab: 'for-you', limit: 3 });
+        expect(items).toHaveLength(3);
+        const hotIdx = items.findIndex((it) => it.type === 'hot');
+        expect(hotIdx).toBeGreaterThanOrEqual(0);
+        expect(hotIdx).toBeLessThanOrEqual(2);
+      }
+    });
+
     it('does not force a hot slide onto a paginated continuation page (only a fresh load is guaranteed)', async () => {
       for (let i = 0; i < 40; i++) await seedReadyUpdate('u' + i);
       await seedHotUpdate('h1');

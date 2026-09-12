@@ -400,7 +400,14 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     if (hotItem) {
       const insertAt = Math.min(2, Math.max(1, items.length));
       items.splice(insertAt, 0, hotItem);
-      if (items.length > limit) items.pop();
+      // Trim from the end to respect `limit`, but never trim the hotItem we
+      // just forced in — at small limits (e.g. 2) it can land in the last
+      // slot, and an unconditional pop() would undo the guarantee above.
+      while (items.length > limit && items.length > 1) {
+        const lastIdx = items.length - 1;
+        const removeIdx = items[lastIdx] === hotItem ? lastIdx - 1 : lastIdx;
+        items.splice(removeIdx, 1);
+      }
     }
   }
 
