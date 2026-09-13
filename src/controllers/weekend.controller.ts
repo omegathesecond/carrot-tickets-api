@@ -6,11 +6,19 @@ import { WeekendService } from '@services/weekend.service';
 
 const FEED_LIMIT_DEFAULT = 10;
 const FEED_LIMIT_MAX = 24;
+const SEE_ALL_LIMIT_DEFAULT = 20;
+const SEE_ALL_LIMIT_MAX = 30;
 
 function parseLimit(raw: unknown): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return FEED_LIMIT_DEFAULT;
   return Math.min(FEED_LIMIT_MAX, Math.floor(n));
+}
+
+function parseSeeAllLimit(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return SEE_ALL_LIMIT_DEFAULT;
+  return Math.min(SEE_ALL_LIMIT_MAX, Math.floor(n));
 }
 
 function parseExcludeIds(raw: unknown): string[] {
@@ -75,6 +83,18 @@ export class WeekendController {
       const viewer = await resolveBuyerFromRequest(req);
       const cards = await WeekendService.getWhoHasPlansCards(viewer, parseLimit(req.query['limit']), parseExcludeIds(req.query['exclude']));
       return ApiResponseUtil.success(res, { cards });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load weekend plans');
+    }
+  }
+
+  /** GET /api/social/weekend/feed/all — the "Who Has Plans" See All page (cursor-paginated). */
+  static async feedAll(req: Request, res: Response): Promise<any> {
+    try {
+      const viewer = await resolveBuyerFromRequest(req);
+      const cursor = req.query['cursor'] ? String(req.query['cursor']) : null;
+      const { cards, nextCursor } = await WeekendService.getWhoHasPlansPage(viewer, cursor, parseSeeAllLimit(req.query['limit']));
+      return ApiResponseUtil.success(res, { cards, nextCursor });
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load weekend plans');
     }

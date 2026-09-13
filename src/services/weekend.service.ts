@@ -364,6 +364,65 @@ export class WeekendService {
     return WeekendService.toFeedCards(candidates);
   }
 
+  /**
+   * The "Who Has Plans This Weekend" See All page: every eligible public
+   * (same audience/block rules as the rail) status, cursor-paginated.
+   * Deliberately NOT `rankedCandidates` — that method overfetches-then-
+   * shuffles for a small rail, which has no stable order across pages;
+   * this is a plain `updatedAt` desc, `_id` desc sort so a cursor built
+   * from the last row of one page is a correct boundary for the next.
+   */
+  static async getWhoHasPlansPage(
+    viewer: IBuyer | null,
+    cursor: string | null,
+    limit: number
+  ): Promise<{ cards: WeekendFeedCardDto[]; nextCursor: string | null }> {
+    const viewerId = viewer ? String(viewer._id) : null;
+    const now = new Date();
+    const [followingIds, excludedBlocked] = await Promise.all([
+      viewerId ? FollowService.followingIds(viewerId, 'buyer') : Promise.resolve([] as any[]),
+      viewerId ? WeekendService.blockedEitherWayIds(viewerId) : Promise.resolve([] as string[]),
+    ]);
+
+    const query: any = {
+      activeUntil: { $gt: now },
+      statusType: { $in: HAS_PLANS_STATUS_TYPES },
+      $or: WeekendService.audienceOrClause(viewerId, followingIds.map(String)),
+    };
+    const excludeBuyerIds = [...(viewerId ? [viewerId] : []), ...excludedBlocked];
+    if (excludeBuyerIds.length) query.buyerId = { $nin: excludeBuyerIds.map((id) => new Types.ObjectId(id)) };
+
+    const decoded = WeekendService.decodeSeeAllCursor(cursor);
+    if (decoded) {
+      query.$and = [{ $or: [{ updatedAt: { $lt: decoded.updatedAt } }, { updatedAt: decoded.updatedAt, _id: { $lt: decoded.id } }] }];
+    }
+
+    const rows = await WeekendStatus.find(query)
+      .sort({ updatedAt: -1, _id: -1 })
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const cards = await WeekendService.toFeedCards(page);
+    const last = page[page.length - 1];
+    const nextCursor = hasMore && last ? WeekendService.encodeSeeAllCursor(last.updatedAt, String(last._id)) : null;
+    return { cards, nextCursor };
+  }
+
+  private static encodeSeeAllCursor(updatedAt: Date, id: string): string {
+    return Buffer.from(JSON.stringify({ t: updatedAt.getTime(), id })).toString('base64url');
+  }
+
+  private static decodeSeeAllCursor(raw: string | null): { updatedAt: Date; id: Types.ObjectId } | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+      if (typeof parsed.t !== 'number' || typeof parsed.id !== 'string' || !HEX24.test(parsed.id)) return null;
+      return { updatedAt: new Date(parsed.t), id: new Types.ObjectId(parsed.id) };
+    } catch {
+      return null;
+    }
+  }
+
   // ---------------------------------------------------------------------
   // Private requests (spec §11-§17)
   // ---------------------------------------------------------------------

@@ -288,6 +288,62 @@ describe('WeekendService', () => {
     });
   });
 
+  describe('getWhoHasPlansPage (See All)', () => {
+    it('pages through every eligible status without duplicates or gaps, in stable updatedAt order', async () => {
+      const viewer = await seedBuyer('u_seeall_viewer');
+      const posters = [];
+      for (let i = 0; i < 5; i += 1) {
+        const poster = await seedBuyer(`u_seeall_${i}`);
+        await WeekendService.upsertStatus(poster, { statusType: 'have_plans', audience: 'public' });
+        posters.push(poster);
+      }
+
+      const page1 = await WeekendService.getWhoHasPlansPage(viewer, null, 2);
+      expect(page1.cards).toHaveLength(2);
+      expect(page1.nextCursor).not.toBeNull();
+
+      const page2 = await WeekendService.getWhoHasPlansPage(viewer, page1.nextCursor, 2);
+      expect(page2.cards).toHaveLength(2);
+      expect(page2.nextCursor).not.toBeNull();
+
+      const page3 = await WeekendService.getWhoHasPlansPage(viewer, page2.nextCursor, 2);
+      expect(page3.cards).toHaveLength(1);
+      expect(page3.nextCursor).toBeNull();
+
+      const allIds = [...page1.cards, ...page2.cards, ...page3.cards].map((c) => c.user.id);
+      expect(new Set(allIds).size).toBe(5);
+      expect(allIds.sort()).toEqual(posters.map((p) => String(p._id)).sort());
+    });
+
+    it('excludes the viewer, blocked users, and never mixes in "looking for plans" statuses', async () => {
+      const viewer = await seedBuyer('u_seeall_self');
+      const blocked = await seedBuyer('u_seeall_blocked');
+      const lookingForPlans = await seedBuyer('u_seeall_lfp');
+      await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(blocked, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(lookingForPlans, { statusType: 'bored', audience: 'public' });
+      await BlockService.block(viewer, String(blocked._id));
+
+      const { cards } = await WeekendService.getWhoHasPlansPage(viewer, null, 10);
+      const ids = cards.map((c) => c.user.id);
+      expect(ids).not.toContain(String(viewer._id));
+      expect(ids).not.toContain(String(blocked._id));
+      expect(ids).not.toContain(String(lookingForPlans._id));
+    });
+
+    it('respects the audience clause for a signed-out viewer (public only)', async () => {
+      const publicPoster = await seedBuyer('u_seeall_pub');
+      const followersPoster = await seedBuyer('u_seeall_fol');
+      await WeekendService.upsertStatus(publicPoster, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(followersPoster, { statusType: 'have_plans', audience: 'followers' });
+
+      const { cards } = await WeekendService.getWhoHasPlansPage(null, null, 10);
+      const ids = cards.map((c) => c.user.id);
+      expect(ids).toContain(String(publicPoster._id));
+      expect(ids).not.toContain(String(followersPoster._id));
+    });
+  });
+
   describe('createRequest', () => {
     it('rejects an invalid kind', async () => {
       const sender = await seedBuyer('u_req_invalid_kind');
