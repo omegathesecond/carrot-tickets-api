@@ -587,6 +587,30 @@ describe('ShareEarnService', () => {
       expect(notified).toBe(1);
     });
 
+    it('breaks a tie in confirmed sales by whoever joined the campaign first', async () => {
+      const { eventId, vendorId } = await seedPublishedEvent();
+      await seedActiveCampaign({
+        vendorId: new mongoose.Types.ObjectId(vendorId), eventId,
+        rewardRules: [{ trigger: 'top_promoter', rewardType: 'points', provider: 'carrot', pointsAmount: 500 }],
+      });
+      const laterBuyer = await seedBuyer({ name: 'Joined later' });
+      const earlierBuyer = await seedBuyer({ name: 'Joined first' });
+      const { promoter: later } = await ShareEarnService.joinCampaign(eventId, { _id: laterBuyer._id as mongoose.Types.ObjectId });
+      const { promoter: earlier } = await ShareEarnService.joinCampaign(eventId, { _id: earlierBuyer._id as mongoose.Types.ObjectId });
+      // Force a deterministic tie on confirmedSalesCount, with `earlier` genuinely joined first.
+      await ShareEarnPromoter.updateOne({ _id: later._id }, { $set: { joinedAt: new Date(Date.now() + 60_000) } });
+      await ShareEarnPromoter.updateOne({ _id: earlier._id }, { $set: { joinedAt: new Date(Date.now() - 60_000) } });
+
+      await confirmSale(eventId, vendorId, later.referralCode);
+      await confirmSale(eventId, vendorId, earlier.referralCode);
+
+      await ShareEarnService.closeCampaign(eventId, vendorId);
+
+      const rewards = await ShareEarnReward.find({ trigger: 'top_promoter' });
+      expect(rewards).toHaveLength(1);
+      expect(String(rewards[0]!.promoterId)).toBe(String(earlier._id));
+    });
+
     it('does not award a top-promoter reward when no promoter has a confirmed sale', async () => {
       const { eventId, vendorId } = await seedPublishedEvent();
       await seedActiveCampaign({
