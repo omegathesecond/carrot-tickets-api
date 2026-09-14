@@ -12,6 +12,7 @@ router.put('/me', authenticateBuyer, requireProfilePhoto, WeekendController.upse
 router.delete('/me', authenticateBuyer, WeekendController.removeMine);
 
 router.get('/feed', optionalTicketsAuth, WeekendController.feed);
+router.get('/feed/all', optionalTicketsAuth, WeekendController.feedAll);
 router.get('/feed/looking-for-plans', optionalTicketsAuth, WeekendController.lookingForPlansFeed);
 
 router.post('/requests', authenticateBuyer, requireProfilePhoto, WeekendController.createRequest);
