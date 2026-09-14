@@ -227,4 +227,29 @@ export class EventPlanController {
       return failWithHttpError(res, error, 'Failed to record your response');
     }
   }
+
+  /** POST /api/social/plans/:id/like | /save — Public plans only, "interact
+   *  with a Public Event Plan the same way as a normal post". */
+  static react(type: 'like' | 'save') {
+    return async (req: Request, res: Response): Promise<any> => {
+      try {
+        const buyer = await resolveBuyerFromRequest(req);
+        if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+        const r = await EventPlanService.toggleReaction(String(req.params['id'] || ''), { type: 'buyer', id: String(buyer._id) }, type);
+        return ApiResponseUtil.success(res, r);
+      } catch (error: any) {
+        return failWithHttpError(res, error, `Failed to ${type} plan`);
+      }
+    };
+  }
+
+  /** POST /api/social/plans/:id/share */
+  static async share(req: Request, res: Response): Promise<any> {
+    try {
+      const r = await EventPlanService.recordShare(String(req.params['id'] || ''));
+      return ApiResponseUtil.success(res, r);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to share plan');
+    }
+  }
 }

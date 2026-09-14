@@ -39,6 +39,14 @@ export interface IEventPlan extends Document {
   transport?: IPlanTransportInfo;
   transportConfirmed: boolean;
   cancelledAt?: Date;
+  /** Social engagement (public plans only — see EventPlanService.toggleReaction/
+   *  recordShare) — kept in sync the same way Update's counters are: an
+   *  atomic $inc alongside the reaction row, never recomputed from a count()
+   *  on read. */
+  likeCount: number;
+  saveCount: number;
+  shareCount: number;
+  commentCount: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +77,10 @@ const eventPlanSchema = new Schema<IEventPlan>(
     transport: { type: transportSchema },
     transportConfirmed: { type: Boolean, default: false },
     cancelledAt: { type: Date },
+    likeCount: { type: Number, default: 0 },
+    saveCount: { type: Number, default: 0 },
+    shareCount: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

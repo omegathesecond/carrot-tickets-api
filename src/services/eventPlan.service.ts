@@ -1,12 +1,17 @@
 import { Types } from 'mongoose';
 import { EventPlan, IEventPlan, PlanVisibility, PlanJoinPolicy } from '@models/eventPlan.model';
 import { EventPlanMember, IEventPlanMember, PlanAttendanceStatus } from '@models/eventPlanMember.model';
+import { EventPlanReaction } from '@models/eventPlanReaction.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { BlockService } from '@services/block.service';
 import { NotificationDispatcher } from '@services/notificationDispatcher.service';
+import { toggleReactionGeneric } from '@services/reactions.service';
 import { HttpError } from '@utils/httpError.util';
 import { HEX24 } from '@utils/controllerHelpers.util';
+import type { SocialActor } from '@utils/socialActor.util';
+
+export type PlanViewerReactions = { liked: boolean; saved: boolean };
 
 const displayName = (b: IBuyer | null | undefined): string => b?.username ?? b?.name ?? 'Someone';
 
@@ -73,6 +78,28 @@ export class EventPlanService {
 
   private static isAdmin(plan: IEventPlan, viewerId: string | null): boolean {
     return Boolean(viewerId && String(plan.adminId) === viewerId);
+  }
+
+  /** Batch viewer like/save lookup for a set of plans — one query regardless
+   *  of list size, mirrors update.service#getViewerReactions so the same
+   *  reaction row is the single source of truth everywhere a plan renders
+   *  (Home feed, event detail, profile/My Plans all read through here or
+   *  through getDetail, never a locally-cached flag). */
+  private static async viewerReactionsByPlan(
+    planIds: (string | Types.ObjectId)[],
+    actor: SocialActor | null
+  ): Promise<Map<string, PlanViewerReactions>> {
+    const map = new Map<string, PlanViewerReactions>();
+    if (!actor || planIds.length === 0) return map;
+    const rows = await EventPlanReaction.find({ planId: { $in: planIds }, actorType: actor.type, buyerId: actor.id }).lean();
+    for (const r of rows as any[]) {
+      const key = String(r.planId);
+      const entry = map.get(key) ?? { liked: false, saved: false };
+      if (r.type === 'like') entry.liked = true;
+      if (r.type === 'save') entry.saved = true;
+      map.set(key, entry);
+    }
+    return map;
   }
 
   private static async assertAdmin(plan: IEventPlan, buyer: IBuyer): Promise<void> {
@@ -188,6 +215,11 @@ export class EventPlanService {
       }
     }
 
+    const reactionsByPlan = await EventPlanService.viewerReactionsByPlan(
+      planIds,
+      viewerId ? { type: 'buyer', id: viewerId } : null
+    );
+
     return plans.map((p) => {
       const member = myMembers!.get(String(p._id)) || null;
       return {
@@ -205,6 +237,12 @@ export class EventPlanService {
         transport: p.transport
           ? { seats: p.transport.seats ?? null, costEstimate: p.transport.costEstimate ?? null }
           : null,
+        // Social engagement (public plans only — see EventPlanService.toggleReaction).
+        likeCount: p.likeCount ?? 0,
+        saveCount: p.saveCount ?? 0,
+        shareCount: p.shareCount ?? 0,
+        commentCount: p.commentCount ?? 0,
+        viewerReactions: reactionsByPlan.get(String(p._id)) ?? { liked: false, saved: false },
         viewer: {
           isAdmin: EventPlanService.isAdmin(p, viewerId),
           memberStatus: member ? member.status : null,
@@ -222,10 +260,11 @@ export class EventPlanService {
     const canParticipate = EventPlanService.canParticipate(plan, viewerId, member);
     const isAdmin = EventPlanService.isAdmin(plan, viewerId);
 
-    const [admin, event, memberCount] = await Promise.all([
+    const [admin, event, memberCount, reactionsByPlan] = await Promise.all([
       Buyer.findById(plan.adminId).select('name username avatarUrl'),
       Event.findById(plan.eventId).select('name eventDate startTime venue status'),
       EventPlanMember.countDocuments({ planId, status: 'accepted' }),
+      EventPlanService.viewerReactionsByPlan([plan._id], viewerId ? { type: 'buyer', id: viewerId } : null),
     ]);
 
     let members: any[] = [];
@@ -265,6 +304,12 @@ export class EventPlanService {
       event: event
         ? { id: String(event._id), name: event.name, eventDate: event.eventDate, startTime: event.startTime, venue: event.venue }
         : null,
+      // Social engagement (public plans only — see EventPlanService.toggleReaction).
+      likeCount: plan.likeCount ?? 0,
+      saveCount: plan.saveCount ?? 0,
+      shareCount: plan.shareCount ?? 0,
+      commentCount: plan.commentCount ?? 0,
+      viewerReactions: reactionsByPlan.get(String(plan._id)) ?? { liked: false, saved: false },
       viewer: {
         isAdmin,
         memberStatus: member ? member.status : null,
@@ -340,7 +385,7 @@ export class EventPlanService {
     const eventIds = [...new Set(plans.map((p) => String(p.eventId)))];
     const adminIds = [...new Set(plans.map((p) => String(p.adminId)))];
 
-    const [events, admins, counts, memberRows, viewerRows] = await Promise.all([
+    const [events, admins, counts, memberRows, viewerRows, reactionsByPlan] = await Promise.all([
       Event.find({ _id: { $in: eventIds } }).select('name eventDate venue posterUrl'),
       Buyer.find({ _id: { $in: adminIds } }).select('name username avatarUrl'),
       EventPlanMember.aggregate([
@@ -353,6 +398,7 @@ export class EventPlanService {
       viewerBuyerId
         ? EventPlanMember.find({ planId: { $in: planIds }, buyerId: viewerBuyerId }).select('planId status')
         : Promise.resolve([] as IEventPlanMember[]),
+      EventPlanService.viewerReactionsByPlan(planIds, viewerBuyerId ? { type: 'buyer', id: viewerBuyerId } : null),
     ]);
 
     const eventById = new Map(events.map((e: any) => [String(e._id), e]));
@@ -399,6 +445,12 @@ export class EventPlanService {
             venue: event.venue,
             posterUrl: event.posterUrl ?? null,
           },
+          // Social engagement (public plans only — see EventPlanService.toggleReaction).
+          likeCount: p.likeCount ?? 0,
+          saveCount: p.saveCount ?? 0,
+          shareCount: p.shareCount ?? 0,
+          commentCount: p.commentCount ?? 0,
+          viewerReactions: reactionsByPlan.get(String(p._id)) ?? { liked: false, saved: false },
           viewer: {
             isAdmin: viewerBuyerId ? String(p.adminId) === viewerBuyerId : false,
             memberStatus: viewerBuyerId ? viewerStatusByPlan.get(String(p._id)) ?? null : null,
@@ -406,6 +458,47 @@ export class EventPlanService {
         };
       })
       .filter((c): c is NonNullable<typeof c> => c !== null);
+  }
+
+  // ---------------------------------------------------------------------
+  // Social engagement — Public plans only (like a normal post). Distinct
+  // from the plan's members-only conversation (EventPlanMessage): any
+  // signed-in user may like/save/share/comment on a Public plan without
+  // joining it, matching Update's post-engagement model. A Private plan
+  // never exposes these, regardless of the viewer's membership.
+  // ---------------------------------------------------------------------
+
+  private static assertPublicActive(plan: IEventPlan): void {
+    if (plan.visibility !== 'public' || plan.status !== 'active') {
+      throw new HttpError(403, 'Only public plans support this');
+    }
+  }
+
+  static async toggleReaction(
+    planId: string,
+    actor: SocialActor,
+    type: 'like' | 'save'
+  ): Promise<{ active: boolean; likeCount: number; saveCount: number }> {
+    const plan = await EventPlanService.loadPlan(planId);
+    EventPlanService.assertPublicActive(plan);
+    const { active } = await toggleReactionGeneric({
+      reactionModel: EventPlanReaction,
+      targetModel: EventPlan,
+      targetField: 'planId',
+      targetId: planId,
+      actor,
+      type,
+      counterField: type === 'like' ? 'likeCount' : 'saveCount',
+    });
+    const p = await EventPlan.findById(planId).select('likeCount saveCount').lean();
+    return { active, likeCount: (p as any)?.likeCount ?? 0, saveCount: (p as any)?.saveCount ?? 0 };
+  }
+
+  static async recordShare(planId: string): Promise<{ shareCount: number }> {
+    const plan = await EventPlanService.loadPlan(planId);
+    EventPlanService.assertPublicActive(plan);
+    const p = await EventPlan.findByIdAndUpdate(planId, { $inc: { shareCount: 1 } }, { new: true }).select('shareCount').lean();
+    return { shareCount: (p as any)?.shareCount ?? 0 };
   }
 
   // ---------------------------------------------------------------------
