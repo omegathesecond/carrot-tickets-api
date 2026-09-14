@@ -3,6 +3,7 @@ import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { EventPlanController } from '@controllers/eventPlan.controller';
 import { EventPlanMessageController } from '@controllers/eventPlanMessage.controller';
+import { EventPlanCommentController } from '@controllers/eventPlanComment.controller';
 
 const router = Router();
 
@@ -16,6 +17,13 @@ router.post('/invites/:memberId/accept', authenticateBuyer, EventPlanController.
 router.post('/invites/:memberId/decline', authenticateBuyer, EventPlanController.declineInvite);
 router.post('/requests/:memberId/approve', authenticateBuyer, EventPlanController.approveRequest);
 router.post('/requests/:memberId/decline', authenticateBuyer, EventPlanController.declineRequest);
+
+// Comment thread on a Public Event Plan (social engagement) — 'plan-comments'
+// is a two-segment path ('/plan-comments/:commentId[/like]'), so its order
+// relative to the single-segment '/:id' routes below is not load-bearing,
+// same as update.route.ts's '/comments/:commentId'.
+router.post('/plan-comments/:commentId/like', authenticateBuyer, EventPlanCommentController.like);
+router.delete('/plan-comments/:commentId', authenticateBuyer, EventPlanCommentController.remove);
 
 router.get('/:id', optionalTicketsAuth, EventPlanController.detail);
 router.get('/:id/pending', authenticateBuyer, EventPlanController.pending);
@@ -33,5 +41,15 @@ router.get('/:id/messages', optionalTicketsAuth, EventPlanMessageController.list
 router.post('/:id/messages', authenticateBuyer, requireProfilePhoto, EventPlanMessageController.send);
 router.post('/:id/messages/:messageId/react', authenticateBuyer, EventPlanMessageController.react);
 router.delete('/:id/messages/:messageId/react', authenticateBuyer, EventPlanMessageController.unreact);
+
+// Social engagement (Public plans only) — like/comment/share/save, same
+// interaction model as a normal Update post. Unlike the conversation above,
+// these do NOT require plan membership; EventPlanService/eventPlanComment.service
+// enforce visibility==='public' internally.
+router.post('/:id/like', authenticateBuyer, requireProfilePhoto, EventPlanController.react('like'));
+router.post('/:id/save', authenticateBuyer, EventPlanController.react('save'));
+router.post('/:id/share', EventPlanController.share);
+router.get('/:id/comments', optionalTicketsAuth, EventPlanCommentController.list);
+router.post('/:id/comments', authenticateBuyer, requireProfilePhoto, EventPlanCommentController.create);
 
 export default router;
