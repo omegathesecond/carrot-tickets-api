@@ -64,6 +64,21 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   weekend_request_received: 'social',
   weekend_request_responded: 'social',
   weekend_reminder: 'reminders',
+  // Share&Earn notifications bypass this buyer dispatcher entirely (written
+  // directly via NotificationService.create — see @services/shareEarn.service);
+  // 'social' is the closest existing pref bucket, kept only for
+  // Record<NotificationType,…> exhaustiveness.
+  share_earn_joined: 'social',
+  share_earn_sale_confirmed: 'social',
+  share_earn_reward_confirmed: 'social',
+  share_earn_milestone_reached: 'social',
+  share_earn_top_promoter_won: 'social',
+  share_earn_reward_available: 'social',
+  share_earn_reward_redeemed: 'social',
+  share_earn_reward_reversed: 'social',
+  share_earn_campaign_closing_soon: 'social',
+  share_earn_campaign_terms_changed: 'social',
+  share_earn_launch: 'announcements',
 };
 
 const CHUNK = 50;
