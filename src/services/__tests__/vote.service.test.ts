@@ -11,6 +11,8 @@ import {
   getVotePayload,
   castVote,
   suggestSong,
+  getOptionVoters,
+  getVoteFeedCard,
 } from '@services/vote.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -278,5 +280,116 @@ describe('vote.service', () => {
 
     await expect(castVote(String(event._id), String(legacyAttend._id), actor, 'maybe')).rejects.toMatchObject({ statusCode: 404 });
     expect(await VoteResponse.countDocuments({ questionId: legacyAttend._id })).toBe(1); // pre-existing response untouched
+  });
+});
+
+describe('per-option voter avatars + full list (spec follow-up: profile pictures under each option)', () => {
+  beforeAll(async () => {
+    await connectTestDb();
+    await VoteQuestion.init();
+    await VoteResponse.init();
+  });
+  afterEach(async () => {
+    await clearTestDb();
+  });
+  afterAll(async () => {
+    await disconnectTestDb();
+  });
+
+  it('attaches a buyer avatar sample to each revealed option, and omits it while results are hidden', async () => {
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
+    const { Buyer } = await import('@models/buyer.model');
+    const a = await Buyer.create({ phone: '+26878400020', password: 'secret1', username: 'ex_a', avatarUrl: 'https://cdn.example/a.jpg' });
+    const b = await Buyer.create({ phone: '+26878400021', password: 'secret1', username: 'ex_b' });
+    const actorA = { type: 'buyer' as const, id: String(a._id) };
+    const actorB = { type: 'buyer' as const, id: String(b._id) };
+
+    const before = await getVotePayload(String(event._id), actorA);
+    const bumpQ = before.questions.find((q) => q.kind === 'bump_into')!;
+    expect(bumpQ.results).toBeNull(); // no selectors leak before the viewer has voted
+
+    await castVote(String(event._id), bumpQ.id, actorA, 'ex');
+    await castVote(String(event._id), bumpQ.id, actorB, 'ex');
+
+    const after = await getVotePayload(String(event._id), actorA);
+    const revealed = after.questions.find((q) => q.kind === 'bump_into')!;
+    const exOption = revealed.results!.options.find((o) => o.key === 'ex')!;
+    expect(exOption.count).toBe(2);
+    expect(exOption.selectors).toHaveLength(2);
+    expect(exOption.selectors.map((s) => s.id).sort()).toEqual([String(a._id), String(b._id)].sort());
+    expect(exOption.selectors.find((s) => s.id === String(a._id))!.avatarUrl).toBe('https://cdn.example/a.jpg');
+
+    const noneOption = revealed.results!.options.find((o) => o.key === 'no_one_in_particular')!;
+    expect(noneOption.selectors).toEqual([]);
+  });
+
+  it('caps the inline sample at 6 but getOptionVoters pages through every selector', async () => {
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
+    const { Buyer } = await import('@models/buyer.model');
+    const buyers = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => Buyer.create({ phone: `+2687840010${i}`, password: 'secret1', username: `crowd_${i}` }))
+    );
+    const actors = buyers.map((b) => ({ type: 'buyer' as const, id: String(b._id) }));
+
+    const payload = await getVotePayload(String(event._id), actors[0]!);
+    const cupQ = payload.questions.find((q) => q.kind === 'cup')!;
+    for (const actor of actors) await castVote(String(event._id), cupQ.id, actor, 'green');
+
+    const after = await getVotePayload(String(event._id), actors[0]!);
+    const greenOption = after.questions.find((q) => q.kind === 'cup')!.results!.options.find((o) => o.key === 'green')!;
+    expect(greenOption.count).toBe(8);
+    expect(greenOption.selectors).toHaveLength(6); // SELECTOR_SAMPLE_SIZE cap — the "+N" the client asked for
+
+    const page1 = await getOptionVoters(String(event._id), cupQ.id, 'green', actors[0]!, undefined, 5);
+    expect(page1.voters).toHaveLength(5);
+    expect(page1.nextCursor).not.toBeNull();
+    const page2 = await getOptionVoters(String(event._id), cupQ.id, 'green', actors[0]!, page1.nextCursor!, 5);
+    expect(page2.voters).toHaveLength(3);
+    expect(page2.nextCursor).toBeNull();
+    const allIds = new Set([...page1.voters, ...page2.voters].map((v) => v.id));
+    expect(allIds.size).toBe(8); // no duplicates/drops across the cursor boundary
+  });
+
+  it('rejects getOptionVoters for a question the viewer has not answered while voting is still open', async () => {
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
+    const { Buyer } = await import('@models/buyer.model');
+    const a = await Buyer.create({ phone: '+26878400030', password: 'secret1', username: 'peeker' });
+    const b = await Buyer.create({ phone: '+26878400031', password: 'secret1', username: 'answerer' });
+    const actorA = { type: 'buyer' as const, id: String(a._id) };
+    const actorB = { type: 'buyer' as const, id: String(b._id) };
+
+    const payload = await getVotePayload(String(event._id), actorA);
+    const busyQ = payload.questions.find((q) => q.kind === 'busy')!;
+    await castVote(String(event._id), busyQ.id, actorB, 'packed');
+
+    await expect(getOptionVoters(String(event._id), busyQ.id, 'packed', actorA)).rejects.toMatchObject({ statusCode: 403 });
+    await castVote(String(event._id), busyQ.id, actorA, 'quiet');
+    await expect(getOptionVoters(String(event._id), busyQ.id, 'packed', actorA)).resolves.toMatchObject({ voters: [{ id: String(b._id) }] });
+  });
+});
+
+describe('getVoteFeedCard (Home feed card auto-progression follow-up)', () => {
+  beforeAll(async () => {
+    await connectTestDb();
+    await VoteQuestion.init();
+    await VoteResponse.init();
+  });
+  afterEach(async () => {
+    await clearTestDb();
+  });
+  afterAll(async () => {
+    await disconnectTestDb();
+  });
+
+  it('returns every materialized question (not just one) so the card can auto-advance through all of them', async () => {
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
+    const { Buyer } = await import('@models/buyer.model');
+    const a = await Buyer.create({ phone: '+26878400040', password: 'secret1', username: 'feeder' });
+    const actor = { type: 'buyer' as const, id: String(a._id) };
+
+    const card = await getVoteFeedCard(event, actor);
+    expect(card).not.toBeNull();
+    expect(card!.questions.map((q) => q.kind)).toEqual(['attending_with', 'busy', 'bump_into', 'cup']);
+    expect(card!.questions.every((q) => q.viewerHasVoted === false)).toBe(true);
   });
 });
