@@ -159,6 +159,13 @@ export async function ensureVoteQuestions(event: IEvent): Promise<IVoteQuestion[
   return sortQuestionsCanonically(all.filter((q) => q.kind !== 'attend'));
 }
 
+export interface VoteSelectorRef {
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+}
+
 export interface VoteQuestionView {
   id: string;
   kind: VoteQuestionKind;
@@ -171,7 +178,21 @@ export interface VoteQuestionView {
   results: {
     totalVotes: number;
     leadingKey: string | null;
-    options: Array<{ key: string; label: string; count: number; percent: number }>;
+    options: Array<{
+      key: string;
+      label: string;
+      count: number;
+      percent: number;
+      /** A small recent sample of buyers who picked this option — "display
+       *  the profile pictures of users who selected that option" follow-up
+       *  (spec §6 compatibility pass). Vendor/organizer responses are never
+       *  included (no public avatar to show). Only present once `results`
+       *  itself is revealed, so it's gated by the same "vote to reveal" /
+       *  closed rule as the rest of `results` — see buildQuestionView. Use
+       *  `count` for the "+N" overflow past this sample and getOptionVoters
+       *  for the full clickable list. */
+      selectors: VoteSelectorRef[];
+    }>;
   } | null;
   allowSuggestions?: boolean;
   suggestions?: Array<{ id: string; title: string; artist: string | null; count: number | null }>;
@@ -203,7 +224,7 @@ export interface VotePayload {
 async function tallyOptions(
   questionId: string,
   options: Array<{ key: string; label: string }>
-): Promise<{ totalVotes: number; leadingKey: string | null; options: Array<{ key: string; label: string; count: number; percent: number }> }> {
+): Promise<{ totalVotes: number; leadingKey: string | null; options: Array<{ key: string; label: string; count: number; percent: number; selectors: VoteSelectorRef[] }> }> {
   const rows = await VoteResponse.aggregate([{ $match: { questionId: new Types.ObjectId(questionId) } }, { $group: { _id: '$optionKey', count: { $sum: 1 } } }]);
   const countByKey = new Map(rows.map((r: any) => [String(r._id), r.count as number]));
   const totalVotes = rows.reduce((sum: number, r: any) => sum + r.count, 0);
@@ -215,7 +236,10 @@ async function tallyOptions(
       leadingCount = count;
       leadingKey = o.key;
     }
-    return { key: o.key, label: o.label, count, percent: totalVotes > 0 ? Math.round((count / totalVotes) * 1000) / 10 : 0 };
+    // `selectors` is filled in by buildQuestionView (sampleSelectorsByOption)
+    // once it knows this tally is actually going to be revealed — never
+    // queried here for a question the viewer hasn't unlocked results for.
+    return { key: o.key, label: o.label, count, percent: totalVotes > 0 ? Math.round((count / totalVotes) * 1000) / 10 : 0, selectors: [] as VoteSelectorRef[] };
   });
   return { totalVotes, leadingKey: totalVotes > 0 ? leadingKey : null, options: out };
 }
@@ -229,6 +253,35 @@ async function hydrateBuyerRefs(ids: string[]): Promise<Map<string, any>> {
 function buyerRef(map: Map<string, any>, id: string) {
   const b = map.get(id);
   return { id, name: b?.name ?? null, username: b?.username ?? null, avatarUrl: b?.avatarUrl ?? null };
+}
+
+/** How many avatars to show under each option before collapsing into "+N" —
+ *  see VoteSelectorRef's doc comment. */
+const SELECTOR_SAMPLE_SIZE = 6;
+
+/** One query for the whole question (not one per option) — most-recent
+ *  responder first per option, buyer actors only. Backs the `selectors`
+ *  sample attached to `results.options` in buildQuestionView. */
+async function sampleSelectorsByOption(
+  questionId: string,
+  optionKeys: string[],
+  limit = SELECTOR_SAMPLE_SIZE
+): Promise<Map<string, VoteSelectorRef[]>> {
+  if (optionKeys.length === 0) return new Map();
+  const rows = await VoteResponse.find({ questionId, actorType: 'buyer', optionKey: { $in: optionKeys } })
+    .sort({ updatedAt: -1 })
+    .select('actorId optionKey')
+    .lean();
+  const idsByOption = new Map<string, string[]>();
+  for (const r of rows as any[]) {
+    const ids = idsByOption.get(r.optionKey) ?? [];
+    if (ids.length < limit) ids.push(String(r.actorId));
+    idsByOption.set(r.optionKey, ids);
+  }
+  const buyerMap = await hydrateBuyerRefs([...idsByOption.values()].flat());
+  const out = new Map<string, VoteSelectorRef[]>();
+  for (const [key, ids] of idsByOption) out.set(key, ids.map((id) => buyerRef(buyerMap, id)));
+  return out;
 }
 
 /**
@@ -288,6 +341,11 @@ async function buildQuestionView(q: IVoteQuestion, window: VoteWindow, actor: So
     const tally = await tallyOptions(questionId, options);
     totalVotes = tally.totalVotes;
     if (reveal) results = tally;
+  }
+
+  if (results) {
+    const selectorMap = await sampleSelectorsByOption(questionId, results.options.map((o) => o.key));
+    results = { ...results, options: results.options.map((o) => ({ ...o, selectors: selectorMap.get(o.key) ?? [] })) };
   }
 
   const view: VoteQuestionView = {
@@ -363,14 +421,66 @@ export async function castVote(eventId: string, questionId: string, actor: Socia
   return buildQuestionView(question, window, actor);
 }
 
+export interface VoteVotersPage {
+  voters: VoteSelectorRef[];
+  nextCursor: string | null;
+}
+
+const VOTERS_PAGE_SIZE = 30;
+
 /**
- * Home feed card (spec §4): "one active question" per event, not the whole
- * payload. Prefers a question the viewer hasn't answered yet (gives them
- * something to actually do from the card) and falls back to the first
- * question in display order for an anonymous viewer or one who's answered
- * everything. Returns null for an event whose window isn't currently open —
- * callers pre-filter for this, but it's cheap insurance against a stale
- * candidate list surfacing a closed Vote.
+ * "Clicking the count should open the complete list of those users" follow-up
+ * — the full, paginated (cursor = last row's _id) list of buyers who picked
+ * one option on one question. Gated by the exact same "vote to reveal" /
+ * closed rule as `results` itself (buildQuestionView): a viewer who hasn't
+ * answered this question yet, before it closes, can't back into the results
+ * this way either.
+ */
+export async function getOptionVoters(
+  eventId: string,
+  questionId: string,
+  optionKey: string,
+  actor: SocialActor | null,
+  cursor?: string,
+  limit = VOTERS_PAGE_SIZE
+): Promise<VoteVotersPage> {
+  const event = await loadEventOr404(eventId);
+  const window = getVoteWindow(event);
+  const question = await VoteQuestion.findOne({ _id: questionId, eventId });
+  if (!question || question.kind === 'attend') throw new HttpError(404, 'Attendance Status question not found');
+
+  let viewerHasVoted = false;
+  if (actor) {
+    viewerHasVoted = !!(await VoteResponse.exists({ questionId, actorType: actor.type, actorId: actor.id }));
+  }
+  if (!(viewerHasVoted || window.hasClosed)) {
+    throw new HttpError(403, 'Respond to this question to see who picked each option');
+  }
+
+  const boundedLimit = Math.min(50, Math.max(1, limit));
+  const query: Record<string, unknown> = { questionId, optionKey, actorType: 'buyer' };
+  if (cursor) query['_id'] = { $lt: new Types.ObjectId(cursor) };
+  const rows = await VoteResponse.find(query).sort({ _id: -1 }).limit(boundedLimit + 1).select('actorId').lean();
+  const hasMore = rows.length > boundedLimit;
+  const page = hasMore ? rows.slice(0, boundedLimit) : rows;
+  const buyerMap = await hydrateBuyerRefs(page.map((r: any) => String(r.actorId)));
+
+  return {
+    voters: page.map((r: any) => buyerRef(buyerMap, String(r.actorId))),
+    nextCursor: hasMore ? String(page[page.length - 1]!._id) : null,
+  };
+}
+
+/**
+ * Home feed card (spec §4, plus the follow-up: "apply the same [auto-
+ * progression] functionality... to the Attendance Status card on both the
+ * Home feed and the Event Detail page"). Returns EVERY materialized
+ * question, not just one — the feed card drives the same in-place
+ * auto-advance-through-all-questions flow as the event-detail page (see
+ * landing's useVoteProgression), so it needs the whole set to advance
+ * through, just like getVotePayload. Returns null for an event whose window
+ * isn't currently open — callers pre-filter for this, but it's cheap
+ * insurance against a stale candidate list surfacing a closed Vote.
  */
 export async function getVoteFeedCard(event: IEvent, actor: SocialActor | null) {
   const window = getVoteWindow(event);
@@ -378,26 +488,14 @@ export async function getVoteFeedCard(event: IEvent, actor: SocialActor | null) 
   const questions = await ensureVoteQuestions(event);
   if (questions.length === 0) return null;
 
-  let chosen = questions[0]!;
-  if (actor) {
-    for (const q of questions) {
-      const voted = await VoteResponse.exists({ questionId: q._id, actorType: actor.type, actorId: actor.id });
-      if (!voted) {
-        chosen = q;
-        break;
-      }
-    }
-  }
-
-  const question = await buildQuestionView(chosen, window, actor);
+  const views = await Promise.all(questions.map((q) => buildQuestionView(q, window, actor)));
   return {
     eventId: String(event._id),
     eventName: event.name,
     posterUrl: event.posterUrl ?? null,
     eventDate: event.eventDate,
     closesAt: window.closesAt.toISOString(),
-    questionCount: questions.length,
-    question,
+    questions: views,
   };
 }
 
