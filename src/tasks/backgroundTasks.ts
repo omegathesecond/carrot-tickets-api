@@ -9,6 +9,7 @@ import { AccountActivityDigestService } from '@services/accountActivityDigest.se
 import { VoteNotificationService } from '@services/voteNotification.service';
 import { WeekendReminderService } from '@services/weekendReminder.service';
 import { WeekendService } from '@services/weekend.service';
+import { ShareEarnService } from '@services/shareEarn.service';
 
 // Start the reservation expiry sweep
 const RESERVATION_SWEEP_MS = 60_000;
@@ -107,6 +108,11 @@ const WEEKEND_REMINDER_SWEEP_MS = 600_000;
 // query, no user-facing latency requirement.
 const WEEKEND_CANCELLED_EVENT_SWEEP_MS = 900_000;
 
+// Share&Earn (spec §17): auto-close campaigns whose closing date has passed —
+// stops accepting new referrals while preserving everything already earned.
+// Same cadence as the event reminder/Vote sweeps.
+const SHARE_EARN_SWEEP_MS = 600_000;
+
 /**
  * Registers all periodic background sweeps (reservation expiry, card-sale
  * reconciliation, event reminders, stuck-update reconciliation) with their
@@ -186,6 +192,11 @@ export function startBackgroundTasks(): NodeJS.Timeout[] {
   handles.push(setInterval(() => {
     WeekendService.sweepCancelledEventLinks().catch((err) => console.error('[weekend-cancelled-event-sweep] error', err));
   }, WEEKEND_CANCELLED_EVENT_SWEEP_MS));
+
+  handles.push(setInterval(() => {
+    ShareEarnService.autoCloseExpiredCampaigns().catch((err) => console.error('[share-earn-sweep] error', err));
+    ShareEarnService.notifyCampaignsClosingSoon().catch((err) => console.error('[share-earn-closing-soon] error', err));
+  }, SHARE_EARN_SWEEP_MS));
 
   return handles;
 }

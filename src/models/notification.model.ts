@@ -42,7 +42,22 @@ export type NotificationType =
   // second generic type, and the Friday nudge is a third.
   | 'weekend_request_received'
   | 'weekend_request_responded'
-  | 'weekend_reminder';
+  | 'weekend_reminder'
+  // Share&Earn (spec §15) — join confirmation, referred-sale confirmation,
+  // reward lifecycle (confirmed/available/redeemed/reversed), milestone
+  // reached, campaign closing soon / terms changed, and the platform-wide
+  // launch announcement.
+  | 'share_earn_joined'
+  | 'share_earn_sale_confirmed'
+  | 'share_earn_reward_confirmed'
+  | 'share_earn_milestone_reached'
+  | 'share_earn_top_promoter_won'
+  | 'share_earn_reward_available'
+  | 'share_earn_reward_redeemed'
+  | 'share_earn_reward_reversed'
+  | 'share_earn_campaign_closing_soon'
+  | 'share_earn_campaign_terms_changed'
+  | 'share_earn_launch';
 
 export type NotificationRecipientType = 'buyer' | 'vendor';
 
@@ -99,6 +114,17 @@ const notificationSchema = new Schema<INotification>(
         'weekend_request_received',
         'weekend_request_responded',
         'weekend_reminder',
+        'share_earn_joined',
+        'share_earn_sale_confirmed',
+        'share_earn_reward_confirmed',
+        'share_earn_milestone_reached',
+        'share_earn_top_promoter_won',
+        'share_earn_reward_available',
+        'share_earn_reward_redeemed',
+        'share_earn_reward_reversed',
+        'share_earn_campaign_closing_soon',
+        'share_earn_campaign_terms_changed',
+        'share_earn_launch',
       ],
       required: true,
     },
@@ -164,6 +190,15 @@ notificationSchema.index(
 notificationSchema.index(
   { recipientId: 1, type: 1, 'data.weekStart': 1 },
   { unique: true, partialFilterExpression: { type: 'weekend_reminder' }, name: 'weekend_reminder_dedupe' }
+);
+
+// Share&Earn "campaign closing soon" (spec §15): one notification per
+// (promoter, campaign), same as the event reminder sweep's dedupe pattern —
+// ShareEarnService.notifyCampaignsClosingSoon pre-filters against this before
+// dispatching, so a campaign swept on every tick still only ever notifies once.
+notificationSchema.index(
+  { recipientId: 1, type: 1, 'data.shareEarnCampaignId': 1 },
+  { unique: true, partialFilterExpression: { type: 'share_earn_campaign_closing_soon' }, name: 'share_earn_campaign_closing_soon_dedupe' }
 );
 
 export const Notification = model<INotification>('Notification', notificationSchema);

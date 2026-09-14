@@ -30,6 +30,7 @@ import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
 import { FollowService } from '@services/follow.service';
 import { EventCurrency, settlementCurrencyForMethod } from '@utils/currency.util';
 import { TicketPdfService } from '@services/ticketPdf.service';
+import { ShareEarnService } from '@services/shareEarn.service';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -79,6 +80,9 @@ export interface SellTicketsParams {
   // Mutually exclusive with serviceFeeAmount: the buyer is charged face, and
   // this is netted out of organizerProceeds instead.
   absorbedServiceFeeAmount?: number;
+  // Share&Earn — the referral code the buyer's checkout carried, if any (see
+  // ITicketSale.shareEarnReferralCode). Vendor/POS/reseller callers omit it.
+  referralCode?: string;
 }
 
 /**
@@ -369,6 +373,11 @@ export class TicketService {
       await ReservationService.confirm(sale._id.toString()); // reserved -= qty
       await this.applySoldCountsForSale(sale); // sold += qty, per line
 
+      // Share&Earn — confirm any pending referral this sale carried. Internally
+      // defensive (never throws): a Share&Earn bug must never strand a paid,
+      // ticketed sale unreturned to its buyer.
+      await ShareEarnService.confirmReferralForSale(claimed);
+
       return tickets;
     } catch (err) {
       const minted = await Ticket.countDocuments({ saleId: sale._id });
@@ -422,7 +431,8 @@ export class TicketService {
         keshlessCardNumber,
         keshlessPin,
         soldBy,
-        soldByType
+        soldByType,
+        referralCode
       } = params;
 
       // Normalize once so the sale record + confirmation SMS use the same
@@ -642,6 +652,7 @@ export class TicketService {
               ...resellerAttribution,
               ...econ,
               ...feeSnapshot,
+              ...(referralCode ? { shareEarnReferralCode: referralCode } : {}),
               soldAt: new Date()
             });
             await saleWithoutSession.save();
@@ -666,6 +677,10 @@ export class TicketService {
             }
 
             await this.autoFollowOrganizerForSale(saleWithoutSession);
+            if (paymentStatus === PaymentStatus.COMPLETED) {
+              await ShareEarnService.registerPendingReferral(saleWithoutSession);
+              await ShareEarnService.confirmReferralForSale(saleWithoutSession);
+            }
 
             return {
               sale: saleWithoutSession,
@@ -700,6 +715,7 @@ export class TicketService {
         ...resellerAttribution,
         ...econ,
         ...feeSnapshot,
+        ...(referralCode ? { shareEarnReferralCode: referralCode } : {}),
         soldAt: new Date()
       });
       await sale.save(session ? { session } : undefined);
@@ -728,6 +744,10 @@ export class TicketService {
       }
 
       await this.autoFollowOrganizerForSale(sale);
+      if (paymentStatus === PaymentStatus.COMPLETED) {
+        await ShareEarnService.registerPendingReferral(sale);
+        await ShareEarnService.confirmReferralForSale(sale);
+      }
 
       return {
         sale,
@@ -1050,6 +1070,11 @@ export class TicketService {
         await session.commitTransaction();
       }
 
+      // Share&Earn — reverse any referral this sale earned (spec §6). Outside
+      // the transaction (best-effort, never blocks a refund the organizer
+      // is waiting on) and internally defensive: never throws.
+      await ShareEarnService.reverseReferralForRefund(sale, ticket);
+
       return ticket;
     } catch (error: any) {
       if (session) {
@@ -1190,6 +1215,7 @@ export class TicketService {
     buyerId?: string;
     keshlessCardNumber: string;
     keshlessPin?: string;
+    referralCode?: string;
   }): Promise<{
     tickets: Array<{
       ticketId: string;
@@ -1211,6 +1237,7 @@ export class TicketService {
       buyerId,
       keshlessCardNumber,
       keshlessPin,
+      referralCode,
     } = params;
 
     const customerPhone = params.customerPhone ? normalizePhone(params.customerPhone) : undefined;
@@ -1256,6 +1283,7 @@ export class TicketService {
       channel: SalesChannel.ONLINE,
       serviceFeeAmount,
       absorbedServiceFeeAmount,
+      referralCode,
     });
 
     this.sendTicketConfirmations(event, result.tickets, customerPhone, customerEmail);
@@ -1341,6 +1369,8 @@ export class TicketService {
     quantity: number;
     event: { name: string; date: Date; venue: string };
   }> {
+    // Deliberately NOT wired for Share&Earn: spec §6 excludes complimentary/
+    // free tickets from earning referral credit, and this is exactly that path.
     const { eventId, items, customerEmail, buyerId } = params;
 
     const customerPhone = params.customerPhone ? normalizePhone(params.customerPhone) : undefined;
@@ -1532,6 +1562,7 @@ export class TicketService {
     hubId?: string;
     resellerCommissionPercent?: number;
     channel?: SalesChannel;
+    referralCode?: string;
   }): Promise<{ referenceId: string; saleId: string; expiresAt: Date }> {
     if (!this.momoClient.isConfigured()) throw new Error('MTN MoMo is not available');
 
@@ -1621,9 +1652,11 @@ export class TicketService {
       ...econ,
       serviceFeeAmount,
       amountCharged,
+      ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
     await sale.save();
+    await ShareEarnService.registerPendingReferral(sale);
 
     // 2) Reserve inventory
     const { expiresAt } = await ReservationService.reserve({
@@ -1705,6 +1738,7 @@ export class TicketService {
     hubId?: string;
     resellerCommissionPercent?: number;
     channel?: SalesChannel;
+    referralCode?: string;
   }): Promise<{ paymentId: string; redirect: any; saleId: string; expiresAt: Date }> {
     if (!this.peachClient.isConfigured()) throw new Error('Card payments are not available');
 
@@ -1793,9 +1827,11 @@ export class TicketService {
       ...econ,
       serviceFeeAmount,
       amountCharged,
+      ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
     await sale.save();
+    await ShareEarnService.registerPendingReferral(sale);
 
     // 2) Reserve inventory
     const { expiresAt } = await ReservationService.reserve({
@@ -1865,6 +1901,7 @@ export class TicketService {
     hubId?: string;
     resellerCommissionPercent?: number;
     channel?: SalesChannel;
+    referralCode?: string;
   }): Promise<{ checkoutSessionId: string; checkoutUrl: string; saleId: string; expiresAt: Date }> {
     if (!this.deltapayClient.isConfigured()) throw new Error('DeltaPay is not available');
 
@@ -1957,9 +1994,11 @@ export class TicketService {
       ...econ,
       serviceFeeAmount,
       amountCharged,
+      ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
     await sale.save();
+    await ShareEarnService.registerPendingReferral(sale);
 
     // 2) Reserve inventory
     const { expiresAt } = await ReservationService.reserve({
@@ -2628,6 +2667,7 @@ export class TicketService {
     hubId?: string;
     resellerCommissionPercent?: number;
     channel?: SalesChannel;
+    referralCode?: string;
   }): Promise<{ checkoutId: string; redirectUrl: string; saleId: string; expiresAt: Date }> {
     if (!this.yocoClient.isConfigured()) throw new Error('Yoco is not available');
 
@@ -2717,9 +2757,11 @@ export class TicketService {
       ...econ,
       serviceFeeAmount,
       amountCharged,
+      ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
     await sale.save();
+    await ShareEarnService.registerPendingReferral(sale);
 
     // 2) Reserve inventory
     const { expiresAt } = await ReservationService.reserve({
@@ -2965,6 +3007,7 @@ export class TicketService {
     hubId?: string;
     resellerCommissionPercent?: number;
     channel?: SalesChannel;
+    referralCode?: string;
   }): Promise<{ checkoutId: string; redirectUrl: string; saleId: string; expiresAt: Date }> {
     if (!this.yebopayClient.isConfigured()) throw new Error('YeboPay is not available');
 
@@ -3054,9 +3097,11 @@ export class TicketService {
       ...econ,
       serviceFeeAmount,
       amountCharged,
+      ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
     await sale.save();
+    await ShareEarnService.registerPendingReferral(sale);
 
     // 2) Reserve inventory
     const { expiresAt } = await ReservationService.reserve({
