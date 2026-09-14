@@ -62,6 +62,11 @@ describe('Weekend routes', () => {
       expect(res.body.data.cards).toEqual([]);
     });
 
+    it('GET /feed/all returns 200 with no auth, paginated with a nextCursor', async () => {
+      const res = await request(app).get('/api/social/weekend/feed/all').expect(200);
+      expect(res.body.data).toEqual({ cards: [], nextCursor: null });
+    });
+
     it('GET /users/:username returns 200 with no auth for an existing user with no status', async () => {
       const buyer = await seedBuyer();
       const res = await request(app).get(`/api/social/weekend/users/${buyer.username}`).expect(200);

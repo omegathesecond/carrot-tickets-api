@@ -178,6 +178,7 @@ router.get('/weekend-recaps', optionalTicketsAuth, WeekendRecapController.list);
  * §2, §7) — matching the meetup/story write routes above.
  */
 router.get('/events/:eventId/vote', optionalTicketsAuth, VoteController.get);
+router.get('/events/:eventId/vote/:questionId/options/:optionKey/voters', optionalTicketsAuth, VoteController.optionVoters);
 router.post('/events/:eventId/vote/:questionId', authenticateBuyer, VoteController.cast);
 router.post('/events/:eventId/vote/:questionId/songs', authenticateBuyer, VoteController.suggestSong);
 router.post('/events/:eventId/vote/:questionId/tags', authenticateBuyer, VoteController.requestTag);

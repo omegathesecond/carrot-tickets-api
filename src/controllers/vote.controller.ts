@@ -3,7 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
-import { getVotePayload, castVote, suggestSong } from '@services/vote.service';
+import { getVotePayload, castVote, suggestSong, getOptionVoters } from '@services/vote.service';
 import { VoteTagService } from '@services/voteTag.service';
 import { listComments, postComment, reactToComment, deleteOwnComment, moderateRemoveComment } from '@services/voteDiscussion.service';
 
@@ -46,6 +46,27 @@ export class VoteController {
       return ApiResponseUtil.created(res, view, 'Song suggested');
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to suggest song');
+    }
+  }
+
+  /** GET /api/public/events/:eventId/vote/:questionId/options/:optionKey/voters?cursor=&limit=
+   *  "Clicking the count should open the complete list of those users." */
+  static async optionVoters(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = await resolveActorFromRequest(req).catch(() => null);
+      const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
+      const limit = req.query['limit'] ? parseInt(String(req.query['limit']), 10) : undefined;
+      const page = await getOptionVoters(
+        req.params['eventId'] as string,
+        req.params['questionId'] as string,
+        req.params['optionKey'] as string,
+        actor,
+        cursor,
+        limit
+      );
+      return ApiResponseUtil.success(res, page);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load responses');
     }
   }
 
