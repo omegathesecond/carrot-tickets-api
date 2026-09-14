@@ -16,6 +16,7 @@ import { buildEventCardFields } from '@utils/eventCard.util';
 import { getVoteFeedCard } from '@services/vote.service';
 import { EventPlanService } from '@services/eventPlan.service';
 import { weekendRecapCandidates, rankWeekendRecapCandidates, buildWeekendRecapSectionSlide } from '@services/weekendRecap.service';
+import { getFeedSlide as getWhatsHotFeedSlide } from '@services/whatsHot.service';
 
 /** Posts bundled into one Weekend Recap Home-feed section — a small rail,
  *  not a single card, per the spec's "swipeable cards (mobile) / row with
@@ -27,9 +28,24 @@ export type FeedSlide =
   | { type: 'event'; id: string; sortAt: string; [k: string]: any }
   | { type: 'vote'; id: string; sortAt: string; [k: string]: any }
   | { type: 'plan'; id: string; sortAt: string; [k: string]: any }
-  | { type: 'weekendRecap'; id: string; sortAt: string; [k: string]: any };
+  | { type: 'weekendRecap'; id: string; sortAt: string; [k: string]: any }
+  | { type: 'hot'; id: string; sortAt: string; [k: string]: any };
 
-interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; actor?: SocialActor; limit?: number; category?: string; }
+interface FeedOpts {
+  tab: 'for-you' | 'following' | 'events';
+  cursor?: string;
+  actor?: SocialActor;
+  limit?: number;
+  category?: string;
+  /** "Promote the section most strongly from Thursday through Saturday,
+   *  using each user's local timezone" (What's Hot spec §1). The API has no
+   *  reliable per-buyer timezone (same gap weekendWindow.util documents), so
+   *  the client computes this from its OWN local clock (`new Date().getDay()`
+   *  in [4,5,6]) and passes it through — doubling the 'h' token's frequency
+   *  in the shuffled window when true, so the section surfaces more often
+   *  without ever pinning it to a fixed position. */
+  promoteHot?: boolean;
+}
 /** `e` is the $skip-based event cursor. `s` ("seen") covers update ids already
  *  served THIS random walk — every tab with update slides ('for-you' and
  *  'following') now samples them via $sample, so a later page's $nin
@@ -37,50 +53,61 @@ interface FeedOpts { tab: 'for-you' | 'following' | 'events'; cursor?: string; a
  *  the Home feed spec's "don't repeatedly show the same Vote during one
  *  browsing session" (§4) — event ids whose Vote card has already been
  *  served THIS session, across every tab that shows one. `p` ("plan-seen")
- *  is the same "don't repeat" treatment for Event Plan cards. `lv` ("last
- *  was vote") marks that the previous page's last served item was a Vote
- *  card — the pattern buffer is rebuilt from scratch on every getFeed()
+ *  is the same "don't repeat" treatment for Event Plan cards. `wr`
+ *  ("weekend-recap-seen") is the same treatment for Weekend Recap post ids (a
+ *  single 'weekendRecap' slide bundles several posts, so this accumulates
+ *  every post id any slide has already shown, not one id per slide). `h`
+ *  ("hot-seen") is the identical treatment for What's Hot post ids. `lv`
+ *  ("last was vote") marks that the previous page's last served item was a
+ *  Vote card — the pattern buffer is rebuilt from scratch on every getFeed()
  *  call (including a paginated continuation), so without this the slot-0
  *  guard that keeps a fresh load from opening on a Vote card has no memory
  *  of what a continuation request's page just ended on, and two Vote cards
- *  can land back-to-back across the pagination boundary. `lp` ("last was
- *  plan") is the identical carry-forward for Event Plan cards. `wr`/`lwr`
- *  are the same pair of mechanisms again for the Weekend Recap slot. */
-interface Cursor { e?: number; s?: string[]; v?: string[]; p?: string[]; wr?: string[]; lv?: boolean; lp?: boolean; lwr?: boolean; }
+ *  can land back-to-back across the pagination boundary. `lp`/`lwr`/`lh` are
+ *  the identical carry-forward for Event Plan / Weekend Recap / What's Hot
+ *  cards. */
+interface Cursor { e?: number; s?: string[]; v?: string[]; p?: string[]; wr?: string[]; h?: string[]; lv?: boolean; lp?: boolean; lwr?: boolean; lh?: boolean; }
 
 function decode(cursor?: string): Cursor { if (!cursor) return {}; try { return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { return {}; } }
 function encode(c: Cursor): string { return Buffer.from(JSON.stringify(c)).toString('base64url'); }
 
-type Slot = 'u' | 'e' | 'v' | 'p' | 'wr';
+type Slot = 'u' | 'e' | 'v' | 'p' | 'wr' | 'h';
 
-// per-window slot pattern (11): mostly posts, an event every ~4th slot, a
-// Vote card once every 11, and an Event Plan card once every 11 — "mix ...
-// cards naturally... without overwhelming the feed" (spec §4, extended to
-// Event Plan cards by the Home-feed-discoverability follow-up). Only the
-// 'following' blend and the 'events' tab surface event slots; 'for-you'
+// per-window slot pattern (12): mostly posts, an event every ~4th slot, a
+// Vote card once every 12, an Event Plan card once every 12, a Weekend Recap
+// section once every 12, and a What's Hot slide once every 12 (twice, when
+// promoteHot is set — see below) — "mix ... cards naturally... without
+// overwhelming the feed" (spec §4, extended to Event Plan, Weekend Recap and
+// What's Hot by their own follow-ups: "Display Weekend Recap naturally
+// between regular posts... Do not place it permanently at the top"). Only
+// the 'following' blend and the 'events' tab surface event slots; 'for-you'
 // (Discover) is posts-only, so its empty event bucket makes this pattern
-// fall through to updates/votes/plans. The vote and plan buckets are
-// themselves only ever populated for 'for-you'/'following' (see getFeed),
-// so they're no-op dry slots on the 'events' tab.
+// fall through to updates/votes/plans/weekendRecap/hot. The
+// vote/plan/weekendRecap/hot buckets are themselves only ever populated for
+// 'for-you'/'following' (see getFeed), so they're no-op dry slots on the
+// 'events' tab.
 //
 // The window's slot ORDER is re-shuffled every time one is generated (not a
 // fixed constant) — the Home feed follow-up spec: "do not use a fixed feed
 // position for Vote cards" / "vary their position whenever the feed is
-// refreshed" (extended to Event Plan cards for the same reason: neither
-// should camp on a fixed position). Each getFeed() call builds its pattern
-// buffer from scratch, so a fresh load/refresh (no cursor) always
-// re-randomizes from slot 0.
+// refreshed" (extended to Event Plan, Weekend Recap and What's Hot cards for
+// the same reason: none of them should camp on a fixed position). Each
+// getFeed() call builds its pattern buffer from scratch, so a fresh
+// load/refresh (no cursor) always re-randomizes from slot 0.
 // Weekend Recap gets one 'wr' slot per window, the same base frequency as
-// Vote and Event Plan (~1-in-11) — kept a FIXED 11-token pool (one 'u' traded
-// for 'wr', 'v'/'p' left at the same trailing indices) rather than growing
-// the window or varying its shape by day-of-week: "prioritize Weekend Recap
-// from Sunday through Tuesday" is done via rankWeekendRecapCandidates
-// (WHICH posts surface) instead of changing how OFTEN the slot itself
-// appears, which would make the interleave pattern's shape date-dependent —
-// this window is what feed.service.test.ts's Math.random()-driven Vote/Plan
-// adjacency tests assume is stable on every day of the week.
-function shuffledWindow(): Slot[] {
-  const tokens: Slot[] = ['u', 'u', 'u', 'u', 'u', 'u', 'wr', 'e', 'e', 'v', 'p'];
+// Vote and Event Plan (~1-in-12) — a fixed size regardless of day-of-week:
+// "prioritize Weekend Recap from Sunday through Tuesday" is done via
+// rankWeekendRecapCandidates (WHICH posts surface) instead of changing how
+// OFTEN the slot itself appears, which would make the interleave pattern's
+// shape date-dependent — this window is what feed.service.test.ts's
+// Math.random()-driven Vote/Plan adjacency tests assume is stable on every
+// day of the week.
+function shuffledWindow(promoteHot: boolean): Slot[] {
+  const tokens: Slot[] = ['u', 'u', 'u', 'u', 'u', 'u', 'wr', 'e', 'e', 'v', 'p', 'h'];
+  // Thu-Sat promotion (spec §1) is a frequency bump, never a fixed slot —
+  // adding a second 'h' token still goes through the same shuffle+guard
+  // logic below, so it can land anywhere in the window except slot 0.
+  if (promoteHot) tokens.push('h');
   for (let i = tokens.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     const tmp = tokens[i]!;
@@ -101,19 +128,20 @@ function shuffledWindow(): Slot[] {
  * Vote card at the top of the Home feed"). For a paginated continuation
  * request the buffer is rebuilt from scratch too, so `guardZeroFor` also
  * carries 'v' when the previous page's cursor recorded that IT ended on a
- * Vote card (`cur.lv`), and likewise 'p' when it ended on an Event Plan card
- * (`cur.lp`) — otherwise this fresh buffer's slot 0 has no memory of the
- * prior page's trailing slot and two cards of the same type can land
- * back-to-back across the pagination boundary.
+ * Vote card (`cur.lv`), likewise 'p'/'wr'/'h' for an Event Plan (`cur.lp`),
+ * Weekend Recap (`cur.lwr`) or What's Hot (`cur.lh`) card — otherwise this
+ * fresh buffer's slot 0 has no memory of the prior page's trailing slot and
+ * two cards of the same type can land back-to-back across the pagination
+ * boundary.
  */
-function appendWindow(pattern: Slot[], guardZeroFor: ReadonlySet<Slot>): void {
-  const win = shuffledWindow();
+function appendWindow(pattern: Slot[], guardZeroFor: ReadonlySet<Slot>, promoteHot: boolean): void {
+  const win = shuffledWindow(promoteHot);
   const isFirstWindow = pattern.length === 0;
   const prevTail = pattern[pattern.length - 1];
-  for (const special of ['v', 'p', 'wr'] as const) {
+  for (const special of ['v', 'p', 'wr', 'h'] as const) {
     if (win[0] !== special) continue;
     if (!(prevTail === special || (isFirstWindow && guardZeroFor.has(special)))) continue;
-    const swapIdx = win.findIndex((t, idx) => idx > 0 && t !== 'v' && t !== 'p' && t !== 'wr');
+    const swapIdx = win.findIndex((t, idx) => idx > 0 && t !== 'v' && t !== 'p' && t !== 'wr' && t !== 'h');
     if (swapIdx > 0) {
       const tmp = win[0]!;
       win[0] = win[swapIdx]!;
@@ -326,7 +354,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
 
   // Weekend Recap section (Home-feed placement spec) — ONE feed slide
   // bundling up to WEEKEND_RECAP_SECTION_SIZE posts (a rail, not a single
-  // card), same two personal-scroll tabs as Vote/Plan, same ~1-in-11 slot
+  // card), same two personal-scroll tabs as Vote/Plan, same ~1-in-12 slot
   // frequency, and "don't repeatedly show the same content during one
   // browsing session" via `cur.wr` (every bundled post id, not just the
   // section's own synthetic id — see the cursor bookkeeping below).
@@ -341,27 +369,88 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     if (section) wrSlides.push(section as FeedSlide);
   }
 
+  // What's Hot This Weekend slides (spec §1) — same two personal-scroll tabs
+  // as Vote/Plan; "farther down the feed between regular posts", never at
+  // slot 0 (guardZeroFor below). Each slide bundles several posts (a
+  // "horizontally scrollable preview"), so the budget is slides, not posts —
+  // at most one 'h' token per shuffled window (two when promoteHot), so
+  // that's the ceiling on how many slides one page could ever consume.
+  // `cur.h` accumulates every post id shown across every slide THIS session
+  // (not one id per slide) so a later slide never repeats an earlier one's
+  // posts (spec §6: "do not duplicate the same post multiple times within
+  // one feed session").
+  const hotSlides: FeedSlide[] = [];
+  if (opts.tab === 'for-you' || opts.tab === 'following') {
+    const hotSlideBudget = Math.max(1, Math.ceil(limit / (opts.promoteHot ? 6 : 12)));
+    let hotSeen = cur.h ?? [];
+    for (let i = 0; i < hotSlideBudget; i++) {
+      const slide = await getWhatsHotFeedSlide(hotSeen);
+      if (!slide) break;
+      const ids = slide.items.map((it: any) => it.id);
+      hotSlides.push({ type: 'hot', id: `hot-${ids[0]}`, sortAt: new Date().toISOString(), items: slide.items });
+      hotSeen = [...hotSeen, ...ids];
+    }
+  }
+
   // ---- interleave by a freshly-shuffled pattern, dropping dry slots ----
-  const q = { u: updateSlides, e: eventSlides, v: voteSlides, p: planSlides, wr: wrSlides };
+  const hotSlidesOriginal = hotSlides.slice();
+  const q = { u: updateSlides, e: eventSlides, v: voteSlides, p: planSlides, wr: wrSlides, h: hotSlides };
   const items: FeedSlide[] = [];
   const pattern: Slot[] = [];
   const isFreshLoad = !opts.cursor;
   const guardZeroFor = new Set<Slot>(
     isFreshLoad
-      ? (['v', 'p', 'wr'] as const)
-      : ([...(cur.lv ? (['v'] as const) : []), ...(cur.lp ? (['p'] as const) : []), ...(cur.lwr ? (['wr'] as const) : [])] as const),
+      ? (['v', 'p', 'wr', 'h'] as const)
+      : ([
+          ...(cur.lv ? (['v'] as const) : []),
+          ...(cur.lp ? (['p'] as const) : []),
+          ...(cur.lwr ? (['wr'] as const) : []),
+          ...(cur.lh ? (['h'] as const) : []),
+        ] as const),
   );
   let pi = 0;
-  while (items.length < limit && (q.u.length || q.e.length || q.v.length || q.p.length || q.wr.length)) {
-    if (pi >= pattern.length) appendWindow(pattern, guardZeroFor);
+  while (items.length < limit && (q.u.length || q.e.length || q.v.length || q.p.length || q.wr.length || q.h.length)) {
+    if (pi >= pattern.length) appendWindow(pattern, guardZeroFor, !!opts.promoteHot);
     const slot = pattern[pi]!;
     pi++;
     const bucket = q[slot];
     if (bucket.length) { items.push(bucket.shift()!); continue; }
-    // slot dry: fall back to whichever has items (u > e > v > p > wr), else break out of this pass
-    const fallback = q.u.length ? q.u : q.e.length ? q.e : q.v.length ? q.v : q.p.length ? q.p : q.wr.length ? q.wr : null;
+    // slot dry: fall back to whichever has items (u > e > v > p > wr > h), else break out of this pass
+    const fallback = q.u.length ? q.u : q.e.length ? q.e : q.v.length ? q.v : q.p.length ? q.p : q.wr.length ? q.wr : q.h.length ? q.h : null;
     if (!fallback) break;
     items.push(fallback.shift()!);
+  }
+
+  // Client escalation (2026-09-12): "still not visible on the Home feed...
+  // place it within the first three posts... every time the feed loads...
+  // not hidden because of feed ranking, pagination, caching or the absence
+  // of followed creators." The shuffled window above only makes a *chance*
+  // placement anywhere in the page — on a real page it can easily land past
+  // post #3 or miss the page's `limit` cutoff entirely (u/e can fill the
+  // whole page before the pattern ever reaches its 'h' token). So a fresh
+  // load's first page (never a paginated continuation — that's not "the
+  // feed loads") gets a hard placement guarantee here, on top of the
+  // shuffle: if a hot slide made it into the page but landed past index 2,
+  // pull it forward; if none made it in at all but one was available, force
+  // it in. Index 0 is still avoided (unchanged "never permanently pinned to
+  // the very top" from the original spec) — slot 1 or 2 satisfies both.
+  if (isFreshLoad && (opts.tab === 'for-you' || opts.tab === 'following') && hotSlidesOriginal.length) {
+    const hotIdx = items.findIndex((i) => i.type === 'hot');
+    let hotItem: FeedSlide | undefined;
+    if (hotIdx > 2) hotItem = items.splice(hotIdx, 1)[0];
+    else if (hotIdx === -1) hotItem = hotSlidesOriginal[0];
+    if (hotItem) {
+      const insertAt = Math.min(2, Math.max(1, items.length));
+      items.splice(insertAt, 0, hotItem);
+      // Trim from the end to respect `limit`, but never trim the hotItem we
+      // just forced in — at small limits (e.g. 2) it can land in the last
+      // slot, and an unconditional pop() would undo the guarantee above.
+      while (items.length > limit && items.length > 1) {
+        const lastIdx = items.length - 1;
+        const removeIdx = items[lastIdx] === hotItem ? lastIdx - 1 : lastIdx;
+        items.splice(removeIdx, 1);
+      }
+    }
   }
 
   // ---- next cursor from the last consumed position of each source ----
@@ -401,6 +490,17 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   if (mergedRecapSeen.length) next.wr = mergedRecapSeen;
   // Carried to the next page's slot-0 guard, same reasoning as lv/lp above.
   if (items[items.length - 1]?.type === 'weekendRecap') next.lwr = true;
+
+  // Flatten every consumed 'hot' slide's bundled post ids (not one id per
+  // slide — see the hotSlides comment above) into the session "don't repeat"
+  // list.
+  const consumedHotIds = items.filter((i) => i.type === 'hot').flatMap((i: any) => (i.items as any[]).map((it) => it.id));
+  const mergedHotSeen = [...(cur.h ?? []), ...consumedHotIds];
+  if (mergedHotSeen.length) next.h = mergedHotSeen;
+  // Carried to the next page's slot-0 guard (see appendWindow's doc comment)
+  // so a continuation request can't open on a What's Hot slide right after
+  // this page's last item was one.
+  if (items[items.length - 1]?.type === 'hot') next.lh = true;
 
   const anyMore = items.length >= limit; // conservative: only advertise more if we filled a page
   return { items, nextCursor: anyMore ? encode(next) : null };

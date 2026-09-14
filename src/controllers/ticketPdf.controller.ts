@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Ticket } from '@models/ticket.model';
 import { ITicket, TicketPdfStatus } from '@interfaces/ticket.interface';
 import { TicketPdfService } from '@services/ticketPdf.service';
+import { TicketService } from '@services/ticket.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { buyerTicketOr } from '@utils/ticketHolder.util';
@@ -20,6 +21,28 @@ function sendPdf(res: Response, buffer: Buffer, filename: string): void {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(buffer);
+}
+
+type BundleTicketIdsValidation =
+  | { ok: true; ticketIds: string[] }
+  | { ok: false; message: string };
+
+/**
+ * Shared shape check for a `{ ticketIds: string[] }` bundle request body, used
+ * by both the buyer (`downloadTicketsBundle`) and vendor
+ * (`downloadVendorTicketsBundle`) bundle endpoints so the cap and the
+ * validation rule can't drift between the two copies. Runs before either
+ * route touches the database — a 1000-element list must still cost zero DB
+ * lookups.
+ */
+function validateBundleTicketIds(ticketIds: unknown): BundleTicketIdsValidation {
+  if (!Array.isArray(ticketIds) || ticketIds.length === 0 || !ticketIds.every((id) => typeof id === 'string')) {
+    return { ok: false, message: 'ticketIds must be a non-empty array of ticket ids' };
+  }
+  if (ticketIds.length > MAX_BUNDLE_TICKETS) {
+    return { ok: false, message: `Cannot bundle more than ${MAX_BUNDLE_TICKETS} tickets at once` };
+  }
+  return { ok: true, ticketIds };
 }
 
 /**
@@ -65,16 +88,77 @@ export class TicketPdfController {
     }
   }
 
+  /**
+   * GET /api/tickets/:ticketId/pdf/download — one ticket as PDF BYTES for an
+   * organizer. Mirrors downloadTicketPdf, swapping the buyer check for vendor
+   * ownership. Bytes (not the R2 URL) because the dashboard assembles the ZIP
+   * client-side and cross-origin R2 fetches depend on bucket CORS.
+   */
+  static async downloadVendorTicketPdf(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser || {};
+      const ticket = await TicketService.resolveVendorTicket(
+        req.params['ticketId'] as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false,
+      );
+      await ticket.populate('eventId', EVENT_POPULATE_FIELDS);
+      const buffer = await TicketPdfService.buildTicketPdfBuffer(ticket);
+      sendPdf(res, buffer, `${sanitizeFilenamePart(ticket.ticketId)}.pdf`);
+    } catch (error: any) {
+      const msg = error?.message || '';
+      if (/not authorized/i.test(msg)) return ApiResponseUtil.forbidden(res, 'You are not allowed to access this ticket');
+      if (/not found/i.test(msg)) return ApiResponseUtil.notFound(res, 'Ticket not found');
+      console.error('Vendor ticket PDF error:', error);
+      return ApiResponseUtil.error(res, msg || 'Failed to generate ticket PDF');
+    }
+  }
+
+  /**
+   * POST /api/tickets/pdf-bundle — several of THIS vendor's tickets as one
+   * PDF. Mirrors downloadVendorTicketPdf's ownership check but for a list.
+   * Every ticket is resolved + authorised BEFORE any rendering starts: a
+   * bundle containing one foreign ticket must render nothing at all, since
+   * rendering first and rejecting after would still have generated (and
+   * risked leaking) another organizer's QR codes.
+   */
+  static async downloadVendorTicketsBundle(req: Request, res: Response): Promise<any> {
+    try {
+      const validation = validateBundleTicketIds(req.body?.ticketIds);
+      if (!validation.ok) {
+        return ApiResponseUtil.badRequest(res, validation.message);
+      }
+      const { ticketIds } = validation;
+
+      const ticketsUser = (req as any).ticketsUser || {};
+      const tickets: ITicket[] = [];
+      for (const id of ticketIds) {
+        const t = await TicketService.resolveVendorTicket(
+          id, ticketsUser.vendorId as string, ticketsUser.isSuperAdmin || false,
+        );
+        await t.populate('eventId', EVENT_POPULATE_FIELDS);
+        tickets.push(t);
+      }
+
+      const buffer = await TicketPdfService.buildBundlePdfBuffer(tickets);
+      sendPdf(res, buffer, 'tickets.pdf');
+    } catch (error: any) {
+      const msg = error?.message || '';
+      if (/not authorized/i.test(msg)) return ApiResponseUtil.forbidden(res, 'You are not allowed to access one of these tickets');
+      if (/not found/i.test(msg)) return ApiResponseUtil.notFound(res, 'Ticket not found');
+      console.error('Vendor bundle PDF error:', error);
+      return ApiResponseUtil.error(res, msg || 'Failed to generate ticket bundle');
+    }
+  }
+
   /** POST /api/public/tickets/pdf-bundle — several tickets as ONE downloadable PDF. */
   static async downloadTicketsBundle(req: Request, res: Response): Promise<any> {
     try {
-      const ticketIds: unknown = req.body?.ticketIds;
-      if (!Array.isArray(ticketIds) || ticketIds.length === 0 || !ticketIds.every((id) => typeof id === 'string')) {
-        return ApiResponseUtil.badRequest(res, 'ticketIds must be a non-empty array of ticket ids');
+      const validation = validateBundleTicketIds(req.body?.ticketIds);
+      if (!validation.ok) {
+        return ApiResponseUtil.badRequest(res, validation.message);
       }
-      if (ticketIds.length > MAX_BUNDLE_TICKETS) {
-        return ApiResponseUtil.badRequest(res, `Cannot bundle more than ${MAX_BUNDLE_TICKETS} tickets at once`);
-      }
+      const { ticketIds } = validation;
 
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) {

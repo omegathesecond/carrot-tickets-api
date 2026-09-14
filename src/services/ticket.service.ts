@@ -1,7 +1,7 @@
 import { Ticket } from '@models/ticket.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Event } from '@models/event.model';
-import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus, SalesChannel, TicketPdfStatus } from '@interfaces/ticket.interface';
 import { EventStatus, type ITicketType } from '@interfaces/event.interface';
 import { resolveCart, assertSingleAttribution } from '@services/cart.service';
 import type { CartLine } from '@interfaces/cart.interface';
@@ -29,6 +29,7 @@ import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/s
 import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
 import { FollowService } from '@services/follow.service';
 import { EventCurrency, settlementCurrencyForMethod } from '@utils/currency.util';
+import { TicketPdfService } from '@services/ticketPdf.service';
 import mongoose from 'mongoose';
 
 export interface SellTicketsParams {
@@ -45,8 +46,13 @@ export interface SellTicketsParams {
    * that call hands back the tier. Asking callers for the snapshot too would
    * make each of them load the event for data we fetch anyway, and let a
    * stale snapshot disagree with the tier we actually validated.
+   *
+   * `recipients` is optional and sparse: entry `i` names ticket `i` minted for
+   * this line, in order, and any line shorter than `quantity` (or omitted
+   * altogether) leaves the remaining tickets carrying the sale's own buyer
+   * details, exactly as before this field existed.
    */
-  lines: Array<{ ticketTypeId: string; quantity: number }>;
+  lines: Array<{ ticketTypeId: string; quantity: number; recipients?: Array<{ name?: string; phone?: string; email?: string }> }>;
   customerName?: string;
   customerPhone?: string;
   // Buyer identity (buyer-authed purchase paths only — VENDOR/POS sales
@@ -452,7 +458,12 @@ export class TicketService {
       // which enforces the cap against the cart TOTAL before we get here, and
       // the direct callers (POS, reseller) are single-line, where the two are
       // the same number.
-      const resolvedLines: Array<{ ticketTypeId: string; ticketType: ITicketType; quantity: number }> = [];
+      const resolvedLines: Array<{
+        ticketTypeId: string;
+        ticketType: ITicketType;
+        quantity: number;
+        recipients?: Array<{ name?: string; phone?: string; email?: string }>;
+      }> = [];
       for (const line of lines) {
         const availabilityCheck = await EventService.checkTicketAvailability(
           eventId,
@@ -468,6 +479,7 @@ export class TicketService {
           ticketTypeId: line.ticketTypeId,
           ticketType: availabilityCheck.ticketTypeData!,
           quantity: line.quantity,
+          recipients: line.recipients,
         });
       }
 
@@ -558,18 +570,23 @@ export class TicketService {
       // Create tickets — one inner pass per cart line, so every ticket carries
       // ITS OWN tier's name and price.
       const tickets: ITicket[] = [];
+      // Flatten to one entry per ticket, pairing each with its own recipient
+      // (absent entries fall back to the sale's buyer details).
       const flattened = resolvedLines.flatMap((line) =>
-        Array.from({ length: line.quantity }, () => line.ticketType)
+        Array.from({ length: line.quantity }, (_, i) => ({
+          tier: line.ticketType,
+          recipient: line.recipients?.[i],
+        }))
       );
-      for (const tier of flattened) {
+      for (const entry of flattened) {
         const ticket = this.buildTicket({
           eventId,
           vendorId,
-          ticketType: tier.name,
-          price: tier.price,
-          customerName,
-          customerPhone,
-          customerEmail,
+          ticketType: entry.tier.name,
+          price: entry.tier.price,
+          customerName: entry.recipient?.name ?? customerName,
+          customerPhone: entry.recipient?.phone ?? customerPhone,
+          customerEmail: entry.recipient?.email ?? customerEmail,
           buyerId,
           currency: displayCurrency,
         });
@@ -585,17 +602,18 @@ export class TicketService {
               session.endSession();
             }
             // Retry ALL tickets without a session — same per-line flattening,
-            // or this fallback would silently mint the wrong tiers.
+            // or this fallback would silently mint the wrong tiers (and drop
+            // every recipient).
             const ticketsWithoutSession: ITicket[] = [];
-            for (const retryTier of flattened) {
+            for (const retryEntry of flattened) {
               const t = this.buildTicket({
                 eventId,
                 vendorId,
-                ticketType: retryTier.name,
-                price: retryTier.price,
-                customerName,
-                customerPhone,
-                customerEmail,
+                ticketType: retryEntry.tier.name,
+                price: retryEntry.tier.price,
+                customerName: retryEntry.recipient?.name ?? customerName,
+                customerPhone: retryEntry.recipient?.phone ?? customerPhone,
+                customerEmail: retryEntry.recipient?.email ?? customerEmail,
                 buyerId,
                 currency: displayCurrency,
               });
@@ -792,6 +810,77 @@ export class TicketService {
     }
 
     return this.sendSaleConfirmationSms(sale);
+  }
+
+  /**
+   * Load a ticket by its code (TKT-…) or Mongo _id and assert the calling vendor
+   * owns it. Every vendor-scoped per-ticket route funnels through here so the
+   * ownership rule has exactly one implementation.
+   */
+  static async resolveVendorTicket(
+    idOrCode: string,
+    vendorId: string,
+    isSuperAdmin = false,
+  ): Promise<ITicket> {
+    const ticket = await TicketPdfService.resolveTicket(idOrCode);
+    if (!ticket) {
+      throw new Error(`Ticket not found: ${idOrCode}`);
+    }
+    if (!isSuperAdmin && (!vendorId || ticket.vendorId?.toString() !== vendorId)) {
+      throw new Error('Not authorized to access this ticket');
+    }
+    return ticket;
+  }
+
+  /**
+   * Send ONE ticket to the recipient stored on that ticket. Deliberately takes
+   * no recipient argument: the ticket is the single source of truth, so a
+   * caller must PATCH the recipient first.
+   *
+   * Validates the channel against the stored contact BEFORE dispatching — an SMS
+   * credit is spent either way, so the guard belongs ahead of the send.
+   */
+  static async sendTicketToItsRecipient(
+    ticket: ITicket,
+    channel: 'sms' | 'email',
+  ): Promise<{ sent: boolean }> {
+    // Validate channel against stored contact BEFORE any R2 work — prevents
+    // wasting PDF generation if the ticket has no recipient for this channel.
+    if (channel === 'sms' && !ticket.customerPhone) {
+      throw new Error('This ticket has no recipient phone number');
+    }
+    if (channel === 'email' && !ticket.customerEmail) {
+      throw new Error('This ticket has no recipient email address');
+    }
+
+    const event = await Event.findById(ticket.eventId);
+    if (!event) {
+      throw new Error(`Event not found for ticket: ${ticket.ticketId}`);
+    }
+
+    // The R2-cached artifact is idempotent — first call renders and uploads,
+    // later calls return the same URL. A concurrent request can still be
+    // GENERATING (no pdfUrl yet) — refuse to send rather than mailing/texting
+    // a code-only message and reporting it as a success.
+    const pdf = await TicketPdfService.ensureTicketPdf(ticket);
+    if (pdf.status !== TicketPdfStatus.READY || !pdf.pdfUrl) {
+      throw new Error('Ticket PDF is still being generated — try again in a moment');
+    }
+
+    const summaries = [{
+      ticketId: ticket.ticketId,
+      eventName: event.name,
+      eventDate: event.eventDate.toISOString(),
+      startTime: event.startTime?.toISOString(),
+      venue: event.venue,
+      pdfUrl: pdf.pdfUrl,
+    }];
+
+    if (channel === 'sms') {
+      return { sent: await SmsService.sendTicketConfirmation(ticket.customerPhone!, summaries) };
+    }
+
+    return { sent: await EmailService.sendTicketConfirmation(ticket.customerEmail!, summaries) };
   }
 
   static async getSales(query: GetSalesQuery) {

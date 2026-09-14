@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
-import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus, SalesChannel, TicketStatus } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
@@ -12,6 +12,7 @@ import { EventFinancialsService } from '@services/eventFinancials.service';
 import { ExportService } from '@services/export.service';
 import { WalletService } from '@services/wallet.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
+import { normalizePhone, isValidPhone } from '@utils/phone.util';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { Ticket } from '@models/ticket.model';
@@ -880,7 +881,7 @@ export class TicketsController {
       // work during the changeover. The spread is why TypeScript cannot see a
       // shape change here, which is why the cart is built explicitly.
       const { items, ticketTypeId, quantity, ...rest } = value as {
-        items?: Array<{ ticketTypeId: string; quantity: number }>;
+        items?: Array<{ ticketTypeId: string; quantity: number; recipients?: Array<{ name?: string; phone?: string; email?: string }> }>;
         ticketTypeId?: string;
         quantity?: number;
       } & Record<string, unknown>;
@@ -959,6 +960,104 @@ export class TicketsController {
       }
       console.error('Send sale SMS error:', err);
       return ApiResponseUtil.error(res, msg || 'Failed to send ticket SMS');
+    }
+  }
+
+  /**
+   * Sales: set one ticket's own recipient. Tickets minted in one sale share the
+   * buyer's details by default; this is how an organizer gives each ticket to a
+   * different person.
+   *
+   * Refuses a scanned ticket: silently moving a used ticket to a new name is how
+   * gate disputes start.
+   */
+  static async updateTicketRecipient(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      const { error, value } = Joi.object({
+        name: Joi.string().trim().max(120).optional(),
+        phone: Joi.string().trim().max(32).optional().custom((value, helpers) => {
+          if (!isValidPhone(value)) return helpers.error('any.invalid');
+          return value;
+        }).messages({
+          'any.invalid': 'phone must be a valid phone number',
+        }),
+        email: Joi.string().trim().email().max(254).optional(),
+      }).or('name', 'phone', 'email').validate(req.body);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      const ticketId = req.params['ticketId'];
+      const ticket = await TicketService.resolveVendorTicket(
+        ticketId as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false,
+      );
+
+      // A scanned ticket is CHECKED_IN — there is no USED member on this enum
+      // (TicketStatus = available | sold | checked_in | refunded | cancelled).
+      if (ticket.status === TicketStatus.CHECKED_IN) {
+        return ApiResponseUtil.error(res, 'This ticket has already been scanned and cannot be reassigned', 409);
+      }
+
+      if (value.name !== undefined) ticket.customerName = value.name;
+      if (value.phone !== undefined) ticket.customerPhone = normalizePhone(value.phone);
+      if (value.email !== undefined) ticket.customerEmail = value.email.toLowerCase();
+      await ticket.save();
+
+      return ApiResponseUtil.success(res, {
+        ticket: {
+          ticketId: ticket.ticketId,
+          customerName: ticket.customerName,
+          customerPhone: ticket.customerPhone,
+          customerEmail: ticket.customerEmail,
+        },
+      }, 'Recipient updated');
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (/not authorized/i.test(msg)) return ApiResponseUtil.error(res, 'You are not allowed to access this ticket', 403);
+      if (/not found/i.test(msg)) return ApiResponseUtil.error(res, 'Ticket not found', 404);
+      console.error('Update ticket recipient error:', err);
+      return ApiResponseUtil.error(res, msg || 'Failed to update recipient');
+    }
+  }
+
+  /** Sales: send ONE ticket to its own recipient over the chosen channel. */
+  static async sendSingleTicket(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+
+      const { error, value } = Joi.object({
+        channel: Joi.string().valid('sms', 'email').required(),
+      }).validate(req.body);
+
+      if (error) {
+        return ApiResponseUtil.error(res, error.details[0]?.message || 'Validation error', 400);
+      }
+
+      const ticket = await TicketService.resolveVendorTicket(
+        req.params['ticketId'] as string,
+        ticketsUser.vendorId as string,
+        ticketsUser.isSuperAdmin || false,
+      );
+
+      const { sent } = await TicketService.sendTicketToItsRecipient(ticket, value.channel);
+      if (!sent) {
+        return ApiResponseUtil.error(res, 'Gateway did not accept the message', 502);
+      }
+      return ApiResponseUtil.success(res, { sent }, 'Ticket sent');
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (/not authorized/i.test(msg)) return ApiResponseUtil.error(res, 'You are not allowed to access this ticket', 403);
+      if (/no recipient/i.test(msg)) return ApiResponseUtil.error(res, msg, 400);
+      if (/still being generated/i.test(msg)) return ApiResponseUtil.error(res, msg, 409);
+      if (/event not found/i.test(msg)) return ApiResponseUtil.error(res, 'Internal error: event data missing for this ticket', 500);
+      if (/not found/i.test(msg)) return ApiResponseUtil.error(res, 'Ticket not found', 404);
+      console.error('Send single ticket error:', err);
+      return ApiResponseUtil.error(res, msg || 'Failed to send ticket');
     }
   }
 
