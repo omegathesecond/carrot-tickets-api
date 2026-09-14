@@ -65,6 +65,7 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   share_earn_sale_confirmed: 'social',
   share_earn_reward_confirmed: 'social',
   share_earn_milestone_reached: 'social',
+  share_earn_top_promoter_won: 'social',
   share_earn_reward_available: 'social',
   share_earn_reward_redeemed: 'social',
   share_earn_reward_reversed: 'social',

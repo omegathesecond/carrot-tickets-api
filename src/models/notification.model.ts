@@ -42,6 +42,7 @@ export type NotificationType =
   | 'share_earn_sale_confirmed'
   | 'share_earn_reward_confirmed'
   | 'share_earn_milestone_reached'
+  | 'share_earn_top_promoter_won'
   | 'share_earn_reward_available'
   | 'share_earn_reward_redeemed'
   | 'share_earn_reward_reversed'
@@ -105,6 +106,7 @@ const notificationSchema = new Schema<INotification>(
         'share_earn_sale_confirmed',
         'share_earn_reward_confirmed',
         'share_earn_milestone_reached',
+        'share_earn_top_promoter_won',
         'share_earn_reward_available',
         'share_earn_reward_redeemed',
         'share_earn_reward_reversed',

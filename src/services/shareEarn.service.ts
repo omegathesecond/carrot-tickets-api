@@ -267,17 +267,61 @@ export class ShareEarnService {
     campaign.status = 'closed';
     campaign.closedAt = new Date();
     await campaign.save();
-    await log(campaign._id as Types.ObjectId, campaign.eventId, 'campaign_closed', { actorType: 'vendor', actorId: new Types.ObjectId(vendorId) });
+    await ShareEarnService.finalizeCampaignClosure(campaign, { actorType: 'vendor', actorId: new Types.ObjectId(vendorId) });
     return campaign;
   }
 
   /** Background sweep — mirrors the codebase's other reminder/expiry sweeps (@/tasks/backgroundTasks). */
   static async autoCloseExpiredCampaigns(): Promise<number> {
-    const res = await ShareEarnCampaign.updateMany(
-      { status: { $in: ['active', 'paused'] }, endsAt: { $lte: new Date() } },
-      { $set: { status: 'closed', closedAt: new Date() } }
-    );
-    return res.modifiedCount ?? 0;
+    const now = new Date();
+    const expiring = await ShareEarnCampaign.find({ status: { $in: ['active', 'paused'] }, endsAt: { $lte: now } });
+    for (const campaign of expiring) {
+      campaign.status = 'closed';
+      campaign.closedAt = now;
+      await campaign.save();
+      await ShareEarnService.finalizeCampaignClosure(campaign, { actorType: 'system' });
+    }
+    return expiring.length;
+  }
+
+  /** Shared tail of every close path (manual + sweep): log it, then settle any 'top_promoter' rules. */
+  private static async finalizeCampaignClosure(
+    campaign: IShareEarnCampaign,
+    actor: { actorType: 'buyer' | 'vendor' | 'system'; actorId?: Types.ObjectId }
+  ): Promise<void> {
+    await log(campaign._id as Types.ObjectId, campaign.eventId, 'campaign_closed', actor);
+    await ShareEarnService.awardTopPromoterRewards(campaign);
+  }
+
+  /**
+   * Settle every 'top_promoter' reward rule (spec §7) once a campaign closes.
+   * Winner is the non-disqualified promoter with the most confirmed sales
+   * (ties broken by whoever joined the campaign first); no qualifying sales
+   * means no winner and the rule goes unawarded. Idempotent — guarded by
+   * awardedMilestoneRuleIds and the (promoterId, ruleId, trigger) unique index
+   * issueReward already relies on for milestone rewards.
+   */
+  private static async awardTopPromoterRewards(campaign: IShareEarnCampaign): Promise<void> {
+    const rules = campaign.rewardRules.filter((r) => r.trigger === 'top_promoter');
+    if (!rules.length) return;
+
+    const winner = await ShareEarnPromoter.findOne({
+      campaignId: campaign._id,
+      status: { $ne: 'disqualified' },
+      confirmedSalesCount: { $gt: 0 },
+    }).sort({ confirmedSalesCount: -1, joinedAt: 1 });
+    if (!winner) return;
+
+    let awarded = false;
+    for (const rule of rules) {
+      if (winner.awardedMilestoneRuleIds.includes(rule.ruleId)) continue;
+      const reward = await ShareEarnService.issueReward(campaign, winner, rule, {});
+      if (reward) {
+        winner.awardedMilestoneRuleIds.push(rule.ruleId);
+        awarded = true;
+      }
+    }
+    if (awarded) await winner.save();
   }
 
   /**
@@ -760,6 +804,13 @@ export class ShareEarnService {
         'Milestone reached!', `You hit a Share&Earn milestone — your reward is ${reward.status === 'available' ? 'ready' : 'being confirmed'}.`,
         { shareEarnCampaignId: String(campaign._id), shareEarnRewardId: String(reward._id) })
         .catch((e) => console.error('[shareEarn] milestone notification failed', e));
+    }
+
+    if (rule.trigger === 'top_promoter') {
+      NotificationService.create('buyer', String(promoter.buyerId), 'share_earn_top_promoter_won',
+        "You're the top promoter!", `You finished as the top promoter for this Share&Earn campaign — your reward is ${reward.status === 'available' ? 'ready' : 'being confirmed'}.`,
+        { shareEarnCampaignId: String(campaign._id), shareEarnRewardId: String(reward._id) })
+        .catch((e) => console.error('[shareEarn] top-promoter notification failed', e));
     }
 
     return reward;

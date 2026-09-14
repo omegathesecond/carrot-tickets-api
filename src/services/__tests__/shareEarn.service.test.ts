@@ -545,4 +545,93 @@ describe('ShareEarnService', () => {
       expect((await ShareEarnCampaign.findOne({ eventId: future.eventId }))!.status).toBe('active');
     });
   });
+
+  describe('top-promoter reward', () => {
+    async function confirmSale(eventId: string, vendorId: string, referralCode: string) {
+      const purchaser = await seedBuyer({ name: `Purchaser ${Math.random()}` });
+      const sale = await seedSale({ eventId, vendorId, buyerId: purchaser._id as mongoose.Types.ObjectId, referralCode });
+      await ShareEarnService.registerPendingReferral(sale);
+      await ShareEarnService.confirmReferralForSale(sale);
+    }
+
+    it('awards the top-promoter reward to the promoter with the most confirmed sales once the campaign closes', async () => {
+      const { eventId, vendorId } = await seedPublishedEvent();
+      await seedActiveCampaign({
+        vendorId: new mongoose.Types.ObjectId(vendorId), eventId,
+        rewardRules: [
+          { trigger: 'per_sale', rewardType: 'points', provider: 'carrot', pointsAmount: 10 },
+          { trigger: 'top_promoter', rewardType: 'points', provider: 'carrot', pointsAmount: 500, description: 'Top promoter bonus' },
+        ],
+      });
+      const runnerUpBuyer = await seedBuyer({ name: 'Runner-up' });
+      const winnerBuyer = await seedBuyer({ name: 'Winner' });
+      const { promoter: runnerUp } = await ShareEarnService.joinCampaign(eventId, { _id: runnerUpBuyer._id as mongoose.Types.ObjectId });
+      const { promoter: winner } = await ShareEarnService.joinCampaign(eventId, { _id: winnerBuyer._id as mongoose.Types.ObjectId });
+
+      await confirmSale(eventId, vendorId, runnerUp.referralCode);
+      await confirmSale(eventId, vendorId, winner.referralCode);
+      await confirmSale(eventId, vendorId, winner.referralCode);
+
+      await ShareEarnService.closeCampaign(eventId, vendorId);
+
+      const topPromoterRewards = await ShareEarnReward.find({ trigger: 'top_promoter' });
+      expect(topPromoterRewards).toHaveLength(1);
+      expect(String(topPromoterRewards[0]!.promoterId)).toBe(String(winner._id));
+      expect(topPromoterRewards[0]!.status).toBe('available');
+      expect(topPromoterRewards[0]!.pointsAmount).toBe(500);
+      expect(await totalShareEarnPoints(winnerBuyer._id as mongoose.Types.ObjectId)).toBe(500 + 10 * 2);
+      expect(await totalShareEarnPoints(runnerUpBuyer._id as mongoose.Types.ObjectId)).toBe(10);
+
+      const { Notification } = await import('@models/notification.model');
+      const notified = await Notification.countDocuments({ recipientId: winnerBuyer._id, type: 'share_earn_top_promoter_won' });
+      expect(notified).toBe(1);
+    });
+
+    it('does not award a top-promoter reward when no promoter has a confirmed sale', async () => {
+      const { eventId, vendorId } = await seedPublishedEvent();
+      await seedActiveCampaign({
+        vendorId: new mongoose.Types.ObjectId(vendorId), eventId,
+        rewardRules: [{ trigger: 'top_promoter', rewardType: 'points', provider: 'carrot', pointsAmount: 500 }],
+      });
+      const buyer = await seedBuyer();
+      await ShareEarnService.joinCampaign(eventId, { _id: buyer._id as mongoose.Types.ObjectId });
+
+      await ShareEarnService.closeCampaign(eventId, vendorId);
+      expect(await ShareEarnReward.countDocuments({ trigger: 'top_promoter' })).toBe(0);
+    });
+
+    it('does not double-award if the campaign close path runs more than once', async () => {
+      const { eventId, vendorId } = await seedPublishedEvent();
+      await seedActiveCampaign({
+        vendorId: new mongoose.Types.ObjectId(vendorId), eventId,
+        rewardRules: [{ trigger: 'top_promoter', rewardType: 'points', provider: 'carrot', pointsAmount: 500 }],
+      });
+      const buyer = await seedBuyer();
+      const { promoter } = await ShareEarnService.joinCampaign(eventId, { _id: buyer._id as mongoose.Types.ObjectId });
+      await confirmSale(eventId, vendorId, promoter.referralCode);
+
+      await ShareEarnService.closeCampaign(eventId, vendorId);
+      await ShareEarnService.closeCampaign(eventId, vendorId); // already closed — short-circuits
+
+      expect(await ShareEarnReward.countDocuments({ trigger: 'top_promoter' })).toBe(1);
+    });
+
+    it('also settles the top-promoter reward when the campaign is closed by the expiry sweep', async () => {
+      const { eventId, vendorId } = await seedPublishedEvent();
+      await seedActiveCampaign({
+        vendorId: new mongoose.Types.ObjectId(vendorId), eventId, endsInDays: 7,
+        rewardRules: [{ trigger: 'top_promoter', rewardType: 'points', provider: 'carrot', pointsAmount: 500 }],
+      });
+      const buyer = await seedBuyer();
+      const { promoter } = await ShareEarnService.joinCampaign(eventId, { _id: buyer._id as mongoose.Types.ObjectId });
+      await confirmSale(eventId, vendorId, promoter.referralCode);
+      await ShareEarnCampaign.updateOne({ eventId }, { $set: { endsAt: new Date(Date.now() - 1000) } });
+
+      await ShareEarnService.autoCloseExpiredCampaigns();
+
+      const rewards = await ShareEarnReward.find({ trigger: 'top_promoter' });
+      expect(rewards).toHaveLength(1);
+      expect(String(rewards[0]!.promoterId)).toBe(String(promoter._id));
+    });
+  });
 });
