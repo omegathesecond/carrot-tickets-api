@@ -71,6 +71,30 @@ export async function buildWeekendRecapSectionSlide(docs: IUpdate[], actor: Soci
   };
 }
 
+/**
+ * Client escalation (2026-09-15): "It is not showing." Root cause — when
+ * zero weekend_recap posts exist anywhere yet (the exact state right after
+ * this feature ships), buildWeekendRecapSectionSlide above returns null and
+ * feed.service pushes nothing at all: no section, no "Add Weekend Recap"
+ * entry point, nothing — contradicting the spec's explicit empty state
+ * ("How was your weekend? Share your favourite moments." + an Add Weekend
+ * Recap button). This builds that placeholder slide so the section still
+ * occupies its normal interleaved slot with a bootstrap CTA instead of
+ * vanishing outright. `seeAll: false` — there is nothing to see yet.
+ */
+export function buildWeekendRecapEmptyStateSlide(): any {
+  const now = new Date().toISOString();
+  return {
+    type: 'weekendRecap',
+    id: 'wr-empty',
+    sortAt: now,
+    label: 'Weekend Recap',
+    seeAll: false,
+    posts: [],
+    isEmpty: true,
+  };
+}
+
 export type WeekendRecapSort = 'recommended' | 'latest' | 'most_viewed' | 'most_liked';
 export type WeekendRecapFilter = 'events' | 'vacations' | 'nightlife' | 'music' | 'food' | 'travel' | 'nearby';
 
@@ -106,7 +130,7 @@ export async function listWeekendRecaps(opts: {
   // nearby-ranking tier falling back when a buyer has no stored location.
 
   const skip = (opts.page - 1) * opts.limit;
-  let cursor = Update.find(query).sort(SORTS[opts.sort]).skip(skip).limit(opts.limit + 1);
+  const cursor = Update.find(query).sort(SORTS[opts.sort]).skip(skip).limit(opts.limit + 1);
   if (opts.sort === 'recommended') {
     // Same Sun-Tue boost as the Home-feed slot, applied as a secondary sort
     // key isn't possible via a stored field, so recommended pulls a slightly

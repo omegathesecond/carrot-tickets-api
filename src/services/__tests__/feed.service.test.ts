@@ -33,8 +33,11 @@ describe('feed.service getFeed', () => {
     const types = items.map((i) => i.type);
     expect(types).toContain('update');
     // Discover is posts-only: the seeded event (and any synthetic activity
-    // slide) must never appear in 'for-you'.
-    expect(types.every((t) => t === 'update')).toBe(true);
+    // slide) must never appear in 'for-you'. The one deliberate exception is
+    // the Weekend Recap bootstrap CTA (spec's required empty state), which
+    // occupies its normal slot on a fresh load until recap content exists —
+    // see the "Weekend Recap section cards" describe block below.
+    expect(types.every((t) => t === 'update' || t === 'weekendRecap')).toBe(true);
     const updateSlide = items.find((i) => i.type === 'update');
     expect(updateSlide?.['viewCount']).toBe(0);
   });
@@ -566,6 +569,29 @@ describe('feed.service getFeed', () => {
       // The single recap post can appear at most once across the whole
       // paginated walk (cur.wr excludes it from every subsequent page).
       expect(seenTwice.filter(Boolean).length).toBeLessThanOrEqual(1);
+    });
+
+    it('surfaces an empty-state weekendRecap section on a fresh load when zero recap posts exist yet', async () => {
+      for (let i = 0; i < 15; i++) await seedReadyUpdate('u' + i);
+
+      let found: any = null;
+      for (let i = 0; i < 20 && !found; i++) {
+        const { items } = await getFeed({ tab: 'for-you', limit: 12 });
+        found = items.find((it) => it.type === 'weekendRecap');
+      }
+      expect(found).toBeTruthy();
+      expect(found.isEmpty).toBe(true);
+      expect(found.seeAll).toBe(false);
+      expect(found.posts).toEqual([]);
+    });
+
+    it('does not repeat the empty-state slide on a paginated continuation', async () => {
+      for (let i = 0; i < 30; i++) await seedReadyUpdate('u' + i);
+
+      const first = await getFeed({ tab: 'for-you', limit: 4 });
+      expect(first.nextCursor).toBeTruthy();
+      const second = await getFeed({ tab: 'for-you', limit: 4, cursor: first.nextCursor ?? undefined });
+      expect(second.items.find((it) => it.type === 'weekendRecap' && (it as any).isEmpty)).toBeUndefined();
     });
   });
 

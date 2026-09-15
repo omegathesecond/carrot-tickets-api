@@ -5,6 +5,7 @@ import {
   weekendRecapCandidates,
   rankWeekendRecapCandidates,
   buildWeekendRecapSectionSlide,
+  buildWeekendRecapEmptyStateSlide,
   listWeekendRecaps,
   pickWeekendRecapLabel,
   WEEKEND_RECAP_LABELS,
@@ -100,6 +101,17 @@ describe('weekendRecap.service', () => {
 
     it('returns null for an empty candidate list', async () => {
       expect(await buildWeekendRecapSectionSlide([], null)).toBeNull();
+    });
+  });
+
+  describe('buildWeekendRecapEmptyStateSlide', () => {
+    it('builds a placeholder weekendRecap slide with no posts and seeAll disabled', () => {
+      const slide = buildWeekendRecapEmptyStateSlide();
+      expect(slide.type).toBe('weekendRecap');
+      expect(slide.isEmpty).toBe(true);
+      expect(slide.posts).toEqual([]);
+      expect(slide.seeAll).toBe(false);
+      expect(typeof slide.label).toBe('string');
     });
   });
 

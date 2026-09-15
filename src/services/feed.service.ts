@@ -15,7 +15,7 @@ import type { SocialActor } from '@utils/socialActor.util';
 import { buildEventCardFields } from '@utils/eventCard.util';
 import { getVoteFeedCard } from '@services/vote.service';
 import { EventPlanService } from '@services/eventPlan.service';
-import { weekendRecapCandidates, rankWeekendRecapCandidates, buildWeekendRecapSectionSlide } from '@services/weekendRecap.service';
+import { weekendRecapCandidates, rankWeekendRecapCandidates, buildWeekendRecapSectionSlide, buildWeekendRecapEmptyStateSlide } from '@services/weekendRecap.service';
 import { getFeedSlide as getWhatsHotFeedSlide } from '@services/whatsHot.service';
 
 /** Posts bundled into one Weekend Recap Home-feed section — a small rail,
@@ -367,6 +367,13 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     const ranked = rankWeekendRecapCandidates(raw, WEEKEND_RECAP_SECTION_SIZE);
     const section = await buildWeekendRecapSectionSlide(ranked, opts.actor ?? null);
     if (section) wrSlides.push(section as FeedSlide);
+    // Client escalation (2026-09-15): "It is not showing" — with zero
+    // weekend_recap posts anywhere yet, `section` above is null and nothing
+    // would render at all, not even the spec's required empty state /
+    // bootstrap CTA. Fresh-load-only (not a paginated continuation) so it
+    // occupies its normal interleaved slot once per feed load rather than on
+    // every page.
+    else if (!opts.cursor) wrSlides.push(buildWeekendRecapEmptyStateSlide() as FeedSlide);
   }
 
   // What's Hot This Weekend slides (spec §1) — same two personal-scroll tabs
