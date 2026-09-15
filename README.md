@@ -325,6 +325,24 @@ Recommended platforms:
 - **Azure App Service**
 - **Heroku** (simple deployment)
 
+### Before marking a fix "shipped"
+
+Cloud Run deploys from `main` — a commit only reaches production once it is
+an ancestor of `origin/main`. Passing build/lint/test on a feature branch
+proves the change is correct, not that it's live: a branch can pass CI
+forever without ever being merged.
+
+Before recording any commit as shipped/deployed, verify it actually landed:
+
+```bash
+npm run verify:shipped -- <commit-sha>          # checks against origin/main
+npm run verify:shipped -- <commit-sha> origin/dev  # or any other branch
+```
+
+Exits `0` with `OK: ... is an ancestor of ...` only when true; anything else
+(not merged, unknown commit) exits non-zero with `NOT SHIPPED` — treat that
+as a hard stop, not a warning.
+
 ## Monitoring & Logging
 
 ### Sentry Integration
