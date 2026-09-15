@@ -106,7 +106,7 @@ export async function listWeekendRecaps(opts: {
   // nearby-ranking tier falling back when a buyer has no stored location.
 
   const skip = (opts.page - 1) * opts.limit;
-  let cursor = Update.find(query).sort(SORTS[opts.sort]).skip(skip).limit(opts.limit + 1);
+  const cursor = Update.find(query).sort(SORTS[opts.sort]).skip(skip).limit(opts.limit + 1);
   if (opts.sort === 'recommended') {
     // Same Sun-Tue boost as the Home-feed slot, applied as a secondary sort
     // key isn't possible via a stored field, so recommended pulls a slightly
