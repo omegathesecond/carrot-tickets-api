@@ -8,7 +8,8 @@ import { resolveUpdateAuthor } from '@services/updateAuthor';
 import { validateCreateItems } from '@utils/updateCreate.util';
 import { validateWhatsHotFields } from '@utils/whatsHotCreate.util';
 import { Update } from '@models/update.model';
-import type { UpdateAuthorType } from '@interfaces/update.interface';
+import type { UpdateAuthorType, UpdateCategory } from '@interfaces/update.interface';
+import { UPDATE_CATEGORIES } from '@interfaces/update.interface';
 
 const AUTHOR_TYPES: UpdateAuthorType[] = ['buyer', 'vendor'];
 const PAGE_SIZE = 24;
@@ -16,6 +17,23 @@ const PAGE_SIZE = 24;
  *  everywhere it's enforced, per the "same limits used when creating a post"
  *  requirement on edits. */
 const MAX_CAPTION_LENGTH = 500;
+const MAX_LOCATION_LENGTH = 120;
+
+/** Validates the optional `category`/`location` body fields shared by create
+ *  and createAsVendor — kept in one place so the two entry points can't
+ *  drift, same reasoning as MAX_CAPTION_LENGTH above. */
+function validatePostMeta(body: any): { ok: true; category: UpdateCategory; location?: string } | { ok: false; message: string } {
+  const category = body?.category ?? 'general';
+  if (!UPDATE_CATEGORIES.includes(category)) return { ok: false, message: `category must be one of ${UPDATE_CATEGORIES.join(', ')}` };
+  const location = body?.location;
+  if (location !== undefined && location !== null && typeof location !== 'string') {
+    return { ok: false, message: 'location must be a string' };
+  }
+  if (typeof location === 'string' && location.length > MAX_LOCATION_LENGTH) {
+    return { ok: false, message: `location must be ${MAX_LOCATION_LENGTH} characters or fewer` };
+  }
+  return { ok: true, category, location: location || undefined };
+}
 
 export class UpdateController {
   static async create(req: Request, res: Response): Promise<any> {
@@ -25,11 +43,13 @@ export class UpdateController {
     if (typeof caption === 'string' && caption.length > MAX_CAPTION_LENGTH) return ApiResponseUtil.validationError(res, 'caption too long');
     const v = validateCreateItems(req.body?.kind, items);
     if (!v.ok) return ApiResponseUtil.validationError(res, v.message);
+    const meta = validatePostMeta(req.body);
+    if (!meta.ok) return ApiResponseUtil.validationError(res, meta.message);
     const hot = validateWhatsHotFields(req.body);
     if (!hot.ok) return ApiResponseUtil.validationError(res, hot.message);
     try {
       const { update, uploads } = await createUpdate({
-        authorType: 'buyer', authorId: String(buyer._id), kind: v.kind, caption, eventId, items: v.items, ...hot.fields,
+        authorType: 'buyer', authorId: String(buyer._id), kind: v.kind, category: meta.category, caption, location: meta.location, eventId, items: v.items, ...hot.fields,
       });
       return ApiResponseUtil.created(res, { updateId: update.id, uploads });
     } catch (err: any) {
@@ -66,11 +86,13 @@ export class UpdateController {
     if (typeof caption === 'string' && caption.length > MAX_CAPTION_LENGTH) return ApiResponseUtil.validationError(res, 'caption too long');
     const v = validateCreateItems(req.body?.kind, items);
     if (!v.ok) return ApiResponseUtil.validationError(res, v.message);
+    const meta = validatePostMeta(req.body);
+    if (!meta.ok) return ApiResponseUtil.validationError(res, meta.message);
     const hot = validateWhatsHotFields(req.body);
     if (!hot.ok) return ApiResponseUtil.validationError(res, hot.message);
     try {
       const { update, uploads } = await createUpdate({
-        authorType: 'vendor', authorId: String(vendorId), kind: v.kind, caption, eventId, items: v.items, ...hot.fields,
+        authorType: 'vendor', authorId: String(vendorId), kind: v.kind, category: meta.category, caption, location: meta.location, eventId, items: v.items, ...hot.fields,
       });
       return ApiResponseUtil.created(res, { updateId: update.id, uploads });
     } catch (err: any) {
@@ -335,7 +357,9 @@ export class UpdateController {
       authorType: update.authorType,
       authorId: String(update.authorId),
       kind: update.kind,
+      category: update.category ?? 'general',
       caption: update.caption,
+      location: update.location ?? null,
       editedAt: update.editedAt ? update.editedAt.toISOString() : null,
       eventId: update.eventId ? String(update.eventId) : null,
       media: update.media,
