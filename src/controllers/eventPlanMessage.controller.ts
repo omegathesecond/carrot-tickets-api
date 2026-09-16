@@ -40,6 +40,80 @@ export class EventPlanMessageController {
     }
   }
 
+  /** POST /api/social/plans/:id/posts { kind, body?, replyTo?, items, clientToken? }
+   *  Returns { message, uploads } — client uploads each file to uploads[i].uploadUrl,
+   *  then calls finalize. */
+  static async createPost(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const { kind, body, replyTo, items, clientToken } = req.body || {};
+      const result = await EventPlanMessageService.createPost(buyer, String(req.params['id'] || ''), {
+        kind,
+        body,
+        replyTo,
+        items: Array.isArray(items) ? items : [],
+        clientToken,
+      });
+      return ApiResponseUtil.created(res, result);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to create post');
+    }
+  }
+
+  /** POST /api/social/plans/:id/posts/:messageId/finalize */
+  static async finalizePost(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const message = await EventPlanMessageService.finalizePost(buyer, String(req.params['id'] || ''), String(req.params['messageId'] || ''));
+      return ApiResponseUtil.success(res, { message });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to finalize post');
+    }
+  }
+
+  /** PATCH /api/social/plans/:id/messages/:messageId { body } */
+  static async editCaption(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const message = await EventPlanMessageService.editCaption(
+        buyer,
+        String(req.params['id'] || ''),
+        String(req.params['messageId'] || ''),
+        String(req.body?.body ?? '')
+      );
+      return ApiResponseUtil.success(res, { message });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to edit post');
+    }
+  }
+
+  /** DELETE /api/social/plans/:id/messages/:messageId */
+  static async remove(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await EventPlanMessageService.deletePost(buyer, String(req.params['id'] || ''), String(req.params['messageId'] || ''));
+      return ApiResponseUtil.success(res, { ok: true });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to delete post');
+    }
+  }
+
+  /** POST /api/social/plans/:id/read */
+  static async markRead(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await EventPlanMessageService.markRead(buyer, String(req.params['id'] || ''));
+      return ApiResponseUtil.success(res, { ok: true });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to update read status');
+    }
+  }
+
   /** POST /api/social/plans/:id/messages/:messageId/react { emoji } */
   static async react(req: Request, res: Response): Promise<any> {
     try {

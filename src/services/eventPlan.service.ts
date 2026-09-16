@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { EventPlan, IEventPlan, PlanVisibility, PlanJoinPolicy } from '@models/eventPlan.model';
 import { EventPlanMember, IEventPlanMember, PlanAttendanceStatus } from '@models/eventPlanMember.model';
 import { EventPlanReaction } from '@models/eventPlanReaction.model';
+import { EventPlanMessage } from '@models/eventPlanMessage.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { BlockService } from '@services/block.service';
@@ -25,7 +26,9 @@ const buyerSummary = (b: any): BuyerSummary => ({
 });
 
 export interface CreatePlanInput {
-  eventId: string;
+  /** Exactly one of eventId / manualEvent must be given (spec §2). */
+  eventId?: string;
+  manualEvent?: { name: string; date?: string | Date; location?: string };
   name: string;
   description?: string;
   visibility?: PlanVisibility;
@@ -111,13 +114,33 @@ export class EventPlanService {
   // ---------------------------------------------------------------------
 
   static async create(admin: IBuyer, input: CreatePlanInput): Promise<IEventPlan> {
-    if (!HEX24.test(input.eventId)) throw new HttpError(400, 'Invalid event id');
     const name = (input.name || '').trim();
     if (!name) throw new HttpError(400, 'Plan name is required');
     if (name.length > 100) throw new HttpError(400, 'Plan name is too long');
 
-    const event = await Event.findById(input.eventId).select('_id');
-    if (!event) throw new HttpError(404, 'Event not found');
+    const hasEventId = Boolean(input.eventId);
+    const hasManualEvent = Boolean(input.manualEvent?.name?.trim());
+    if (hasEventId === hasManualEvent) {
+      throw new HttpError(400, 'Provide either an existing Carrot event or a manually-entered event, not both or neither');
+    }
+
+    let eventId: string | undefined;
+    let manualEvent: { name: string; date?: Date; location?: string } | undefined;
+    if (hasEventId) {
+      if (!HEX24.test(input.eventId!)) throw new HttpError(400, 'Invalid event id');
+      const event = await Event.findById(input.eventId).select('_id');
+      if (!event) throw new HttpError(404, 'Event not found');
+      eventId = input.eventId;
+    } else {
+      const manualName = input.manualEvent!.name.trim();
+      if (!manualName) throw new HttpError(400, 'Event or trip name is required');
+      if (manualName.length > 150) throw new HttpError(400, 'Event or trip name is too long');
+      manualEvent = {
+        name: manualName,
+        date: input.manualEvent!.date ? new Date(input.manualEvent!.date) : undefined,
+        location: input.manualEvent!.location?.trim() || undefined,
+      };
+    }
 
     const visibility: PlanVisibility = input.visibility === 'private' ? 'private' : 'public';
     const joinPolicy: PlanJoinPolicy = input.joinPolicy === 'request' ? 'request' : 'open';
@@ -128,7 +151,8 @@ export class EventPlanService {
     );
 
     const plan = await EventPlan.create({
-      eventId: input.eventId,
+      eventId,
+      manualEvent,
       adminId: admin._id,
       name,
       description: input.description?.trim() || undefined,
@@ -224,7 +248,10 @@ export class EventPlanService {
       const member = myMembers!.get(String(p._id)) || null;
       return {
         id: String(p._id),
-        eventId: String(p.eventId),
+        eventId: p.eventId ? String(p.eventId) : null,
+        manualEvent: p.manualEvent
+          ? { name: p.manualEvent.name, date: p.manualEvent.date ?? null, location: p.manualEvent.location ?? null }
+          : null,
         name: p.name,
         description: p.description ?? null,
         visibility: p.visibility,
@@ -262,7 +289,7 @@ export class EventPlanService {
 
     const [admin, event, memberCount, reactionsByPlan] = await Promise.all([
       Buyer.findById(plan.adminId).select('name username avatarUrl'),
-      Event.findById(plan.eventId).select('name eventDate startTime venue status'),
+      plan.eventId ? Event.findById(plan.eventId).select('name eventDate startTime venue status') : Promise.resolve(null),
       EventPlanMember.countDocuments({ planId, status: 'accepted' }),
       EventPlanService.viewerReactionsByPlan([plan._id], viewerId ? { type: 'buyer', id: viewerId } : null),
     ]);
@@ -284,9 +311,24 @@ export class EventPlanService {
         .filter(Boolean);
     }
 
+    // Unread Posts count (spec §5 — "Unread-content counts"): only meaningful
+    // for a participant, since non-members never had a lastReadAt to begin
+    // with and can't post anyway.
+    let unreadCount = 0;
+    if (canParticipate) {
+      unreadCount = await EventPlanMessage.countDocuments({
+        planId,
+        deletedAt: { $exists: false },
+        createdAt: { $gt: member?.lastReadAt ?? new Date(0) },
+      });
+    }
+
     return {
       id: String(plan._id),
-      eventId: String(plan.eventId),
+      eventId: plan.eventId ? String(plan.eventId) : null,
+      manualEvent: plan.manualEvent
+        ? { name: plan.manualEvent.name, date: plan.manualEvent.date ?? null, location: plan.manualEvent.location ?? null }
+        : null,
       name: plan.name,
       description: plan.description ?? null,
       visibility: plan.visibility,
@@ -315,6 +357,7 @@ export class EventPlanService {
         memberStatus: member ? member.status : null,
         memberId: member ? String(member._id) : null,
         canParticipate,
+        unreadCount,
       },
       members: canSeeMembers ? members : [],
     };
@@ -351,12 +394,14 @@ export class EventPlanService {
     if (rows.length === 0) return [];
     const planIds = rows.map((r) => r.planId);
     const plans = await EventPlan.find({ _id: { $in: planIds } });
-    const events = await Event.find({ _id: { $in: plans.map((p) => p.eventId) } }).select('eventDate');
+    const events = await Event.find({ _id: { $in: plans.filter((p) => p.eventId).map((p) => p.eventId) } }).select('eventDate');
     const eventDateById = new Map(events.map((e) => [String(e._id), e.eventDate]));
     const now = new Date();
 
     const filtered = plans.filter((p) => {
-      const eventDate = eventDateById.get(String(p.eventId));
+      // A manually-entered trip with no date given is treated as always
+      // upcoming (there's nothing to compare against) unless cancelled.
+      const eventDate = p.eventId ? eventDateById.get(String(p.eventId)) : p.manualEvent?.date;
       const isPast = p.status === 'cancelled' || (eventDate ? eventDate < now : false);
       return section === 'past' ? isPast : !isPast;
     });
@@ -382,7 +427,7 @@ export class EventPlanService {
     if (plans.length === 0) return [];
 
     const planIds = plans.map((p) => p._id);
-    const eventIds = [...new Set(plans.map((p) => String(p.eventId)))];
+    const eventIds = [...new Set(plans.filter((p) => p.eventId).map((p) => String(p.eventId)))];
     const adminIds = [...new Set(plans.map((p) => String(p.adminId)))];
 
     const [events, admins, counts, memberRows, viewerRows, reactionsByPlan] = await Promise.all([
@@ -418,10 +463,11 @@ export class EventPlanService {
 
     return plans
       .map((p) => {
-        // A plan whose event was deleted has nothing to attach to — drop it
-        // rather than surface a broken card.
-        const event = eventById.get(String(p.eventId));
-        if (!event) return null;
+        // An event-linked plan whose event was deleted has nothing to attach
+        // to — drop it rather than surface a broken card. A manually-entered
+        // trip has no such dependency and always renders.
+        const event = p.eventId ? eventById.get(String(p.eventId)) : null;
+        if (p.eventId && !event) return null;
         return {
           type: 'plan' as const,
           id: String(p._id),
@@ -438,13 +484,18 @@ export class EventPlanService {
             ? { method: p.transport.method ?? null, seats: p.transport.seats ?? null, costEstimate: p.transport.costEstimate ?? null }
             : null,
           joinPolicy: p.joinPolicy,
-          event: {
-            id: String(event._id),
-            name: event.name,
-            eventDate: event.eventDate,
-            venue: event.venue,
-            posterUrl: event.posterUrl ?? null,
-          },
+          event: event
+            ? {
+                id: String(event._id),
+                name: event.name,
+                eventDate: event.eventDate,
+                venue: event.venue,
+                posterUrl: event.posterUrl ?? null,
+              }
+            : null,
+          manualEvent: p.manualEvent
+            ? { name: p.manualEvent.name, date: p.manualEvent.date ?? null, location: p.manualEvent.location ?? null }
+            : null,
           // Social engagement (public plans only — see EventPlanService.toggleReaction).
           likeCount: p.likeCount ?? 0,
           saveCount: p.saveCount ?? 0,
@@ -548,7 +599,7 @@ export class EventPlanService {
           'plan_arrangement_updated',
           plan.name,
           'Meeting or transport arrangements were updated',
-          { planId: String(plan._id), eventId: String(plan.eventId) },
+          { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
           String(admin._id)
         );
       }
@@ -584,7 +635,7 @@ export class EventPlanService {
         'plan_visibility_changed',
         plan.name,
         visibility === 'private' ? 'This plan is now private' : 'This plan is now public',
-        { planId: String(plan._id), eventId: String(plan.eventId), visibility },
+        { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined, visibility },
         String(admin._id)
       );
     }
@@ -606,7 +657,7 @@ export class EventPlanService {
         'plan_cancelled',
         plan.name,
         'This plan was cancelled by its administrator',
-        { planId: String(plan._id), eventId: String(plan.eventId) },
+        { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
         String(admin._id)
       );
     }
@@ -675,7 +726,7 @@ export class EventPlanService {
         'plan_invite',
         displayName(admin),
         `invited you to "${plan.name}"`,
-        { planId: String(plan._id), eventId: String(plan.eventId) },
+        { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
         adminId
       );
     }
@@ -707,7 +758,7 @@ export class EventPlanService {
       'plan_member_removed',
       plan.name,
       'You were removed from this plan',
-      { planId: String(plan._id), eventId: String(plan.eventId) },
+      { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
       String(admin._id)
     );
   }
@@ -731,7 +782,7 @@ export class EventPlanService {
       accept ? 'plan_invite_accepted' : 'plan_invite_declined',
       displayName(buyer),
       accept ? `accepted your invitation to "${plan.name}"` : `declined your invitation to "${plan.name}"`,
-      { planId: String(plan._id), eventId: String(plan.eventId) },
+      { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
       String(buyer._id)
     );
   }
@@ -779,7 +830,7 @@ export class EventPlanService {
       'plan_join_request',
       displayName(buyer),
       `wants to join "${plan.name}"`,
-      { planId: String(plan._id), eventId: String(plan.eventId) },
+      { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
       buyerId
     );
   }
@@ -802,7 +853,7 @@ export class EventPlanService {
       approve ? 'plan_join_approved' : 'plan_join_declined',
       plan.name,
       approve ? 'Your request to join was approved' : 'Your request to join was declined',
-      { planId: String(plan._id), eventId: String(plan.eventId) },
+      { planId: String(plan._id), eventId: plan.eventId ? String(plan.eventId) : undefined },
       String(admin._id)
     );
   }

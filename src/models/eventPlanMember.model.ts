@@ -33,6 +33,10 @@ export interface IEventPlanMember extends Document {
   joinedAt?: Date; // became 'accepted'
   removedAt?: Date;
   leftAt?: Date;
+  /** Last time this member opened the plan's Posts tab — drives the unread
+   *  post count (spec §5 — "Unread-content counts"). Absent means never
+   *  opened; every post counts as unread until the first markRead call. */
+  lastReadAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +54,7 @@ const eventPlanMemberSchema = new Schema<IEventPlanMember>(
     joinedAt: { type: Date },
     removedAt: { type: Date },
     leftAt: { type: Date },
+    lastReadAt: { type: Date },
   },
   { timestamps: true }
 );

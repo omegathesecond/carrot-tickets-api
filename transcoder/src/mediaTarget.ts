@@ -1,4 +1,4 @@
-export type MediaCollection = 'updates' | 'stories';
+export type MediaCollection = 'updates' | 'stories' | 'eventPlanMessages';
 
 export interface VideoRendition {
   url: string;
@@ -10,11 +10,12 @@ export interface VideoRendition {
 }
 
 /**
- * Where a transcode result gets written. Update.media is an ARRAY (the
- * single video always lives at index 0 — see @models/update.model on the api
- * side); Story.media is a single embedded doc, no array. Same field names
- * (`status`/`video`/`error`), different path prefix — this is the one thing
- * that has to branch on `collection` in the whole write path.
+ * Where a transcode result gets written. Update.media and
+ * EventPlanMessage.media are both ARRAYs (the single video always lives at
+ * index 0 — see @models/update.model / @models/eventPlanMessage.model on the
+ * api side); Story.media is a single embedded doc, no array. Same field
+ * names (`status`/`video`/`error`), different path prefix — this is the one
+ * thing that has to branch on `collection` in the whole write path.
  */
 export function mediaPathPrefix(collection: MediaCollection): string {
   return collection === 'stories' ? 'media' : 'media.0';
