@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { getObject, putObject, publicUrl } from './r2';
 import { buildRenditionArgs, buildPosterArgs, runFfmpeg, buildProbeArgs, runProbe, parseProbe } from './ffmpeg';
-import { connect, Update, StoryTarget } from './db';
+import { connect, Update, StoryTarget, EventPlanMessageTarget } from './db';
 import { renditionKeyPrefix, readyUpdateOps, failedUpdateOps, type MediaCollection } from './mediaTarget';
 import { applyResult } from './writeResult';
 
@@ -19,14 +19,15 @@ app.post('/transcode', async (req, res) => {
   if (!updateId || !rawKey) return res.status(400).json({ error: 'updateId and rawKey required' });
   // Defaults to 'updates' for backward compat with any in-flight caller that
   // predates this field — everything on the api side now sends it explicitly.
-  const target: MediaCollection = collection === 'stories' ? 'stories' : 'updates';
+  const target: MediaCollection =
+    collection === 'stories' ? 'stories' : collection === 'eventPlanMessages' ? 'eventPlanMessages' : 'updates';
   res.status(202).json({ accepted: true });          // ack immediately; work continues async
   process.nextTick(() => transcode(updateId, rawKey, target).catch((e) => console.error('transcode job failed:', e?.message)));
 });
 
 async function transcode(updateId: string, rawKey: string, collection: MediaCollection): Promise<void> {
   await connect();
-  const Model = collection === 'stories' ? StoryTarget : Update;
+  const Model = collection === 'stories' ? StoryTarget : collection === 'eventPlanMessages' ? EventPlanMessageTarget : Update;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tc-'));
   const input = path.join(dir, 'in');
   try {

@@ -19,7 +19,7 @@ import { Story } from '@models/story.model';
 export interface Transcodable {
   id?: unknown; // mongoose's Document.id is itself optional/`any` — matched here so real docs satisfy this structurally
   media: { rawKey: string }[]; // videos are always a single item — media[0]
-  collection: 'updates' | 'stories';
+  collection: 'updates' | 'stories' | 'eventPlanMessages';
 }
 
 export async function triggerTranscode(target: Transcodable): Promise<void> {

@@ -39,8 +39,16 @@ router.post('/:id/attendance', authenticateBuyer, EventPlanController.vote);
 
 router.get('/:id/messages', optionalTicketsAuth, EventPlanMessageController.list);
 router.post('/:id/messages', authenticateBuyer, requireProfilePhoto, EventPlanMessageController.send);
+router.patch('/:id/messages/:messageId', authenticateBuyer, EventPlanMessageController.editCaption);
+router.delete('/:id/messages/:messageId', authenticateBuyer, EventPlanMessageController.remove);
 router.post('/:id/messages/:messageId/react', authenticateBuyer, EventPlanMessageController.react);
 router.delete('/:id/messages/:messageId/react', authenticateBuyer, EventPlanMessageController.unreact);
+router.post('/:id/read', authenticateBuyer, EventPlanMessageController.markRead);
+
+// Photo/video Posts (spec §6) — two-step create: presign here, upload
+// client-side, then finalize triggers processing (mirrors update.route.ts).
+router.post('/:id/posts', authenticateBuyer, requireProfilePhoto, EventPlanMessageController.createPost);
+router.post('/:id/posts/:messageId/finalize', authenticateBuyer, EventPlanMessageController.finalizePost);
 
 // Social engagement (Public plans only) — like/comment/share/save, same
 // interaction model as a normal Update post. Unlike the conversation above,

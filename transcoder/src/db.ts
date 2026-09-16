@@ -10,6 +10,11 @@ export const Update = mongoose.model('Update', updateSchema);
 const storySchema = new mongoose.Schema({}, { strict: false, collection: 'stories' });
 export const StoryTarget = mongoose.model('StoryTarget', storySchema);
 
+// Trip Plan "Posts" media (@models/eventPlanMessage.model on the api side) —
+// same array-of-media shape as Update, written the same way.
+const eventPlanMessageSchema = new mongoose.Schema({}, { strict: false, collection: 'eventplanmessages' });
+export const EventPlanMessageTarget = mongoose.model('EventPlanMessageTarget', eventPlanMessageSchema);
+
 export async function connect(): Promise<void> {
   if (mongoose.connection.readyState === 0) await mongoose.connect(process.env.MONGODB_URI!);
 }
