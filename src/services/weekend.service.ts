@@ -106,6 +106,11 @@ export interface WeekendFeedCardDto {
   weekendStart: Date;
   weekendEnd: Date;
   updatedAt: Date;
+  /** True only when this card belongs to the requesting viewer (spec §3: the
+   *  owner must recognize their own card and get an Edit/Update action
+   *  instead of a "send a request to yourself" one). Always false for a
+   *  signed-out viewer or when the card belongs to someone else. */
+  isOwner: boolean;
 }
 
 export interface WeekendRequestRow {
@@ -300,7 +305,7 @@ export class WeekendService {
     return tiers.flat().slice(0, limit);
   }
 
-  private static async toFeedCards(candidates: IWeekendStatus[]): Promise<WeekendFeedCardDto[]> {
+  private static async toFeedCards(candidates: IWeekendStatus[], viewerId: string | null = null): Promise<WeekendFeedCardDto[]> {
     if (candidates.length === 0) return [];
     const buyerIds = [...new Set(candidates.map((c) => String(c.buyerId)))];
     const eventIds = [...new Set(candidates.filter((c) => c.eventId).map((c) => String(c.eventId)))];
@@ -348,25 +353,51 @@ export class WeekendService {
         weekendStart: c.weekendStart,
         weekendEnd: c.weekendEnd,
         updatedAt: c.updatedAt,
+        isOwner: viewerId !== null && String(c.buyerId) === viewerId,
       };
     });
   }
 
-  /** "Who Has Plans This Weekend" (spec §5/§6). */
+  /**
+   * The viewer's own active status, as a feed card, regardless of its
+   * `statusType` bucket (spec §3: whatever they posted through "+ Add" must
+   * show up as their own card in "Who Has Plans This Weekend" — the section
+   * that flow lives in — even if the status type they picked would normally
+   * route to "Looking for Plans" or neither rail for anyone else viewing it).
+   * `rankedCandidates`/the See-All query always exclude the viewer's own
+   * buyerId, so this is assembled separately and prepended by the caller.
+   */
+  private static async ownCardIfActive(viewer: IBuyer): Promise<WeekendFeedCardDto | null> {
+    const doc = await WeekendStatus.findOne({ buyerId: viewer._id, activeUntil: { $gt: new Date() } });
+    if (!doc) return null;
+    const [card] = await WeekendService.toFeedCards([doc], String(viewer._id));
+    return card ?? null;
+  }
+
+  /**
+   * "Who Has Plans This Weekend" (spec §5/§6). The viewer's own active status
+   * is prepended first (spec §3) on the initial page only — `excludeIds`
+   * non-empty means this is a `loadMore` continuation, which must never
+   * re-insert the owner's already-shown card.
+   */
   static async getWhoHasPlansCards(viewer: IBuyer | null, limit: number, excludeIds: string[]): Promise<WeekendFeedCardDto[]> {
+    const ownCard = viewer && excludeIds.length === 0 ? await WeekendService.ownCardIfActive(viewer) : null;
     const candidates = await WeekendService.rankedCandidates(viewer, HAS_PLANS_STATUS_TYPES, limit, excludeIds);
-    return WeekendService.toFeedCards(candidates);
+    const cards = await WeekendService.toFeedCards(candidates, viewer ? String(viewer._id) : null);
+    return ownCard ? [ownCard, ...cards] : cards;
   }
 
   /** "Looking for Plans" (spec §8, further down the feed — never mixed with the above). */
   static async getLookingForPlansCards(viewer: IBuyer | null, limit: number, excludeIds: string[]): Promise<WeekendFeedCardDto[]> {
     const candidates = await WeekendService.rankedCandidates(viewer, LOOKING_FOR_PLANS_STATUS_TYPES, limit, excludeIds);
-    return WeekendService.toFeedCards(candidates);
+    return WeekendService.toFeedCards(candidates, viewer ? String(viewer._id) : null);
   }
 
   /**
    * The "Who Has Plans This Weekend" See All page: every eligible public
-   * (same audience/block rules as the rail) status, cursor-paginated.
+   * (same audience/block rules as the rail) status, cursor-paginated. The
+   * viewer's own active status is prepended on the first page only (spec §3
+   * — same rule as `getWhoHasPlansCards`; `cursor === null` is "first page").
    * Deliberately NOT `rankedCandidates` — that method overfetches-then-
    * shuffles for a small rail, which has no stable order across pages;
    * this is a plain `updatedAt` desc, `_id` desc sort so a cursor built
@@ -378,6 +409,7 @@ export class WeekendService {
     limit: number
   ): Promise<{ cards: WeekendFeedCardDto[]; nextCursor: string | null }> {
     const viewerId = viewer ? String(viewer._id) : null;
+    const ownCard = viewer && !cursor ? await WeekendService.ownCardIfActive(viewer) : null;
     const now = new Date();
     const [followingIds, excludedBlocked] = await Promise.all([
       viewerId ? FollowService.followingIds(viewerId, 'buyer') : Promise.resolve([] as any[]),
@@ -402,10 +434,10 @@ export class WeekendService {
       .limit(limit + 1);
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
-    const cards = await WeekendService.toFeedCards(page);
+    const cards = await WeekendService.toFeedCards(page, viewerId);
     const last = page[page.length - 1];
     const nextCursor = hasMore && last ? WeekendService.encodeSeeAllCursor(last.updatedAt, String(last._id)) : null;
-    return { cards, nextCursor };
+    return { cards: ownCard ? [ownCard, ...cards] : cards, nextCursor };
   }
 
   private static encodeSeeAllCursor(updatedAt: Date, id: string): string {
