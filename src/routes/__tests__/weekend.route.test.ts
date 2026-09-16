@@ -97,5 +97,34 @@ describe('Weekend routes', () => {
       const after = await request(app).get('/api/social/weekend/me').set('Authorization', auth).expect(200);
       expect(after.body.data.status).toBeNull();
     });
+
+    it('surfaces a just-created status as the first, isOwner card in the "Who Has Plans" feed and See All page', async () => {
+      await seedBuyer();
+      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+
+      await request(app)
+        .put('/api/social/weekend/me')
+        .set('Authorization', auth)
+        .send({ statusType: 'have_plans', audience: 'public' })
+        .expect(200);
+
+      const feed = await request(app).get('/api/social/weekend/feed').set('Authorization', auth).expect(200);
+      expect(feed.body.data.cards[0]?.user.username).toBe('weekend_route_buyer');
+      expect(feed.body.data.cards[0]?.isOwner).toBe(true);
+
+      const seeAll = await request(app).get('/api/social/weekend/feed/all').set('Authorization', auth).expect(200);
+      expect(seeAll.body.data.cards[0]?.user.username).toBe('weekend_route_buyer');
+      expect(seeAll.body.data.cards[0]?.isOwner).toBe(true);
+
+      // Updating (not duplicating) the status: still exactly one card for this buyer.
+      await request(app)
+        .put('/api/social/weekend/me')
+        .set('Authorization', auth)
+        .send({ statusType: 'bored', audience: 'public' })
+        .expect(200);
+      const refeed = await request(app).get('/api/social/weekend/feed').set('Authorization', auth).expect(200);
+      expect(refeed.body.data.cards.filter((c: any) => c.user.username === 'weekend_route_buyer')).toHaveLength(1);
+      expect(refeed.body.data.cards[0]?.statusType).toBe('bored');
+    });
   });
 });

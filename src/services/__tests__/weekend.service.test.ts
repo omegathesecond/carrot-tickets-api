@@ -201,11 +201,31 @@ describe('WeekendService', () => {
   });
 
   describe('feed ranking (getWhoHasPlansCards / getLookingForPlansCards)', () => {
-    it('never returns the viewer themselves', async () => {
+    it('prepends the viewer\'s own active status first, flagged isOwner, in "Who Has Plans"', async () => {
       const viewer = await seedBuyer('u_feed_self');
+      const other = await seedBuyer('u_feed_self_other');
+      await WeekendService.upsertStatus(other, { statusType: 'have_plans', audience: 'public' });
       await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
+      expect(cards[0]?.user.id).toBe(String(viewer._id));
+      expect(cards[0]?.isOwner).toBe(true);
+      expect(cards.filter((c) => c.user.id === String(viewer._id))).toHaveLength(1);
+      expect(cards.find((c) => c.user.id === String(other._id))?.isOwner).toBe(false);
+    });
+
+    it('does not re-prepend the viewer\'s own card on a loadMore continuation (non-empty excludeIds)', async () => {
+      const viewer = await seedBuyer('u_feed_self_lm');
+      await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
+      const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, ['507f1f77bcf86cd799439011']);
       expect(cards.find((c) => c.user.id === String(viewer._id))).toBeUndefined();
+    });
+
+    it('shows the owner\'s own card in "Who Has Plans" even when their status type belongs to the "Looking for Plans" bucket', async () => {
+      const viewer = await seedBuyer('u_feed_self_lfp_type');
+      await WeekendService.upsertStatus(viewer, { statusType: 'bored', audience: 'public' });
+      const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
+      expect(cards[0]?.user.id).toBe(String(viewer._id));
+      expect(cards[0]?.isOwner).toBe(true);
     });
 
     it('excludes candidates blocked in either direction', async () => {
@@ -315,20 +335,34 @@ describe('WeekendService', () => {
       expect(allIds.sort()).toEqual(posters.map((p) => String(p._id)).sort());
     });
 
-    it('excludes the viewer, blocked users, and never mixes in "looking for plans" statuses', async () => {
+    it('prepends the viewer\'s own status first (only on the first page), excludes blocked users, and never mixes in "looking for plans" statuses', async () => {
       const viewer = await seedBuyer('u_seeall_self');
       const blocked = await seedBuyer('u_seeall_blocked');
       const lookingForPlans = await seedBuyer('u_seeall_lfp');
+      const other1 = await seedBuyer('u_seeall_other1');
+      const other2 = await seedBuyer('u_seeall_other2');
       await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
       await WeekendService.upsertStatus(blocked, { statusType: 'have_plans', audience: 'public' });
       await WeekendService.upsertStatus(lookingForPlans, { statusType: 'bored', audience: 'public' });
+      await WeekendService.upsertStatus(other1, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(other2, { statusType: 'have_plans', audience: 'public' });
       await BlockService.block(viewer, String(blocked._id));
 
-      const { cards } = await WeekendService.getWhoHasPlansPage(viewer, null, 10);
-      const ids = cards.map((c) => c.user.id);
-      expect(ids).not.toContain(String(viewer._id));
-      expect(ids).not.toContain(String(blocked._id));
-      expect(ids).not.toContain(String(lookingForPlans._id));
+      const page1 = await WeekendService.getWhoHasPlansPage(viewer, null, 1);
+      expect(page1.cards[0]?.user.id).toBe(String(viewer._id));
+      expect(page1.cards[0]?.isOwner).toBe(true);
+      expect(page1.nextCursor).not.toBeNull();
+
+      // A later page (real cursor from page1) must not re-prepend the owner's card.
+      const page2 = await WeekendService.getWhoHasPlansPage(viewer, page1.nextCursor, 10);
+      const page2Ids = page2.cards.map((c) => c.user.id);
+      expect(page2.cards.find((c) => c.user.id === String(viewer._id))).toBeUndefined();
+      expect(page2Ids).not.toContain(String(blocked._id));
+      expect(page2Ids).not.toContain(String(lookingForPlans._id));
+
+      // Together, page1's non-owner slice and page2 cover both eligible others exactly once.
+      const nonOwnerPage1Ids = page1.cards.slice(1).map((c) => c.user.id);
+      expect([...nonOwnerPage1Ids, ...page2Ids].sort()).toEqual([String(other1._id), String(other2._id)].sort());
     });
 
     it('respects the audience clause for a signed-out viewer (public only)', async () => {
