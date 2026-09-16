@@ -209,3 +209,86 @@ describe('Trip Plan — Posts (photo/video)', () => {
     expect(after.body.data.plan.viewer.unreadCount).toBe(0);
   });
 });
+
+describe('Trip Plan — cover photo', () => {
+  beforeAll(async () => {
+    await connectTestDb();
+    await EventPlan.init();
+    await EventPlanMember.init();
+  });
+  afterEach(clearTestDb);
+  afterAll(disconnectTestDb);
+
+  async function makePlan() {
+    await makeBuyer(ADMIN, 'Admin', 'admin_one');
+    await makeBuyer(FRIEND, 'Friend', 'friend_one');
+    const event = await makeEvent();
+    const created = await createPlan(ADMIN, { eventId: String(event._id), name: 'Scorpion Kings trip', visibility: 'public' }).expect(201);
+    return created.body.data.id as string;
+  }
+
+  it('has no cover photo until one is uploaded', async () => {
+    const planId = await makePlan();
+    const res = await request(app).get(`/api/social/plans/${planId}`).expect(200);
+    expect(res.body.data.plan.coverImage).toBeNull();
+  });
+
+  it('uploads and finalizes a cover photo, surfacing it on the detail, mine and Home-feed responses', async () => {
+    const planId = await makePlan();
+    const presigned = await request(app)
+      .post(`/api/social/plans/${planId}/cover/presign`)
+      .set(auth(ADMIN))
+      .send({ ext: 'jpg', contentType: 'image/jpeg' })
+      .expect(200);
+    expect(presigned.body.data.uploadUrl).toContain('https://r2.example/put');
+
+    const finalized = await request(app)
+      .post(`/api/social/plans/${planId}/cover/finalize`)
+      .set(auth(ADMIN))
+      .send({ rawKey: presigned.body.data.rawKey })
+      .expect(200);
+    expect(finalized.body.data.plan.coverImage).toBe(`https://cdn.carrottickets.com/${presigned.body.data.rawKey}`);
+
+    const detail = await request(app).get(`/api/social/plans/${planId}`).expect(200);
+    expect(detail.body.data.plan.coverImage).toBe(finalized.body.data.plan.coverImage);
+
+    const mine = await request(app).get('/api/social/plans/mine?section=upcoming').set(auth(ADMIN)).expect(200);
+    expect(mine.body.data.plans.find((p: any) => p.id === planId).coverImage).toBe(finalized.body.data.plan.coverImage);
+  });
+
+  it('rejects a non-admin from setting the cover photo', async () => {
+    const planId = await makePlan();
+    await request(app)
+      .post(`/api/social/plans/${planId}/cover/presign`)
+      .set(auth(FRIEND))
+      .send({ ext: 'jpg', contentType: 'image/jpeg' })
+      .expect(403);
+  });
+
+  it('rejects an unsupported file type', async () => {
+    const planId = await makePlan();
+    await request(app)
+      .post(`/api/social/plans/${planId}/cover/presign`)
+      .set(auth(ADMIN))
+      .send({ ext: 'gif', contentType: 'image/gif' })
+      .expect(400);
+  });
+
+  it('removes the cover photo', async () => {
+    const planId = await makePlan();
+    const presigned = await request(app)
+      .post(`/api/social/plans/${planId}/cover/presign`)
+      .set(auth(ADMIN))
+      .send({ ext: 'png', contentType: 'image/png' })
+      .expect(200);
+    await request(app)
+      .post(`/api/social/plans/${planId}/cover/finalize`)
+      .set(auth(ADMIN))
+      .send({ rawKey: presigned.body.data.rawKey })
+      .expect(200);
+
+    await request(app).delete(`/api/social/plans/${planId}/cover`).set(auth(ADMIN)).expect(200);
+    const detail = await request(app).get(`/api/social/plans/${planId}`).expect(200);
+    expect(detail.body.data.plan.coverImage).toBeNull();
+  });
+});

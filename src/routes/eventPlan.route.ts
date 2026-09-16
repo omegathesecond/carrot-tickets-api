@@ -29,6 +29,11 @@ router.get('/:id', optionalTicketsAuth, EventPlanController.detail);
 router.get('/:id/pending', authenticateBuyer, EventPlanController.pending);
 router.patch('/:id', authenticateBuyer, EventPlanController.update);
 router.patch('/:id/visibility', authenticateBuyer, EventPlanController.changeVisibility);
+// Cover photo (Home-feed card + detail header) — presign/finalize mirrors
+// Posts' upload flow; admin-only since it's part of the plan's presentation.
+router.post('/:id/cover/presign', authenticateBuyer, EventPlanController.presignCover);
+router.post('/:id/cover/finalize', authenticateBuyer, EventPlanController.finalizeCover);
+router.delete('/:id/cover', authenticateBuyer, EventPlanController.removeCover);
 router.post('/:id/cancel', authenticateBuyer, EventPlanController.cancel);
 router.post('/:id/join', authenticateBuyer, requireProfilePhoto, EventPlanController.join);
 router.post('/:id/leave', authenticateBuyer, EventPlanController.leave);

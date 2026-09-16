@@ -11,6 +11,10 @@ import { toggleReactionGeneric } from '@services/reactions.service';
 import { HttpError } from '@utils/httpError.util';
 import { HEX24 } from '@utils/controllerHelpers.util';
 import type { SocialActor } from '@utils/socialActor.util';
+import { updatesR2 } from '@utils/updatesR2';
+
+const COVER_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const COVER_CONTENT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export type PlanViewerReactions = { liked: boolean; saved: boolean };
 
@@ -257,6 +261,7 @@ export class EventPlanService {
         visibility: p.visibility,
         joinPolicy: p.joinPolicy,
         status: p.status,
+        coverImage: p.coverImage ?? null,
         admin: buyerSummary(adminById.get(String(p.adminId)) ?? { _id: p.adminId }),
         memberCount: countByPlan.get(String(p._id)) ?? (EventPlanService.isAdmin(p, viewerId) ? 1 : 0),
         meetingPoint: p.meetingPoint ?? null,
@@ -289,7 +294,7 @@ export class EventPlanService {
 
     const [admin, event, memberCount, reactionsByPlan] = await Promise.all([
       Buyer.findById(plan.adminId).select('name username avatarUrl'),
-      plan.eventId ? Event.findById(plan.eventId).select('name eventDate startTime venue status') : Promise.resolve(null),
+      plan.eventId ? Event.findById(plan.eventId).select('name eventDate startTime venue status posterUrl') : Promise.resolve(null),
       EventPlanMember.countDocuments({ planId, status: 'accepted' }),
       EventPlanService.viewerReactionsByPlan([plan._id], viewerId ? { type: 'buyer', id: viewerId } : null),
     ]);
@@ -334,6 +339,7 @@ export class EventPlanService {
       visibility: plan.visibility,
       joinPolicy: plan.joinPolicy,
       status: plan.status,
+      coverImage: plan.coverImage ?? null,
       admin: buyerSummary(admin ?? { _id: plan.adminId }),
       memberCount,
       meetingPoint: plan.meetingPoint ?? null,
@@ -344,7 +350,14 @@ export class EventPlanService {
       transport: plan.visibility === 'public' || canParticipate ? plan.transport ?? null : null,
       transportConfirmed: plan.transportConfirmed,
       event: event
-        ? { id: String(event._id), name: event.name, eventDate: event.eventDate, startTime: event.startTime, venue: event.venue }
+        ? {
+            id: String(event._id),
+            name: event.name,
+            eventDate: event.eventDate,
+            startTime: event.startTime,
+            venue: event.venue,
+            posterUrl: event.posterUrl ?? null,
+          }
         : null,
       // Social engagement (public plans only — see EventPlanService.toggleReaction).
       likeCount: plan.likeCount ?? 0,
@@ -475,6 +488,7 @@ export class EventPlanService {
           visibility: 'public' as const,
           name: p.name,
           description: p.description ?? null,
+          coverImage: p.coverImage ?? null,
           admin: buyerSummary(adminById.get(String(p.adminId)) ?? { _id: p.adminId }),
           memberCount: countByPlan.get(String(p._id)) ?? 0,
           memberAvatars: (sampleBuyerIdsByPlan.get(String(p._id)) ?? []).map((id) => avatarByBuyer.get(id) ?? null),
@@ -604,6 +618,45 @@ export class EventPlanService {
         );
       }
     }
+    return plan;
+  }
+
+  /** Step 1 of the cover-photo upload (mirrors Posts' presign/finalize —
+   *  updatesR2 is already wired for Trip Plan media). Admin-only: the cover
+   *  is part of the plan's own presentation, not member-contributed content. */
+  static async presignCoverUpload(
+    admin: IBuyer,
+    planId: string,
+    ext: string,
+    contentType: string
+  ): Promise<{ rawKey: string; uploadUrl: string }> {
+    const plan = await EventPlanService.loadPlan(planId);
+    await EventPlanService.assertAdmin(plan, admin);
+    const cleanExt = ext.replace(/^\./, '').toLowerCase();
+    if (!COVER_EXTS.has(cleanExt) || !COVER_CONTENT_TYPES.has(contentType)) {
+      throw new HttpError(400, 'Cover photo must be a JPEG, PNG or WEBP image');
+    }
+    const rawKey = updatesR2.rawKey(cleanExt);
+    const uploadUrl = await updatesR2.presignPut(rawKey, contentType);
+    return { rawKey, uploadUrl };
+  }
+
+  /** Step 2 — client has PUT the file to `uploadUrl`; persist the resulting
+   *  public URL as the plan's cover. */
+  static async finalizeCoverUpload(admin: IBuyer, planId: string, rawKey: string): Promise<IEventPlan> {
+    const plan = await EventPlanService.loadPlan(planId);
+    await EventPlanService.assertAdmin(plan, admin);
+    if (!/^updates\/raw\/[a-z0-9._-]+$/i.test(rawKey)) throw new HttpError(400, 'Invalid upload reference');
+    plan.coverImage = updatesR2.publicUrl(rawKey);
+    await plan.save();
+    return plan;
+  }
+
+  static async removeCover(admin: IBuyer, planId: string): Promise<IEventPlan> {
+    const plan = await EventPlanService.loadPlan(planId);
+    await EventPlanService.assertAdmin(plan, admin);
+    plan.coverImage = undefined;
+    await plan.save();
     return plan;
   }
 

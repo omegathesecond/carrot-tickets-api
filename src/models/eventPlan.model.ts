@@ -52,6 +52,10 @@ export interface IEventPlan extends Document {
   visibility: PlanVisibility;
   joinPolicy: PlanJoinPolicy;
   status: PlanStatus;
+  /** Home-feed card + detail-page header image (spec: "every Trip Plan must
+   *  support a cover photo"). Set via presignCoverUpload/finalizeCoverUpload
+   *  (admin-only) — never required, a card/header falls back to a placeholder. */
+  coverImage?: string;
   meetingPoint?: string;
   meetingTime?: Date;
   /** Distinguishes an admin-confirmed arrangement from a member's suggestion (spec §10). */
@@ -101,6 +105,7 @@ const eventPlanSchema = new Schema<IEventPlan>(
     visibility: { type: String, enum: ['public', 'private'], required: true, default: 'public' },
     joinPolicy: { type: String, enum: ['open', 'request'], required: true, default: 'open' },
     status: { type: String, enum: ['active', 'cancelled'], required: true, default: 'active' },
+    coverImage: { type: String, trim: true, maxlength: 500 },
     meetingPoint: { type: String, trim: true, maxlength: 200 },
     meetingTime: { type: Date },
     meetingConfirmed: { type: Boolean, default: false },

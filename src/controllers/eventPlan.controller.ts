@@ -84,6 +84,49 @@ export class EventPlanController {
     }
   }
 
+  /** POST /api/social/plans/:id/cover/presign { ext, contentType } */
+  static async presignCover(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const result = await EventPlanService.presignCoverUpload(
+        buyer,
+        String(req.params['id'] || ''),
+        String(req.body?.ext || ''),
+        String(req.body?.contentType || '')
+      );
+      return ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to prepare cover photo upload');
+    }
+  }
+
+  /** POST /api/social/plans/:id/cover/finalize { rawKey } */
+  static async finalizeCover(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await EventPlanService.finalizeCoverUpload(buyer, String(req.params['id'] || ''), String(req.body?.rawKey || ''));
+      const detail = await EventPlanService.getDetail(String(req.params['id'] || ''), String(buyer._id));
+      return ApiResponseUtil.success(res, { plan: detail }, 'Cover photo updated');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to save cover photo');
+    }
+  }
+
+  /** DELETE /api/social/plans/:id/cover */
+  static async removeCover(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await EventPlanService.removeCover(buyer, String(req.params['id'] || ''));
+      const detail = await EventPlanService.getDetail(String(req.params['id'] || ''), String(buyer._id));
+      return ApiResponseUtil.success(res, { plan: detail }, 'Cover photo removed');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to remove cover photo');
+    }
+  }
+
   /** PATCH /api/social/plans/:id/visibility { visibility, confirmed } */
   static async changeVisibility(req: Request, res: Response): Promise<any> {
     try {
