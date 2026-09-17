@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
-import { WeekendStatus, IWeekendStatus } from '@models/weekendStatus.model';
+import { WeekendStatus, IWeekendStatus, IWeekendStatusMedia } from '@models/weekendStatus.model';
+import { updatesR2 } from '@utils/updatesR2';
 import { WeekendRequest, IWeekendRequest } from '@models/weekendRequest.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
@@ -52,6 +53,12 @@ function eventSummaryFromDoc(event: any): WeekendEventSummary {
   return { id: String(event._id), name: event.name, eventDate: event.eventDate, endTime: event.endTime, venue: event.venue, posterUrl: event.posterUrl ?? null };
 }
 
+export interface WeekendMediaSummary {
+  url: string;
+  width: number;
+  height: number;
+}
+
 export interface WeekendStatusDto {
   id: string;
   statusType: WeekendStatusType;
@@ -59,12 +66,17 @@ export interface WeekendStatusDto {
   message: string | null;
   audience: WeekendAudience;
   event: WeekendEventSummary | null;
+  media: WeekendMediaSummary | null;
   /** spec §3: never inferred — only true when a genuine completed ticket
    *  transaction exists for the STATUS OWNER on the linked event. */
   hasConfirmedTicket: boolean;
   weekendStart: Date;
   weekendEnd: Date;
   updatedAt: Date;
+}
+
+function mediaSummary(media: IWeekendStatusMedia | undefined): WeekendMediaSummary | null {
+  return media ? { url: media.url, width: media.width ?? 0, height: media.height ?? 0 } : null;
 }
 
 async function toStatusDto(doc: IWeekendStatus): Promise<WeekendStatusDto> {
@@ -79,6 +91,7 @@ async function toStatusDto(doc: IWeekendStatus): Promise<WeekendStatusDto> {
     message: doc.message ?? null,
     audience: doc.audience,
     event,
+    media: mediaSummary(doc.media),
     hasConfirmedTicket,
     weekendStart: doc.weekendStart,
     weekendEnd: doc.weekendEnd,
@@ -93,6 +106,10 @@ export interface UpsertWeekendStatusInput {
   audience?: string;
   selectedViewerIds?: string[];
   forNextWeekend?: boolean;
+  /** `undefined` = leave the existing attachment untouched (same convention
+   *  as every other field here); `null` = explicitly remove it; an object =
+   *  replace it. Always an already-uploaded url from presignMediaUpload. */
+  media?: { url: string; width?: number; height?: number } | null;
 }
 
 export interface WeekendFeedCardDto {
@@ -102,6 +119,7 @@ export interface WeekendFeedCardDto {
   statusLabel: string;
   message: string | null;
   event: WeekendEventSummary | null;
+  media: WeekendMediaSummary | null;
   otherAttendeeAvatars: (string | null)[];
   weekendStart: Date;
   weekendEnd: Date;
@@ -161,6 +179,17 @@ export class WeekendService {
     const { start: weekendStart, end: weekendEnd } = input.forNextWeekend ? nextWeekendWindow() : currentWeekendWindow();
     const activeUntil = event ? event.endTime : weekendEnd;
 
+    let media: IWeekendStatusMedia | undefined;
+    let clearMedia = false;
+    if (input.media === null) {
+      clearMedia = true;
+    } else if (input.media) {
+      const url = String(input.media.url || '');
+      const publicBase = process.env['UPDATES_R2_PUBLIC_URL'];
+      if (!publicBase || !url.startsWith(publicBase)) throw new HttpError(400, 'Invalid photo — upload it through the weekend media endpoint first');
+      media = { url, width: Number(input.media.width) || 0, height: Number(input.media.height) || 0 };
+    }
+
     const doc = await WeekendStatus.findOneAndUpdate(
       { buyerId: buyer._id },
       {
@@ -173,12 +202,33 @@ export class WeekendService {
           weekendStart,
           weekendEnd,
           activeUntil,
+          ...(media ? { media } : {}),
         },
-        $unset: statusType === 'going_to_event' ? {} : { eventId: '' },
+        $unset: {
+          ...(statusType === 'going_to_event' ? {} : { eventId: '' }),
+          ...(clearMedia ? { media: '' } : {}),
+        },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     return toStatusDto(doc);
+  }
+
+  /** image/jpeg|png|webp only — video is a known follow-up (needs the same
+   *  transcode pipeline `update.service.ts` uses; out of scope here so it
+   *  fails loudly rather than silently accepting a file it can't process). */
+  private static readonly ALLOWED_MEDIA_TYPES: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+  };
+
+  static async presignMediaUpload(contentType: string): Promise<{ uploadUrl: string; publicUrl: string }> {
+    const ext = WeekendService.ALLOWED_MEDIA_TYPES[contentType];
+    if (!ext) throw new HttpError(400, 'Only JPEG, PNG or WEBP photos are supported right now');
+    const key = updatesR2.rawKey(ext);
+    const uploadUrl = await updatesR2.presignPut(key, contentType);
+    return { uploadUrl, publicUrl: updatesR2.publicUrl(key) };
   }
 
   static async getOwnStatus(buyer: IBuyer): Promise<WeekendStatusDto | null> {
@@ -349,6 +399,7 @@ export class WeekendService {
         statusLabel: WEEKEND_STATUS_LABELS[c.statusType],
         message: c.message ?? null,
         event: event ? eventSummaryFromDoc(event) : null,
+        media: mediaSummary(c.media),
         otherAttendeeAvatars: c.eventId ? otherGoingByEvent.get(String(c.eventId)) ?? [] : [],
         weekendStart: c.weekendStart,
         weekendEnd: c.weekendEnd,

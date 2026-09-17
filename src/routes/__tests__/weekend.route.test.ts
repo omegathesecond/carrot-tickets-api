@@ -29,6 +29,10 @@ describe('Weekend routes', () => {
       await request(app).delete('/api/social/weekend/me').expect(401);
     });
 
+    it('401s POST /media when signed out', async () => {
+      await request(app).post('/api/social/weekend/media').send({ contentType: 'image/jpeg' }).expect(401);
+    });
+
     it('401s POST /requests when signed out', async () => {
       await request(app)
         .post('/api/social/weekend/requests')
@@ -96,6 +100,46 @@ describe('Weekend routes', () => {
       await request(app).delete('/api/social/weekend/me').set('Authorization', auth).expect(200);
       const after = await request(app).get('/api/social/weekend/me').set('Authorization', auth).expect(200);
       expect(after.body.data.status).toBeNull();
+    });
+
+    it('presigns a photo upload then accepts its returned url as the status media', async () => {
+      const OLD_ENV = process.env;
+      process.env = {
+        ...OLD_ENV,
+        UPDATES_R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+        UPDATES_R2_ACCESS_KEY_ID: 'test-key',
+        UPDATES_R2_SECRET_ACCESS_KEY: 'test-secret',
+        UPDATES_R2_BUCKET_NAME: 'updates-test',
+        UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com',
+      };
+      try {
+        await seedBuyer();
+        const auth = `Bearer ${signBuyerToken(PHONE)}`;
+
+        const rejected = await request(app)
+          .post('/api/social/weekend/media')
+          .set('Authorization', auth)
+          .send({ contentType: 'video/mp4' })
+          .expect(400);
+        expect(rejected.body.success).toBe(false);
+
+        const presign = await request(app)
+          .post('/api/social/weekend/media')
+          .set('Authorization', auth)
+          .send({ contentType: 'image/jpeg' })
+          .expect(200);
+        const { publicUrl } = presign.body.data;
+        expect(publicUrl).toContain('https://cdn.carrottickets.com/updates/raw/');
+
+        const put = await request(app)
+          .put('/api/social/weekend/me')
+          .set('Authorization', auth)
+          .send({ statusType: 'bored', media: { url: publicUrl, width: 400, height: 300 } })
+          .expect(200);
+        expect(put.body.data.status.media).toEqual({ url: publicUrl, width: 400, height: 300 });
+      } finally {
+        process.env = OLD_ENV;
+      }
     });
 
     it('surfaces a just-created status as the first, isOwner card in the "Who Has Plans" feed and See All page', async () => {

@@ -131,6 +131,68 @@ describe('WeekendService', () => {
       const doc = await WeekendStatus.findOne({ buyerId: buyer._id });
       expect(doc!.eventId).toBeUndefined();
     });
+
+    describe('media (My Weekend form\'s "Add photo or video")', () => {
+      const OLD_ENV = process.env;
+      beforeEach(() => { process.env = { ...OLD_ENV, UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com' }; });
+      afterEach(() => { process.env = OLD_ENV; });
+
+      it('rejects a media url that was not issued by presignMediaUpload', async () => {
+        const buyer = await seedBuyer('u_media_bad_url');
+        await expect(
+          WeekendService.upsertStatus(buyer, { statusType: 'bored', media: { url: 'https://evil.example.com/x.jpg' } })
+        ).rejects.toMatchObject({ statusCode: 400 });
+      });
+
+      it('accepts a media url on the configured R2 public base and persists it', async () => {
+        const buyer = await seedBuyer('u_media_ok');
+        const dto = await WeekendService.upsertStatus(buyer, {
+          statusType: 'bored',
+          media: { url: 'https://cdn.carrottickets.com/updates/raw/abc.jpg', width: 800, height: 600 },
+        });
+        expect(dto.media).toEqual({ url: 'https://cdn.carrottickets.com/updates/raw/abc.jpg', width: 800, height: 600 });
+      });
+
+      it('leaves an existing attachment untouched when media is omitted', async () => {
+        const buyer = await seedBuyer('u_media_untouched');
+        await WeekendService.upsertStatus(buyer, { statusType: 'bored', media: { url: 'https://cdn.carrottickets.com/updates/raw/keep.jpg' } });
+        const dto = await WeekendService.upsertStatus(buyer, { statusType: 'staying_in' });
+        expect(dto.media?.url).toBe('https://cdn.carrottickets.com/updates/raw/keep.jpg');
+      });
+
+      it('removes the attachment when media is explicitly null', async () => {
+        const buyer = await seedBuyer('u_media_remove');
+        await WeekendService.upsertStatus(buyer, { statusType: 'bored', media: { url: 'https://cdn.carrottickets.com/updates/raw/gone.jpg' } });
+        const dto = await WeekendService.upsertStatus(buyer, { statusType: 'bored', media: null });
+        expect(dto.media).toBeNull();
+      });
+    });
+  });
+
+  describe('presignMediaUpload', () => {
+    const OLD_ENV = process.env;
+    beforeEach(() => {
+      process.env = {
+        ...OLD_ENV,
+        UPDATES_R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+        UPDATES_R2_ACCESS_KEY_ID: 'test-key',
+        UPDATES_R2_SECRET_ACCESS_KEY: 'test-secret',
+        UPDATES_R2_BUCKET_NAME: 'updates-test',
+        UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com',
+      };
+    });
+    afterEach(() => { process.env = OLD_ENV; });
+
+    it('rejects an unsupported content type', async () => {
+      await expect(WeekendService.presignMediaUpload('video/mp4')).rejects.toMatchObject({ statusCode: 400 });
+      await expect(WeekendService.presignMediaUpload('application/pdf')).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('returns a presigned upload url and a matching public url for an allowed image type', async () => {
+      const { uploadUrl, publicUrl } = await WeekendService.presignMediaUpload('image/jpeg');
+      expect(uploadUrl).toContain('r2.cloudflarestorage.com/updates/raw/');
+      expect(publicUrl).toContain('https://cdn.carrottickets.com/updates/raw/');
+    });
   });
 
   describe('getForViewer', () => {
