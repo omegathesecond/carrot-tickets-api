@@ -15,6 +15,12 @@ import { WeekendStatusType, WeekendAudience, WEEKEND_STATUS_TYPES, WEEKEND_AUDIE
  * WeekendService.sweepCancelledEventLinks for what happens when the linked
  * event itself gets cancelled/deleted.
  */
+export interface IWeekendStatusMedia {
+  url: string;
+  width: number;
+  height: number;
+}
+
 export interface IWeekendStatus extends Document {
   buyerId: Types.ObjectId;
   statusType: WeekendStatusType;
@@ -23,12 +29,25 @@ export interface IWeekendStatus extends Document {
   audience: WeekendAudience;
   /** Only meaningful when audience='selected'. */
   selectedViewerIds: Types.ObjectId[];
+  /** A single attached photo on the status itself (My Weekend form's "Add
+   *  photo or video" field). Video is not supported yet — see
+   *  WeekendService.presignMediaUpload — so this is always an image today. */
+  media?: IWeekendStatusMedia;
   weekendStart: Date;
   weekendEnd: Date;
   activeUntil: Date;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const weekendStatusMediaSchema = new Schema<IWeekendStatusMedia>(
+  {
+    url: { type: String, required: true },
+    width: { type: Number, default: 0 },
+    height: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
 
 const weekendStatusSchema = new Schema<IWeekendStatus>(
   {
@@ -38,6 +57,7 @@ const weekendStatusSchema = new Schema<IWeekendStatus>(
     eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
     audience: { type: String, enum: WEEKEND_AUDIENCES, required: true, default: 'public' },
     selectedViewerIds: { type: [Schema.Types.ObjectId], default: [] },
+    media: { type: weekendStatusMediaSchema },
     weekendStart: { type: Date, required: true },
     weekendEnd: { type: Date, required: true },
     activeUntil: { type: Date, required: true },

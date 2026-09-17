@@ -54,6 +54,20 @@ export class WeekendController {
     }
   }
 
+  /** POST /api/social/weekend/media — presign an R2 upload for the "Add
+   *  photo or video" field on the My Weekend form (image only for now). */
+  static async requestMediaUpload(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const contentType = String(req.body?.contentType || '');
+      const result = await WeekendService.presignMediaUpload(contentType);
+      return ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to prepare photo upload');
+    }
+  }
+
   /** DELETE /api/social/weekend/me */
   static async removeMine(req: Request, res: Response): Promise<any> {
     try {

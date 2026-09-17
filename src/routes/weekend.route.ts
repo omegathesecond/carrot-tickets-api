@@ -10,6 +10,7 @@ const router = Router();
 router.get('/me', authenticateBuyer, WeekendController.getMine);
 router.put('/me', authenticateBuyer, requireProfilePhoto, WeekendController.upsertMine);
 router.delete('/me', authenticateBuyer, WeekendController.removeMine);
+router.post('/media', authenticateBuyer, requireProfilePhoto, WeekendController.requestMediaUpload);
 
 router.get('/feed', optionalTicketsAuth, WeekendController.feed);
 router.get('/feed/all', optionalTicketsAuth, WeekendController.feedAll);
