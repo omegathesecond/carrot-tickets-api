@@ -1068,10 +1068,27 @@ export class EventService {
 
       // Check if any tickets have been sold
       if (ticketType.sold > 0) {
-        // Only allow updating description and increasing quantity
-        if (updates.name || updates.price !== undefined) {
-          throw new Error('Cannot change name or price of ticket type with sold tickets');
+        // Renaming or repricing a tier people already hold is a bait-and-switch
+        // on them, so it stays an administrator-only correction — the same
+        // carve-out deleteEvent and unpublishEvent already make.
+        //
+        // Compare against the STORED values rather than testing whether the
+        // field is merely present. The dashboard's TicketTypeDialog submits
+        // every field on every edit (name/price are disabled once a tier has
+        // sales, so the values it sends back are identical), and rejecting that
+        // unchanged resend blocked the one edit that is always safe on a sold
+        // tier: raising the quantity. It only ever adds availability, and it
+        // touches nobody's existing ticket.
+        if (!isSuperAdmin) {
+          const renaming = updates.name !== undefined && updates.name !== ticketType.name;
+          const repricing = updates.price !== undefined && updates.price !== ticketType.price;
+          if (renaming || repricing) {
+            throw new Error('Cannot change name or price of ticket type with sold tickets');
+          }
         }
+        // Not a policy gate and so NOT admin-bypassable: a quantity under the
+        // sold count describes a tier that has issued more tickets than it has,
+        // which no amount of authority makes representable.
         if (updates.quantity !== undefined && updates.quantity < ticketType.sold) {
           throw new Error(`Cannot reduce quantity below sold count (${ticketType.sold})`);
         }
