@@ -117,6 +117,15 @@ describe('GET /api/merchant/tables', () => {
     expect(res.body.data.tables[0].fulfilment.status).toBe('paid');
   });
 
+  it('names the waiter waiting on the order, so the stall can chase an uncollected one', async () => {
+    const f = await settledFloor();
+    const res = await request(app).get('/api/merchant/tables').set('Authorization', f.bar.auth);
+
+    // The stall sees a PERSON, not the waiter id it has no way to resolve —
+    // "table 7 has been sitting there" names nobody to call.
+    expect(res.body.data.tables[0].openedByName).toBe('Thabo');
+  });
+
   it('shows a stall ONLY its own lines and its own money', async () => {
     const f = await settledFloor();
     const res = await request(app).get('/api/merchant/tables').set('Authorization', f.bar.auth);

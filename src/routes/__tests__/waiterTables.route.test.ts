@@ -56,7 +56,43 @@ async function seedFloor(permissions: string[] = WAITER_PERMISSIONS, status = Ev
     role: 'waiter', permissions, isSuperAdmin: false,
     fullName: 'Thabo', vendorId: String(vendorId), eventId: String(event._id),
   }, JWT_SECRET);
-  return { eventId: String(event._id), token, waiterId: String(waiter._id) };
+  return {
+    eventId: String(event._id), token, waiterId: String(waiter._id),
+    vendorId: String(vendorId),
+  };
+}
+
+/**
+ * A SECOND waiter on the floor [floor] already opened — same event, same
+ * vendor, own row and own token.
+ *
+ * Table scoping is per-waiter, so proving it needs two waiters who differ ONLY
+ * in identity: seeding a second event (what seedFloor does) would pass on the
+ * event filter alone and prove nothing about the openedBy filter.
+ */
+async function seedCoworker(
+  floor: { eventId: string; vendorId: string },
+  permissions: string[] = WAITER_PERMISSIONS,
+) {
+  // The ROW is what authorizes — authenticateWaiter throws the token's
+  // permissions claim away and recomputes from these grants on every request —
+  // so a suite asking for a shift lead has to grant one here. Putting
+  // MANAGE_ALL_TABLES in the claim alone proves nothing.
+  const waiter = await Waiter.create({
+    fullName: 'Nomsa', loginCode: `WTRT${waiterSeq++}`, pin: '123456',
+    scope: 'organizer', vendorId: new mongoose.Types.ObjectId(floor.vendorId),
+    eventId: new mongoose.Types.ObjectId(floor.eventId),
+    grants: [
+      ...(permissions.includes(WaiterPermission.SETTLE_TABLES) ? [OperatorGrant.SETTLE_TABLES] : []),
+      ...(permissions.includes(WaiterPermission.MANAGE_ALL_TABLES) ? [OperatorGrant.MANAGE_ALL_TABLES] : []),
+    ],
+  });
+  const token = jwt.sign({
+    scope: 'waiter', userType: 'waiter', waiterId: String(waiter._id),
+    role: 'waiter', permissions, isSuperAdmin: false,
+    fullName: 'Nomsa', vendorId: floor.vendorId, eventId: floor.eventId,
+  }, JWT_SECRET);
+  return { token, waiterId: String(waiter._id) };
 }
 
 /** A stocked stall on a given event, for the addItem route tests. */
@@ -136,6 +172,79 @@ describe('waiter tables — open and list', () => {
     const res = await request(app).get('/api/waiter/tables')
       .set('Authorization', `Bearer ${other.token}`);
     expect(res.body.data.tables).toEqual([]);
+  });
+
+  it('lists only the tables THIS waiter opened, not a co-worker at the same event', async () => {
+    const mine = await seedFloor();
+    const theirs = await seedCoworker(mine);
+    await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${mine.token}`).send({ label: '7' });
+    await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${theirs.token}`).send({ label: '8' });
+
+    const res = await request(app).get('/api/waiter/tables')
+      .set('Authorization', `Bearer ${theirs.token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.tables.map((t: any) => t.label)).toEqual(['8']);
+  });
+
+  it('lets a shift lead holding MANAGE_ALL_TABLES see the whole floor', async () => {
+    const mine = await seedFloor();
+    const lead = await seedCoworker(mine, [
+      ...WAITER_PERMISSIONS, WaiterPermission.MANAGE_ALL_TABLES,
+    ]);
+    await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${mine.token}`).send({ label: '7' });
+    await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${lead.token}`).send({ label: '8' });
+
+    const res = await request(app).get('/api/waiter/tables')
+      .set('Authorization', `Bearer ${lead.token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.tables.map((t: any) => t.label).sort()).toEqual(['7', '8']);
+  });
+
+  it('refuses to add an item to a co-worker table, and says nothing about it existing', async () => {
+    const mine = await seedFloor();
+    const theirs = await seedCoworker(mine);
+    const opened = await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${mine.token}`).send({ label: '7' });
+
+    const res = await request(app)
+      .post(`/api/waiter/tables/${opened.body.data._id}/items`)
+      .set('Authorization', `Bearer ${theirs.token}`)
+      .send({ merchantId: new mongoose.Types.ObjectId().toString(),
+        productId: new mongoose.Types.ObjectId().toString(), qty: 1 });
+
+    // 404 not 403 — a waiter has no business learning the id is real.
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/not found/i);
+  });
+
+  it('refuses to void a co-worker table', async () => {
+    const mine = await seedFloor();
+    const theirs = await seedCoworker(mine);
+    const opened = await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${mine.token}`).send({ label: '7' });
+
+    const res = await request(app)
+      .post(`/api/waiter/tables/${opened.body.data._id}/void`)
+      .set('Authorization', `Bearer ${theirs.token}`).send({ reason: 'walkout' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('names the waiter who opened each table, so the floor is attributable', async () => {
+    const mine = await seedFloor();
+    await request(app).post('/api/waiter/tables')
+      .set('Authorization', `Bearer ${mine.token}`).send({ label: '7' });
+
+    const res = await request(app).get('/api/waiter/tables')
+      .set('Authorization', `Bearer ${mine.token}`);
+
+    expect(res.body.data.tables[0].openedByName).toBe('Thabo');
   });
 });
 

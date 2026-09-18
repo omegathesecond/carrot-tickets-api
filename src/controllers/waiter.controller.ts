@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
+import { Table } from '@models/table.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { WaiterToken } from '@interfaces/waiter.interface';
+import { WaiterToken, WaiterPermission } from '@interfaces/waiter.interface';
 import { operatorMayActOnEvent } from '@services/operatorEventScope.service';
 import { HEX24 } from '@utils/controllerHelpers.util';
 import {
@@ -14,6 +15,8 @@ import {
 import { StockDeclinedError } from '@services/stock.service';
 import { PosCatalogService } from '@services/posCatalog.service';
 import { WalletDeclinedError } from '@services/merchant.service';
+import { WalletService } from '@services/wallet.service';
+import { normalizeBandUid } from '@utils/bandUid.util';
 
 /**
  * Load the event this waiter is working and assert they may act on it. Every
@@ -45,6 +48,36 @@ export async function loadWaiterEvent(req: Request, res: Response): Promise<any 
     ApiResponseUtil.error(res, 'You are not assigned to this event', 403); return null;
   }
   return event;
+}
+
+/**
+ * A waiter may only work a table they opened.
+ *
+ * Scoping the LIST is presentation, not security — every mutating route takes
+ * a table id straight off the URL, and an id is readable over a co-worker's
+ * shoulder — so this is the real gate and it sits in front of
+ * add/remove/void/settle/accept alike. MANAGE_ALL_TABLES lifts it for a shift
+ * lead who has to close a table for someone gone off shift.
+ *
+ * Answers 404, not 403, for a table belonging to another waiter: a waiter has
+ * no business learning that a given id exists at all.
+ *
+ * Returns true when the caller may proceed; otherwise it has already answered.
+ */
+async function waiterMayWorkTable(
+  req: Request, res: Response, tableId: string, eventId: string,
+): Promise<boolean> {
+  const waiter = (req as any).waiter as WaiterToken;
+  if (waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES)) return true;
+  if (!HEX24.test(String(tableId))) { ApiResponseUtil.notFound(res, 'Table not found'); return false; }
+  const table = await Table.findOne(
+    { _id: tableId, eventId }, { openedBy: 1 },
+  ).lean<{ openedBy: string } | null>();
+  if (!table || table.openedBy !== waiter.waiterId) {
+    ApiResponseUtil.notFound(res, 'Table not found');
+    return false;
+  }
+  return true;
 }
 
 export class WaiterController {
@@ -94,6 +127,29 @@ export class WaiterController {
     }
   }
 
+  /**
+   * GET /api/waiter/balance?bandUid= — what a guest's band holds.
+   *
+   * The waiter is the person standing in front of the guest when they ask
+   * "have I got enough on this?", so they need the same read the cashier desk
+   * has. Reuses WalletService.getWalletViewByBand rather than a waiter-shaped
+   * copy of it — one definition of what a wallet view is.
+   *
+   * eventId comes from the TOKEN's event, not a query param: a waiter works
+   * exactly one event and must not be able to read a band at another.
+   */
+  static async balance(req: Request, res: Response): Promise<any> {
+    const event = await loadWaiterEvent(req, res);
+    if (!event) return;
+    const rawUid = typeof req.query['bandUid'] === 'string' ? req.query['bandUid'] : '';
+    if (!rawUid.trim()) return ApiResponseUtil.badRequest(res, 'bandUid is required');
+    const view = await WalletService.getWalletViewByBand(
+      normalizeBandUid(rawUid.trim()), String(event._id),
+    );
+    if (!view) return ApiResponseUtil.notFound(res, 'No wallet for that band');
+    return ApiResponseUtil.success(res, view);
+  }
+
   /** POST /api/waiter/tables — open a new table under a number/label. */
   static async openTable(req: Request, res: Response): Promise<any> {
     const event = await loadWaiterEvent(req, res);
@@ -112,13 +168,25 @@ export class WaiterController {
     }
   }
 
-  /** GET /api/waiter/tables — tables at this waiter's event, optionally ?status=open|settled|voided. */
+  /**
+   * GET /api/waiter/tables — the tables THIS waiter opened at their event,
+   * optionally ?status=open|settled|voided.
+   *
+   * Scoped to the caller unless they hold MANAGE_ALL_TABLES. The scope is
+   * derived from the TOKEN's waiterId and never from a query param, so a
+   * waiter cannot ask for a co-worker's floor; a shift lead who needs to close
+   * a table for someone off shift is granted the permission instead.
+   */
   static async listTables(req: Request, res: Response): Promise<any> {
     const event = await loadWaiterEvent(req, res);
     if (!event) return;
+    const waiter = (req as any).waiter as WaiterToken;
+    const seesWholeFloor =
+      waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ?? false;
     const str = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
     const tables = await TableService.list(String(event._id), {
       status: str('status'), tab: str('tab'), q: str('q'),
+      ...(seesWholeFloor ? {} : { openedBy: waiter.waiterId }),
     });
     return ApiResponseUtil.success(res, { tables });
   }
@@ -143,6 +211,7 @@ export class WaiterController {
     if (!HEX24.test(tableId) || !HEX24.test(merchantId)) {
       return ApiResponseUtil.notFound(res, 'no handover for this stall on that table');
     }
+    if (!(await waiterMayWorkTable(req, res, tableId, String(event._id)))) return;
     try {
       const table = await TableService.accept({
         tableId, eventId: String(event._id), merchantId, acceptedBy: waiter.waiterId,
@@ -163,6 +232,7 @@ export class WaiterController {
     const { merchantId, productId, qty } = req.body || {};
     if (!merchantId || !productId) return ApiResponseUtil.badRequest(res, 'merchantId and productId are required');
     if (!Number.isInteger(qty) || qty <= 0) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
+    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
     try {
       const table = await TableService.addItem({
         tableId: req.params['id']!, eventId: String(event._id), merchantId, productId, qty, addedBy: waiter.waiterId,
@@ -191,6 +261,7 @@ export class WaiterController {
     const event = await loadWaiterEvent(req, res);
     if (!event) return;
     const waiter = (req as any).waiter as WaiterToken;
+    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
     try {
       const table = await TableService.removeItem({
         tableId: req.params['id']!, eventId: String(event._id), lineId: req.params['lineId']!, removedBy: waiter.waiterId,
@@ -212,6 +283,7 @@ export class WaiterController {
     if (!event) return;
     const waiter = (req as any).waiter as WaiterToken;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : '';
+    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
     try {
       const table = await TableService.voidTable({
         tableId: req.params['id']!, eventId: String(event._id), reason, voidedBy: waiter.waiterId,
@@ -250,6 +322,7 @@ export class WaiterController {
     // handheld. One generated server-side would be new on every attempt and
     // every retry would be a second bill.
     if (!clientTxnId) return ApiResponseUtil.badRequest(res, 'clientTxnId is required');
+    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
 
     try {
       const settlement = await TableService.settle({

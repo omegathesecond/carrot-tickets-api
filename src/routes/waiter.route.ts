@@ -12,6 +12,11 @@ router.get('/events', requireWaiterPermission(WaiterPermission.VIEW_EVENTS), Wai
 // catalogue, the same class of thing as /events. Nothing on a table moves.
 router.get('/products', requireWaiterPermission(WaiterPermission.VIEW_EVENTS), WaiterController.getProducts);
 
+// VIEW_EVENTS, alongside /products: reading what a band holds moves nothing.
+// The waiter is who the guest asks "have I got enough on this?", so every
+// waiter can answer it, not only one trusted with the money.
+router.get('/balance', requireWaiterPermission(WaiterPermission.VIEW_EVENTS), WaiterController.balance);
+
 router.post('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.openTable);
 router.get('/tables', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.listTables);
 router.post('/tables/:id/items', requireWaiterPermission(WaiterPermission.MANAGE_TABLES), WaiterController.addItem);

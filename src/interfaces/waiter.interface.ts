@@ -32,6 +32,16 @@ export enum WaiterPermission {
   MANAGE_TABLES = 'waiter:manage_tables',
   /** The money moment — granted per person, so absent from WAITER_PERMISSIONS. */
   SETTLE_TABLES = 'waiter:settle_tables',
+  /**
+   * See and work the WHOLE floor, not just one's own tables.
+   *
+   * A waiter is scoped to the tables they opened: a busy floor otherwise lets
+   * anyone settle a tab they never served, and the takings stop being
+   * attributable. A shift lead needs the opposite — somebody has to be able to
+   * close a table whose waiter has gone off shift — so this is granted per
+   * person and, like SETTLE_TABLES, is absent from WAITER_PERMISSIONS.
+   */
+  MANAGE_ALL_TABLES = 'waiter:manage_all_tables',
 }
 
 /** Every permission a waiter holds without an extra grant. */

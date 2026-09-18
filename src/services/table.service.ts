@@ -4,6 +4,7 @@ import {
   ITable, ITableLine, TableStatus, ITableFulfilment, TableFulfilmentStatus,
 } from '@interfaces/table.interface';
 import { Merchant } from '@models/merchant.model';
+import { Waiter } from '@models/waiter.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
 import { Wallet, IWallet } from '@models/wallet.model';
@@ -185,6 +186,27 @@ export interface StallTableView {
   fulfilment: ITableFulfilment;
   settledAt?: Date;
   createdAt: Date;
+  /** Who is waiting on this order, so the stall can chase an uncollected one. */
+  openedByName: string;
+}
+
+/**
+ * Waiter id → full name, for a batch of tables.
+ *
+ * `Table.openedBy` stores the waiter id as a plain string, so every surface
+ * that shows a table has had to either display the raw id or refetch a
+ * catalogue to guess at a name. One indexed lookup per LIST (not per table)
+ * resolves them all; a waiter whose row has since been deleted falls back to
+ * 'Unknown waiter' rather than leaking the id into the UI.
+ */
+async function waiterNames(openedBy: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(openedBy.filter((id) => mongoose.isValidObjectId(id)))];
+  if (ids.length === 0) return new Map();
+  const rows = await Waiter.find(
+    { _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) } },
+    { fullName: 1 },
+  ).lean<{ _id: mongoose.Types.ObjectId; fullName: string }[]>();
+  return new Map(rows.map((r) => [String(r._id), r.fullName]));
 }
 
 /**
@@ -297,17 +319,34 @@ export class TableService {
    * fulfilment rows rather than a stored field — see tabFilter. They are
    * different questions, so both are offered rather than one overloaded.
    */
+  /**
+   * The floor as ONE waiter sees it.
+   *
+   * [opts.openedBy] scopes the list to that waiter's own tables. It is the
+   * CALLER's job to pass it — a shift lead holding MANAGE_ALL_TABLES omits it
+   * and gets the whole floor — but the waiter route always passes it, so a
+   * waiter can neither see nor settle a tab they never served. Leaving it
+   * optional here rather than required keeps the reporting callers (which
+   * legitimately want every table) honest and explicit.
+   */
   static async list(
     eventId: string,
-    opts: { status?: string; tab?: string; q?: string } = {},
-  ): Promise<ITable[]> {
-    const { status, tab, q } = opts;
-    return Table.find({
+    opts: { status?: string; tab?: string; q?: string; openedBy?: string } = {},
+  ): Promise<(ITable & { openedByName: string })[]> {
+    const { status, tab, q, openedBy } = opts;
+    const tables = await Table.find({
       eventId: new mongoose.Types.ObjectId(eventId),
       ...(status ? { status } : {}),
+      ...(openedBy ? { openedBy } : {}),
       ...tabFilter(tab),
       ...labelFilter(q),
-    }).sort({ createdAt: -1 }).limit(200);
+    }).sort({ createdAt: -1 }).limit(200).lean<ITable[]>();
+
+    const names = await waiterNames(tables.map((t) => t.openedBy));
+    return tables.map((t) => ({
+      ...t,
+      openedByName: names.get(t.openedBy) ?? 'Unknown waiter',
+    })) as (ITable & { openedByName: string })[];
   }
 
   /**
@@ -335,6 +374,11 @@ export class TableService {
       fulfilment: { $elemMatch: { merchantId: merchantObjId, ...(status ? { status } : {}) } },
     }).sort({ settledAt: -1, createdAt: -1 }).limit(200).lean<ITable[]>();
 
+    // Resolved for the whole page in one lookup, not per table: the stall
+    // needs a person to chase when an order sits uncollected, and "table 7"
+    // names nobody.
+    const names = await waiterNames(tables.map((t) => t.openedBy));
+
     return tables.map((t) => {
       const mine = t.items.filter((i) => String(i.merchantId) === merchantId);
       const row = t.fulfilment.find((f) => String(f.merchantId) === merchantId)!;
@@ -347,6 +391,7 @@ export class TableService {
         fulfilment: row,
         settledAt: t.settledAt,
         createdAt: t.createdAt,
+        openedByName: names.get(t.openedBy) ?? 'Unknown waiter',
       };
     });
   }

@@ -39,6 +39,15 @@ export enum OperatorGrant {
    * other actor, whose namespaces have no mapping for it.
    */
   SETTLE_TABLES = 'settle_tables',
+  /**
+   * The SHIFT LEAD. Works the whole floor rather than only the tables this
+   * waiter opened — which is otherwise the hard scope, so that a busy floor
+   * cannot have anyone settling a tab they never served and the takings stay
+   * attributable. Somebody still has to be able to close a table whose waiter
+   * has gone off shift, and that somebody holds this. Held by a Waiter; it
+   * means nothing on any other actor.
+   */
+  MANAGE_ALL_TABLES = 'manage_all_tables',
 }
 
 export const OPERATOR_GRANTS: OperatorGrant[] = Object.values(OperatorGrant);
@@ -61,6 +70,7 @@ const MERCHANT_BY_GRANT: Partial<Record<OperatorGrant, MerchantPermission>> = {
 /** Grants → the waiter namespace (floor waiters logging in through the POS). */
 const WAITER_BY_GRANT: Partial<Record<OperatorGrant, WaiterPermission>> = {
   [OperatorGrant.SETTLE_TABLES]: WaiterPermission.SETTLE_TABLES,
+  [OperatorGrant.MANAGE_ALL_TABLES]: WaiterPermission.MANAGE_ALL_TABLES,
 };
 
 /**
