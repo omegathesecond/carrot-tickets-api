@@ -172,6 +172,16 @@ export interface TableSettlement {
 }
 
 /**
+ * One table as the WAITER sees it: the whole tab, with the ids already
+ * resolved to the names the screen actually renders. The handheld used to
+ * resolve these itself off a second catalogue fetch — see [merchantNames].
+ */
+export interface WaiterTableView extends Omit<ITable, 'items'> {
+  openedByName: string;
+  items: (ITableLine & { merchantName: string })[];
+}
+
+/**
  * One table as ONE stall may see it: its own lines, its own money, its own
  * handover row. Not an ITable — the redaction is the point, and returning the
  * real shape would invite a caller to treat it as the whole table.
@@ -199,6 +209,26 @@ export interface StallTableView {
  * resolves them all; a waiter whose row has since been deleted falls back to
  * 'Unknown waiter' rather than leaking the id into the UI.
  */
+/**
+ * Merchant id → stall name, for every line across a batch of tables.
+ *
+ * The waiter's table screen groups lines under a stall heading, and the line
+ * carries only a merchantId. Without this the handheld had to fetch the whole
+ * event catalogue as a second request purely to learn names, and showed
+ * 'Stall 4f8a2c' — a placeholder shaped exactly like a real name, so the
+ * operator read it AS the name and then watched it change. One lookup per
+ * list, sent with the lines, removes both the delay and the lie.
+ */
+async function merchantNames(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((id) => mongoose.isValidObjectId(id)))];
+  if (unique.length === 0) return new Map();
+  const rows = await Merchant.find(
+    { _id: { $in: unique.map((id) => new mongoose.Types.ObjectId(id)) } },
+    { name: 1 },
+  ).lean<{ _id: mongoose.Types.ObjectId; name: string }[]>();
+  return new Map(rows.map((r) => [String(r._id), r.name]));
+}
+
 async function waiterNames(openedBy: string[]): Promise<Map<string, string>> {
   const ids = [...new Set(openedBy.filter((id) => mongoose.isValidObjectId(id)))];
   if (ids.length === 0) return new Map();
@@ -332,7 +362,7 @@ export class TableService {
   static async list(
     eventId: string,
     opts: { status?: string; tab?: string; q?: string; openedBy?: string } = {},
-  ): Promise<(ITable & { openedByName: string })[]> {
+  ): Promise<WaiterTableView[]> {
     const { status, tab, q, openedBy } = opts;
     const tables = await Table.find({
       eventId: new mongoose.Types.ObjectId(eventId),
@@ -342,11 +372,18 @@ export class TableService {
       ...labelFilter(q),
     }).sort({ createdAt: -1 }).limit(200).lean<ITable[]>();
 
-    const names = await waiterNames(tables.map((t) => t.openedBy));
+    const [names, stalls] = await Promise.all([
+      waiterNames(tables.map((t) => t.openedBy)),
+      merchantNames(tables.flatMap((t) => t.items.map((i) => String(i.merchantId)))),
+    ]);
     return tables.map((t) => ({
       ...t,
       openedByName: names.get(t.openedBy) ?? 'Unknown waiter',
-    })) as (ITable & { openedByName: string })[];
+      items: t.items.map((i) => ({
+        ...i,
+        merchantName: stalls.get(String(i.merchantId)) ?? 'Unknown stall',
+      })),
+    })) as unknown as WaiterTableView[];
   }
 
   /**

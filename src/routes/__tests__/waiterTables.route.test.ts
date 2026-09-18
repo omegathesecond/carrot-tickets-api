@@ -236,6 +236,19 @@ describe('waiter tables — open and list', () => {
     expect(res.status).toBe(404);
   });
 
+  it('names the stall on every line, so the handheld never renders a raw id', async () => {
+    const { eventId, token } = await seedFloor();
+    await tableWithDrinks(eventId, token, { label: '7', price: 2500, qty: 1 });
+
+    const res = await request(app).get('/api/waiter/tables')
+      .set('Authorization', `Bearer ${token}`);
+
+    // The NAME, resolved server-side — the handheld used to fetch the whole
+    // catalogue as a second request just to learn this, and showed
+    // 'Stall <last-6-of-id>' in the meantime.
+    expect(res.body.data.tables[0].items[0].merchantName).toBe('Test Stall');
+  });
+
   it('names the waiter who opened each table, so the floor is attributable', async () => {
     const mine = await seedFloor();
     await request(app).post('/api/waiter/tables')
