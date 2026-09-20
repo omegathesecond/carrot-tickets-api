@@ -421,7 +421,7 @@ export class ExportService {
         ['Failed Scans', failedScans.toString()],
         [''],
         ['Ticket Types'],
-        ['Type', 'Price', 'Quantity', 'Sold', 'Available', 'Revenue']
+        ['Type', 'Price', 'Quantity (Available)', 'Sold', 'Available', 'Revenue']
       ];
 
       // Add ticket type details

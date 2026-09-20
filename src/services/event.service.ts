@@ -676,6 +676,15 @@ export class EventService {
         throw new Error(`Cannot publish a ${event.status.toLowerCase()} event`);
       }
 
+      // A ticket type can only exist on the event document if it already
+      // passed Mongoose validation (name, price >= 0, quantity >= 1), so
+      // "at least one" here also means "at least one valid" — there's no
+      // separate draft/incomplete ticket-type state to filter out. Blocks
+      // both the organizer's submit-for-approval and a direct admin publish.
+      if (!event.ticketTypes || event.ticketTypes.length === 0) {
+        throw new Error('Create at least one ticket type before requesting to publish this event.');
+      }
+
       if (isSuperAdmin) {
         // Admin approval — the event goes live.
         event.status = EventStatus.PUBLISHED;
@@ -1143,6 +1152,15 @@ export class EventService {
 
       // Remove ticket type
       event.ticketTypes = event.ticketTypes.filter(tt => tt.name !== ticketTypeName);
+
+      // An event awaiting approval can no longer be published without any
+      // ticket types — pull it back to draft so "Submit for Approval" (and
+      // its ticket-type gate) reappears instead of leaving it stuck pending
+      // with nothing to approve. Published events are untouched; removing a
+      // tier there is a stock change, not a publication-state change.
+      if (event.ticketTypes.length === 0 && event.status === EventStatus.PENDING_APPROVAL) {
+        event.status = EventStatus.DRAFT;
+      }
 
       await event.save();
       return event;
