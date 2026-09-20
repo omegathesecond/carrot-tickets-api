@@ -311,6 +311,15 @@ router.put(
   TicketsController.unpublishEvent
 );
 
+// Organizer withdraws a submission awaiting approval, back to draft. Distinct
+// from /unpublish: scoped to pending_approval only, never overridable by an
+// admin, and blocked (with an explanatory message) once tickets have sold.
+router.put(
+  '/events/:eventId/withdraw',
+  requireTicketsPermission(TicketsPermission.PUBLISH_EVENT),
+  TicketsController.withdrawEvent
+);
+
 /**
  * Organizer announcements — post into the event's #announcements channel.
  * dualAuth (router-level) already authenticated the request; this route only

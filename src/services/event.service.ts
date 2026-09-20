@@ -657,7 +657,12 @@ export class EventService {
    * An inactive (suspended) organizer is still blocked outright — that's an
    * account-level sanction, distinct from the per-event approval flow.
    */
-  static async publishEvent(eventId: string, vendorId: string, isSuperAdmin: boolean = false): Promise<IEvent> {
+  static async publishEvent(
+    eventId: string,
+    vendorId: string,
+    isSuperAdmin: boolean = false,
+    expectedStatus?: EventStatus
+  ): Promise<IEvent> {
     try {
       const query: any = { _id: eventId };
       if (!isSuperAdmin) {
@@ -667,6 +672,15 @@ export class EventService {
 
       if (!event) {
         throw new Error('Event not found');
+      }
+
+      // The admin "Approve" button sends the status it last saw
+      // (pending_approval) — if the event has moved on since (e.g. the
+      // organizer withdrew it) this stops a stale click from silently
+      // publishing it anyway. Admin's separate "publish a draft directly"
+      // action never sends this, so that capability is unaffected.
+      if (expectedStatus && event.status !== expectedStatus) {
+        throw new Error('This event is no longer awaiting approval — it may have been withdrawn. Please refresh and try again.');
       }
 
       if (event.status === EventStatus.PUBLISHED) {
@@ -756,6 +770,53 @@ export class EventService {
     } catch (error: any) {
       console.error('Unpublish event error:', error);
       throw new Error(error.message || 'Failed to unpublish event');
+    }
+  }
+
+  /**
+   * Withdraw a submission awaiting approval, back to draft. Organizer-only —
+   * an admin pulling a LIVE event offline uses unpublishEvent instead, and
+   * that path still allows an override once tickets have sold. Withdraw never
+   * does: a submission that hasn't been approved yet can't legitimately have
+   * sold anything, but the guard stays as a hard stop (and a clear message)
+   * in case sales slipped in through another path.
+   */
+  static async withdrawEvent(eventId: string, vendorId: string): Promise<IEvent> {
+    try {
+      const event = await Event.findOne({ _id: eventId, vendorId });
+
+      if (!event) {
+        throw new Error('Event not found');
+      }
+
+      // Re-checked at save time too (see below) to close the race where the
+      // event stopped being pending_approval between this read and the save
+      // — e.g. an admin's approval landed a moment earlier.
+      if (event.status !== EventStatus.PENDING_APPROVAL) {
+        throw new Error('This submission is no longer awaiting approval — it may have already been withdrawn or reviewed.');
+      }
+
+      if (event.totalTicketsSold > 0) {
+        throw new Error('This event already has ticket sales, so it cannot be withdrawn. Please use the event cancellation and refund process instead.');
+      }
+
+      // Atomic, conditional on the status we just verified — the second of two
+      // concurrent withdraw clicks (or a withdraw racing an admin approval)
+      // finds nothing to update instead of silently double-applying.
+      const updated = await Event.findOneAndUpdate(
+        { _id: event._id, status: EventStatus.PENDING_APPROVAL },
+        { $set: { status: EventStatus.DRAFT }, $unset: { publishedAt: 1 } },
+        { new: true }
+      );
+
+      if (!updated) {
+        throw new Error('This submission is no longer awaiting approval — it may have already been withdrawn or reviewed.');
+      }
+
+      return updated;
+    } catch (error: any) {
+      console.error('Withdraw event error:', error);
+      throw new Error(error.message || 'Failed to withdraw event');
     }
   }
 

@@ -660,11 +660,19 @@ export class TicketsController {
     try {
       const ticketsUser = (req as any).ticketsUser;
       const { eventId } = req.params;
+      // Sent by the "Approve & Publish" action so a stale approval (the
+      // organizer withdrew after the admin's page loaded) is rejected instead
+      // of silently publishing anyway. Absent for a direct admin publish of a
+      // draft, which is unaffected.
+      const expectedStatus = Object.values(EventStatus).includes(req.body?.expectedStatus)
+        ? (req.body.expectedStatus as EventStatus)
+        : undefined;
 
       const event = await EventService.publishEvent(
         eventId as string,
         ticketsUser.vendorId as string,
-        ticketsUser.isSuperAdmin || false
+        ticketsUser.isSuperAdmin || false,
+        expectedStatus
       );
 
       // Message reflects where the event actually landed: a superadmin publish
@@ -698,6 +706,26 @@ export class TicketsController {
     } catch (error: any) {
       console.error('Unpublish event error:', error);
       ApiResponseUtil.error(res, error.message || 'Failed to unpublish event');
+    }
+  }
+
+  /**
+   * Events: Withdraw a submission awaiting approval (organizer-only)
+   */
+  static async withdrawEvent(req: Request, res: Response): Promise<any> {
+    try {
+      const ticketsUser = (req as any).ticketsUser;
+      const { eventId } = req.params;
+
+      const event = await EventService.withdrawEvent(
+        eventId as string,
+        ticketsUser.vendorId as string
+      );
+
+      ApiResponseUtil.success(res, event, 'Submission withdrawn — you can edit and resubmit it any time');
+    } catch (error: any) {
+      console.error('Withdraw event error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to withdraw event');
     }
   }
 
