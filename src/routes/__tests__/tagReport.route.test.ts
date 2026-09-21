@@ -86,3 +86,47 @@ it("403s another vendor's registrations", async () => {
   expect(res.status).toBe(403);
 });
 
+
+it('400s an unknown sort', async () => {
+  const event = await cashlessEvent();
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags?sort=cheapest`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(400);
+});
+
+it('400s a funded flag that is not a boolean', async () => {
+  const event = await cashlessEvent();
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags?funded=yes`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(400);
+});
+
+// The two sorts use DIFFERENT cursor shapes, and a cursor minted under one is
+// meaningless under the other — it would silently page from the wrong place.
+// Reject the mismatch rather than serve a wrong page of a money list.
+it('400s a bare _id cursor under the balance sort', async () => {
+  const event = await cashlessEvent();
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags?sort=balance&cursor=64c000000000000000000a01`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(400);
+});
+
+it('400s a balance cursor under the default sort', async () => {
+  const event = await cashlessEvent();
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags?cursor=5000:64c000000000000000000a01`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(400);
+});
+
+it('serves a funded, balance-sorted page', async () => {
+  const event = await cashlessEvent();
+  const res = await request(app)
+    .get(`/api/tickets/events/${event._id}/tags?funded=true&sort=balance`)
+    .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`);
+  expect(res.status).toBe(200);
+  expect(res.body.data).toHaveProperty('tags');
+});
