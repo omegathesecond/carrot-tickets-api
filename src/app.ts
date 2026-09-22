@@ -25,6 +25,7 @@ import { buildCorsOrigin } from '@utils/corsOrigins.util';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
+import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 
 // Import routes
 import ticketsRoutes from '@routes/tickets.route';
@@ -253,6 +254,19 @@ function initAfterConnect(): void {
   // issuing standalone tags. See src/scripts/migrate-wallet-indexes.ts.
   migrateWalletIndexes().catch((err) => {
     console.error('❌ migrateWalletIndexes failed (issuing a standalone tag may collide on ticketId_1):', err);
+  });
+
+  // Same shape, same reasoning, for `weekendstatuses`: buyerId used to be a
+  // plain unique field back when the collection held only one "My Weekend"
+  // row per buyer. The "+Add" composer's plan_post rows (many per buyer)
+  // dropped that constraint from the schema, but the legacy buyerId_1 index
+  // stays live on any already-provisioned DB until dropped explicitly.
+  // Until this runs, a buyer's SECOND weekend plan (or even a profile-widget
+  // upsert racing a plan create) 500s with "E11000 duplicate key error ...
+  // index: buyerId_1". Logged, not fatal — a failed migration must not stop
+  // the API serving everything else. See src/scripts/migrate-weekend-indexes.ts.
+  migrateWeekendIndexes().catch((err) => {
+    console.error('❌ migrateWeekendIndexes failed (a second weekend plan may collide on buyerId_1):', err);
   });
 
   // Background sweeps: reservation expiry, card-sale reconciliation,

@@ -38,7 +38,8 @@
     "seed:cashless": "ts-node -r tsconfig-paths/register src/scripts/seedCashlessDemo.ts",
     "seed:menu-demo": "ts-node -r tsconfig-paths/register src/scripts/seedMenuDemo.ts",
     "yoco:register-webhook": "ts-node -r tsconfig-paths/register src/scripts/yocoRegisterWebhook.ts",
-    "migrate:wallet-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-wallet-indexes.ts"
+    "migrate:wallet-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-wallet-indexes.ts",
+    "migrate:weekend-indexes": "ts-node -r tsconfig-paths/register src/scripts/migrate-weekend-indexes.ts"
   },
   "keywords": [
     "api",
