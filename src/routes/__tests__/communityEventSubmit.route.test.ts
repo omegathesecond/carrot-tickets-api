@@ -34,7 +34,7 @@ function fields(over: Record<string, string> = {}): Record<string, string> {
     eventDate: futureIso(10),
     startTime: futureIso(10, 18),
     endTime: futureIso(10, 23),
-    category: 'sports',
+    category: 'Music',
     ticketing: 'external',
     externalTicketUrl: 'https://tickets.example.com/jam',
     description: 'A community-listed rooftop session.',

@@ -1,7 +1,7 @@
 import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
-import { EVENT_CATEGORY_IDS } from '@/constants/eventCategories';
+import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
 import { STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
@@ -265,10 +265,8 @@ export const createEventSchema = Joi.object({
     .messages({
       'boolean.base': 'cashless must be a boolean value'
     }),
-  // Required — the organizer must pick one explicitly, never auto-assigned.
-  category: Joi.string().valid(...EVENT_CATEGORY_IDS).required().messages({
-    'any.only': 'Invalid event category',
-    'any.required': 'Select a category'
+  category: Joi.string().valid(...EVENT_CATEGORIES).default('Other').messages({
+    'any.only': 'Invalid event category'
   }),
   posterUrl: Joi.string().uri().optional().trim().messages({
     'string.uri': 'Poster URL must be a valid URL'
@@ -352,7 +350,7 @@ export const updateEventSchema = Joi.object({
     .messages({
       'boolean.base': 'cashless must be a boolean value'
     }),
-  category: Joi.string().valid(...EVENT_CATEGORY_IDS).messages({
+  category: Joi.string().valid(...EVENT_CATEGORIES).messages({
     'any.only': 'Invalid event category'
   }),
   posterUrl: Joi.string().uri().optional().trim(),

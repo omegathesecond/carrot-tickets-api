@@ -80,8 +80,8 @@ export interface IEvent extends Document {
   // Status
   status: EventStatus;
 
-  // Organizer-set category — powers the Tickets-page category tabs + poster
-  // badge. Never inferred; required at create, see createEventSchema.
+  // Organizer-set category — powers Home/Discover category chips + poster
+  // badge. Never inferred; defaults to 'Other' when unset.
   category: EventCategory;
 
   // Ticketing mode — 'carrot' sells tickets on-platform (default); 'external'

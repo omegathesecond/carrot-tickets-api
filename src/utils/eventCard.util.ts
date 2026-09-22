@@ -1,5 +1,3 @@
-import { DEFAULT_EVENT_CATEGORY } from '@/constants/eventCategories';
-
 export interface PublicEventCardExtras {
   recentSales?: number;
   trending?: boolean;
@@ -54,11 +52,11 @@ export function buildEventCardFields(event: any) {
     // neither, so they fall back to carrot/null rather than surfacing undefined.
     ticketing: event.ticketing ?? 'carrot',
     externalTicketUrl: event.externalTicketUrl ?? null,
-    // Organizer-set category — powers the Tickets-page category tabs + poster
+    // Organizer-set category — powers Home/Discover category chips + poster
     // badge. Legacy events predating this field (or serialized through a
-    // .select() projection that omits it) fall back to the default category
-    // rather than surfacing undefined.
-    category: event.category ?? DEFAULT_EVENT_CATEGORY,
+    // .select() projection that omits it) fall back to 'Other' rather than
+    // surfacing undefined.
+    category: event.category ?? 'Other',
     // Display currency + organizer-entered price range for external events.
     // Legacy events predating these fields fall back to SZL / no range.
     currency: event.currency ?? 'SZL',

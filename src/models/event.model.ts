@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import { IEvent, EventStatus, ITicketType } from '@interfaces/event.interface';
 import { PaymentMethod } from '@interfaces/ticket.interface';
-import { EVENT_CATEGORY_IDS, DEFAULT_EVENT_CATEGORY } from '@/constants/eventCategories';
+import { EVENT_CATEGORIES } from '@/constants/eventCategories';
 
 const ticketTypeSchema = new Schema<ITicketType>({
   name: {
@@ -159,12 +159,11 @@ const eventSchema = new Schema<IEvent>({
   },
 
   // Organizer-set category — powers Home/Discover category chips + poster
-  // badge. Never inferred; defaults to 'events' when unset. Stored as the
-  // stable id (see constants/eventCategories), not the display label.
+  // badge. Never inferred; defaults to 'Other' when unset.
   category: {
     type: String,
-    enum: EVENT_CATEGORY_IDS,
-    default: DEFAULT_EVENT_CATEGORY,
+    enum: EVENT_CATEGORIES,
+    default: 'Other',
     index: true
   },
 
