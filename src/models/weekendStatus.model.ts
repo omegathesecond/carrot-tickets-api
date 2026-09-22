@@ -128,7 +128,20 @@ const weekendStatusSchema = new Schema<IWeekendStatus>(
     weekendEnd: { type: Date, required: true },
     activeUntil: { type: Date, required: true },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    // Mongoose's default (connection-level) autoIndex would otherwise race
+    // migrateWeekendIndexes() (called at app.ts boot, non-test envs only) to
+    // (re)build this collection's indexes the instant this model registers
+    // on an open connection — if that background build wins while the
+    // legacy plain-unique buyerId_1 index still exists in the target DB, it
+    // throws IndexKeySpecsConflict instead of ever landing the current
+    // (non-unique) buyerId_1_source_1_activeUntil_1 index. Left on for
+    // NODE_ENV==='test' — the test suite's ephemeral in-memory Mongo relies
+    // on autoIndex to build these before assertions run. See
+    // src/scripts/migrate-weekend-indexes.ts.
+    autoIndex: process.env['NODE_ENV'] === 'test',
+  }
 );
 
 // "Who Has Plans This Weekend" / "Looking for Plans" home-feed queries: active
