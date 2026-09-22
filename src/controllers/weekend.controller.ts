@@ -80,6 +80,68 @@ export class WeekendController {
     }
   }
 
+  /** POST /api/social/weekend/plans/media — presign an R2 upload for one item
+   *  of the "+Add" plan composer's media set (image or video). */
+  static async presignPlanMedia(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const contentType = String(req.body?.contentType || '');
+      const result = await WeekendService.presignPlanMediaUpload(contentType);
+      return ApiResponseUtil.success(res, result);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to prepare media upload');
+    }
+  }
+
+  /** POST /api/social/weekend/plans — the "+Add" composer's Post action. */
+  static async createPlan(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const plan = await WeekendService.createPlan(buyer, req.body || {});
+      return ApiResponseUtil.success(res, { plan }, 'Posted', 201);
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to post your weekend plan');
+    }
+  }
+
+  /** GET /api/social/weekend/plans/:id — edit-mode prefill for one plan. */
+  static async getPlan(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const plan = await WeekendService.getPlan(buyer, String(req.params['id'] || ''));
+      return ApiResponseUtil.success(res, { plan });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load that plan');
+    }
+  }
+
+  /** PUT /api/social/weekend/plans/:id — the card's own "Edit" action. */
+  static async updatePlan(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const plan = await WeekendService.updatePlan(buyer, String(req.params['id'] || ''), req.body || {});
+      return ApiResponseUtil.success(res, { plan }, 'Plan updated');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to update that plan');
+    }
+  }
+
+  /** DELETE /api/social/weekend/plans/:id */
+  static async removePlan(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolveBuyerFromRequest(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await WeekendService.removePlan(buyer, String(req.params['id'] || ''));
+      return ApiResponseUtil.success(res, { ok: true }, 'Plan removed');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to remove that plan');
+    }
+  }
+
   /** GET /api/social/weekend/users/:username */
   static async getForUser(req: Request, res: Response): Promise<any> {
     try {

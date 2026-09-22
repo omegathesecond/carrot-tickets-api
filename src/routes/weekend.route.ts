@@ -12,6 +12,15 @@ router.put('/me', authenticateBuyer, requireProfilePhoto, WeekendController.upse
 router.delete('/me', authenticateBuyer, WeekendController.removeMine);
 router.post('/media', authenticateBuyer, requireProfilePhoto, WeekendController.requestMediaUpload);
 
+// "+Add" plan composer (spec: separate from the singular /me status above —
+// see weekendStatus.model.ts's class doc comment). '/plans/media' before
+// '/plans/:id', same fixed-segment-first convention as '/users/search'.
+router.post('/plans/media', authenticateBuyer, requireProfilePhoto, WeekendController.presignPlanMedia);
+router.post('/plans', authenticateBuyer, requireProfilePhoto, WeekendController.createPlan);
+router.get('/plans/:id', authenticateBuyer, WeekendController.getPlan);
+router.put('/plans/:id', authenticateBuyer, requireProfilePhoto, WeekendController.updatePlan);
+router.delete('/plans/:id', authenticateBuyer, WeekendController.removePlan);
+
 router.get('/feed', optionalTicketsAuth, WeekendController.feed);
 router.get('/feed/all', optionalTicketsAuth, WeekendController.feedAll);
 router.get('/feed/looking-for-plans', optionalTicketsAuth, WeekendController.lookingForPlansFeed);

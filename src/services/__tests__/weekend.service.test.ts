@@ -585,4 +585,197 @@ describe('WeekendService', () => {
       await expect(WeekendService.cancelRequest(sender, id)).rejects.toMatchObject({ statusCode: 409 });
     });
   });
+
+  // "+Add" plan composer — separate `source:'plan_post'` rows, see
+  // weekendStatus.model.ts's class doc comment.
+  describe('createPlan / getPlan / updatePlan / removePlan', () => {
+    const OLD_ENV = process.env;
+    beforeEach(() => { process.env = { ...OLD_ENV, UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com' }; });
+    afterEach(() => { process.env = OLD_ENV; });
+
+    it('creates a brand-new plan on every call — never upserts, and never touches the profile-widget row', async () => {
+      const buyer = await seedBuyer('u_plan_multi');
+      await WeekendService.upsertStatus(buyer, { statusType: 'staying_in' });
+      const first = await WeekendService.createPlan(buyer, { statusType: 'have_plans', audience: 'public' });
+      const second = await WeekendService.createPlan(buyer, { statusType: 'bored', audience: 'public' });
+      expect(first.id).not.toBe(second.id);
+      expect(await WeekendStatus.countDocuments({ buyerId: buyer._id })).toBe(3); // 1 profile_widget + 2 plan_post
+      const widget = await WeekendService.getOwnStatus(buyer);
+      expect(widget?.statusType).toBe('staying_in'); // untouched by either createPlan call
+    });
+
+    it('rejects an invalid status / missing custom message / bad selected-people audience, same rules as upsertStatus', async () => {
+      const buyer = await seedBuyer('u_plan_validate');
+      await expect(WeekendService.createPlan(buyer, { statusType: 'not_real' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(WeekendService.createPlan(buyer, { statusType: 'custom' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(WeekendService.createPlan(buyer, { statusType: 'bored', audience: 'selected', selectedViewerIds: [] })).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('persists an ordered media array and returns it in cover-first order', async () => {
+      const buyer = await seedBuyer('u_plan_media');
+      const plan = await WeekendService.createPlan(buyer, {
+        statusType: 'have_plans',
+        media: [
+          { url: 'https://cdn.carrottickets.com/updates/raw/cover.jpg', type: 'image' },
+          { url: 'https://cdn.carrottickets.com/updates/raw/clip.mp4', type: 'video' },
+        ],
+      });
+      expect(plan.media).toHaveLength(2);
+      expect(plan.media[0]?.url).toContain('cover.jpg');
+      expect(plan.media[0]?.type).toBe('image');
+      expect(plan.media[1]?.type).toBe('video');
+      expect(plan.media[0]?.id).toBeTruthy();
+    });
+
+    it('rejects a media url that was not issued by the plan media presign endpoint', async () => {
+      const buyer = await seedBuyer('u_plan_media_bad');
+      await expect(
+        WeekendService.createPlan(buyer, { statusType: 'bored', media: [{ url: 'https://evil.example.com/x.jpg', type: 'image' }] })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('rejects more than the max allowed media items', async () => {
+      const buyer = await seedBuyer('u_plan_media_max');
+      const media = Array.from({ length: 11 }, (_, i) => ({ url: `https://cdn.carrottickets.com/updates/raw/${i}.jpg`, type: 'image' }));
+      await expect(WeekendService.createPlan(buyer, { statusType: 'bored', media })).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('is idempotent on a repeated clientRequestId (double-click / retried request never duplicates)', async () => {
+      const buyer = await seedBuyer('u_plan_idempotent');
+      const first = await WeekendService.createPlan(buyer, { statusType: 'have_plans', clientRequestId: 'dup-token-1' });
+      const second = await WeekendService.createPlan(buyer, { statusType: 'have_plans', clientRequestId: 'dup-token-1' });
+      expect(second.id).toBe(first.id);
+      expect(await WeekendStatus.countDocuments({ buyerId: buyer._id, source: 'plan_post' })).toBe(1);
+    });
+
+    it('lets two different plans reuse the same clientRequestId across different buyers', async () => {
+      const a = await seedBuyer('u_plan_idem_a');
+      const b = await seedBuyer('u_plan_idem_b');
+      const planA = await WeekendService.createPlan(a, { statusType: 'have_plans', clientRequestId: 'shared-token' });
+      const planB = await WeekendService.createPlan(b, { statusType: 'have_plans', clientRequestId: 'shared-token' });
+      expect(planA.id).not.toBe(planB.id);
+    });
+
+    it('getPlan returns the exact plan by id, including selectedViewers, and 404s for another buyer\'s plan', async () => {
+      const buyer = await seedBuyer('u_plan_get');
+      const person = await seedBuyer('u_plan_get_person');
+      const stranger = await seedBuyer('u_plan_get_stranger');
+      const plan = await WeekendService.createPlan(buyer, { statusType: 'bored', audience: 'selected', selectedViewerIds: [String(person._id)] });
+      const fetched = await WeekendService.getPlan(buyer, plan.id);
+      expect(fetched.selectedViewers.map((p) => p.id)).toEqual([String(person._id)]);
+      await expect(WeekendService.getPlan(stranger, plan.id)).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('updatePlan edits only the targeted plan, leaving the buyer\'s other plans and profile-widget row untouched', async () => {
+      const buyer = await seedBuyer('u_plan_update');
+      await WeekendService.upsertStatus(buyer, { statusType: 'staying_in' });
+      const planA = await WeekendService.createPlan(buyer, { statusType: 'have_plans', message: 'Plan A' });
+      const planB = await WeekendService.createPlan(buyer, { statusType: 'bored' });
+      const updated = await WeekendService.updatePlan(buyer, planA.id, { statusType: 'custom', message: 'Updated plan A' });
+      expect(updated.statusType).toBe('custom');
+      expect(updated.message).toBe('Updated plan A');
+      const untouchedB = await WeekendService.getPlan(buyer, planB.id);
+      expect(untouchedB.statusType).toBe('bored');
+      const widget = await WeekendService.getOwnStatus(buyer);
+      expect(widget?.statusType).toBe('staying_in');
+    });
+
+    it('updatePlan 404s when editing another buyer\'s plan', async () => {
+      const owner = await seedBuyer('u_plan_update_owner');
+      const stranger = await seedBuyer('u_plan_upd_stranger');
+      const plan = await WeekendService.createPlan(owner, { statusType: 'have_plans' });
+      await expect(WeekendService.updatePlan(stranger, plan.id, { statusType: 'bored' })).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('removePlan deletes only the targeted plan', async () => {
+      const buyer = await seedBuyer('u_plan_remove');
+      const planA = await WeekendService.createPlan(buyer, { statusType: 'have_plans' });
+      const planB = await WeekendService.createPlan(buyer, { statusType: 'bored' });
+      await WeekendService.removePlan(buyer, planA.id);
+      await expect(WeekendService.getPlan(buyer, planA.id)).rejects.toMatchObject({ statusCode: 404 });
+      expect(await WeekendService.getPlan(buyer, planB.id)).toBeTruthy();
+    });
+
+    it('removePlan 404s when removing another buyer\'s plan (and does not delete it)', async () => {
+      const owner = await seedBuyer('u_plan_remove_owner');
+      const stranger = await seedBuyer('u_plan_rm_stranger');
+      const plan = await WeekendService.createPlan(owner, { statusType: 'have_plans' });
+      await expect(WeekendService.removePlan(stranger, plan.id)).rejects.toMatchObject({ statusCode: 404 });
+      expect(await WeekendService.getPlan(owner, plan.id)).toBeTruthy();
+    });
+  });
+
+  describe('presignPlanMediaUpload', () => {
+    const OLD_ENV = process.env;
+    beforeEach(() => {
+      process.env = {
+        ...OLD_ENV,
+        UPDATES_R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+        UPDATES_R2_ACCESS_KEY_ID: 'test-key',
+        UPDATES_R2_SECRET_ACCESS_KEY: 'test-secret',
+        UPDATES_R2_BUCKET_NAME: 'updates-test',
+        UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com',
+      };
+    });
+    afterEach(() => { process.env = OLD_ENV; });
+
+    it('accepts image AND video content types (unlike the profile-widget presignMediaUpload)', async () => {
+      const image = await WeekendService.presignPlanMediaUpload('image/jpeg');
+      expect(image.type).toBe('image');
+      const video = await WeekendService.presignPlanMediaUpload('video/mp4');
+      expect(video.type).toBe('video');
+      expect(video.uploadUrl).toContain('r2.cloudflarestorage.com/updates/raw/');
+    });
+
+    it('rejects an unsupported content type', async () => {
+      await expect(WeekendService.presignPlanMediaUpload('application/pdf')).rejects.toMatchObject({ statusCode: 400 });
+    });
+  });
+
+  describe('multiple plans on the Home feed', () => {
+    const OLD_ENV = process.env;
+    beforeEach(() => { process.env = { ...OLD_ENV, UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com' }; });
+    afterEach(() => { process.env = OLD_ENV; });
+
+    it('prepends ALL of the viewer\'s own active plans (plus their profile-widget status), newest first, none hidden or replaced', async () => {
+      const viewer = await seedBuyer('u_multi_feed_viewer');
+      await WeekendService.upsertStatus(viewer, { statusType: 'staying_in', audience: 'public' });
+      const older = await WeekendService.createPlan(viewer, { statusType: 'have_plans', audience: 'public' });
+      await new Promise((r) => setTimeout(r, 5));
+      const newer = await WeekendService.createPlan(viewer, { statusType: 'bored', audience: 'public' });
+
+      const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
+      const ownCards = cards.filter((c) => c.user.id === String(viewer._id));
+      expect(ownCards).toHaveLength(3);
+      expect(ownCards[0]?.id).toBe(newer.id); // newest plan first
+      expect(ownCards.every((c) => c.isOwner)).toBe(true);
+      expect(ownCards.find((c) => c.id === older.id)?.editableAsPlan).toBe(true);
+      expect(ownCards.find((c) => c.statusType === 'staying_in')?.editableAsPlan).toBe(false); // profile-widget row, not a plan
+    });
+
+    it('a viewed-by-someone-else card is never flagged editableAsPlan', async () => {
+      const viewer = await seedBuyer('u_multi_feed_v2');
+      const owner = await seedBuyer('u_multi_feed_owner2');
+      await WeekendService.createPlan(owner, { statusType: 'have_plans', audience: 'public' });
+      const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
+      expect(cards.find((c) => c.user.id === String(owner._id))?.editableAsPlan).toBe(false);
+    });
+
+    it('carries every attached media item through to the feed card, cover first', async () => {
+      const viewer = await seedBuyer('u_multi_feed_media');
+      await WeekendService.createPlan(viewer, {
+        statusType: 'have_plans',
+        audience: 'public',
+        media: [
+          { url: 'https://cdn.carrottickets.com/updates/raw/a.jpg', type: 'image' },
+          { url: 'https://cdn.carrottickets.com/updates/raw/b.mp4', type: 'video' },
+        ],
+      });
+      const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
+      const own = cards.find((c) => c.user.id === String(viewer._id));
+      expect(own?.mediaItems).toHaveLength(2);
+      expect(own?.mediaItems[0]?.url).toContain('a.jpg');
+      expect(own?.mediaItems[1]?.type).toBe('video');
+    });
+  });
 });

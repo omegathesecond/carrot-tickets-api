@@ -50,6 +50,11 @@ export type WeekendAudience = (typeof WEEKEND_AUDIENCES)[number];
 
 export const WEEKEND_MESSAGE_MAXLEN = 200;
 
+/** "+Add" plan composer media set limits (spec §5/§6). */
+export const WEEKEND_PLAN_MEDIA_TYPES = ['image', 'video'] as const;
+export type WeekendPlanMediaType = (typeof WEEKEND_PLAN_MEDIA_TYPES)[number];
+export const WEEKEND_PLAN_MEDIA_MAX = 10;
+
 export const WEEKEND_REQUEST_KINDS = [
   'invite_to_event',
   'buy_ticket',
