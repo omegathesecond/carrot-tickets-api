@@ -95,7 +95,7 @@ describe('vote.service', () => {
     expect(new Set(kinds).size).toBe(kinds.length); // no duplicate kind
   });
 
-  it('hides results until the viewer has voted; reveals genuine totals/percentages after', async () => {
+  it('shows genuine totals/percentages before the viewer has voted, and after', async () => {
     const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
     const { Buyer } = await import('@models/buyer.model');
     const a = await Buyer.create({ phone: '+26878400001', password: 'secret1', username: 'voter_a' });
@@ -105,7 +105,8 @@ describe('vote.service', () => {
 
     const before = await getVotePayload(String(event._id), actorA);
     const busyQ = before.questions.find((q) => q.kind === 'busy')!;
-    expect(busyQ.results).toBeNull();
+    expect(busyQ.results).not.toBeNull(); // results visible before the viewer has answered
+    expect(busyQ.viewerHasVoted).toBe(false);
     expect(busyQ.totalVotes).toBe(0);
 
     await castVote(String(event._id), busyQ.id, actorA, 'packed');
@@ -185,7 +186,7 @@ describe('vote.service', () => {
     expect(songQAfter.suggestions![0]!.count).toBe(2);
   });
 
-  it('surfaces only CONFIRMED attendee tags publicly, and only once results are revealed', async () => {
+  it('surfaces only CONFIRMED attendee tags publicly, as soon as the window is open', async () => {
     const { VoteTagService } = await import('@services/voteTag.service');
     const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
     const { Buyer } = await import('@models/buyer.model');
@@ -196,11 +197,16 @@ describe('vote.service', () => {
 
     const before = await getVotePayload(String(event._id), voter);
     const attendingQ = before.questions.find((q) => q.kind === 'attending_with')!;
-    expect(attendingQ.confirmedTags).toBeUndefined(); // not revealed yet — viewer hasn't voted
+    expect(attendingQ.confirmedTags).toBeUndefined(); // none confirmed yet — no tags requested
 
     const confirmedTag = await VoteTagService.request(tagger, attendingQ.id, String(confirmedTarget._id));
     await VoteTagService.request(tagger, attendingQ.id, String(pendingTarget._id));
     await VoteTagService.confirm(confirmedTarget, String(confirmedTag._id));
+
+    // Visible even before the viewer casts their own answer.
+    const preVote = await getVotePayload(String(event._id), voter);
+    const preVoteQ = preVote.questions.find((q) => q.kind === 'attending_with')!;
+    expect(preVoteQ.confirmedTags).toHaveLength(1);
 
     await castVote(String(event._id), attendingQ.id, voter, 'solo');
     const after = await getVotePayload(String(event._id), voter);
@@ -296,7 +302,7 @@ describe('per-option voter avatars + full list (spec follow-up: profile pictures
     await disconnectTestDb();
   });
 
-  it('attaches a buyer avatar sample to each revealed option, and omits it while results are hidden', async () => {
+  it('attaches a buyer avatar sample to each option before AND after the viewer votes', async () => {
     const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
     const { Buyer } = await import('@models/buyer.model');
     const a = await Buyer.create({ phone: '+26878400020', password: 'secret1', username: 'ex_a', avatarUrl: 'https://cdn.example/a.jpg' });
@@ -304,12 +310,16 @@ describe('per-option voter avatars + full list (spec follow-up: profile pictures
     const actorA = { type: 'buyer' as const, id: String(a._id) };
     const actorB = { type: 'buyer' as const, id: String(b._id) };
 
+    await castVote(String(event._id), (await getVotePayload(String(event._id), actorA)).questions.find((q) => q.kind === 'bump_into')!.id, actorB, 'ex');
+
     const before = await getVotePayload(String(event._id), actorA);
     const bumpQ = before.questions.find((q) => q.kind === 'bump_into')!;
-    expect(bumpQ.results).toBeNull(); // no selectors leak before the viewer has voted
+    expect(bumpQ.viewerHasVoted).toBe(false);
+    const preVoteOption = bumpQ.results!.options.find((o) => o.key === 'ex')!;
+    expect(preVoteOption.count).toBe(1);
+    expect(preVoteOption.selectors.map((s) => s.id)).toEqual([String(b._id)]);
 
     await castVote(String(event._id), bumpQ.id, actorA, 'ex');
-    await castVote(String(event._id), bumpQ.id, actorB, 'ex');
 
     const after = await getVotePayload(String(event._id), actorA);
     const revealed = after.questions.find((q) => q.kind === 'bump_into')!;
@@ -321,6 +331,30 @@ describe('per-option voter avatars + full list (spec follow-up: profile pictures
 
     const noneOption = revealed.results!.options.find((o) => o.key === 'no_one_in_particular')!;
     expect(noneOption.selectors).toEqual([]);
+  });
+
+  it("excludes an actor blocked (either direction) by the viewer from the avatar sample and voter list, without changing the total count", async () => {
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
+    const { Buyer } = await import('@models/buyer.model');
+    const { BlockService } = await import('@services/block.service');
+    const viewer = await Buyer.create({ phone: '+26878400022', password: 'secret1', username: 'viewer_i' });
+    const blocked = await Buyer.create({ phone: '+26878400023', password: 'secret1', username: 'blocked_i' });
+    const stranger = await Buyer.create({ phone: '+26878400024', password: 'secret1', username: 'stranger_i' });
+    const viewerActor = { type: 'buyer' as const, id: String(viewer._id) };
+
+    const payload = await getVotePayload(String(event._id), viewerActor);
+    const bumpQ = payload.questions.find((q) => q.kind === 'bump_into')!;
+    await castVote(String(event._id), bumpQ.id, { type: 'buyer', id: String(blocked._id) }, 'ex');
+    await castVote(String(event._id), bumpQ.id, { type: 'buyer', id: String(stranger._id) }, 'ex');
+    await BlockService.block(viewer, String(blocked._id));
+
+    const after = await getVotePayload(String(event._id), viewerActor);
+    const exOption = after.questions.find((q) => q.kind === 'bump_into')!.results!.options.find((o) => o.key === 'ex')!;
+    expect(exOption.count).toBe(2); // genuine total unaffected by the viewer's block
+    expect(exOption.selectors.map((s) => s.id)).toEqual([String(stranger._id)]); // blocked buyer's avatar excluded
+
+    const voters = await getOptionVoters(String(event._id), bumpQ.id, 'ex', viewerActor);
+    expect(voters.voters.map((v) => v.id)).toEqual([String(stranger._id)]);
   });
 
   it('caps the inline sample at 6 but getOptionVoters pages through every selector', async () => {
@@ -350,7 +384,7 @@ describe('per-option voter avatars + full list (spec follow-up: profile pictures
     expect(allIds.size).toBe(8); // no duplicates/drops across the cursor boundary
   });
 
-  it('rejects getOptionVoters for a question the viewer has not answered while voting is still open', async () => {
+  it('lets getOptionVoters see who picked an option before the viewer answers, but not before the window opens', async () => {
     const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4 });
     const { Buyer } = await import('@models/buyer.model');
     const a = await Buyer.create({ phone: '+26878400030', password: 'secret1', username: 'peeker' });
@@ -362,9 +396,14 @@ describe('per-option voter avatars + full list (spec follow-up: profile pictures
     const busyQ = payload.questions.find((q) => q.kind === 'busy')!;
     await castVote(String(event._id), busyQ.id, actorB, 'packed');
 
-    await expect(getOptionVoters(String(event._id), busyQ.id, 'packed', actorA)).rejects.toMatchObject({ statusCode: 403 });
+    // Peeker hasn't voted yet, but can already see who picked 'packed'.
+    await expect(getOptionVoters(String(event._id), busyQ.id, 'packed', actorA)).resolves.toMatchObject({ voters: [{ id: String(b._id) }] });
     await castVote(String(event._id), busyQ.id, actorA, 'quiet');
     await expect(getOptionVoters(String(event._id), busyQ.id, 'packed', actorA)).resolves.toMatchObject({ voters: [{ id: String(b._id) }] });
+
+    const notYetOpen = await seedEvent({ startInDays: 20, publishedDaysAgo: 1 });
+    const [q] = await ensureVoteQuestions(notYetOpen as any);
+    await expect(getOptionVoters(String(notYetOpen._id), String(q!._id), 'packed', actorA)).rejects.toMatchObject({ statusCode: 409 });
   });
 });
 

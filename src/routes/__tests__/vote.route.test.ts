@@ -78,7 +78,8 @@ describe('Vote routes', () => {
     const question = before.body.data.questions.find((q: any) => q.kind === 'attending_with');
     expect(question).toBeDefined();
     expect(question.viewerHasVoted).toBe(false);
-    expect(question.results).toBeNull();
+    expect(question.results).not.toBeNull(); // results visible before the viewer answers
+    expect(question.results.totalVotes).toBe(0);
 
     const cast = await request(app)
       .post(`/api/public/events/${eventId}/vote/${question.id}`)
