@@ -8,6 +8,7 @@ import { AttendeeTag } from '@models/attendeeTag.model';
 import { Buyer } from '@models/buyer.model';
 import { getVoteWindow, VoteWindow } from '@utils/voteWindow.util';
 import { assertActorNotSuspended } from '@services/socialAuthor.service';
+import { BlockService } from '@services/block.service';
 import { HttpError } from '@utils/httpError.util';
 import type { SocialActor } from '@utils/socialActor.util';
 
@@ -183,14 +184,15 @@ export interface VoteQuestionView {
       label: string;
       count: number;
       percent: number;
-      /** A small recent sample of buyers who picked this option — "display
-       *  the profile pictures of users who selected that option" follow-up
-       *  (spec §6 compatibility pass). Vendor/organizer responses are never
-       *  included (no public avatar to show). Only present once `results`
-       *  itself is revealed, so it's gated by the same "vote to reveal" /
-       *  closed rule as the rest of `results` — see buildQuestionView. Use
-       *  `count` for the "+N" overflow past this sample and getOptionVoters
-       *  for the full clickable list. */
+      /** A small recent sample of buyers who picked this option — "show
+       *  compact profile pictures of the users who selected each option,
+       *  before the current user answers" follow-up. Vendor/organizer
+       *  responses are never included (no public avatar to show), and any
+       *  actor blocked (either direction) by the viewer is excluded — see
+       *  excludedSelectorActorIds. Present as soon as the window is open
+       *  (no vote-to-reveal gate) — see buildQuestionView. Use `count` for
+       *  the "+N" overflow past this sample and getOptionVoters for the
+       *  full clickable list. */
       selectors: VoteSelectorRef[];
     }>;
   } | null;
@@ -199,11 +201,11 @@ export interface VoteQuestionView {
   viewerTags?: Array<{ id: string; status: string; user: { id: string; name: string | null; username: string | null; avatarUrl: string | null } }>;
   incomingTagRequests?: Array<{ id: string; user: { id: string; name: string | null; username: string | null; avatarUrl: string | null } }>;
   /** "Confirmed tagged attendees where applicable" (spec §6) — every CONFIRMED
-   *  attending-with pair for this question, publicly visible once results are
-   *  revealed (viewer has voted, or voting closed). Pending/declined tags are
-   *  never included here — those stay private to the two parties (see
-   *  viewerTags/incomingTagRequests above), matching "only confirmed tags
-   *  should become publicly visible" (spec §2). */
+   *  attending-with pair for this question, publicly visible as soon as the
+   *  window is open. Pending/declined tags are never included here — those
+   *  stay private to the two parties (see viewerTags/incomingTagRequests
+   *  above), matching "only confirmed tags should become publicly visible"
+   *  (spec §2). */
   confirmedTags?: Array<{
     id: string;
     tagger: { id: string; name: string | null; username: string | null; avatarUrl: string | null };
@@ -255,20 +257,39 @@ function buyerRef(map: Map<string, any>, id: string) {
   return { id, name: b?.name ?? null, username: b?.username ?? null, avatarUrl: b?.avatarUrl ?? null };
 }
 
+/** Ids to keep out of any buyer-facing list of who-selected-what: blocked in
+ *  EITHER direction (mirrors story.service#listForViewer / nearby.service),
+ *  so a blocked relationship hides that person's avatar/name from results
+ *  regardless of who blocked whom. Anonymous viewers have nothing to hide
+ *  from and vendors aren't buyers, so only a buyer actor yields exclusions. */
+async function excludedSelectorActorIds(actor: SocialActor | null): Promise<string[]> {
+  if (!actor || actor.type !== 'buyer') return [];
+  const [iBlocked, blockedMe] = await Promise.all([BlockService.listBlockedIds(actor.id), BlockService.listBlockerIds(actor.id)]);
+  return [...new Set([...iBlocked, ...blockedMe])];
+}
+
 /** How many avatars to show under each option before collapsing into "+N" —
  *  see VoteSelectorRef's doc comment. */
 const SELECTOR_SAMPLE_SIZE = 6;
 
 /** One query for the whole question (not one per option) — most-recent
  *  responder first per option, buyer actors only. Backs the `selectors`
- *  sample attached to `results.options` in buildQuestionView. */
+ *  sample attached to `results.options` in buildQuestionView. Excludes any
+ *  actor blocked (either direction) by the viewer — the total `count` stays
+ *  genuine/unfiltered, only the visible avatar sample respects the block. */
 async function sampleSelectorsByOption(
   questionId: string,
   optionKeys: string[],
+  excludedActorIds: string[],
   limit = SELECTOR_SAMPLE_SIZE
 ): Promise<Map<string, VoteSelectorRef[]>> {
   if (optionKeys.length === 0) return new Map();
-  const rows = await VoteResponse.find({ questionId, actorType: 'buyer', optionKey: { $in: optionKeys } })
+  const rows = await VoteResponse.find({
+    questionId,
+    actorType: 'buyer',
+    optionKey: { $in: optionKeys },
+    ...(excludedActorIds.length > 0 ? { actorId: { $nin: excludedActorIds } } : {}),
+  })
     .sort({ updatedAt: -1 })
     .select('actorId optionKey')
     .lean();
@@ -318,7 +339,10 @@ async function buildQuestionView(q: IVoteQuestion, window: VoteWindow, actor: So
     viewerResponse = await VoteResponse.findOne({ questionId, actorType: actor.type, actorId: actor.id }).lean();
   }
   const viewerHasVoted = !!viewerResponse;
-  const reveal = viewerHasVoted || window.hasClosed;
+  // Results are visible to everyone once the window is open — "see other
+  // users' selections before answering" (no vote-to-reveal gate). A closed
+  // window still reveals (there's nothing left to protect by then either).
+  const reveal = window.hasOpened;
 
   let options: Array<{ key: string; label: string }> = q.options.map((o) => ({ key: o.key, label: o.label }));
   let totalVotes = 0;
@@ -344,7 +368,8 @@ async function buildQuestionView(q: IVoteQuestion, window: VoteWindow, actor: So
   }
 
   if (results) {
-    const selectorMap = await sampleSelectorsByOption(questionId, results.options.map((o) => o.key));
+    const excludedActorIds = await excludedSelectorActorIds(actor);
+    const selectorMap = await sampleSelectorsByOption(questionId, results.options.map((o) => o.key), excludedActorIds);
     results = { ...results, options: results.options.map((o) => ({ ...o, selectors: selectorMap.get(o.key) ?? [] })) };
   }
 
@@ -431,10 +456,9 @@ const VOTERS_PAGE_SIZE = 30;
 /**
  * "Clicking the count should open the complete list of those users" follow-up
  * — the full, paginated (cursor = last row's _id) list of buyers who picked
- * one option on one question. Gated by the exact same "vote to reveal" /
- * closed rule as `results` itself (buildQuestionView): a viewer who hasn't
- * answered this question yet, before it closes, can't back into the results
- * this way either.
+ * one option on one question. Visible as soon as the window is open (no
+ * vote-to-reveal gate — matches buildQuestionView) and excludes any actor
+ * blocked (either direction) by the viewer, same as sampleSelectorsByOption.
  */
 export async function getOptionVoters(
   eventId: string,
@@ -449,16 +473,14 @@ export async function getOptionVoters(
   const question = await VoteQuestion.findOne({ _id: questionId, eventId });
   if (!question || question.kind === 'attend') throw new HttpError(404, 'Attendance Status question not found');
 
-  let viewerHasVoted = false;
-  if (actor) {
-    viewerHasVoted = !!(await VoteResponse.exists({ questionId, actorType: actor.type, actorId: actor.id }));
-  }
-  if (!(viewerHasVoted || window.hasClosed)) {
-    throw new HttpError(403, 'Respond to this question to see who picked each option');
+  if (!window.hasOpened) {
+    throw new HttpError(409, 'Attendance Status is not open yet');
   }
 
+  const excludedActorIds = await excludedSelectorActorIds(actor);
   const boundedLimit = Math.min(50, Math.max(1, limit));
   const query: Record<string, unknown> = { questionId, optionKey, actorType: 'buyer' };
+  if (excludedActorIds.length > 0) query['actorId'] = { $nin: excludedActorIds };
   if (cursor) query['_id'] = { $lt: new Types.ObjectId(cursor) };
   const rows = await VoteResponse.find(query).sort({ _id: -1 }).limit(boundedLimit + 1).select('actorId').lean();
   const hasMore = rows.length > boundedLimit;
