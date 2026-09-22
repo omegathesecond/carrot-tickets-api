@@ -19,16 +19,16 @@ describe('GET /api/public/events?category=', () => {
   });
 
   it('filters to the requested category and includes category in the card', async () => {
-    await Event.create({ ...common(), name: 'Gig', category: 'Music' });
-    await Event.create({ ...common(), name: 'Expo', category: 'Tech' });
-    const res = await request(app).get('/api/public/events?category=Music').expect(200);
+    await Event.create({ ...common(), name: 'Gig', category: 'sports' });
+    await Event.create({ ...common(), name: 'Expo', category: 'education' });
+    const res = await request(app).get('/api/public/events?category=sports').expect(200);
     const names = res.body.data.events?.map((e: any) => e.name) ?? res.body.data.map((e: any) => e.name);
     expect(names).toContain('Gig');
     expect(names).not.toContain('Expo');
   });
 
   it('includes category on the card, and legacy events without a category serialize as Other', async () => {
-    await Event.create({ ...common(), name: 'Gig', category: 'Music' });
+    await Event.create({ ...common(), name: 'Gig', category: 'sports' });
     // Legacy-shaped event: no category field set at all (mimics pre-migration docs).
     await Event.collection.insertOne({
       ...common(),
@@ -40,13 +40,13 @@ describe('GET /api/public/events?category=', () => {
     const events = res.body.data.events ?? res.body.data;
     const gig = events.find((e: any) => e.name === 'Gig');
     const legacy = events.find((e: any) => e.name === 'Legacy');
-    expect(gig.category).toBe('Music');
-    expect(legacy.category).toBe('Other');
+    expect(gig.category).toBe('sports');
+    expect(legacy.category).toBe('events');
   });
 
   it('treats category=All the same as no filter', async () => {
-    await Event.create({ ...common(), name: 'Gig', category: 'Music' });
-    await Event.create({ ...common(), name: 'Expo', category: 'Tech' });
+    await Event.create({ ...common(), name: 'Gig', category: 'sports' });
+    await Event.create({ ...common(), name: 'Expo', category: 'education' });
     const res = await request(app).get('/api/public/events?category=All').expect(200);
     const names = res.body.data.events?.map((e: any) => e.name) ?? res.body.data.map((e: any) => e.name);
     expect(names).toContain('Gig');

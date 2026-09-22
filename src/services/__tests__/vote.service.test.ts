@@ -41,16 +41,16 @@ async function seedEvent(opts: { startInDays: number; publishedDaysAgo: number; 
 
 describe('deriveQuestionDefinitions', () => {
   it('only includes gated questions when the event actually carries their data', () => {
-    const bare = deriveQuestionDefinitions({ lineup: undefined, outfitThemeOptions: undefined, category: 'Other' as any });
+    const bare = deriveQuestionDefinitions({ lineup: undefined, outfitThemeOptions: undefined, category: 'events' as any });
     expect(bare.map((d) => d.kind)).toEqual(['attending_with', 'busy', 'bump_into', 'cup']);
 
-    const full = deriveQuestionDefinitions({ lineup: ['DJ Nova', 'MC Rae'], outfitThemeOptions: ['White Party', 'Neon'], category: 'Music' as any });
+    const full = deriveQuestionDefinitions({ lineup: ['DJ Nova', 'MC Rae'], outfitThemeOptions: ['White Party', 'Neon'], category: 'nightlife' as any });
     expect(full.map((d) => d.kind)).toEqual(['attending_with', 'busy', 'bump_into', 'cup', 'artist', 'song', 'outfit']);
     expect(full.find((d) => d.kind === 'artist')!.options.map((o) => o.label)).toEqual(['DJ Nova', 'MC Rae']);
   });
 
-  it('includes the song question for a lineup event even outside the Music category', () => {
-    const defs = deriveQuestionDefinitions({ lineup: ['DJ Nova'], outfitThemeOptions: undefined, category: 'Other' as any });
+  it('includes the song question for a lineup event even outside the nightlife category', () => {
+    const defs = deriveQuestionDefinitions({ lineup: ['DJ Nova'], outfitThemeOptions: undefined, category: 'events' as any });
     expect(defs.map((d) => d.kind)).toContain('song');
   });
 });
@@ -165,7 +165,7 @@ describe('vote.service', () => {
   });
 
   it('suggestSong dedupes near-identical suggestions and votes the suggester onto the existing one', async () => {
-    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4, category: 'Music' });
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4, category: 'nightlife' });
     const { Buyer } = await import('@models/buyer.model');
     const a = await Buyer.create({ phone: '+26878400006', password: 'secret1', username: 'voter_f' });
     const b = await Buyer.create({ phone: '+26878400007', password: 'secret1', username: 'voter_g' });
@@ -217,7 +217,7 @@ describe('vote.service', () => {
   });
 
   it('renders the Attendance Status questions in the required fixed order, with event-conditional questions trailing', async () => {
-    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4, lineup: ['DJ Nova'], outfitThemeOptions: ['Neon'], category: 'Music' });
+    const event = await seedEvent({ startInDays: 3, publishedDaysAgo: 4, lineup: ['DJ Nova'], outfitThemeOptions: ['Neon'], category: 'nightlife' });
     const payload = await getVotePayload(String(event._id), null);
     expect(payload.questions.map((q) => q.kind)).toEqual([
       'attending_with',

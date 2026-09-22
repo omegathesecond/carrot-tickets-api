@@ -29,7 +29,7 @@ describe('event card field parity: buildEventCardFields <-> feed event slide', (
       endTime: new Date(Date.now() + 90000000),
       posterUrl: 'p', thumbnailUrl: 't',
       status: EventStatus.PUBLISHED,
-      category: 'Music',
+      category: 'sports',
       ticketTypes: [
         { name: 'GA', price: 100, quantity: 5, available: 5 },
         { name: 'VIP', price: 300, quantity: 1, available: 0, isSoldOut: true },

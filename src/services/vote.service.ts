@@ -104,7 +104,9 @@ export function deriveQuestionDefinitions(
   }
 
   // DJ/music-relevant events only — a theatre or food festival has no DJ set.
-  if (event.category === 'Music' || (event.lineup && event.lineup.length > 0)) {
+  // 'nightlife' replaces the old 'Music' category (removed in the 16-category
+  // taxonomy rollout — see constants/eventCategories).
+  if (event.category === 'nightlife' || (event.lineup && event.lineup.length > 0)) {
     defs.push({ kind: 'song', prompt: 'What song must the DJ play?', options: [] });
   }
 

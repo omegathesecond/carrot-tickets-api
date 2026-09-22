@@ -24,25 +24,25 @@ describe('GET /api/public/feed?category=', () => {
   });
 
   it('returns only event slides of the requested category', async () => {
-    await Event.create({ ...common(), name: 'MusicEvt', category: 'Music' });
-    await Event.create({ ...common(), name: 'TechEvt', category: 'Tech' });
+    await Event.create({ ...common(), name: 'MusicEvt', category: 'sports' });
+    await Event.create({ ...common(), name: 'TechEvt', category: 'education' });
 
-    const res = await request(app).get('/api/public/feed?tab=events&category=Music').expect(200);
+    const res = await request(app).get('/api/public/feed?tab=events&category=sports').expect(200);
     const eventNames = res.body.data.items.filter((s: any) => s.type === 'event').map((s: any) => s.name);
     expect(eventNames).toContain('MusicEvt');
     expect(eventNames).not.toContain('TechEvt');
   });
 
   it('drops update slides whose linked event is not in the requested category, and updates with no eventId', async () => {
-    const musicEvent = await Event.create({ ...common(), name: 'MusicEvt', category: 'Music' });
-    const techEvent = await Event.create({ ...common(), name: 'TechEvt', category: 'Tech' });
+    const musicEvent = await Event.create({ ...common(), name: 'MusicEvt', category: 'sports' });
+    const techEvent = await Event.create({ ...common(), name: 'TechEvt', category: 'education' });
     const media = { rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } };
 
     await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'music update', media: [media], eventId: musicEvent._id });
     await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'tech update', media: [media], eventId: techEvent._id });
     await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'no event update', media: [media] });
 
-    const res = await request(app).get('/api/public/feed?tab=for-you&category=Music').expect(200);
+    const res = await request(app).get('/api/public/feed?tab=for-you&category=sports').expect(200);
     const captions = res.body.data.items.filter((s: any) => s.type === 'update').map((s: any) => s.caption);
     expect(captions).toContain('music update');
     expect(captions).not.toContain('tech update');
@@ -50,8 +50,8 @@ describe('GET /api/public/feed?category=', () => {
   });
 
   it('behaves unchanged when category is absent or All', async () => {
-    await Event.create({ ...common(), name: 'MusicEvt', category: 'Music' });
-    await Event.create({ ...common(), name: 'TechEvt', category: 'Tech' });
+    await Event.create({ ...common(), name: 'MusicEvt', category: 'sports' });
+    await Event.create({ ...common(), name: 'TechEvt', category: 'education' });
 
     const resNoFilter = await request(app).get('/api/public/feed?tab=events').expect(200);
     const namesNoFilter = resNoFilter.body.data.items.filter((s: any) => s.type === 'event').map((s: any) => s.name);
@@ -63,12 +63,12 @@ describe('GET /api/public/feed?category=', () => {
   });
 
   it('exposes category on event slides, falling back to Other for legacy events with no category', async () => {
-    await Event.create({ ...common(), name: 'MusicEvt', category: 'Music' });
+    await Event.create({ ...common(), name: 'MusicEvt', category: 'sports' });
     await Event.create({ ...common(), name: 'LegacyEvt' }); // no category field, mirrors pre-migration docs
 
     const res = await request(app).get('/api/public/feed?tab=events').expect(200);
     const slides = res.body.data.items.filter((s: any) => s.type === 'event');
-    expect(slides.find((s: any) => s.name === 'MusicEvt').category).toBe('Music');
-    expect(slides.find((s: any) => s.name === 'LegacyEvt').category).toBe('Other');
+    expect(slides.find((s: any) => s.name === 'MusicEvt').category).toBe('sports');
+    expect(slides.find((s: any) => s.name === 'LegacyEvt').category).toBe('events');
   });
 });
