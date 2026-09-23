@@ -73,6 +73,72 @@ const statusStage = {
   },
 };
 
+export type TagSort = 'recent' | 'balance';
+
+/**
+ * A page boundary, carried between requests.
+ *
+ * `recent` orders on _id alone, so the last row's _id IS the whole boundary —
+ * the existing convention, and cursors already issued under it stay valid.
+ *
+ * `balance` orders on a value that repeats. Bulk-registered plastic all carries
+ * the same float, so a balance-only cursor has no correct comparison available:
+ * `balance < cursor` skips every row sharing the boundary balance, and
+ * `balance <= cursor` re-serves them forever. The fix is to order on
+ * (balance, _id) — a TOTAL order, because _id is unique — and to carry both
+ * halves, so the boundary can be stated as the strict "after this row"
+ * predicate that `cursorMatch` below builds.
+ */
+export interface TagCursor {
+  /** Null under the `recent` sort, which does not order on balance at all. */
+  balance: number | null;
+  id: mongoose.Types.ObjectId;
+}
+
+const HEX24 = /^[0-9a-fA-F]{24}$/;
+/**
+ * "<balance>:<walletId>". Balance is non-negative integer cents — wallet.model
+ * pins `min: 0` — so there is no sign to parse. Deliberately legible rather
+ * than base64: a cursor that turns up in a support ticket about a money screen
+ * should be readable without a decoder.
+ */
+const BALANCE_CURSOR = /^(\d{1,15}):([0-9a-fA-F]{24})$/;
+
+/**
+ * Parses a cursor AGAINST THE SORT it was issued under, returning null for one
+ * that does not belong to it. The two sorts mint different shapes and a cursor
+ * from one is meaningless under the other, so the mismatch is a 400 in
+ * TagReportController.list rather than a silently wrong page. Shared with the
+ * controller so the format has exactly one definition.
+ */
+export function parseTagCursor(cursor: string, sort: TagSort): TagCursor | null {
+  if (sort === 'balance') {
+    const m = BALANCE_CURSOR.exec(cursor);
+    if (!m) return null;
+    return { balance: Number(m[1]!), id: new mongoose.Types.ObjectId(m[2]!) };
+  }
+  if (!HEX24.test(cursor)) return null;
+  return { balance: null, id: new mongoose.Types.ObjectId(cursor) };
+}
+
+/** The inverse of `parseTagCursor`: the boundary row, written as a cursor. */
+function tagCursorToken(row: { _id: unknown; balance: number }, sort: TagSort): string {
+  return sort === 'balance' ? `${row.balance}:${String(row._id)}` : String(row._id);
+}
+
+/** The strict "everything after this row" predicate, in the sort's own order. */
+function cursorMatch(cursor: TagCursor, sort: TagSort): Record<string, unknown> {
+  if (sort !== 'balance') return { _id: { $lt: cursor.id } };
+  return {
+    $or: [
+      { balance: { $lt: cursor.balance } },
+      // The tiebreak. Without it a run of equal balances either repeats or
+      // loses half its rows at every page boundary.
+      { balance: cursor.balance, _id: { $lt: cursor.id } },
+    ],
+  };
+}
+
 /**
  * Read-only aggregations behind the organizer's Tags screen. A "tag" here is a
  * Wallet: the plastic carries only a UID, the wallet carries the money and the
@@ -114,17 +180,31 @@ export class TagReportService {
 
   static async list(
     eventId: string,
-    opts: { limit?: number; cursor?: string; status?: TagStatus; q?: string },
+    opts: { limit?: number; cursor?: string; status?: TagStatus; q?: string; funded?: boolean; sort?: TagSort },
   ): Promise<{ tags: TagRow[]; hasMore: boolean; nextCursor: string | null }> {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const sort: TagSort = opts.sort ?? 'recent';
     const match: Record<string, unknown> = { eventId: new mongoose.Types.ObjectId(eventId) };
-    // _id desc + a strictly-less-than cursor: the same convention as the stock
-    // movements feed, so a row can neither repeat nor be skipped at a boundary.
-    if (opts.cursor) match['_id'] = { $lt: new mongoose.Types.ObjectId(opts.cursor) };
+
+    // Applied HERE, ahead of the ticket $lookup, not after it: at an event that
+    // bulk-registers plastic before the gates open this is the difference
+    // between joining every tag and joining the handful holding money (at the
+    // Bikers Rally, 11 of 496).
+    if (opts.funded) match['balance'] = { $gt: 0 };
+
+    // Strictly-after-the-last-row cursor, the same convention as the stock
+    // movements feed, so a row can neither repeat nor be skipped at a boundary
+    // — but expressed in whichever order this page is actually sorted by.
+    // A cursor that does not parse was already rejected as a 400 upstream;
+    // paging from the start beats paging from a guessed place.
+    const cursor = opts.cursor ? parseTagCursor(opts.cursor, sort) : null;
+    if (cursor) Object.assign(match, cursorMatch(cursor, sort));
 
     const pipeline: any[] = [
       { $match: match },
-      { $sort: { _id: -1 } },
+      // The _id tiebreak is not decoration: it is what makes the balance
+      // cursor above a total order, and so what makes paging correct.
+      { $sort: sort === 'balance' ? { balance: -1, _id: -1 } : { _id: -1 } },
       { $lookup: { from: Ticket.collection.name, localField: 'ticketId', foreignField: '_id', as: 'ticket' } },
       { $unwind: { path: '$ticket', preserveNullAndEmptyArrays: true } },
       { $addFields: { tagStatus: statusStage } },
@@ -162,7 +242,9 @@ export class TagReportService {
         },
       })),
       hasMore,
-      nextCursor: hasMore ? String(page[page.length - 1]!._id) : null,
+      // The cursor has to describe the boundary IN THIS PAGE'S ORDER, so its
+      // shape follows the sort — see TagCursor.
+      nextCursor: hasMore ? tagCursorToken(page[page.length - 1]!, sort) : null,
     };
   }
 
