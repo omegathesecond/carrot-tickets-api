@@ -1,12 +1,14 @@
 import mongoose from 'mongoose';
 import { Event } from '@models/event.model';
+import { DEFAULT_EVENT_CATEGORY } from '@/constants/eventCategories';
 
-/** One-time, idempotent: events written before `category` existed become 'Other'
- *  (organizers re-tag from the dashboard). Never inferred from the name. */
+/** One-time, idempotent: events written before `category` existed become the
+ *  catch-all default (organizers re-tag from the dashboard). Never inferred
+ *  from the name. */
 export async function backfillEventCategory(): Promise<{ updated: number }> {
   const res = await Event.updateMany(
     { category: { $exists: false } },
-    { $set: { category: 'Other' } },
+    { $set: { category: DEFAULT_EVENT_CATEGORY } },
   );
   return { updated: res.modifiedCount };
 }
