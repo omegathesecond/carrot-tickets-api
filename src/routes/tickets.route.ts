@@ -762,6 +762,10 @@ router.post('/events/:eventId/tags/:walletId/refund', requireTicketsPermission(T
 
 router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
 router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
+// Registered BEFORE the bare path would ever be reached with a ".pdf" suffix —
+// Express matches literally, so the two are distinct routes, not one with an
+// extension. Same guard as the JSON view: the PDF exposes nothing extra.
+router.get('/events/:eventId/stock/reconciliation.pdf', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliationPdf);
 router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
 router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.movements);
 

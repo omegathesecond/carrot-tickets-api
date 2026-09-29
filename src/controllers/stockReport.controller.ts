@@ -3,6 +3,20 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedCashlessEvent } from '@controllers/organizerCashless.controller';
 import { StockReportService } from '@services/stockReport.service';
+import { StockReconciliationPdfService } from '@services/stockReconciliationPdf.service';
+import { EVENT_TIMEZONE } from '@utils/eventTime.util';
+
+/**
+ * A download filename an organiser can file without renaming: the event, then
+ * the date it describes. Anything outside [A-Za-z0-9-] is stripped, so an event
+ * name carrying a quote or a slash cannot break out of the Content-Disposition
+ * header.
+ */
+function reconciliationFilename(eventName: string): string {
+  const slug = eventName.replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'event';
+  const date = new Date().toLocaleDateString('en-CA', { timeZone: EVENT_TIMEZONE }); // YYYY-MM-DD
+  return `stock-reconciliation-${slug}-${date}.pdf`;
+}
 
 /**
  * Organiser stock reporting (design 2026-08-13, Slice 4). Read-only surfaces —
@@ -34,6 +48,33 @@ export class StockReportController {
       return ApiResponseUtil.success(res, { event: { id: String(event._id), name: event.name }, ...data });
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load reconciliation', 500);
+    }
+  }
+
+  /**
+   * GET /api/tickets/events/:eventId/stock/reconciliation.pdf
+   *
+   * The same reconciliation as above, rendered for printing. It calls the SAME
+   * service method the JSON endpoint calls, so the page an organiser hands a
+   * stall manager cannot disagree with the one on their screen.
+   */
+  static async reconciliationPdf(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = String(req.params['eventId']);
+      const event = await loadOwnedCashlessEvent(req, res, eventId);
+      if (!event) return;
+
+      const data = await StockReportService.reconciliation(eventId, event.startTime);
+      const buffer = await StockReconciliationPdfService.buildPdfBuffer(
+        { name: event.name, venue: (event as any).venue },
+        data,
+      );
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${reconciliationFilename(event.name)}"`);
+      return res.send(buffer);
+    } catch (e: any) {
+      return ApiResponseUtil.error(res, e?.message || 'Failed to build the reconciliation PDF', 500);
     }
   }
 
