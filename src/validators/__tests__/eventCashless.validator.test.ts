@@ -1,6 +1,6 @@
 import { createEventSchema, updateEventSchema } from '@validators/tickets.validator';
 
-const base = { name: 'E', venue: 'V', eventDate: new Date(Date.now() + 8.64e7), startTime: new Date(Date.now() + 8.64e7), endTime: new Date(Date.now() + 9e7) };
+const base = { name: 'E', venue: 'V', category: 'events', eventDate: new Date(Date.now() + 8.64e7), startTime: new Date(Date.now() + 8.64e7), endTime: new Date(Date.now() + 9e7) };
 
 it('accepts cashless: true on create', () => {
   const { error, value } = createEventSchema.validate({ ...base, cashless: true });
