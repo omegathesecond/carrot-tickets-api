@@ -5,6 +5,7 @@ import { PaymentMethod, TicketStatus } from '@interfaces/ticket.interface';
 import { Ticket } from '@models/ticket.model';
 import { normalizePhone } from '@utils/phone.util';
 import type { EventCategory } from '@/constants/eventCategories';
+import { DEFAULT_EVENT_CATEGORY } from '@/constants/eventCategories';
 import mongoose from 'mongoose';
 import { CommunityService } from '@services/community.service';
 import { HttpError } from '@utils/httpError.util';
@@ -125,7 +126,7 @@ export class EventService {
         isMultiDay: params.isMultiDay,
         cashless: params.cashless,
         capacity: params.capacity,
-        category: params.category ?? 'Other',
+        category: params.category ?? DEFAULT_EVENT_CATEGORY,
         ticketing: params.ticketing ?? 'carrot',
         externalTicketUrl: params.externalTicketUrl,
         currency: params.currency ?? 'SZL',

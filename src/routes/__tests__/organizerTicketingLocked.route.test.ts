@@ -39,6 +39,7 @@ it('forces ticketing to carrot on create, ignoring an external request', async (
     .send({
       name: 'Rooftop Jam', venue: 'The Roof',
       eventDate: futureIso(10), startTime: futureIso(10, 18), endTime: futureIso(10, 23),
+      category: 'nightlife',
       ticketing: 'external', externalTicketUrl: 'https://organizer-owned.example.com/tickets',
     });
 
@@ -54,6 +55,7 @@ it('rejects an update attempt to switch an event to external ticketing', async (
     .send({
       name: 'Block Party', venue: 'Main St',
       eventDate: futureIso(10), startTime: futureIso(10, 18), endTime: futureIso(10, 23),
+      category: 'nightlife',
     });
   expect(created.status).toBe(201);
   const eventId = created.body.data._id;

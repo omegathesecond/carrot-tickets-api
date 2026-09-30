@@ -32,14 +32,14 @@ it('always includes ticketing + externalTicketUrl as base fields, falling back t
   expect(card.externalTicketUrl).toBeNull();
 });
 
-it('always includes category as a base field, falling back to Other for legacy events', () => {
+it('always includes category as a base field, falling back to events for legacy events', () => {
   const card = toPublicEventCard(baseEvent); // baseEvent has no category field
-  expect(card.category).toBe('Other');
+  expect(card.category).toBe('events');
 });
 
 it('reads category straight off the event when present', () => {
-  const card = toPublicEventCard({ ...baseEvent, category: 'Music' });
-  expect(card.category).toBe('Music');
+  const card = toPublicEventCard({ ...baseEvent, category: 'sports' });
+  expect(card.category).toBe('sports');
 });
 
 it('reads ticketing + externalTicketUrl straight off the event when present', () => {
