@@ -3,6 +3,7 @@ import { BuyerOtp, OtpAudience } from '@models/buyerOtp.model';
 import { SmsService } from '@services/sms.service';
 import { EmailService } from '@services/email.service';
 import { Identifier } from '@utils/identifier.util';
+import { OtpCooldownError } from '@utils/httpError.util';
 
 /**
  * Shared one-time-passcode engine.
@@ -26,6 +27,7 @@ const MAX_ATTEMPTS = 5;
 // email inbox (and burn SMS/email gateway credits). 60s matches a typical
 // "resend code" cadence.
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+
 
 export class OtpService {
   private static sendFor(id: Identifier, code: string): Promise<boolean> {
@@ -51,7 +53,7 @@ export class OtpService {
       const elapsedMs = Date.now() - recent.createdAt.getTime();
       if (elapsedMs < OTP_RESEND_COOLDOWN_MS) {
         const wait = Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsedMs) / 1000);
-        throw new Error(`Please wait ${wait} second${wait === 1 ? '' : 's'} before requesting another code.`);
+        throw new OtpCooldownError(wait);
       }
     }
 

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import Joi from 'joi';
 import { PaymentMethod, PaymentStatus, SalesChannel, TicketStatus } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { failWithHttpError, failOtpRequest } from '@utils/controllerHelpers.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { EventService } from '@services/event.service';
 import { TicketService } from '@services/ticket.service';
@@ -180,7 +180,7 @@ export class TicketsController {
       ApiResponseUtil.success(res, result, 'If that account exists, a reset code is on its way.');
     } catch (error: any) {
       console.error('Forgot password error:', error);
-      ApiResponseUtil.error(res, error.message || 'Could not send reset code', 400);
+      failOtpRequest(res, error, 'Could not send reset code');
     }
   }
 

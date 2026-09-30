@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { HttpError } from '@utils/httpError.util';
+import { HttpError, OtpCooldownError } from '@utils/httpError.util';
 
 export const HEX24 = /^[0-9a-f]{24}$/i;
 
@@ -10,6 +10,18 @@ export function failWithHttpError(res: Response, error: any, fallback: string) {
   if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
   console.error(fallback, error);
   return ApiResponseUtil.error(res, error?.message || fallback, 500);
+}
+
+/** Map a failed OTP request onto the response. A cooldown keeps its 429 and
+ *  gains a standard `Retry-After`, so the client can count down to the exact
+ *  second another code is allowed rather than guessing or re-parsing the copy.
+ *  Every other failure keeps the 400 these endpoints have always returned. */
+export function failOtpRequest(res: Response, error: any, fallback: string) {
+  if (error instanceof OtpCooldownError) {
+    res.set('Retry-After', String(error.retryAfterSeconds));
+    return ApiResponseUtil.error(res, error.message, error.statusCode);
+  }
+  return ApiResponseUtil.error(res, error?.message || fallback, 400);
 }
 
 export interface MessageCursorParams {

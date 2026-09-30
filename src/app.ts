@@ -93,7 +93,12 @@ app.use(compression()); // Compress responses
 const corsOrigins = buildCorsOrigin(process.env['CORS_ORIGINS']);
 app.use(cors({
   origin: corsOrigins,
-  credentials: false
+  credentials: false,
+  // `Retry-After` is NOT a CORS-safelisted response header, so without this the
+  // dashboard's fetch reads it back as null and a throttled OTP request loses
+  // its exact countdown. Exposing it is what lets a 429 render "Resend in 0:47"
+  // instead of the client guessing, or re-parsing the message copy.
+  exposedHeaders: ['Retry-After']
 }));
 
 // Parse JSON bodies with a size limit.

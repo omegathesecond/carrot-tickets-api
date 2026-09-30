@@ -27,7 +27,7 @@ import { toPublicEventCard } from '@/utils/eventCard.util';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { Update } from '@models/update.model';
-import { failWithHttpError } from '@utils/controllerHelpers.util';
+import { failWithHttpError, failOtpRequest } from '@utils/controllerHelpers.util';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 import { normalizeHashtag } from '@utils/hashtags.util';
 import { UpdateController } from '@controllers/update.controller';
@@ -999,7 +999,7 @@ export class PublicController {
       return ApiResponseUtil.success(res, result, 'We sent a reset code to your email or phone');
     } catch (error: any) {
       console.error('Forgot password buyer error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to send reset code', 400);
+      return failOtpRequest(res, error, 'Failed to send reset code');
     }
   }
 
