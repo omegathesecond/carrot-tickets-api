@@ -55,4 +55,18 @@ describe('migrateLegacyEventCategories', () => {
     expect(res.updated).toBe(0);
     expect((await Event.findById(e._id))!.category).toBe('cinema-theatre');
   });
+
+  it('parks unknown/missing category values on the default and keeps the doc saveable', async () => {
+    const a = await Event.create(baseFields());
+    await Event.collection.updateOne({ _id: a._id }, { $set: { category: 'Weird' } });
+    const b = await Event.create(baseFields());
+    await Event.collection.updateOne({ _id: b._id }, { $unset: { category: '' } });
+    await migrateLegacyEventCategories();
+    for (const id of [a._id, b._id]) {
+      const doc = await Event.findById(id);
+      expect(doc!.category).toBe('events');
+      doc!.name = 'Renamed';
+      await expect(doc!.save()).resolves.toBeTruthy();
+    }
+  });
 });

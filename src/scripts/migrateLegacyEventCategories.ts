@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { Event } from '@models/event.model';
-import { DEFAULT_EVENT_CATEGORY, EventCategory } from '@/constants/eventCategories';
+import { DEFAULT_EVENT_CATEGORY, EVENT_CATEGORY_IDS, EventCategory } from '@/constants/eventCategories';
 
 /**
  * One-time, idempotent: remaps the old free-text category labels (Music,
@@ -35,6 +35,13 @@ export async function migrateLegacyEventCategories(): Promise<{ updated: number;
     updated += res.modifiedCount;
     skipped += res.matchedCount - res.modifiedCount;
   }
+  // Catch-all: any other value (unknown legacy label, null, missing) that is
+  // not a valid id would fail enum validation on save() — park it on the default.
+  const rest = await Event.updateMany(
+    { category: { $nin: EVENT_CATEGORY_IDS } },
+    { $set: { category: DEFAULT_EVENT_CATEGORY } },
+  );
+  updated += rest.modifiedCount;
   return { updated, skipped };
 }
 

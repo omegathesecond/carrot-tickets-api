@@ -25,6 +25,7 @@ import { buildCorsOrigin } from '@utils/corsOrigins.util';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
+import { migrateLegacyEventCategories } from '@/scripts/migrateLegacyEventCategories';
 import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 
 // Import routes
@@ -268,6 +269,15 @@ function initAfterConnect(): void {
   migrateWeekendIndexes().catch((err) => {
     console.error('❌ migrateWeekendIndexes failed (a second weekend plan may collide on buyerId_1):', err);
   });
+
+  // Event categories moved from free-text labels (Music, Art, ...) to stable
+  // ids. Until legacy docs are remapped they fail enum validation on save()
+  // and drop out of category filters. Idempotent; logged, not fatal.
+  migrateLegacyEventCategories()
+    .then((r) => console.log('[migrateLegacyEventCategories]', r))
+    .catch((err) => {
+      console.error('❌ migrateLegacyEventCategories failed (legacy events may fail category validation):', err);
+    });
 
   // Background sweeps: reservation expiry, card-sale reconciliation,
   // event reminders, stuck-update reconciliation. Same functions, same
