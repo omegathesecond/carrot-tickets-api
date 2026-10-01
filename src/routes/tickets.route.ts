@@ -41,6 +41,7 @@ import { EnquiryController } from '@controllers/enquiry.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { VoteAdminController } from '@controllers/voteAdmin.controller';
 import { ShareEarnOrganizerController } from '@controllers/shareEarnOrganizer.controller';
+import { AdminVenuesController } from '@controllers/adminVenues.controller';
 
 const router = Router();
 
@@ -99,6 +100,13 @@ router.get(
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
 router.post('/admin/organizers', requireSuperAdmin, AdminOrganizersController.createOrganizer);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
+
+/**
+ * Venue trading switch — super-admin creates a vendor's Venue (one per
+ * vendor; a second is a 409) and suspends / reactivates it.
+ */
+router.post('/admin/venues', requireSuperAdmin, AdminVenuesController.activate);
+router.patch('/admin/venues/:id', requireSuperAdmin, AdminVenuesController.updateStatus);
 
 /**
  * Service-categories admin — the DB-driven category manager behind the
