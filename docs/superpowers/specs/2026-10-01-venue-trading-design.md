@@ -156,6 +156,15 @@ per venue). This runs as a script before the API deploy — NOT left to on-boot
 - `?as=venue` deep-links to the Venue form, as `?as=business` does.
 - After sign-up a venue lands where organizers land: the social feed with the
   switch-to-dashboard bar.
+- The signed-out Login menu gets a **Run a venue** item ("Bars, restaurants &
+  lounges") linking to `?as=venue` — the login page shows one account type
+  per URL, so without it the Venue option is unreachable.
+- A signed-in vendor following that link sees the already-signed-in card,
+  never a second sign-up.
+- "Forgot password?" in the Venue (and Business) mode uses the VENDOR reset
+  (`/api/tickets/auth/forgot-password` + `/reset-password`). The panel used
+  the buyer reset for every mode, which tells a vendor their account does
+  not exist.
 
 **Admin switch-on (super-admin Organizers tab).**
 - "Venue trading" action per vendor → creates the `Venue` (`name`, `currency`).
@@ -163,7 +172,14 @@ per venue). This runs as a script before the API deploy — NOT left to on-boot
 - A vendor that already has a venue → **409**. Unknown vendor → **404**.
 
 **Dashboard.**
-- The vendor profile returns `venue: { id, name, currency, status } | null`.
+- `GET /api/tickets/venue` returns `{ venue: { id, name, currency, status,
+  activatedAt } | null, eligible }` — `eligible` is true for a venue-type
+  account or any account with a venue. A dedicated endpoint rather than a
+  field on the profile: the vendor user payload is built inline in five
+  places (login, register, business register, reset, getMe), and a login
+  response without it would hide the section until a reload. Auth only —
+  not gated on `tickets:manage_venue`, so owners whose token predates the
+  deploy are not 403'd; the dashboard gates the UI on the permission.
 - Active venue + permission → a **Venue** section in the sidebar.
 - `businessType: 'venue'` without a venue → "Venue trading isn't on yet —
   Carrot switches it on after a quick check."
