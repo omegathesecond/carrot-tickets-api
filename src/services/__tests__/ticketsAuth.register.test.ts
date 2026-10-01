@@ -148,3 +148,19 @@ describe('TicketsAuthService organizer signup OTP', () => {
     })).resolves.toBeTruthy();
   });
 });
+
+describe('TicketsAuthService venue signup', () => {
+  it('the organizer register creates a venue-type Vendor (events operator) — the path the website Venue form uses', async () => {
+    await TicketsAuthService.requestRegistrationOtp({ email: 'bar@x.com' });
+    await TicketsAuthService.register({
+      businessName: 'Kwa-Linda Lounge',
+      email: 'bar@x.com',
+      password: 'newpass1',
+      businessType: 'venue',
+      code: lastEmailCode(),
+    });
+    const v = await Vendor.findOne({ email: 'bar@x.com' }).lean();
+    expect(v?.businessType).toBe('venue');
+    expect(v?.operatorType).toBe('events');
+  });
+});
