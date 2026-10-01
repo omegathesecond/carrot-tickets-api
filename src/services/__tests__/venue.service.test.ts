@@ -67,6 +67,14 @@ describe('VenueService.setStatus', () => {
     await expect(VenueService.setStatus(new mongoose.Types.ObjectId().toHexString(), 'suspended')).rejects.toBeInstanceOf(VenueNotFoundError);
     await expect(VenueService.setStatus('nope', 'suspended')).rejects.toBeInstanceOf(VenueNotFoundError);
   });
+
+  it('rejects invalid enum values (e.g., banana) and leaves status unchanged', async () => {
+    const v = await makeVendor();
+    const venue = await VenueService.activate({ vendorId: String(v._id), name: 'A', currency: 'SZL', activatedBy: 'admin-1' });
+    await expect(VenueService.setStatus(String(venue._id), 'banana' as any)).rejects.toThrow();
+    const stored = await Venue.findById(venue._id).lean();
+    expect(stored?.status).toBe('active');
+  });
 });
 
 describe('VenueService.forVendor', () => {

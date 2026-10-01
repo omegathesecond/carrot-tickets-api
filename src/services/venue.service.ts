@@ -62,7 +62,7 @@ export class VenueService {
 
   static async setStatus(venueId: string, status: VenueStatus): Promise<IVenue> {
     if (!mongoose.isValidObjectId(venueId)) throw new VenueNotFoundError();
-    const venue = await Venue.findByIdAndUpdate(venueId, { $set: { status } }, { new: true });
+    const venue = await Venue.findByIdAndUpdate(venueId, { $set: { status } }, { new: true, runValidators: true });
     if (!venue) throw new VenueNotFoundError();
     return venue;
   }
