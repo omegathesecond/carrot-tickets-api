@@ -9,6 +9,7 @@ import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { createOrganizerSchema } from '@validators/tickets.validator';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
+import { VenueService } from '@services/venue.service';
 
 const verificationSchema = Joi.object({
   status: Joi.string()
@@ -91,6 +92,7 @@ export class AdminOrganizersController {
 
       const eventsByVendor = new Map(eventRows.map((r) => [String(r._id), r.eventCount]));
       const salesByVendor = new Map(saleRows.map((r) => [String(r._id), r]));
+      const venuesByVendor = await VenueService.summariesFor(vendorIds);
 
       const organizers = vendors.map((v) => {
         const id = String(v._id);
@@ -112,6 +114,7 @@ export class AdminOrganizersController {
           eventCount: eventsByVendor.get(id) ?? 0,
           ticketsSold: s?.ticketsSold ?? 0,
           revenue: s?.revenue ?? 0,
+          venue: venuesByVendor.get(id) ?? null,
         };
       });
 

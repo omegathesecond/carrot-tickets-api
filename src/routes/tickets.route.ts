@@ -42,6 +42,7 @@ import { UpdateController } from '@controllers/update.controller';
 import { VoteAdminController } from '@controllers/voteAdmin.controller';
 import { ShareEarnOrganizerController } from '@controllers/shareEarnOrganizer.controller';
 import { AdminVenuesController } from '@controllers/adminVenues.controller';
+import { VenueController } from '@controllers/venue.controller';
 
 const router = Router();
 
@@ -171,6 +172,10 @@ router.delete(
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
 router.get('/auth/me', TicketsController.getMe);
+
+// The signed-in vendor's own venue (or null) and whether the dashboard Venue
+// section applies. Auth only — see VenueController.mine.
+router.get('/venue', VenueController.mine);
 
 /**
  * End-customer ticket list — the Keshless user-app calls this to show
