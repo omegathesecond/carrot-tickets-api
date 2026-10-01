@@ -29,10 +29,15 @@ export class AdminVenuesController {
   static async activate(req: Request, res: Response): Promise<any> {
     const { error, value } = activateSchema.validate(req.body);
     if (error) return ApiResponseUtil.badRequest(res, error.message);
+
+    // Resolve admin actor: vendor super-admin has vendorId, platform gate-operator has userId
+    const actor = (req as any).ticketsUser?.vendorId ?? (req as any).ticketsUser?.userId;
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Admin identity missing');
+
     try {
       const venue = await VenueService.activate({
         ...value,
-        activatedBy: String((req as any).ticketsUser.vendorId),
+        activatedBy: String(actor),
       });
       return ApiResponseUtil.success(res, toVenueSummary(venue), 'Venue trading switched on', 201);
     } catch (e: any) {

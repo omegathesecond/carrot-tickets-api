@@ -1,10 +1,12 @@
 import request from 'supertest';
 import mongoose from 'mongoose';
+import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { signSuperAdminToken, signVendorToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Venue } from '@models/venue.model';
+import { GateOperator } from '@models/gateOperator.model';
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
@@ -68,6 +70,61 @@ describe('POST /api/tickets/admin/venues', () => {
       .set('Authorization', `Bearer ${signVendorToken(String(v._id))}`)
       .send({ vendorId: String(v._id), name: 'A', currency: 'SZL' });
     expect(res.status).toBe(403);
+  });
+
+  it('switches on via platform gate-operator token (userId, no vendorId)', async () => {
+    const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
+    const userId = '65f0000000000000000000aa';
+    // Create a platform gate operator so requireSuperAdmin validates the row exists
+    await GateOperator.create({
+      _id: new mongoose.Types.ObjectId(userId),
+      fullName: 'Platform Admin',
+      loginCode: '999999',
+      pin: '000000',
+      scope: 'platform',
+      isActive: true,
+    });
+    const token = jwt.sign(
+      {
+        app: 'tickets',
+        userType: 'gate-operator',
+        userId,
+        isSuperAdmin: true,
+        role: 'gate_operator',
+        permissions: [],
+      },
+      JWT_SECRET,
+    );
+    const v = await makeVendor();
+    const res = await request(app)
+      .post('/api/tickets/admin/venues')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vendorId: String(v._id), name: 'Platform Gate On', currency: 'SZL' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.name).toBe('Platform Gate On');
+    const stored = await Venue.findOne({ vendorId: v._id }).lean();
+    expect(stored?.activatedBy).toBe(userId);
+  });
+
+  it('401s when neither vendorId nor userId is present', async () => {
+    const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
+    const token = jwt.sign(
+      {
+        app: 'tickets',
+        userType: 'gate-operator',
+        isSuperAdmin: true,
+        role: 'gate_operator',
+        permissions: [],
+      },
+      JWT_SECRET,
+    );
+    const v = await makeVendor();
+    const res = await request(app)
+      .post('/api/tickets/admin/venues')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vendorId: String(v._id), name: 'A', currency: 'SZL' });
+    expect(res.status).toBe(401);
+    expect(await Venue.countDocuments({})).toBe(0);
   });
 });
 
