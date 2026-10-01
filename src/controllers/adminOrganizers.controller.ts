@@ -10,6 +10,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { createOrganizerSchema } from '@validators/tickets.validator';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { VenueService } from '@services/venue.service';
+import { VenueSummary } from '@interfaces/venue.interface';
 
 const verificationSchema = Joi.object({
   status: Joi.string()
@@ -71,7 +72,7 @@ export class AdminOrganizersController {
 
       // Per-organizer activity for just the vendors on this page.
       const vendorIds = vendors.map((v) => new mongoose.Types.ObjectId(String(v._id)));
-      const [eventRows, saleRows] = vendorIds.length
+      const [eventRows, saleRows, venuesByVendor] = vendorIds.length
         ? await Promise.all([
             Event.aggregate<{ _id: mongoose.Types.ObjectId; eventCount: number }>([
               { $match: { vendorId: { $in: vendorIds } } },
@@ -87,12 +88,12 @@ export class AdminOrganizersController {
                 },
               },
             ]),
+            VenueService.summariesFor(vendorIds),
           ])
-        : [[], []];
+        : [[], [], new Map<string, VenueSummary>()];
 
       const eventsByVendor = new Map(eventRows.map((r) => [String(r._id), r.eventCount]));
       const salesByVendor = new Map(saleRows.map((r) => [String(r._id), r]));
-      const venuesByVendor = await VenueService.summariesFor(vendorIds);
 
       const organizers = vendors.map((v) => {
         const id = String(v._id);

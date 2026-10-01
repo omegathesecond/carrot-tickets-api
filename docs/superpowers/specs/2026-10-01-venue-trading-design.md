@@ -169,7 +169,11 @@ per venue). This runs as a script before the API deploy — NOT left to on-boot
 **Admin switch-on (super-admin Organizers tab).**
 - "Venue trading" action per vendor → creates the `Venue` (`name`, `currency`).
 - Suspend / reactivate flips `status`.
-- A vendor that already has a venue → **409**. Unknown vendor → **404**.
+- A vendor that already has a venue → **409**. A transport or services
+  account → **409** ("Venue trading needs an events account"): the permission
+  scoping strips `tickets:manage_venue` from those types, so a switch-on would
+  succeed for a vendor who can never see the section. The Organizers tab does
+  not offer it for them. Unknown vendor → **404**.
 
 **Dashboard.**
 - `GET /api/tickets/venue` returns `{ venue: { id, name, currency, status,
@@ -180,7 +184,11 @@ per venue). This runs as a script before the API deploy — NOT left to on-boot
   response without it would hide the section until a reload. Auth only —
   not gated on `tickets:manage_venue`, so owners whose token predates the
   deploy are not 403'd; the dashboard gates the UI on the permission.
-- Active venue + permission → a **Venue** section in the sidebar.
+- The **Venue** sidebar item shows for any eligible account (a venue-type
+  account, or one that has a venue) that holds `tickets:manage_venue`, and also
+  when the `GET /venue` lookup fails — so the page's not-on, suspended and
+  error (with retry) states are reachable instead of the item silently
+  vanishing.
 - `businessType: 'venue'` without a venue → "Venue trading isn't on yet —
   Carrot switches it on after a quick check."
 - Suspended → "Venue trading is suspended — contact Carrot."
@@ -450,8 +458,11 @@ pass UNCHANGED for the event path in every phase.
 - **Phase 1:** admin switch-on / suspend / double-activate (409) / unknown
   vendor (404); register with `businessType: 'venue'`; profile carries
   `venue`; the website panel offers three modes and the Venue form posts
-  `venue`; the dashboard Venue section appears only with an active venue AND
-  the permission.
+  `venue`; the dashboard Venue item shows for an eligible account (venue-type
+  or has a venue) that holds the permission, and also when the lookup fails, so
+  the not-on / suspended / error cards are reachable; an account without the
+  permission never sees it. Switching venue trading on is refused (409) for a
+  transport or services account, which can never hold the permission.
 - **Phase 2:** both / neither scope rejected; a venue stall id on an event URL
   → 404 and vice versa; vendor A cannot reach venue B; the same barcode at two
   venues and an event; venue reconciliation respects its window; venue till

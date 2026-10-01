@@ -1,10 +1,11 @@
 import mongoose, { Schema } from 'mongoose';
 import { IVenue } from '@interfaces/venue.interface';
+import { EVENT_CURRENCIES } from '@utils/currency.util';
 
 const venueSchema = new Schema<IVenue>({
   vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', required: true, immutable: true },
   name: { type: String, required: true, trim: true, maxlength: 120 },
-  currency: { type: String, enum: ['SZL', 'ZAR'], required: true },
+  currency: { type: String, enum: EVENT_CURRENCIES, required: true },
   status: { type: String, enum: ['active', 'suspended'], default: 'active', required: true, index: true },
   activatedAt: { type: Date, required: true, default: Date.now },
   activatedBy: { type: String, required: true, trim: true },

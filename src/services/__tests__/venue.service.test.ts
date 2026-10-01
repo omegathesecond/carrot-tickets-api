@@ -7,6 +7,7 @@ import {
   VenueAlreadyExistsError,
   VenueVendorNotFoundError,
   VenueNotFoundError,
+  VenueOperatorTypeError,
 } from '@services/venue.service';
 
 beforeAll(connectTestDb);
@@ -52,6 +53,38 @@ describe('VenueService.activate', () => {
       ).rejects.toBeInstanceOf(VenueVendorNotFoundError);
     }
     expect(await Venue.countDocuments({})).toBe(0);
+  });
+
+  // scopePermissionsToType strips tickets:manage_venue for these two operator
+  // types, so a switch-on would "succeed" for a vendor who can never see the
+  // section. Refuse it up front, and write nothing.
+  it('refuses a transport or services vendor with VenueOperatorTypeError, writing nothing', async () => {
+    const transport = await makeVendor({ operatorType: 'transport' });
+    const services = await makeVendor({ operatorType: 'services', serviceCategory: 'sound_hire' });
+    for (const v of [transport, services]) {
+      await expect(
+        VenueService.activate({ vendorId: String(v._id), name: 'X', currency: 'SZL', activatedBy: 'admin-1' }),
+      ).rejects.toBeInstanceOf(VenueOperatorTypeError);
+    }
+    expect(await Venue.countDocuments({})).toBe(0);
+  });
+
+  it('allows an operatorType "both" vendor and an "events" one', async () => {
+    const both = await makeVendor({ operatorType: 'both' });
+    const events = await makeVendor({ operatorType: 'events' });
+    for (const v of [both, events]) {
+      const venue = await VenueService.activate({ vendorId: String(v._id), name: 'X', currency: 'SZL', activatedBy: 'admin-1' });
+      expect(venue.status).toBe('active');
+    }
+    expect(await Venue.countDocuments({})).toBe(2);
+  });
+
+  it('allows a legacy vendor document with NO operatorType field (the schema default is events)', async () => {
+    const v = await makeVendor();
+    await Vendor.collection.updateOne({ _id: v._id }, { $unset: { operatorType: '' } });
+    expect(await Vendor.collection.findOne({ _id: v._id, operatorType: { $exists: false } })).not.toBeNull();
+    const venue = await VenueService.activate({ vendorId: String(v._id), name: 'Legacy', currency: 'SZL', activatedBy: 'admin-1' });
+    expect(venue.name).toBe('Legacy');
   });
 });
 

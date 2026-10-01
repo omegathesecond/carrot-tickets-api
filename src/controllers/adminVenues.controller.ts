@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import Joi from 'joi';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { EVENT_CURRENCIES } from '@utils/currency.util';
 import {
   VenueService,
   VenueAlreadyExistsError,
   VenueVendorNotFoundError,
+  VenueOperatorTypeError,
   VenueNotFoundError,
   toVenueSummary,
 } from '@services/venue.service';
@@ -12,7 +14,7 @@ import {
 const activateSchema = Joi.object({
   vendorId: Joi.string().hex().length(24).required(),
   name: Joi.string().trim().min(1).max(120).required(),
-  currency: Joi.string().valid('SZL', 'ZAR').required(),
+  currency: Joi.string().valid(...EVENT_CURRENCIES).required(),
 });
 
 const statusSchema = Joi.object({
@@ -41,7 +43,9 @@ export class AdminVenuesController {
       });
       return ApiResponseUtil.success(res, toVenueSummary(venue), 'Venue trading switched on', 201);
     } catch (e: any) {
-      if (e instanceof VenueAlreadyExistsError) return ApiResponseUtil.error(res, e.message, 409);
+      if (e instanceof VenueAlreadyExistsError || e instanceof VenueOperatorTypeError) {
+        return ApiResponseUtil.error(res, e.message, 409);
+      }
       if (e instanceof VenueVendorNotFoundError) return ApiResponseUtil.notFound(res, e.message);
       console.error('Activate venue error:', e);
       return ApiResponseUtil.error(res, e.message || 'Failed to switch venue trading on', 500);

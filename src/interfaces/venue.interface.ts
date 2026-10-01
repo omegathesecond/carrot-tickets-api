@@ -1,7 +1,7 @@
 import { Document, Types } from 'mongoose';
+import { EventCurrency } from '@utils/currency.util';
 
 export type VenueStatus = 'active' | 'suspended';
-export type VenueCurrency = 'SZL' | 'ZAR';
 
 /**
  * A vendor's day-to-day trading premises (venue trading spec). Created ONLY by
@@ -17,10 +17,11 @@ export interface IVenue extends Document {
   _id: Types.ObjectId;
   vendorId: Types.ObjectId;
   name: string;
-  currency: VenueCurrency;
+  /** A venue trades in one of the same two currencies an event can. */
+  currency: EventCurrency;
   status: VenueStatus;
   activatedAt: Date;
-  /** The super-admin's vendorId from their token, kept as a string. */
+  /** The acting super-admin's `vendorId ?? userId` from their token (a platform gate-operator has only a userId), kept as a string. */
   activatedBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -30,7 +31,7 @@ export interface IVenue extends Document {
 export interface VenueSummary {
   id: string;
   name: string;
-  currency: VenueCurrency;
+  currency: EventCurrency;
   status: VenueStatus;
   activatedAt: Date;
 }

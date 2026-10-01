@@ -14,9 +14,9 @@ afterEach(clearTestDb);
 
 const admin = () => `Bearer ${signSuperAdminToken()}`;
 let seq = 0;
-async function makeVendor() {
+async function makeVendor(overrides: Record<string, unknown> = {}) {
   seq += 1;
-  return Vendor.create({ businessName: `Lounge ${seq}`, email: `lounge${seq}@x.co`, password: 'secret1', businessType: 'venue' });
+  return Vendor.create({ businessName: `Lounge ${seq}`, email: `lounge${seq}@x.co`, password: 'secret1', businessType: 'venue', ...overrides });
 }
 
 describe('POST /api/tickets/admin/venues', () => {
@@ -49,6 +49,22 @@ describe('POST /api/tickets/admin/venues', () => {
       .set('Authorization', admin())
       .send({ vendorId: new mongoose.Types.ObjectId().toHexString(), name: 'A', currency: 'SZL' });
     expect(res.status).toBe(404);
+  });
+
+  // Their permission set never includes tickets:manage_venue (see
+  // scopePermissionsToType), so a switch-on would be a success nobody can see.
+  it('409s a transport or services account and creates no venue', async () => {
+    const transport = await makeVendor({ operatorType: 'transport' });
+    const services = await makeVendor({ operatorType: 'services', serviceCategory: 'sound_hire' });
+    for (const v of [transport, services]) {
+      const res = await request(app)
+        .post('/api/tickets/admin/venues')
+        .set('Authorization', admin())
+        .send({ vendorId: String(v._id), name: 'A', currency: 'SZL' });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('Venue trading needs an events account');
+    }
+    expect(await Venue.countDocuments({})).toBe(0);
   });
 
   it('400s a currency outside SZL/ZAR and a blank name', async () => {

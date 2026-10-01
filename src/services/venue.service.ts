@@ -1,7 +1,11 @@
 import mongoose from 'mongoose';
 import { Venue } from '@models/venue.model';
 import { Vendor } from '@models/vendor.model';
-import { IVenue, VenueCurrency, VenueStatus, VenueSummary } from '@interfaces/venue.interface';
+import { IVenue, VenueStatus, VenueSummary } from '@interfaces/venue.interface';
+import { OperatorType } from '@interfaces/vendor.interface';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import { scopePermissionsToType } from '@utils/permissions.util';
+import { EventCurrency } from '@utils/currency.util';
 
 /** A second switch-on for a vendor that already has a venue. Mapped to 409. */
 export class VenueAlreadyExistsError extends Error {
@@ -16,6 +20,17 @@ export class VenueVendorNotFoundError extends Error {
   constructor() {
     super('Vendor not found');
     this.name = 'VenueVendorNotFoundError';
+  }
+}
+
+/**
+ * The vendor's operator type can never see the Venue section — a transport or
+ * services account. Mapped to 409.
+ */
+export class VenueOperatorTypeError extends Error {
+  constructor() {
+    super('Venue trading needs an events account');
+    this.name = 'VenueOperatorTypeError';
   }
 }
 
@@ -37,12 +52,22 @@ export class VenueService {
   static async activate(params: {
     vendorId: string;
     name: string;
-    currency: VenueCurrency;
+    currency: EventCurrency;
     activatedBy: string;
   }): Promise<IVenue> {
     if (!mongoose.isValidObjectId(params.vendorId)) throw new VenueVendorNotFoundError();
-    const vendor = await Vendor.findOne({ _id: params.vendorId, isSuperAdmin: { $ne: true } }).select('_id').lean();
+    const vendor = await Vendor.findOne({ _id: params.vendorId, isSuperAdmin: { $ne: true } })
+      .select('_id operatorType')
+      .lean<{ _id: mongoose.Types.ObjectId; operatorType?: OperatorType } | null>();
     if (!vendor) throw new VenueVendorNotFoundError();
+    // scopePermissionsToType strips tickets:manage_venue for a transport or
+    // services account, so a switch-on would "succeed" for a vendor who can
+    // never see the section. Ask the permission partition (the single source
+    // of truth) rather than restating which types lose it. A legacy document
+    // with no operatorType is an events account — the schema default.
+    const canSeeVenue =
+      scopePermissionsToType([TicketsPermission.MANAGE_VENUE], vendor.operatorType ?? OperatorType.EVENTS).length > 0;
+    if (!canSeeVenue) throw new VenueOperatorTypeError();
     try {
       return await Venue.create({
         vendorId: vendor._id,
