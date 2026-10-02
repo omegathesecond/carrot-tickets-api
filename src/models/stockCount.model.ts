@@ -1,13 +1,17 @@
 // src/models/stockCount.model.ts
 import mongoose, { Schema, Document } from 'mongoose';
 import { StockMovementByType } from '@interfaces/stock.interface';
+import { applyTradingScope } from '@models/tradingScope.schema';
 
 export type StockCountPhase = 'opening' | 'interim' | 'closing';
 
 /** A physical stock-take (design §3): expected (system onHand) vs counted, with
  *  the preserved variance; reconciled to reality via a COUNT_ADJUST movement. */
 export interface IStockCount extends Document {
-  eventId: mongoose.Types.ObjectId; merchantId: mongoose.Types.ObjectId; productId: mongoose.Types.ObjectId;
+  /** Exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: mongoose.Types.ObjectId;
+  venueId?: mongoose.Types.ObjectId;
+  merchantId: mongoose.Types.ObjectId; productId: mongoose.Types.ObjectId;
   expectedOnHand: number; countedOnHand: number; variance: number;   // counted − expected
   phase: StockCountPhase;
   /**
@@ -22,7 +26,7 @@ export interface IStockCount extends Document {
 }
 
 const stockCountSchema = new Schema<IStockCount>({
-  eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+  eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
   merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
   productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
   expectedOnHand: { type: Number, required: true, validate: { validator: Number.isSafeInteger, message: 'expectedOnHand must be a whole number' } },
@@ -34,7 +38,10 @@ const stockCountSchema = new Schema<IStockCount>({
   at: { type: Date, default: Date.now },
 }, { timestamps: false });
 
+applyTradingScope(stockCountSchema);
+
 stockCountSchema.index({ merchantId: 1, productId: 1, at: -1 });
 stockCountSchema.index({ eventId: 1, phase: 1, at: -1 });
+stockCountSchema.index({ venueId: 1, phase: 1, at: -1 });
 
 export const StockCount = mongoose.model<IStockCount>('StockCount', stockCountSchema);

@@ -11,8 +11,9 @@ export type MerchantStatus = 'active' | 'suspended';
  */
 export interface IMerchant extends Document {
   name: string;
-  /** The event this merchant sells at — a merchant is scoped to ONE event. */
-  eventId: Types.ObjectId;
+  /** The event OR venue this stall trades at — exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: Types.ObjectId;
+  venueId?: Types.ObjectId;
   /** Platform commission taken off every charge, 0-100. Defaults to 0 (no cut). */
   commissionPercent: number;
   status: MerchantStatus;

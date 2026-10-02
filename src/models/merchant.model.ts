@@ -1,6 +1,7 @@
 // api/src/models/merchant.model.ts
 import mongoose, { Schema } from 'mongoose';
 import { IMerchant } from '@interfaces/merchant.interface';
+import { applyTradingScope } from '@models/tradingScope.schema';
 
 /**
  * A tap-to-pay STALL at one cashless event (cashless spec). It holds the
@@ -15,7 +16,7 @@ import { IMerchant } from '@interfaces/merchant.interface';
  */
 const merchantSchema = new Schema<IMerchant>({
   name: { type: String, required: true, trim: true },
-  eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+  eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
   commissionPercent: { type: Number, default: 0, min: 0, max: 100 },
   status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
 }, {
@@ -33,6 +34,9 @@ const merchantSchema = new Schema<IMerchant>({
   toObject: { transform: (_doc, ret) => { const { pin, loginCode, __v, ...rest } = ret; return rest; } },
 });
 
+applyTradingScope(merchantSchema);
+
 merchantSchema.index({ eventId: 1, status: 1 });
+merchantSchema.index({ venueId: 1, status: 1 });
 
 export const Merchant = mongoose.model<IMerchant>('Merchant', merchantSchema);

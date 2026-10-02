@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { applyTradingScope } from '@models/tradingScope.schema';
 
 /**
  * Per-BAR on-hand count for one product (design §4). `onHand` is the
@@ -8,7 +9,9 @@ import mongoose, { Schema, Document } from 'mongoose';
  * bar-product's StockMovement deltas.
  */
 export interface IProductStock extends Document {
-  eventId: mongoose.Types.ObjectId;
+  /** Exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: mongoose.Types.ObjectId;
+  venueId?: mongoose.Types.ObjectId;
   merchantId: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId;
   onHand: number; // integer base units, >= 0
@@ -20,7 +23,7 @@ export interface IProductStock extends Document {
 
 const productStockSchema = new Schema<IProductStock>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
     merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
     productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
     onHand: {
@@ -33,9 +36,12 @@ const productStockSchema = new Schema<IProductStock>(
   { timestamps: true },
 );
 
+applyTradingScope(productStockSchema);
+
 // One stock row per bar-product; also the lookup key for the sale CAS.
 productStockSchema.index({ merchantId: 1, productId: 1 }, { unique: true });
 // Aggregate one product across all bars ("Castle Lite across the event").
 productStockSchema.index({ eventId: 1, productId: 1 });
+productStockSchema.index({ venueId: 1, productId: 1 });
 
 export const ProductStock = mongoose.model<IProductStock>('ProductStock', productStockSchema);

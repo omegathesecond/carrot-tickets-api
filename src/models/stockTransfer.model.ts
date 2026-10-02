@@ -1,12 +1,15 @@
 // src/models/stockTransfer.model.ts
 import mongoose, { Schema, Document } from 'mongoose';
 import { StockMovementByType } from '@interfaces/stock.interface';
+import { applyTradingScope } from '@models/tradingScope.schema';
 
 /** A bar-to-bar stock move (design §3). The two paired StockMovements
  *  (TRANSFER_OUT/TRANSFER_IN, refId = this _id) carry the ledger effect; this
  *  row is the human-facing audit (who moved what, from/to which bar, when). */
 export interface IStockTransfer extends Document {
-  eventId: mongoose.Types.ObjectId;
+  /** Exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: mongoose.Types.ObjectId;
+  venueId?: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId;
   fromMerchantId: mongoose.Types.ObjectId;
   toMerchantId: mongoose.Types.ObjectId;
@@ -25,7 +28,7 @@ export interface IStockTransfer extends Document {
 }
 
 const stockTransferSchema = new Schema<IStockTransfer>({
-  eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+  eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
   productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
   fromMerchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
   toMerchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
@@ -36,7 +39,10 @@ const stockTransferSchema = new Schema<IStockTransfer>({
   at: { type: Date, default: Date.now },
 }, { timestamps: false });
 
+applyTradingScope(stockTransferSchema);
+
 stockTransferSchema.index({ eventId: 1, at: -1 });
+stockTransferSchema.index({ venueId: 1, at: -1 });
 stockTransferSchema.index({ productId: 1, at: -1 });
 
 export const StockTransfer = mongoose.model<IStockTransfer>('StockTransfer', stockTransferSchema);

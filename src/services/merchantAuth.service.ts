@@ -52,6 +52,9 @@ export class MerchantAuthService {
     // people able to charge against it.
     const merchant = await Merchant.findOne({ _id: operator.merchantId, status: 'active' });
     if (!merchant) throw new Error('Invalid credentials');
+    // Venue stalls' tills sign in from venue Phase 2 Task 6; until then a stall
+    // with no event cannot mint a merchant token.
+    if (!merchant.eventId) throw new Error('Venue tills cannot sign in yet');
 
     await clearPinLockout(MerchantOperator, operator._id as any);
 

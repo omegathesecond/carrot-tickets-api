@@ -2,6 +2,7 @@
 import mongoose, { Schema } from 'mongoose';
 import { IMerchantOperator } from '@interfaces/merchantOperator.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
+import { applyTradingScope } from '@models/tradingScope.schema';
 
 /**
  * A person on the till at one stall (cashless spec — per-person operators).
@@ -13,7 +14,7 @@ const merchantOperatorSchema = new Schema<IMerchantOperator>({
   fullName: { type: String, required: true, trim: true },
   phoneNumber: { type: String, trim: true },
   merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true, index: true, immutable: true },
-  eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+  eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
   loginCode: { type: String, required: true, unique: true, index: true, trim: true },
   isActive: { type: Boolean, default: true, index: true },
 }, {
@@ -23,7 +24,9 @@ const merchantOperatorSchema = new Schema<IMerchantOperator>({
 });
 
 applyOperatorCredentials(merchantOperatorSchema);
+applyTradingScope(merchantOperatorSchema);
 
 merchantOperatorSchema.index({ merchantId: 1, isActive: 1 });
+merchantOperatorSchema.index({ venueId: 1, isActive: 1 });
 
 export const MerchantOperator = mongoose.model<IMerchantOperator>('MerchantOperator', merchantOperatorSchema);

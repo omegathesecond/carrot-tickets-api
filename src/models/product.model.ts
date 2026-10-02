@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { ProductCategory } from '@interfaces/stock.interface';
+import { applyTradingScope } from '@models/tradingScope.schema';
 
 /**
  * A sellable catalogue item at ONE cashless event (design §4). Price is per
@@ -8,7 +9,9 @@ import { ProductCategory } from '@interfaces/stock.interface';
  * manufacturer EAN/UPC — unique per event, but optional (food/ice/cups have none).
  */
 export interface IProduct extends Document {
-  eventId: mongoose.Types.ObjectId;
+  /** Exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: mongoose.Types.ObjectId;
+  venueId?: mongoose.Types.ObjectId;
   name: string;
   barcode?: string;
   category: ProductCategory;
@@ -24,7 +27,7 @@ export interface IProduct extends Document {
 
 const productSchema = new Schema<IProduct>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
     name: { type: String, required: true, trim: true },
     barcode: { type: String, trim: true },
     category: { type: String, enum: Object.values(ProductCategory), required: true },
@@ -41,6 +44,8 @@ const productSchema = new Schema<IProduct>(
   { timestamps: true },
 );
 
+applyTradingScope(productSchema);
+
 // Unique barcode per event, but ONLY for products that HAVE a barcode.
 // partialFilterExpression (not sparse): a compound sparse index still indexes
 // every doc because eventId is always present, so barcode:null would collide
@@ -49,5 +54,8 @@ productSchema.index(
   { eventId: 1, barcode: 1 },
   { unique: true, partialFilterExpression: { barcode: { $type: 'string' } } },
 );
+
+// The venue catalogue list query (the unique-barcode index above is event-led).
+productSchema.index({ venueId: 1, active: 1 });
 
 export const Product = mongoose.model<IProduct>('Product', productSchema);

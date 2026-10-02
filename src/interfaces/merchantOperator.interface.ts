@@ -14,8 +14,9 @@ export interface IMerchantOperator extends Document {
   phoneNumber?: string;
   /** The stall this person works. Immutable — move = new operator. */
   merchantId: Types.ObjectId;
-  /** Denormalized from the stall so token minting needs no join. */
-  eventId: Types.ObjectId;
+  /** Denormalized from the stall so token minting needs no join. Exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: Types.ObjectId;
+  venueId?: Types.ObjectId;
   loginCode: string;
   pin: string;
   isActive: boolean;
