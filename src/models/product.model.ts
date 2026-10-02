@@ -46,13 +46,28 @@ const productSchema = new Schema<IProduct>(
 
 applyTradingScope(productSchema);
 
-// Unique barcode per event, but ONLY for products that HAVE a barcode.
-// partialFilterExpression (not sparse): a compound sparse index still indexes
-// every doc because eventId is always present, so barcode:null would collide
-// across barcodeless products in the same event (the E11000 {null} incident).
+// Unique barcode per OWNER (event or venue), only for products that HAVE one.
+// The legacy `eventId_1_barcode_1` indexed a venue product's missing eventId as
+// null, so the same barcode at two venues collided. These replace it under NEW
+// names and a reversed key order, so they can be built beside the legacy index
+// on any MongoDB version (no same-name or same-key-pattern conflict);
+// scripts/migrate-product-barcode-index.ts then drops the legacy one.
+// partialFilterExpression (not sparse): see the {null} collision noted above.
 productSchema.index(
-  { eventId: 1, barcode: 1 },
-  { unique: true, partialFilterExpression: { barcode: { $type: 'string' } } },
+  { barcode: 1, eventId: 1 },
+  {
+    name: 'event_barcode_unique',
+    unique: true,
+    partialFilterExpression: { barcode: { $type: 'string' }, eventId: { $exists: true } },
+  },
+);
+productSchema.index(
+  { barcode: 1, venueId: 1 },
+  {
+    name: 'venue_barcode_unique',
+    unique: true,
+    partialFilterExpression: { barcode: { $type: 'string' }, venueId: { $exists: true } },
+  },
 );
 
 // The venue catalogue list query (the unique-barcode index above is event-led).
