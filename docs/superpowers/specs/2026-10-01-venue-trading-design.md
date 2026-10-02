@@ -239,6 +239,11 @@ Phase 3, so no login ships with nothing to do.
 **Dashboard.** Venue › Stalls, Catalogue, Stock, Till staff — the existing
 Event › Cashless components, given an API-base prop rather than copied.
 
+**Phase 2 plan decisions (2026-10-03).** `Table`, `Waiter` and `MerchantCharge` stay event-only in
+Phase 2 — nothing in Phase 2 writes a venue table, waiter or charge — and gain `venueId` in Phase 3,
+which therefore also owns the `Table {eventId,label}` index fix. The new product-barcode indexes use NEW
+names and a reversed key order so they coexist with the legacy index on any MongoDB version.
+
 ## Phase 3 — Selling
 
 ### Waiters, orders and handover
