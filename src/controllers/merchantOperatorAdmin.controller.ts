@@ -4,19 +4,22 @@ import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { loadOwnedEvent } from '@controllers/merchantAdmin.controller';
+import { resolveDocScope } from '@middleware/tradingScope.middleware';
+import { scopeIds, scopeMatch } from '@utils/tradingScope.util';
 import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
 
 /**
- * Admin CRUD for the people on a stall's till. eventId is always inherited
- * from the stall — a body that supplies one is ignored, so an operator can
- * never be pointed at an event their stall does not belong to.
+ * Admin CRUD for the people on a stall's till. The owner (event or venue) is
+ * always inherited from the stall — a body that supplies one is ignored, so an
+ * operator can never be pointed at an owner their stall does not belong to.
+ * Serves both /merchants/:merchantId/operators (event) and
+ * /venue/stalls/:merchantId/operators (venue).
  *
  * SECURITY: every handler resolves the operator/stall FIRST (404 if it does
- * not exist) and only then checks event ownership via the shared
- * loadOwnedEvent (403 if it belongs to a different organizer) — mirroring
- * MerchantAdminController, which sits right beside this file and guards the
- * stall itself the same way. Without this, MANAGE_ACCESS (held by every
+ * not exist) and only then checks scope via the shared resolveDocScope (404 if
+ * the stall sits in another venue or event, 403 if it belongs to a different
+ * organizer) — mirroring MerchantAdminController, which sits right beside this
+ * file and guards the stall itself the same way. Without this, MANAGE_ACCESS (held by every
  * ordinary organizer, not just platform staff) would let any organizer mint
  * or rotate credentials for a stranger's till.
  */
@@ -25,8 +28,8 @@ export class MerchantOperatorAdminController {
     try {
       const merchant = await Merchant.findById(req.params['merchantId']);
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
-      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
-      if (!event) return; // 404 (event gone) or 403 (different organizer) already answered
+      const scope = await resolveDocScope(req, res, merchant, 'Stall not found');
+      if (!scope) return; // 404 (other scope) or 403 (different organizer) already answered
 
       const operators = await MerchantOperator
         .find({ merchantId: merchant._id })
@@ -39,8 +42,8 @@ export class MerchantOperatorAdminController {
     try {
       const merchant = await Merchant.findById(req.params['merchantId']);
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
-      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
-      if (!event) return;
+      const scope = await resolveDocScope(req, res, merchant, 'Stall not found');
+      if (!scope) return; // 404 (other scope) or 403 (different organizer) already answered
 
       if (!req.body.fullName || typeof req.body.fullName !== 'string') {
         ApiResponseUtil.badRequest(res, 'fullName is required'); return;
@@ -55,7 +58,7 @@ export class MerchantOperatorAdminController {
         fullName: req.body.fullName,
         phoneNumber: req.body.phoneNumber,
         merchantId: merchant._id,
-        eventId: merchant.eventId,
+        ...scopeMatch(scopeIds(scope)),
         loginCode,
         pin,
         grants: sanitizeGrants(req.body.grants),
@@ -71,8 +74,8 @@ export class MerchantOperatorAdminController {
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       const merchant = await Merchant.findById(operator.merchantId);
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
-      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
-      if (!event) return;
+      const scope = await resolveDocScope(req, res, merchant, 'Stall not found');
+      if (!scope) return; // 404 (other scope) or 403 (different organizer) already answered
 
       if ('fullName' in req.body) {
         // Unvalidated, this assignment took whatever arrived: a number renamed
@@ -107,8 +110,8 @@ export class MerchantOperatorAdminController {
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       const merchant = await Merchant.findById(operator.merchantId);
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
-      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
-      if (!event) return;
+      const scope = await resolveDocScope(req, res, merchant, 'Stall not found');
+      if (!scope) return; // 404 (other scope) or 403 (different organizer) already answered
 
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin

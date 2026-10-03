@@ -42,7 +42,8 @@ import { UpdateController } from '@controllers/update.controller';
 import { VoteAdminController } from '@controllers/voteAdmin.controller';
 import { ShareEarnOrganizerController } from '@controllers/shareEarnOrganizer.controller';
 import { AdminVenuesController } from '@controllers/adminVenues.controller';
-import { VenueController } from '@controllers/venue.controller';
+import venueRoutes from '@routes/venue.route';
+import { eventScope } from '@middleware/tradingScope.middleware';
 
 const router = Router();
 
@@ -173,9 +174,9 @@ router.delete(
 router.post('/auth/logout', TicketsController.logout);
 router.get('/auth/me', TicketsController.getMe);
 
-// The signed-in vendor's own venue (or null) and whether the dashboard Venue
-// section applies. Auth only — see VenueController.mine.
-router.get('/venue', VenueController.mine);
+// Venue trading — the signed-in vendor's own venue: GET /venue plus its
+// stalls, till staff, catalogue, stock and reports (routes/venue.route.ts).
+router.use('/venue', venueRoutes);
 
 /**
  * End-customer ticket list — the Keshless user-app calls this to show
@@ -670,8 +671,8 @@ router.post('/waiters/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermi
 // MANAGER-role organizer holds MANAGE_STOCK without MANAGE_ACCESS (see
 // TICKETS_ROLE_PERMISSIONS) — mirroring the tab's own gate is a read, not
 // access management. Create/edit/operators below stay MANAGE_ACCESS-only.
-router.get('/merchants', requireAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.list);
-router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
+router.get('/merchants', requireAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), eventScope('query'), MerchantAdminController.list);
+router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), eventScope('body'), MerchantAdminController.create);
 router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
 router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
 
