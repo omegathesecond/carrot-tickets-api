@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { MerchantAuthService } from '@services/merchantAuth.service';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
+import { Venue } from '@models/venue.model';
 import { MerchantPermission, MerchantToken } from '@interfaces/merchant.interface';
 import { deriveMerchantPermissions } from '@interfaces/operatorGrant.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
@@ -16,8 +17,10 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
  * suspending the stall) is the only revocation the dashboard offers. Only
  * MerchantService.charge used to re-read the rows, so a sacked operator kept
  * reading the stall's takings, its stock board and posting stock counts until
- * their token expired. Two findById reads on indexed _ids per request cover
- * every merchant route at once and cannot be forgotten by the next handler.
+ * their token expired. Two findById reads on indexed _ids per request (three
+ * for a venue till, which also reads its venue so suspending the venue signs
+ * its people out) cover every merchant route at once and cannot be forgotten
+ * by the next handler.
  */
 export const authenticateMerchant = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   let decoded: MerchantToken;
@@ -44,12 +47,16 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
   // handler as a 500, so an outage reads as an outage rather than "signed out".
   let operator: { isActive?: boolean; grants?: string[] } | null;
   let merchant: { status?: string } | null;
+  let venue: { status?: string } | null = null;
   try {
-    [operator, merchant] = await Promise.all([
+    [operator, merchant, venue] = await Promise.all([
       MerchantOperator.findById(decoded.merchantOperatorId)
         .select('isActive grants')
         .lean<{ isActive?: boolean; grants?: string[] } | null>(),
       Merchant.findById(decoded.merchantId).select('status').lean<{ status?: string } | null>(),
+      decoded.venueId
+        ? Venue.findById(decoded.venueId).select('status').lean<{ status?: string } | null>()
+        : Promise.resolve(null),
     ]);
   } catch (e) {
     next(e);
@@ -60,6 +67,9 @@ export const authenticateMerchant = async (req: Request, res: Response, next: Ne
   // deleted person or stall must not keep working because nothing says no.
   if (!operator || !operator.isActive) { ApiResponseUtil.unauthorized(res, 'Operator deactivated'); return; }
   if (!merchant || merchant.status !== 'active') { ApiResponseUtil.unauthorized(res, 'Merchant suspended'); return; }
+  if (decoded.venueId && (!venue || venue.status !== 'active')) {
+    ApiResponseUtil.unauthorized(res, 'Venue trading is suspended'); return;
+  }
 
   // The token's own `permissions` is the POS's copy for rendering; it is NEVER
   // what authorizes. Tokens live 7 days, so a grant removed this morning would

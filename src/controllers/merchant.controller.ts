@@ -24,6 +24,7 @@ import {
 } from '@services/table.service';
 import { TableFulfilmentStatus } from '@interfaces/table.interface';
 import { HEX24 } from '@utils/controllerHelpers.util';
+import { belongsToScope, ownerWord, requireScopeOf, scopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 /** The statuses a stall may filter its table feed by — see MerchantController.tables. */
 const FULFILMENT_STATUSES: TableFulfilmentStatus[] = ['paid', 'handed_out', 'collected'];
@@ -36,6 +37,21 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
   wallet_not_found: 'Wallet not found',
 };
 
+const NO_TAGS_AT_VENUES = "Tag payments aren't used at venues";
+const NO_VENUE_TABLES = 'Venue table service is not available yet';
+
+/**
+ * The till's event, or null after a 403 for a VENUE till. Tag charges and
+ * table service are event features in venue Phase 2; refusing explicitly
+ * beats letting a venue token reach event-only queries with no event.
+ */
+function eventTill(req: Request, res: Response, refusal: string): string | null {
+  const { eventId } = (req as any).merchant as MerchantToken;
+  if (eventId) return eventId;
+  ApiResponseUtil.forbidden(res, refusal);
+  return null;
+}
+
 export class MerchantController {
   /**
    * POST /api/merchant/charge — tap-to-pay: debit the tapped band's wallet
@@ -46,11 +62,14 @@ export class MerchantController {
    */
   static async charge(req: Request, res: Response): Promise<any> {
     try {
+      const eventId = eventTill(req, res, NO_TAGS_AT_VENUES);
+      if (!eventId) return;
+
       const { error, value } = chargeSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const merchant = (req as any).merchant as MerchantToken;
-      const { merchantId, eventId, merchantOperatorId, operatorName } = merchant;
+      const { merchantId, merchantOperatorId, operatorName } = merchant;
 
       const event = await Event.findById(eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
@@ -153,12 +172,13 @@ export class MerchantController {
   /** GET /api/merchant/stock — this bar's products + onHand for the stock-take screen. */
   static async stock(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const m = (req as any).merchant as MerchantToken;
+      const { merchantId } = m;
       // Through PosCatalogService so this grid and the waiter's event-wide one
       // answer "which stall carries this product" the same way — one stock row
       // per stall-product, exactly what StockService.applyMovement's CAS and
       // TableService.addItem enforce on the write side.
-      const stock = await PosCatalogService.forMerchant(merchantId, eventId);
+      const stock = await PosCatalogService.forMerchant(merchantId, scopeIds(requireScopeOf(m)));
       return ApiResponseUtil.success(res, { stock });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Failed to load stock', 500); }
   }
@@ -177,7 +197,9 @@ export class MerchantController {
    */
   static async tables(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const eventId = eventTill(req, res, NO_VENUE_TABLES);
+      if (!eventId) return;
+      const { merchantId } = (req as any).merchant as MerchantToken;
       const raw = req.query['status'];
       // Whitelisted, not passed through: an unknown value must not silently
       // widen the query into "every status" on a screen whose whole job is
@@ -199,7 +221,9 @@ export class MerchantController {
    * later disputed.
    */
   static async handOutTable(req: Request, res: Response): Promise<any> {
-    const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+    const eventId = eventTill(req, res, NO_VENUE_TABLES);
+    if (!eventId) return;
+    const { merchantId, merchantOperatorId } = (req as any).merchant as MerchantToken;
     const tableId = String(req.params['id']);
     // Shape-checked before the cast: an unguarded ObjectId cast throws a
     // CastError out of a handler Express 4 does not await, hanging the request.
@@ -223,13 +247,14 @@ export class MerchantController {
 
   /**
    * GET /api/merchant/stalls — transfer destinations: the OTHER live stalls at
-   * this event. The caller's own stall is excluded because a transfer to
-   * yourself is rejected downstream; offering it would be a dead option.
+   * this event or venue. The caller's own stall is excluded because a transfer
+   * to yourself is rejected downstream; offering it would be a dead option.
    */
   static async stalls(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
-      const rows = await Merchant.find({ eventId, status: 'active' }).select('name').sort({ name: 1 }).lean();
+      const token = (req as any).merchant as MerchantToken;
+      const { merchantId } = token;
+      const rows = await Merchant.find({ ...scopeMatch(scopeIds(requireScopeOf(token))), status: 'active' }).select('name').sort({ name: 1 }).lean();
       const stalls = rows
         .filter((m: any) => String(m._id) !== String(merchantId))
         .map((m: any) => ({ merchantId: String(m._id), name: m.name }));
@@ -242,28 +267,30 @@ export class MerchantController {
   /** POST /api/merchant/stock/count — a stock-take by this bar (merchantId from JWT). */
   static async recordCount(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const m = (req as any).merchant as MerchantToken;
+      const { merchantId, merchantOperatorId } = m;
+      const scope = requireScopeOf(m);
       const { error, value } = posCountSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
       const product = await Product.findById(value.productId).lean();
-      if (!product || String(product.eventId) !== String(eventId)) return ApiResponseUtil.badRequest(res, 'product does not belong to this event');
-      const { count, onHand } = await StockCountService.recordCount({ eventId, merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantOperatorId });
+      if (!product || !belongsToScope(product, scope)) return ApiResponseUtil.badRequest(res, `product does not belong to ${ownerWord(scope)}`);
+      const { count, onHand } = await StockCountService.recordCount({ ...scopeIds(scope), merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantOperatorId });
       return ApiResponseUtil.success(res, { countId: String(count._id), expectedOnHand: count.expectedOnHand, countedOnHand: count.countedOnHand, variance: count.variance, onHand });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Count failed', 500); }
   }
 
   /**
-   * Resolve the product named in the body against the token's event and turn
+   * Resolve the product named in the body against the token's owner and turn
    * the quantity into base units. Returns null after answering the response —
    * every POS stock write shares these two refusals.
    */
   private static async resolveProductAndUnits(
     req: Request, res: Response, value: { productId: string; quantity: number; unit: 'unit' | 'pack' },
   ): Promise<number | null> {
-    const { eventId } = (req as any).merchant as MerchantToken;
+    const scope = requireScopeOf((req as any).merchant as MerchantToken);
     const product = await Product.findById(value.productId).lean();
-    if (!product || String(product.eventId) !== String(eventId)) {
-      ApiResponseUtil.badRequest(res, 'product does not belong to this event');
+    if (!product || !belongsToScope(product, scope)) {
+      ApiResponseUtil.badRequest(res, `product does not belong to ${ownerWord(scope)}`);
       return null;
     }
     const units = toBaseUnits(product, value.quantity, value.unit);
@@ -294,13 +321,14 @@ export class MerchantController {
   /** POST /api/merchant/stock/receive — a delivery INTO this stall. */
   static async receiveStock(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const m = (req as any).merchant as MerchantToken;
+      const { merchantId, merchantOperatorId } = m;
       const resolved = await MerchantController.validateStockWrite(req, res, posStockAdjustSchema);
       if (resolved == null) return;
       const { value, units } = resolved;
 
       const { onHand, movement } = await StockService.applyMovement({
-        eventId, merchantId, productId: value.productId,
+        ...scopeIds(requireScopeOf(m)), merchantId, productId: value.productId,
         delta: units, reason: StockMovementReason.RECEIVE,
         refType: 'stock_receive', refId: String(new mongoose.Types.ObjectId()),
         byType: 'Merchant', by: merchantOperatorId, note: value.note,
@@ -317,13 +345,14 @@ export class MerchantController {
   /** POST /api/merchant/stock/waste — breakage and spoilage at this stall. */
   static async wasteStock(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const m = (req as any).merchant as MerchantToken;
+      const { merchantId, merchantOperatorId } = m;
       const resolved = await MerchantController.validateStockWrite(req, res, posStockAdjustSchema);
       if (resolved == null) return;
       const { value, units } = resolved;
 
       const { onHand, movement } = await StockService.applyMovement({
-        eventId, merchantId, productId: value.productId,
+        ...scopeIds(requireScopeOf(m)), merchantId, productId: value.productId,
         delta: -units, reason: StockMovementReason.SPOILAGE,
         refType: 'stock_waste', refId: String(new mongoose.Types.ObjectId()),
         byType: 'Merchant', by: merchantOperatorId, note: value.note,
@@ -345,7 +374,9 @@ export class MerchantController {
   /** POST /api/merchant/stock/transfer — move stock from THIS stall to another. */
   static async transferStock(req: Request, res: Response): Promise<any> {
     try {
-      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+      const m = (req as any).merchant as MerchantToken;
+      const { merchantId, merchantOperatorId } = m;
+      const scope = requireScopeOf(m);
       const resolved = await MerchantController.validateStockWrite(req, res, posTransferSchema);
       if (resolved == null) return;
       const { value, units } = resolved;
@@ -354,16 +385,16 @@ export class MerchantController {
         return ApiResponseUtil.badRequest(res, 'cannot transfer to the same stall');
       }
 
-      // The destination must be a live stall at THIS event. Without this check
-      // a valid id from another event would move stock across event
+      // The destination must be a live stall at THIS event or venue. Without
+      // this check a valid id from another owner would move stock across
       // boundaries, which no report would ever reconcile.
       const destination = await Merchant.findById(value.toMerchantId).lean();
-      if (!destination || String(destination.eventId) !== String(eventId) || destination.status !== 'active') {
-        return ApiResponseUtil.badRequest(res, 'destination stall is not an active stall at this event');
+      if (!destination || !belongsToScope(destination, scope) || destination.status !== 'active') {
+        return ApiResponseUtil.badRequest(res, `destination stall is not an active stall at ${ownerWord(scope)}`);
       }
 
       const { transfer, fromOnHand, toOnHand } = await StockTransferService.transfer({
-        eventId, productId: value.productId,
+        ...scopeIds(scope), productId: value.productId,
         fromMerchantId: String(merchantId), toMerchantId: String(value.toMerchantId),
         qty: units, byType: 'Merchant', by: merchantOperatorId, note: value.note,
       });

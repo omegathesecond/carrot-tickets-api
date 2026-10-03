@@ -34,10 +34,14 @@ export interface MerchantToken {
   /** The PERSON on the till — what each charge is attributed to. */
   merchantOperatorId: string;
   operatorName: string;
-  eventId: string;
   /** The stall's display name. */
   name: string;
-  /** The event's display name, for UI headers (e.g. the vendor/POS chrome). */
+  /** Exactly one of eventId / venueId — the stall's owner. */
+  eventId?: string;
+  /** The event's display name, for UI headers (event tills). */
   eventName?: string;
+  venueId?: string;
+  /** The venue's display name, for UI headers (venue tills). */
+  venueName?: string;
   permissions: MerchantPermission[];
 }
