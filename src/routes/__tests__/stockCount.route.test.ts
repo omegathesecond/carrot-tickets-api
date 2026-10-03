@@ -174,4 +174,18 @@ describe('POS stock routes', () => {
       .send({ productId: String(foreignProduct._id), countedOnHand: 5 });
     expect(res.status).toBe(400);
   });
+
+  it('POST /api/merchant/stock/count refuses a VENUE product with the event copy (400), writing nothing', async () => {
+    const { eventId, barAId, productId } = await setup();
+    const venueProduct = await Product.create({ venueId: new mongoose.Types.ObjectId(), name: 'Venue Beer', category: ProductCategory.BEER, price: 1000 });
+    const res = await request(app)
+      .post('/api/merchant/stock/count')
+      .set('Authorization', `Bearer ${await merchantToken(barAId, eventId)}`)
+      .send({ productId: String(venueProduct._id), countedOnHand: 5 });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('product does not belong to this event');
+    expect(await StockCount.countDocuments({})).toBe(0);
+    expect(await ProductStock.countDocuments({ productId: venueProduct._id })).toBe(0);
+    expect((await ProductStock.findOne({ merchantId: barAId, productId }))!.onHand).toBe(100);
+  });
 });

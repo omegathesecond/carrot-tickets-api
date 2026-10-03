@@ -1,4 +1,5 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { signVendorToken } from '@/__tests__/helpers/auth';
@@ -93,6 +94,28 @@ describe('venue stock operations', () => {
       .send({ merchantId: String(theirStall._id), productId: String(product._id), quantity: 1, unit: 'unit' });
     expect(res.status).toBe(400);
     expect(res.body.message).toBe('merchant does not belong to this venue');
+  });
+
+  it('refuses to receive into an event stall or an event product; nothing is written', async () => {
+    const v = await ownedVenue();
+    const { stall, product } = await stallAndProduct(v);
+    const eventId = new mongoose.Types.ObjectId();
+    const eventStall = await Merchant.create({ name: 'Event Bar', eventId });
+    const eventProduct = await Product.create({ ...CASTLE, eventId });
+    const receive = (merchantId: unknown, productId: unknown) =>
+      request(app).post('/api/tickets/venue/stock/receive').set('Authorization', v.auth)
+        .send({ merchantId: String(merchantId), productId: String(productId), quantity: 1, unit: 'unit' });
+
+    const intoEventStall = await receive(eventStall._id, product._id);
+    expect(intoEventStall.status).toBe(400);
+    expect(intoEventStall.body.message).toBe('merchant does not belong to this venue');
+
+    const ofEventProduct = await receive(stall._id, eventProduct._id);
+    expect(ofEventProduct.status).toBe(400);
+    expect(ofEventProduct.body.message).toBe('product does not belong to this venue');
+
+    expect(await ProductStock.countDocuments({})).toBe(0);
+    expect(await StockMovement.countDocuments({})).toBe(0);
   });
 
   it('transfers between its stalls, counts, sets a threshold and allocations', async () => {

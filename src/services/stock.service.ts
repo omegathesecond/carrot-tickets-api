@@ -43,6 +43,7 @@ export class StockService {
     // The owner, written onto the row (on upsert-insert) and the journal entry.
     const owner = scopeMatch(input);
     const ownerField = 'venueId' in owner ? 'venueId' : 'eventId';
+    const otherOwnerField = ownerField === 'venueId' ? 'eventId' : 'venueId';
     const ownerId = 'venueId' in owner ? owner.venueId : owner.eventId;
     const merchantId = toId(input.merchantId);
     const productId = toId(input.productId);
@@ -68,6 +69,15 @@ export class StockService {
         // Decrement declined (or no row at all). Re-read to report the true available.
         const existing = await ProductStock.findOne({ merchantId, productId }, { onHand: 1 }, { session });
         throw new StockDeclinedError(String(productId), existing?.onHand ?? 0);
+      }
+      // The row must carry ONLY the input's owner kind. $ifNull above fills a
+      // missing owner field and never overwrites one, so an event row hit by a
+      // venue movement (or the reverse) would now carry both — a second owner.
+      // Throwing aborts the transaction, which rolls that write back.
+      if (stock[otherOwnerField] != null) {
+        throw new Error(
+          `stock row ${String(stock._id)} is owned by ${otherOwnerField} ${String(stock[otherOwnerField])}; refusing a movement for ${ownerField} ${String(ownerId)}`,
+        );
       }
 
       const created = await StockMovement.create(

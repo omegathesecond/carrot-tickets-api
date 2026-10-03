@@ -1,4 +1,5 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { JWT_SECRET } from '@config/jwt.config';
@@ -11,6 +12,7 @@ import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
 import { StockCount } from '@models/stockCount.model';
 import { StockMovement } from '@models/stockMovement.model';
+import { StockTransfer } from '@models/stockTransfer.model';
 import { ProductCategory } from '@interfaces/stock.interface';
 import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 
@@ -82,6 +84,65 @@ describe('venue till', () => {
       .send({ productId: String(other._id), countedOnHand: 1 });
     expect(res.status).toBe(400);
     expect(res.body.message).toBe('product does not belong to this venue');
+  });
+
+  describe('tenant boundaries: a refusal writes nothing', () => {
+    type Till = Awaited<ReturnType<typeof venueTill>>;
+    const otherVenueStall = async () => {
+      const vendor = await Vendor.create({ businessName: 'Other', email: `other${seq++}@x.co`, password: 'secret1', businessType: 'venue' });
+      const venue = await Venue.create({ vendorId: vendor._id, name: 'Other Lounge', currency: 'SZL', activatedBy: 'admin' });
+      return Merchant.create({ name: 'Other Venue Bar', venueId: venue._id });
+    };
+    const eventStall = () => Merchant.create({ name: 'Event Bar', eventId: new mongoose.Types.ObjectId() });
+    const eventProduct = () => Product.create({ eventId: new mongoose.Types.ObjectId(), name: 'Event Beer', category: ProductCategory.BEER, price: 2000 });
+
+    /** The till's own stall still holds its 10, and no stock record of any kind was added. */
+    async function expectNothingWritten(t: Till) {
+      expect(await StockTransfer.countDocuments({})).toBe(0);
+      expect(await StockMovement.countDocuments({})).toBe(0);
+      expect(await StockCount.countDocuments({})).toBe(0);
+      expect(await ProductStock.countDocuments({})).toBe(1);
+      expect((await ProductStock.findOne({ merchantId: t.stall._id, productId: t.product._id }).lean())?.onHand).toBe(10);
+    }
+
+    async function transferTo(t: Till, toMerchantId: unknown) {
+      return request(app).post('/api/merchant/stock/transfer').set('Authorization', t.auth)
+        .send({ productId: String(t.product._id), toMerchantId: String(toMerchantId), quantity: 2 });
+    }
+
+    it("refuses a transfer to another venue's stall", async () => {
+      const t = await venueTill();
+      const res = await transferTo(t, (await otherVenueStall())._id);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('destination stall is not an active stall at this venue');
+      await expectNothingWritten(t);
+    });
+
+    it('refuses a transfer to an event stall', async () => {
+      const t = await venueTill();
+      const res = await transferTo(t, (await eventStall())._id);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('destination stall is not an active stall at this venue');
+      await expectNothingWritten(t);
+    });
+
+    it('refuses to count an event product', async () => {
+      const t = await venueTill();
+      const res = await request(app).post('/api/merchant/stock/count').set('Authorization', t.auth)
+        .send({ productId: String((await eventProduct())._id), countedOnHand: 3 });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('product does not belong to this venue');
+      await expectNothingWritten(t);
+    });
+
+    it('refuses to write off an event product', async () => {
+      const t = await venueTill();
+      const res = await request(app).post('/api/merchant/stock/waste').set('Authorization', t.auth)
+        .send({ productId: String((await eventProduct())._id), quantity: 1 });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('product does not belong to this venue');
+      await expectNothingWritten(t);
+    });
   });
 
   it('refuses tag charges and table service at a venue till', async () => {

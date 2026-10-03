@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { Vendor } from '@models/vendor.model';
 import { Venue } from '@models/venue.model';
 import { Merchant } from '@models/merchant.model';
@@ -96,6 +97,22 @@ describe('venue stalls', () => {
       .set('Authorization', `Bearer ${signVendorToken(String(organizer._id), { permissions: [MANAGE_VENUE] })}`);
     expect(none.status).toBe(404);
     expect(none.body.message).toBe('No venue on this account');
+  });
+
+  it("the event stall routes refuse another organizer's event (403), creating nothing", async () => {
+    const v = await ownedVenue();
+    const { eventId } = await seedPublishedEvent({});
+    await Merchant.create({ name: 'Their Bar', eventId });
+
+    const list = await request(app).get(`/api/tickets/merchants?eventId=${eventId}`).set('Authorization', v.auth);
+    expect(list.status).toBe(403);
+    expect(list.body.message).toBe('Event belongs to a different vendor');
+
+    const create = await request(app).post('/api/tickets/merchants').set('Authorization', v.auth)
+      .send({ eventId: String(eventId), name: 'Hijack Bar' });
+    expect(create.status).toBe(403);
+    expect(create.body.message).toBe('Event belongs to a different vendor');
+    expect(await Merchant.countDocuments({})).toBe(1);
   });
 
   it('stall writes need tickets:manage_venue; listing also accepts tickets:manage_stock', async () => {
