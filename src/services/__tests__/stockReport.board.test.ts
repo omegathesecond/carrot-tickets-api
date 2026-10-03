@@ -38,7 +38,7 @@ describe('StockReportService.board', () => {
     await stock(b2._id, castle._id, 12, 20);          // LOW (12 <= 20)
     await stock(b1._id, savanna._id, 0, 5);           // SOLD_OUT
 
-    const { perBar, byProduct } = await StockReportService.board(String(eventId));
+    const { perBar, byProduct } = await StockReportService.board({ eventId: String(eventId) });
 
     const castleB2 = perBar.find((r) => r.merchantName === 'Bar 2' && r.productName === 'Castle Lite')!;
     expect(castleB2.status).toBe('LOW');
@@ -54,7 +54,7 @@ describe('StockReportService.board', () => {
   it('never reads LOW when threshold is unset', async () => {
     const b1 = await bar('Bar 1'); const water = await prod('Water', 'water');
     await stock(b1._id, water._id, 1);                // no threshold
-    const { perBar } = await StockReportService.board(String(eventId));
+    const { perBar } = await StockReportService.board({ eventId: String(eventId) });
     expect(perBar[0]!.status).toBe('IN_STOCK');
     expect(perBar[0]!.lowStockThreshold).toBeNull();
   });
@@ -67,7 +67,7 @@ describe('StockReportService.board', () => {
     await sale(b1._id, castle._id, 'Castle Lite', 20, 2500);
     await sale(b2._id, castle._id, 'Castle Lite', 10, 2500);
 
-    const { perBar, byProduct } = await StockReportService.board(String(eventId));
+    const { perBar, byProduct } = await StockReportService.board({ eventId: String(eventId) });
 
     const atBar1 = perBar.find((r) => r.merchantName === 'Bar 1')!;
     expect(atBar1.unitsSold).toBe(20);
@@ -83,7 +83,7 @@ describe('StockReportService.board', () => {
     const b1 = await bar('Bar 1'); const ice = await prod('Ice', 'other');
     await stock(b1._id, ice._id, 40);
 
-    const { perBar, byProduct } = await StockReportService.board(String(eventId));
+    const { perBar, byProduct } = await StockReportService.board({ eventId: String(eventId) });
 
     expect(perBar[0]!.unitsSold).toBe(0);
     expect(perBar[0]!.revenue).toBe(0);
@@ -94,7 +94,7 @@ describe('StockReportService.board', () => {
     const b1 = await bar('Pop-up Bar'); const shooter = await prod('Shooter');
     await sale(b1._id, shooter._id, 'Shooter', 4, 3000);
 
-    const { byProduct } = await StockReportService.board(String(eventId));
+    const { byProduct } = await StockReportService.board({ eventId: String(eventId) });
 
     const row = byProduct.find((p) => p.productName === 'Shooter')!;
     expect(row.unitsSold).toBe(4);

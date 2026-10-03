@@ -774,14 +774,14 @@ router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermissi
 router.post('/events/:eventId/tags/:walletId/reissue', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.reissue);
 router.post('/events/:eventId/tags/:walletId/refund', requireTicketsPermission(TicketsPermission.REFUND_TICKET), TagAdminController.refund);
 
-router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
-router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
+router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.board);
+router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.reconciliation);
 // Registered BEFORE the bare path would ever be reached with a ".pdf" suffix —
 // Express matches literally, so the two are distinct routes, not one with an
 // extension. Same guard as the JSON view: the PDF exposes nothing extra.
-router.get('/events/:eventId/stock/reconciliation.pdf', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliationPdf);
-router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
-router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.movements);
+router.get('/events/:eventId/stock/reconciliation.pdf', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.reconciliationPdf);
+router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.dashboard);
+router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.movements);
 
 /**
  * The organizer's Tables view (task 13) — a waiter opens a table, adds items

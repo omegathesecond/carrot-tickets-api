@@ -77,7 +77,7 @@ describe('groupByStall', () => {
 });
 
 describe('StockReconciliationPdfService.buildPdfBuffer', () => {
-  const event = { name: 'Ocean Summer Vibes', venue: 'Ocean Cuisine' };
+  const event = { name: 'Ocean Summer Vibes', subtitle: 'Ocean Cuisine' };
 
   it('renders a PDF', async () => {
     const buffer = await StockReconciliationPdfService.buildPdfBuffer(event, data());

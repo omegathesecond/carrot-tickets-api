@@ -24,3 +24,12 @@ export function formatEventDateTime(
   if (!value) return '';
   return new Date(value).toLocaleString('en-GB', { timeZone: EVENT_TIMEZONE, ...options });
 }
+
+/**
+ * Midnight at the start of `now`'s day in Africa/Mbabane, as an instant.
+ * Eswatini is UTC+2 all year (no DST), so the offset is fixed.
+ */
+export function startOfLocalDay(now: Date): Date {
+  const ymd = now.toLocaleDateString('en-CA', { timeZone: EVENT_TIMEZONE }); // YYYY-MM-DD
+  return new Date(`${ymd}T00:00:00+02:00`);
+}

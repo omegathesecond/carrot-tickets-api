@@ -38,7 +38,7 @@ describe('StockReportService.reconciliation', () => {
     await receive(b._id, p._id, 40, new Date('2026-08-13T20:00:00Z'));    // post-doors -> added
     await StockService.applyMovement({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), delta: -30, reason: StockMovementReason.SALE, byType: 'Merchant', by: 'till', refId: 'c1' } as any);
 
-    const { perBar, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    const { perBar, total } = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime });
     const row = perBar[0]!;
     expect(row.opening).toBe(100);
     expect(row.added).toBe(40);
@@ -56,7 +56,7 @@ describe('StockReportService.reconciliation', () => {
     // physical count finds 45 (5 short) -> closing StockCount variance -5, count_adjust -5
     await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), countedOnHand: 45, phase: 'closing', byType: 'Organizer', by: 'v1' } as any);
 
-    const { perBar } = await StockReportService.reconciliation(String(eventId), startTime);
+    const { perBar } = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime });
     const row = perBar[0]!;
     expect(row.physicalCount).toBe(45);
     expect(row.variance).toBe(-5);
@@ -70,7 +70,7 @@ describe('StockReportService.reconciliation', () => {
     await receive(b1._id, p._id, 60, new Date('2026-08-13T15:00:00Z'));
     await receive(b2._id, p._id, 40, new Date('2026-08-13T15:00:00Z'));   // neither bar counted
 
-    const { perBar, byProduct, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    const { perBar, byProduct, total } = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime });
     expect(perBar.every((r) => r.physicalCount === null && r.variance === null)).toBe(true);
     expect(byProduct[0]!.physicalCount).toBeNull();   // NOT 0 — "not counted", not "counted zero"
     expect(byProduct[0]!.variance).toBeNull();
@@ -86,7 +86,7 @@ describe('StockReportService.reconciliation', () => {
     await receive(b2._id, p._id, 50, new Date('2026-08-13T15:00:00Z'));
     await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b1._id), productId: String(p._id), countedOnHand: 45, phase: 'closing', byType: 'Organizer', by: 'v1' } as any);   // only b1 counted (5 short)
 
-    const { byProduct, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    const { byProduct, total } = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime });
     expect(byProduct[0]!.physicalCount).toBe(45);     // only b1 contributes; b2 (uncounted) is excluded, not 0
     expect(byProduct[0]!.variance).toBe(-5);
     expect(total.physicalCount).toBe(45);
@@ -105,7 +105,7 @@ describe('StockReportService.reconciliation', () => {
     await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), countedOnHand: 95, phase: 'opening', byType: 'Organizer', by: 'v1' } as any);
     await StockService.applyMovement({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), delta: -30, reason: StockMovementReason.SALE, byType: 'Merchant', by: 'till', refId: 'c1' } as any);
 
-    const { perBar } = await StockReportService.reconciliation(String(eventId), startTime);
+    const { perBar } = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime });
     const row = perBar[0]!;
     expect(row.opening).toBe(95);
     expect(row.sold).toBe(30);
@@ -116,7 +116,7 @@ describe('StockReportService.reconciliation', () => {
 
     // A closing count that finds exactly 65 is NO shrinkage.
     await StockCountService.recordCount({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), countedOnHand: 65, phase: 'closing', byType: 'Organizer', by: 'v1' } as any);
-    const after = (await StockReportService.reconciliation(String(eventId), startTime)).perBar[0]!;
+    const after = (await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime })).perBar[0]!;
     expect(after.physicalCount).toBe(65);
     expect(after.variance).toBe(0);
     expect(after.expectedClosing).toBe(65);
@@ -140,7 +140,7 @@ describe('StockReportService.reconciliation', () => {
     await receive(b._id, p._id, 20, new Date('2026-08-13T17:30:00Z'));    // 17:30 receive: AFTER the count, BEFORE doors
     await StockService.applyMovement({ eventId: String(eventId), merchantId: String(b._id), productId: String(p._id), delta: -30, reason: StockMovementReason.SALE, byType: 'Merchant', by: 'till', refId: 'c1' } as any);
 
-    const { perBar, total } = await StockReportService.reconciliation(String(eventId), startTime);
+    const { perBar, total } = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: startTime });
     const row = perBar[0]!;
     expect(row.opening).toBe(95);
     expect(row.added).toBe(20);

@@ -50,7 +50,7 @@ describe('StockReportService.dashboard', () => {
     await itemisedCharge(b._id, p._id, 'Castle Lite', 2500, 2);   // 5000 itemised
     await amountOnlyCharge(b._id, 1500);                          // 1500 un-itemised
 
-    const d = await StockReportService.dashboard(String(eventId));
+    const d = await StockReportService.dashboard({ eventId: String(eventId) });
     expect(d.itemisedSplit.itemised.gross).toBe(5000);
     expect(d.itemisedSplit.itemised.count).toBe(1);
     expect(d.itemisedSplit.unitemised.gross).toBe(1500);         // the amount-only charge
@@ -66,7 +66,7 @@ describe('StockReportService.dashboard', () => {
     // legacy: true simulates a pre-migration row lacking staffName -> Unattributed.
     await amountOnlyCharge(b._id, 2000, undefined, true);
 
-    const d = await StockReportService.dashboard(String(eventId));
+    const d = await StockReportService.dashboard({ eventId: String(eventId) });
     expect(d.salesByBar[0]).toMatchObject({ merchantName: 'Bar 1', gross: 5000, count: 2 });
     const unattributed = d.salesByEmployee.find((e) => e.staffName === null)!;
     expect(unattributed.label).toBe('Unattributed');
@@ -81,7 +81,7 @@ describe('StockReportService.dashboard', () => {
     await itemisedCharge(b._id, a._id, 'Alpha', 100, 5);   // 5 units, revenue 500
     await itemisedCharge(b._id, z._id, 'Zulu', 400, 2);    // 2 units, revenue 800
 
-    const d = await StockReportService.dashboard(String(eventId));
+    const d = await StockReportService.dashboard({ eventId: String(eventId) });
     expect(d.bestSellers[0]!.productName).toBe('Alpha');   // more units, despite lower revenue
     expect(d.revenueByProduct[0]!.productName).toBe('Zulu'); // more revenue
   });
@@ -91,7 +91,7 @@ describe('StockReportService.dashboard', () => {
     // A sale at 20:30 UTC is 22:30 in UTC+2 -> hour bucket 22.
     await StockMovement.create({ eventId, merchantId: b._id, productId: p._id, delta: -7, reason: 'sale', balanceAfter: 0, byType: 'Merchant', by: 'till', at: new Date('2026-08-13T20:30:00Z') } as any);
 
-    const d = await StockReportService.dashboard(String(eventId));
+    const d = await StockReportService.dashboard({ eventId: String(eventId) });
     expect(d.peakTimes).toHaveLength(24);
     expect(d.peakTimes.find((h) => h.hour === 22)!.units).toBe(7);
     expect(d.peakTimes.find((h) => h.hour === 20)!.units).toBe(0);
@@ -101,7 +101,7 @@ describe('StockReportService.dashboard', () => {
     const b = await bar('Bar 1'); const p = await prod('Savanna', 'wine');
     await StockCount.create({ eventId, merchantId: b._id, productId: p._id, expectedOnHand: 50, countedOnHand: 47, variance: -3, phase: 'closing', byType: 'Organizer', by: 'v1' } as any);
 
-    const d = await StockReportService.dashboard(String(eventId));
+    const d = await StockReportService.dashboard({ eventId: String(eventId) });
     expect(d.variances).toHaveLength(1);
     expect(d.variances[0]!).toMatchObject({ productName: 'Savanna', variance: -3 });
     expect(d.totalShrinkageUnits).toBe(-3);
@@ -115,7 +115,7 @@ describe('StockReportService.dashboard', () => {
     // 10 units sold in the last window -> rate 10/60 per min -> 20 / (10/60) = 120 min to zero.
     await StockMovement.create({ eventId, merchantId: b._id, productId: fast._id, delta: -10, reason: 'sale', balanceAfter: 20, byType: 'Merchant', by: 'till', at: new Date() } as any);
 
-    const d = await StockReportService.dashboard(String(eventId));
+    const d = await StockReportService.dashboard({ eventId: String(eventId) });
     const pred = d.predictedStockOut.find((r) => r.productName === 'Fast Mover')!;
     expect(pred.minutesToStockOut).toBeCloseTo(120, 1);
     expect(d.predictedStockOut.find((r) => r.productName === 'Idle')).toBeUndefined(); // no recent sales -> excluded
