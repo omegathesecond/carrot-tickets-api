@@ -149,16 +149,8 @@ export class StockReportService {
   private static async doorsReconciliation(ids: ScopeIds, startTime: Date) {
     const match = scopeMatch(ids);
 
-    // Latest opening + closing count per (merchant, product). Fetched FIRST:
-    // the opening counts decide what the movement aggregations may count.
-    const counts = await StockCount.aggregate([
-      { $match: { ...match, phase: { $in: ['opening', 'closing'] } } },
-      { $sort: { at: -1 } },
-      { $group: { _id: { merchantId: '$merchantId', productId: '$productId', phase: '$phase' }, countId: { $first: '$_id' }, at: { $first: '$at' }, countedOnHand: { $first: '$countedOnHand' }, variance: { $first: '$variance' } } },
-    ]);
-    const openings = counts.filter((c: any) => c._id.phase === 'opening');
-    const openingKeys = new Set(openings.map((c: any) => reconKey(c._id.merchantId, c._id.productId)));
-    const scope = StockReportService.openingScope(openings);
+    // Fetched FIRST: the opening counts decide what the movement aggregations may count.
+    const { counts, openingKeys, scope } = await StockReportService.latestCounts(match);
 
     const [byReason, receiveSplit, stockRows, products, merchants] = await Promise.all([
       StockMovement.aggregate([
@@ -202,14 +194,7 @@ export class StockReportService {
     const match = scopeMatch(ids);
     const inRange = { at: { $gte: from, $lt: to } };
 
-    const counts = await StockCount.aggregate([
-      { $match: { ...match, ...inRange, phase: { $in: ['opening', 'closing'] } } },
-      { $sort: { at: -1 } },
-      { $group: { _id: { merchantId: '$merchantId', productId: '$productId', phase: '$phase' }, countId: { $first: '$_id' }, at: { $first: '$at' }, countedOnHand: { $first: '$countedOnHand' }, variance: { $first: '$variance' } } },
-    ]);
-    const openings = counts.filter((c: any) => c._id.phase === 'opening');
-    const openingKeys = new Set(openings.map((c: any) => reconKey(c._id.merchantId, c._id.productId)));
-    const scope = StockReportService.openingScope(openings);
+    const { counts, openingKeys, scope } = await StockReportService.latestCounts({ ...match, ...inRange });
 
     // Latest movement per bar-product before `t`. The sort follows the
     // { venueId, merchantId, productId, at: -1, _id: -1 } index after the
@@ -249,6 +234,22 @@ export class StockReportService {
     for (const g of receives) ensure(String(g._id.merchantId), String(g._id.productId)).added += g.qty;
     StockReportService.applyCounts(counts, ensure);
     return StockReportService.rollup(rows);
+  }
+
+  /**
+   * The latest opening + closing count per (merchant, product) among the
+   * counts `match` selects, the bar-products whose baseline is an opening
+   * count, and the movement scope that baseline implies (openingScope).
+   */
+  private static async latestCounts(match: Record<string, unknown>) {
+    const counts = await StockCount.aggregate([
+      { $match: { ...match, phase: { $in: ['opening', 'closing'] } } },
+      { $sort: { at: -1 } },
+      { $group: { _id: { merchantId: '$merchantId', productId: '$productId', phase: '$phase' }, countId: { $first: '$_id' }, at: { $first: '$at' }, countedOnHand: { $first: '$countedOnHand' }, variance: { $first: '$variance' } } },
+    ]);
+    const openings = counts.filter((c: any) => c._id.phase === 'opening');
+    const openingKeys = new Set(openings.map((c: any) => reconKey(c._id.merchantId, c._id.productId)));
+    return { counts, openingKeys, scope: StockReportService.openingScope(openings) };
   }
 
   /**

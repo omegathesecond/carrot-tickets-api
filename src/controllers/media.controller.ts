@@ -407,30 +407,40 @@ export class MediaController {
     res: Response,
     mediaType: 'menu-item' | 'product',
   ): Promise<any> {
-    try {
-      const { eventId } = req.params;
+    const { eventId } = req.params;
+    if (!eventId) return ApiResponseUtil.validationError(res, 'Event ID is required');
+    return MediaController.storeItemImage(req, res, mediaType, mediaType, async (file) => {
       const ticketsUser = (req as any).ticketsUser;
-      const file = req.file;
-
-      if (!eventId) return ApiResponseUtil.validationError(res, 'Event ID is required');
-      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
-
       const query: any = { _id: eventId };
       if (!ticketsUser.isSuperAdmin) query.vendorId = ticketsUser.vendorId;
       const event = await Event.findOne(query);
-      if (!event) return ApiResponseUtil.notFound(res, 'Event not found');
+      if (!event) { ApiResponseUtil.notFound(res, 'Event not found'); return null; }
+      return R2Service.uploadEventMedia(eventId, mediaType, file.originalname || mediaType, file.buffer, file.mimetype);
+    });
+  }
 
-      const { key, url } = await R2Service.uploadEventMedia(
-        eventId,
-        mediaType,
-        file.originalname || mediaType,
-        file.buffer,
-        file.mimetype,
-      );
-
+  /**
+   * The skeleton every item-image upload shares (event menu/product, venue
+   * product): refuse a missing file, let `store` check the owner and write
+   * the file — it answers a refusal itself and returns null — then answer
+   * `{ media }`. Like uploadItemImage, it writes to NO document.
+   */
+  private static async storeItemImage(
+    req: Request,
+    res: Response,
+    mediaType: 'menu-item' | 'product',
+    logLabel: string,
+    store: (file: Express.Multer.File) => Promise<{ key: string; url: string } | null>,
+  ): Promise<any> {
+    try {
+      const file = req.file;
+      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
+      const stored = await store(file);
+      if (!stored) return; // refused — already answered
+      const { key, url } = stored;
       ApiResponseUtil.success(res, { media: { key, url, type: mediaType } }, 'Image uploaded successfully');
     } catch (error: any) {
-      console.error(`Upload ${mediaType} image error:`, error);
+      console.error(`Upload ${logLabel} image error:`, error);
       ApiResponseUtil.error(res, error.message || 'Failed to upload image');
     }
   }
@@ -450,18 +460,10 @@ export class MediaController {
    * already resolved the caller's own venue; stored under venues/<id>/product.
    */
   static async uploadVenueProductImage(req: Request, res: Response): Promise<any> {
-    try {
+    return MediaController.storeItemImage(req, res, 'product', 'venue product', async (file) => {
       const scope = getScope(req);
       if (scope.kind !== 'venue') throw new Error('uploadVenueProductImage needs a venue scope');
-      const file = req.file;
-      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
-      const { key, url } = await R2Service.uploadFile(
-        `venues/${scope.venueId}/product`, file.originalname || 'product', file.buffer, file.mimetype,
-      );
-      ApiResponseUtil.success(res, { media: { key, url, type: 'product' } }, 'Image uploaded successfully');
-    } catch (error: any) {
-      console.error('Upload venue product image error:', error);
-      ApiResponseUtil.error(res, error.message || 'Failed to upload image');
-    }
+      return R2Service.uploadFile(`venues/${scope.venueId}/product`, file.originalname || 'product', file.buffer, file.mimetype);
+    });
   }
 }
