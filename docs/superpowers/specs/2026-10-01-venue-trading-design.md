@@ -488,7 +488,10 @@ pass UNCHANGED for the event path in every phase.
 ## Deploy notes
 
 - API: trigger `carrot-tickets-api-main-deploy` on `main`. Phase 2's index
-  migration script runs against prod BEFORE the deploy that depends on it.
+  migration (`npm run migrate:product-barcode-index`) runs AFTER the new API
+  revision holds 100% traffic — an old revision cold-starting would re-create
+  the legacy `eventId_1_barcode_1` index via autoIndex — and before venues add
+  barcoded products. Re-run it after any rollback → roll-forward.
 - Wait for the new Cloud Run revision at 100% before pushing the website or
   dashboard (Pages builds faster than Cloud Build).
 - Website deploys from `master`; dashboard from `main` (Cloudflare Pages).

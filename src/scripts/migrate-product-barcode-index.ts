@@ -6,13 +6,20 @@
  * `event_barcode_unique` + `venue_barcode_unique` (built by autoIndex on boot,
  * or by this script); this drops the legacy one.
  *
- * Safe to re-run. Order-independent with the deploy: the new indexes have new
- * names and key orders, so they coexist with the legacy one until it is dropped.
+ * RUN ORDER — against each environment's DB:
+ *   1. AFTER the new API revision holds 100% traffic. An old revision that
+ *      cold-starts still declares the legacy index, and its autoIndex would
+ *      re-create `eventId_1_barcode_1` behind this script.
+ *   2. BEFORE venues add barcoded products — until it runs, the same barcode
+ *      at two venues still collides.
+ *   3. AGAIN after any rollback → roll-forward: the rolled-back revision's
+ *      autoIndex re-creates the legacy index.
  *
- * Run: MONGODB_URI=… npx ts-node -r tsconfig-paths/register src/scripts/migrate-product-barcode-index.ts
+ * Safe to re-run: dropping is existence-guarded and createIndexes is idempotent.
+ *
+ *   MONGODB_URI='...' npm run migrate:product-barcode-index
  */
 import mongoose from 'mongoose';
-import { getDatabaseURI } from '../config/database.config';
 import { Product } from '../models/product.model';
 
 const LEGACY = 'eventId_1_barcode_1';
@@ -30,9 +37,12 @@ export async function migrateProductBarcodeIndex(): Promise<{ legacyDropped: boo
   return { legacyDropped: true };
 }
 
-async function main(): Promise<void> {
+/** The CLI entrypoint. Exported so a test can pin the missing-URI refusal. */
+export async function main(): Promise<void> {
+  const uri = process.env['MONGODB_URI'];
+  if (!uri) throw new Error('MONGODB_URI is not set');
   // autoIndex:false — the explicit createIndexes above is the only build.
-  await mongoose.connect(getDatabaseURI(), { autoIndex: false });
+  await mongoose.connect(uri, { autoIndex: false });
   await migrateProductBarcodeIndex();
   await mongoose.disconnect();
 }

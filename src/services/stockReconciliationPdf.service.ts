@@ -183,7 +183,7 @@ export class StockReconciliationPdfService {
     if (stalls.length === 0) {
       doc.moveDown(2);
       doc.fillColor(MUTED).fontSize(11).font('Helvetica')
-        .text('No stock recorded for this event yet.', PAGE_MARGIN, doc.y);
+        .text('No stock recorded yet.', PAGE_MARGIN, doc.y);
       this.drawFooter(doc);
       return;
     }

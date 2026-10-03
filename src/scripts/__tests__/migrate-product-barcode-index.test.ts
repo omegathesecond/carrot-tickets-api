@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { Product } from '@models/product.model';
-import { migrateProductBarcodeIndex } from '../migrate-product-barcode-index';
+import { main, migrateProductBarcodeIndex } from '../migrate-product-barcode-index';
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
@@ -56,5 +56,21 @@ describe('product barcode indexes', () => {
     await Product.create({ venueId: venue, name: 'Ice', category: 'other', price: 500 });
     await Product.create({ venueId: venue, name: 'Cups', category: 'other', price: 100 });
     expect(await Product.countDocuments({ venueId: venue })).toBe(2);
+  });
+});
+
+describe('the CLI entrypoint', () => {
+  const saved = process.env['MONGODB_URI'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['MONGODB_URI'];
+    else process.env['MONGODB_URI'] = saved;
+  });
+
+  it('refuses to run with no MONGODB_URI rather than falling back to a local database', async () => {
+    delete process.env['MONGODB_URI'];
+    const connect = jest.spyOn(mongoose, 'connect');
+    await expect(main()).rejects.toThrow('MONGODB_URI is not set');
+    expect(connect).not.toHaveBeenCalled();
+    connect.mockRestore();
   });
 });
