@@ -21,3 +21,11 @@ export function applyTradingScope(schema: Schema): void {
     next();
   });
 }
+
+/**
+ * Options for every venueId-led index on these models. Event documents carry
+ * no venueId, so a plain index would hold one null entry per event document;
+ * partial, it holds venue documents only. A `{ venueId: X, … }` equality query
+ * still uses it — X is never null, which implies `$exists`.
+ */
+export const VENUE_ONLY_INDEX = { partialFilterExpression: { venueId: { $exists: true } } };

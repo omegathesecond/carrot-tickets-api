@@ -1,7 +1,7 @@
 // api/src/models/merchant.model.ts
 import mongoose, { Schema } from 'mongoose';
 import { IMerchant } from '@interfaces/merchant.interface';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * A tap-to-pay STALL at one cashless event (cashless spec). It holds the
@@ -37,6 +37,6 @@ const merchantSchema = new Schema<IMerchant>({
 applyTradingScope(merchantSchema);
 
 merchantSchema.index({ eventId: 1, status: 1 });
-merchantSchema.index({ venueId: 1, status: 1 });
+merchantSchema.index({ venueId: 1, status: 1 }, VENUE_ONLY_INDEX);
 
 export const Merchant = mongoose.model<IMerchant>('Merchant', merchantSchema);

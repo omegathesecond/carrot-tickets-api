@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * One append-only leg of the stock journal (design §4/§5). Written ONLY by
@@ -56,7 +56,11 @@ applyTradingScope(stockMovementSchema);
 stockMovementSchema.index({ merchantId: 1, productId: 1, at: -1 });
 // Reporting: sales over time / peak hours (Slice 4).
 stockMovementSchema.index({ eventId: 1, reason: 1, at: -1 });
-stockMovementSchema.index({ venueId: 1, reason: 1, at: -1 });
+stockMovementSchema.index({ venueId: 1, reason: 1, at: -1 }, VENUE_ONLY_INDEX);
+// A venue's balance at an instant: the latest movement per bar-product before
+// it (StockReportService.rangeReconciliation's balanceBefore). Equality on
+// venueId, then the sort the $group/$first reads — no blocking SORT stage.
+stockMovementSchema.index({ venueId: 1, merchantId: 1, productId: 1, at: -1, _id: -1 }, VENUE_ONLY_INDEX);
 // Provenance ("the movement for this charge/transfer/count").
 stockMovementSchema.index({ refType: 1, refId: 1 });
 

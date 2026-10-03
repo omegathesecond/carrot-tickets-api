@@ -1,7 +1,7 @@
 // src/models/stockCount.model.ts
 import mongoose, { Schema, Document } from 'mongoose';
 import { StockMovementByType } from '@interfaces/stock.interface';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 export type StockCountPhase = 'opening' | 'interim' | 'closing';
 
@@ -42,6 +42,6 @@ applyTradingScope(stockCountSchema);
 
 stockCountSchema.index({ merchantId: 1, productId: 1, at: -1 });
 stockCountSchema.index({ eventId: 1, phase: 1, at: -1 });
-stockCountSchema.index({ venueId: 1, phase: 1, at: -1 });
+stockCountSchema.index({ venueId: 1, phase: 1, at: -1 }, VENUE_ONLY_INDEX);
 
 export const StockCount = mongoose.model<IStockCount>('StockCount', stockCountSchema);

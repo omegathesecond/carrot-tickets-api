@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * Per-BAR on-hand count for one product (design §4). `onHand` is the
@@ -42,6 +42,6 @@ applyTradingScope(productStockSchema);
 productStockSchema.index({ merchantId: 1, productId: 1 }, { unique: true });
 // Aggregate one product across all bars ("Castle Lite across the event").
 productStockSchema.index({ eventId: 1, productId: 1 });
-productStockSchema.index({ venueId: 1, productId: 1 });
+productStockSchema.index({ venueId: 1, productId: 1 }, VENUE_ONLY_INDEX);
 
 export const ProductStock = mongoose.model<IProductStock>('ProductStock', productStockSchema);

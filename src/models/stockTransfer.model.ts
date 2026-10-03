@@ -1,7 +1,7 @@
 // src/models/stockTransfer.model.ts
 import mongoose, { Schema, Document } from 'mongoose';
 import { StockMovementByType } from '@interfaces/stock.interface';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /** A bar-to-bar stock move (design §3). The two paired StockMovements
  *  (TRANSFER_OUT/TRANSFER_IN, refId = this _id) carry the ledger effect; this
@@ -42,7 +42,7 @@ const stockTransferSchema = new Schema<IStockTransfer>({
 applyTradingScope(stockTransferSchema);
 
 stockTransferSchema.index({ eventId: 1, at: -1 });
-stockTransferSchema.index({ venueId: 1, at: -1 });
+stockTransferSchema.index({ venueId: 1, at: -1 }, VENUE_ONLY_INDEX);
 stockTransferSchema.index({ productId: 1, at: -1 });
 
 export const StockTransfer = mongoose.model<IStockTransfer>('StockTransfer', stockTransferSchema);

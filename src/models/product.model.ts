@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { ProductCategory } from '@interfaces/stock.interface';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * A sellable catalogue item at ONE cashless event (design §4). Price is per
@@ -52,7 +52,10 @@ applyTradingScope(productSchema);
 // names and a reversed key order, so they can be built beside the legacy index
 // on any MongoDB version (no same-name or same-key-pattern conflict);
 // scripts/migrate-product-barcode-index.ts then drops the legacy one.
-// partialFilterExpression (not sparse): see the {null} collision noted above.
+// partialFilterExpression (not sparse): a compound sparse index still indexes
+// every document that has ANY of its keys, so the owner id alone would put
+// barcode:null into the index and barcodeless products of one owner would
+// collide (the E11000 {null} incident).
 productSchema.index(
   { barcode: 1, eventId: 1 },
   {
@@ -70,7 +73,10 @@ productSchema.index(
   },
 );
 
-// The venue catalogue list query (the unique-barcode index above is event-led).
-productSchema.index({ venueId: 1, active: 1 });
+// The catalogue list queries, one per owner kind. The unique-barcode indexes
+// above are barcode-led, so neither serves a `find({ eventId })` or
+// `find({ venueId })`.
+productSchema.index({ eventId: 1, active: 1 });
+productSchema.index({ venueId: 1, active: 1 }, VENUE_ONLY_INDEX);
 
 export const Product = mongoose.model<IProduct>('Product', productSchema);

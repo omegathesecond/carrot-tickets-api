@@ -211,9 +211,12 @@ export class StockReportService {
     const openingKeys = new Set(openings.map((c: any) => reconKey(c._id.merchantId, c._id.productId)));
     const scope = StockReportService.openingScope(openings);
 
+    // Latest movement per bar-product before `t`. The sort follows the
+    // { venueId, merchantId, productId, at: -1, _id: -1 } index after the
+    // venueId equality, so it streams from the index — no blocking SORT.
     const balanceBefore = (t: Date) => StockMovement.aggregate([
       { $match: { ...match, at: { $lt: t } } },
-      { $sort: { at: -1, _id: -1 } },
+      { $sort: { merchantId: 1, productId: 1, at: -1, _id: -1 } },
       { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, balance: { $first: '$balanceAfter' } } },
     ]);
 

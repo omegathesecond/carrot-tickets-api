@@ -2,7 +2,7 @@
 import mongoose, { Schema } from 'mongoose';
 import { IMerchantOperator } from '@interfaces/merchantOperator.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
-import { applyTradingScope } from '@models/tradingScope.schema';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * A person on the till at one stall (cashless spec — per-person operators).
@@ -27,6 +27,6 @@ applyOperatorCredentials(merchantOperatorSchema);
 applyTradingScope(merchantOperatorSchema);
 
 merchantOperatorSchema.index({ merchantId: 1, isActive: 1 });
-merchantOperatorSchema.index({ venueId: 1, isActive: 1 });
+merchantOperatorSchema.index({ venueId: 1, isActive: 1 }, VENUE_ONLY_INDEX);
 
 export const MerchantOperator = mongoose.model<IMerchantOperator>('MerchantOperator', merchantOperatorSchema);
