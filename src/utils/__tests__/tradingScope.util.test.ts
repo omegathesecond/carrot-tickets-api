@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { scopeIds, scopeMatch, scopeOfDoc, requireScopeOf, belongsToScope } from '@utils/tradingScope.util';
+import { scopeIds, scopeMatch, scopeOfDoc, requireScopeOf, belongsToScope, ownerWord } from '@utils/tradingScope.util';
 
 const E = new mongoose.Types.ObjectId().toHexString();
 const V = new mongoose.Types.ObjectId().toHexString();
@@ -39,5 +39,10 @@ describe('tradingScope util', () => {
     expect(belongsToScope({ eventId: V }, venue)).toBe(false); // same hex, wrong kind
     expect(belongsToScope({ eventId: E }, { kind: 'event', eventId: E })).toBe(true);
     expect(belongsToScope(null, venue)).toBe(false);
+  });
+
+  it('ownerWord names the owner kind in a refusal', () => {
+    expect(ownerWord({ kind: 'event', eventId: E })).toBe('this event');
+    expect(ownerWord({ kind: 'venue', venueId: V })).toBe('this venue');
   });
 });

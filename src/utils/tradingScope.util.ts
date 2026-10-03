@@ -60,3 +60,8 @@ export function belongsToScope(doc: Owned, scope: TradingScope): boolean {
     ? own.eventId === (scope as { eventId: string }).eventId
     : own.venueId === (scope as { venueId: string }).venueId;
 }
+
+/** The owner as refusal copy: "this event" / "this venue". */
+export function ownerWord(scope: TradingScope): 'this event' | 'this venue' {
+  return scope.kind === 'event' ? 'this event' : 'this venue';
+}

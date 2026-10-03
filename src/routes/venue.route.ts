@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { VenueController } from '@controllers/venue.controller';
 import { MerchantAdminController } from '@controllers/merchantAdmin.controller';
 import { MerchantOperatorAdminController } from '@controllers/merchantOperatorAdmin.controller';
+import { StockAdminController } from '@controllers/stockAdmin.controller';
 import { requireAnyPermission, requireTicketsPermission } from '@middleware/ticketsAuth.middleware';
 import { venueScope } from '@middleware/tradingScope.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
@@ -26,5 +27,15 @@ router.get('/stalls/:merchantId/operators', requireTicketsPermission(MANAGE_VENU
 router.post('/stalls/:merchantId/operators', requireTicketsPermission(MANAGE_VENUE), venueScope, MerchantOperatorAdminController.create);
 router.patch('/operators/:id', requireTicketsPermission(MANAGE_VENUE), venueScope, MerchantOperatorAdminController.update);
 router.post('/operators/:id/reset-pin', requireTicketsPermission(MANAGE_VENUE), venueScope, MerchantOperatorAdminController.resetPin);
+
+router.get('/products', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.listProducts);
+router.post('/products', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.createProduct);
+router.patch('/products/:id', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.updateProduct);
+router.post('/stock/receive', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.receiveStock);
+router.patch('/stock/threshold', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.setThreshold);
+router.post('/stock/transfer', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.transferStock);
+router.post('/stock/count', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.recordCount);
+router.get('/stock/allocations', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.listAllocations);
+router.put('/stock/allocations', requireTicketsPermission(MANAGE_STOCK), venueScope, StockAdminController.setAllocations);
 
 export default router;

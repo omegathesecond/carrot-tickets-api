@@ -3,6 +3,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { R2Service } from '@utils/r2.service';
 import { Event } from '@models/event.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import { getScope } from '@middleware/tradingScope.middleware';
 
 /**
  * MediaController - Handles event media uploads to Cloudflare R2
@@ -442,5 +443,25 @@ export class MediaController {
   /** POST /api/media/events/:eventId/product */
   static async uploadProductImage(req: Request, res: Response): Promise<any> {
     return MediaController.uploadItemImage(req, res, 'product');
+  }
+
+  /**
+   * POST /api/media/venue/product — a venue catalogue image. venueScope has
+   * already resolved the caller's own venue; stored under venues/<id>/product.
+   */
+  static async uploadVenueProductImage(req: Request, res: Response): Promise<any> {
+    try {
+      const scope = getScope(req);
+      if (scope.kind !== 'venue') throw new Error('uploadVenueProductImage needs a venue scope');
+      const file = req.file;
+      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
+      const { key, url } = await R2Service.uploadFile(
+        `venues/${scope.venueId}/product`, file.originalname || 'product', file.buffer, file.mimetype,
+      );
+      ApiResponseUtil.success(res, { media: { key, url, type: 'product' } }, 'Image uploaded successfully');
+    } catch (error: any) {
+      console.error('Upload venue product image error:', error);
+      ApiResponseUtil.error(res, error.message || 'Failed to upload image');
+    }
   }
 }

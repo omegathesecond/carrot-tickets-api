@@ -797,18 +797,20 @@ router.get('/events/:eventId/tables', requireSuperAdminOrPermission(TicketsPermi
 
 /**
  * Cashless Stock/Inventory — organiser manages the product catalogue and
- * loads per-bar stock (design 2026-08-12, Slice 1). MANAGE_STOCK gate +
- * event-ownership enforced in the controller.
+ * loads per-bar stock (design 2026-08-12, Slice 1). MANAGE_STOCK gate, then
+ * eventScope enforces event ownership; the handlers are shared with
+ * /api/tickets/venue/*. PATCH /products/:id has no :eventId — the handler
+ * derives the scope from the product's own event (resolveDocScope).
  */
-router.post('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.createProduct);
-router.get('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listProducts);
+router.post('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.createProduct);
+router.get('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.listProducts);
 router.patch('/products/:id', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.updateProduct);
-router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.receiveStock);
-router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setThreshold);
-router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.transferStock);
-router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.recordCount);
-router.get('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listAllocations);
-router.put('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setAllocations);
+router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.receiveStock);
+router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.setThreshold);
+router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.transferStock);
+router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.recordCount);
+router.get('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.listAllocations);
+router.put('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.setAllocations);
 
 /**
  * Event Menu — organiser manages the bar/vendor preorder catalogue shown on
