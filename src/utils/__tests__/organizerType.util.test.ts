@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { Vendor } from '@models/vendor.model';
 import { Venue } from '@models/venue.model';
+import { OperatorType } from '@interfaces/vendor.interface';
 import { ORGANIZER_TYPES, organizerTypeFilter, organizerTypeOf, OrganizerType } from '@utils/organizerType.util';
 
 const id = () => new mongoose.Types.ObjectId();
@@ -66,7 +67,8 @@ describe('organizerTypeFilter agrees with organizerTypeOf (no drift)', () => {
 
   // Every combination the rules look at: operatorType (incl. absent) x
   // businessType x whether a Venue record exists.
-  const operatorTypes = ['events', 'both', 'transport', 'services', undefined] as const;
+  // Built from the enum so a new OperatorType is covered automatically.
+  const operatorTypes: Array<string | undefined> = [...Object.values(OperatorType), undefined];
   const businessTypes = ['venue', 'other'] as const;
 
   async function seedMatrix() {
@@ -97,7 +99,7 @@ describe('organizerTypeFilter agrees with organizerTypeOf (no drift)', () => {
   it('find() and aggregate() return exactly the vendors organizerTypeOf assigns to each type', async () => {
     const rows = await seedMatrix();
     const venueIds = new Set((await Venue.find().select('vendorId').lean()).map((x) => String(x.vendorId)));
-    expect(rows).toHaveLength(20);
+    expect(rows).toHaveLength(operatorTypes.length * businessTypes.length * 2);
 
     const seen = new Set<string>();
     for (const type of ORGANIZER_TYPES as readonly OrganizerType[]) {

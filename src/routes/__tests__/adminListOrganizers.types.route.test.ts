@@ -352,6 +352,30 @@ describe('fails loudly on a bad query (400, exact messages)', () => {
     expect(res.body.data.pagination.total).toBe(11);
   });
 
+  // Express parses with allowPrototypes, so `x[toString]=y` is an object whose
+  // String() throws; that used to escape the handler and kill the process.
+  it.each([
+    ['?type[toString]=x', 'Unknown organizer type'],
+    ['?type[]=events', 'Unknown organizer type'],
+    ['?status[a]=b', 'Unknown verification status'],
+    ['?sort[]=name', 'Unknown sort'],
+    ['?type=venues&venueTrading[a]=b', 'Unknown venue trading filter'],
+    ['?search[a]=b', 'Invalid search'],
+    ['?search[toString]=x', 'Invalid search'],
+    ['?type=services&category[a]=b', 'Invalid category'],
+    ['?page[x]=1', 'Invalid page'],
+    ['?limit[toString]=1', 'Invalid limit'],
+    ['?search=a&search=b', 'Invalid search'],
+  ])('a non-text param %s is a 400 %s, and the API keeps serving', async (qs, message) => {
+    await seedMixed();
+    const res = await list(qs);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe(message);
+    const after = await list('?limit=100');
+    expect(after.status).toBe(200);
+    expect(after.body.data.pagination.total).toBe(11);
+  });
+
   it('is still super-admin only', async () => {
     const res = await request(app).get('/api/tickets/admin/organizers');
     expect([401, 403]).toContain(res.status);

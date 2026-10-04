@@ -55,35 +55,59 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** An absent/empty param is "not sent"; a value outside `allowed` is null (the caller 400s). */
-function enumParam<T extends string>(raw: string, allowed: readonly T[]): { value: T | undefined } | null {
+/**
+ * A query value as trimmed text: '' when the param is absent, null when it is
+ * not a string at all (a repeated `x=1&x=2`, `x[]=1`, or `x[k]=v` arrives as an
+ * array or object). Express parses with allowPrototypes, so `x[toString]=y` is
+ * an object whose String() THROWS - never stringify an unchecked value.
+ */
+function textParam(value: unknown): string | null {
+  if (value === undefined) return '';
+  return typeof value === 'string' ? value.trim() : null;
+}
+
+/**
+ * Absent/empty = "not sent". A value outside `allowed`, or one that is not text
+ * at all (null), is invalid: null back, and the caller answers 400.
+ */
+function enumParam<T extends string>(raw: string | null, allowed: readonly T[]): { value: T | undefined } | null {
+  if (raw === null) return null;
   if (!raw) return { value: undefined };
   const match = allowed.find((a) => a === raw);
   return match ? { value: match } : null;
 }
 
-/** Validates the list query, or says which param is wrong. Messages are part of the API contract. */
+/**
+ * Validates the list query, or says which param is wrong. Never throws, and a
+ * non-text value is always a 400 - never ignored, never a crash. Messages are
+ * part of the API contract.
+ */
 function parseListQuery(q: Request['query']): ListQuery | { error: string } {
-  // String() so a repeated or bracketed param (`type=a&type=b`) fails validation instead of slipping through.
-  const str = (key: string) => String(q[key] ?? '').trim();
-
-  const type = enumParam(str('type'), ORGANIZER_TYPES);
+  const type = enumParam(textParam(q['type']), ORGANIZER_TYPES);
   if (!type) return { error: 'Unknown organizer type' };
-  const status = enumParam(str('status'), Object.values(VerificationStatus));
+  const status = enumParam(textParam(q['status']), Object.values(VerificationStatus));
   if (!status) return { error: 'Unknown verification status' };
-  const sort = enumParam(str('sort'), SORT_NAMES);
+  const sort = enumParam(textParam(q['sort']), SORT_NAMES);
   if (!sort) return { error: 'Unknown sort' };
-  const venueTrading = enumParam(str('venueTrading'), VENUE_TRADING_FILTERS);
+  const venueTrading = enumParam(textParam(q['venueTrading']), VENUE_TRADING_FILTERS);
   if (!venueTrading) return { error: 'Unknown venue trading filter' };
 
-  const category = str('category');
+  const search = textParam(q['search']);
+  if (search === null) return { error: 'Invalid search' };
+  const category = textParam(q['category']);
+  if (category === null) return { error: 'Invalid category' };
+  const pageText = textParam(q['page']);
+  if (pageText === null) return { error: 'Invalid page' };
+  const limitText = textParam(q['limit']);
+  if (limitText === null) return { error: 'Invalid limit' };
+
   if (venueTrading.value && type.value !== 'venues') return { error: 'venueTrading needs type=venues' };
   if (category && type.value !== 'services') return { error: 'category needs type=services' };
 
   return {
-    page: Math.max(1, parseInt(String(q['page'] ?? '1'), 10) || 1),
-    limit: Math.min(100, Math.max(1, parseInt(String(q['limit'] ?? '25'), 10) || 25)),
-    search: str('search'),
+    page: Math.max(1, parseInt(pageText || '1', 10) || 1),
+    limit: Math.min(100, Math.max(1, parseInt(limitText || '25', 10) || 25)),
+    search,
     status: status.value,
     type: type.value,
     venueTrading: venueTrading.value,
@@ -128,7 +152,8 @@ export class AdminOrganizersController {
    *   category      exact serviceCategory — ONLY with type=services.
    *   sort          newest (default) | oldest | name (A-Z, case-insensitive).
    *
-   * An unknown or misplaced param is a 400, not a silent no-op.
+   * An unknown, misplaced or non-text param (`type[]=x`, `search[k]=v`) is a 400,
+   * not a silent no-op.
    *
    * Besides the page it returns `statusCounts` (within the requested type, ignoring
    * every other filter), `typeCounts` (per type, ignoring every filter) and
@@ -136,10 +161,9 @@ export class AdminOrganizersController {
    * dropdown stay stable while filtering.
    */
   static async listOrganizers(req: Request, res: Response): Promise<any> {
-    const query = parseListQuery(req.query);
-    if ('error' in query) return ApiResponseUtil.badRequest(res, query.error);
-
     try {
+      const query = parseListQuery(req.query);
+      if ('error' in query) return ApiResponseUtil.badRequest(res, query.error);
       const { page, limit, search, status, type, venueTrading, category, sort } = query;
 
       // One small read feeds the type filters, venueTrading and per-row classification.
