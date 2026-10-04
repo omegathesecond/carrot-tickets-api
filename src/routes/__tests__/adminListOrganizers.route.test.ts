@@ -10,7 +10,7 @@ afterAll(disconnectTestDb);
 afterEach(clearTestDb);
 
 describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory', () => {
-  it('includes operatorType and serviceCategory on each row, and filters by ?operatorType=services', async () => {
+  it('includes operatorType and serviceCategory on each row, and filters by ?type=services', async () => {
     await Vendor.create({
       businessName: 'Luxe Decor',
       phoneNumber: '+26876000010',
@@ -37,24 +37,24 @@ describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory',
     expect(eventsRow.operatorType).toBe('events');
     expect(eventsRow.serviceCategory).toBeNull();
 
-    // Filtered by operatorType=services returns only the services vendor.
+    // Filtered by type=services returns only the services vendor.
     const filtered = await request(app)
-      .get('/api/tickets/admin/organizers?operatorType=services')
+      .get('/api/tickets/admin/organizers?type=services')
       .set('Authorization', `Bearer ${signSuperAdminToken()}`);
     expect(filtered.status).toBe(200);
     expect(filtered.body.data.organizers).toHaveLength(1);
     expect(filtered.body.data.organizers[0].businessName).toBe('Luxe Decor');
   });
 
-  it('ignores an invalid ?operatorType value instead of erroring', async () => {
+  it('rejects an invalid ?type value with a 400 instead of ignoring it', async () => {
     await Vendor.create({
       businessName: 'Big Concerts Co', phoneNumber: '+26876000012', password: 'secret1',
       operatorType: OperatorType.EVENTS,
     });
     const res = await request(app)
-      .get('/api/tickets/admin/organizers?operatorType=bogus')
+      .get('/api/tickets/admin/organizers?type=bogus')
       .set('Authorization', `Bearer ${signSuperAdminToken()}`);
-    expect(res.status).toBe(200);
-    expect(res.body.data.organizers).toHaveLength(1);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Unknown organizer type');
   });
 });
