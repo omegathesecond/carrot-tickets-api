@@ -39,6 +39,7 @@ export interface TagBinding {
 }
 
 export interface TagMovement {
+  purchaseChargeAmount?: number;
   kind: 'topup' | 'spend' | 'cashout';
   amount: number;
   at: Date;
@@ -266,7 +267,7 @@ export class TagReportService {
     const movements: TagMovement[] = [
       ...topups.map((t: any) => ({ kind: 'topup' as const, amount: t.amount, at: t.createdAt, label: 'Top-up' })),
       ...charges.map((c: any) => ({
-        kind: 'spend' as const, amount: c.amount, at: c.createdAt,
+        kind: 'spend' as const, amount: c.amount, purchaseChargeAmount: c.purchaseChargeAmount, at: c.createdAt,
         label: merchantNames.get(String(c.merchantId)) ?? 'Stall',
       })),
       ...withdrawals.map((w: any) => ({

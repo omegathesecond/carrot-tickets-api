@@ -26,9 +26,11 @@ export interface IMerchantCharge extends Document {
   bandUid: string;
   /** Amount debited from the wallet, integer minor units (cents). */
   amount: number;
+  /** Customer surcharge owed to the organizer, included in amount. */
+  purchaseChargeAmount: number;
   /** Platform commission taken from `amount`, integer minor units (cents). */
   fee: number;
-  /** amount - fee: what the merchant is owed, integer minor units (cents). */
+  /** amount - purchaseChargeAmount - fee: stall earnings, integer cents. */
   netAmount: number;
   clientTxnId: string;
   status: 'completed';
@@ -53,6 +55,7 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   bandUid: { type: String, required: true, trim: true },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
+  purchaseChargeAmount: { type: Number, default: 0, min: 0, validate: { validator: Number.isSafeInteger, message: 'purchase charge must be integer cents' } },
   fee: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'fee must be integer cents' } },
   netAmount: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'netAmount must be integer cents' } },
   clientTxnId: { type: String, required: true },

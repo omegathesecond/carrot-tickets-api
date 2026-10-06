@@ -1,3 +1,4 @@
+import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { WalletService } from '@services/wallet.service';
 import { MerchantService } from '@services/merchant.service';
@@ -17,7 +18,7 @@ afterAll(disconnectTestDb);
 // consistent as WalletService.topUpCash's, not just individually correct in
 // isolation.
 it('shows no drift after a mix of top-ups and merchant charges, including a declined (rejected) charge', async () => {
-  const eventId = new mongoose.Types.ObjectId();
+  const { eventId } = await seedPublishedEvent();
 
   const w1 = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
   const w2 = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });

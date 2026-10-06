@@ -664,7 +664,7 @@ export class WalletService {
     const history = [
       ...topups.map(h => ({ type: 'topup' as const, amount: h.amount, at: h.createdAt })),
       ...withdrawals.map(h => ({ type: 'withdrawal' as const, amount: h.amount, at: h.createdAt })),
-      ...charges.map(h => ({ type: 'purchase' as const, amount: h.amount, at: h.createdAt })),
+      ...charges.map(h => ({ type: 'purchase' as const, amount: h.amount, purchaseChargeAmount: h.purchaseChargeAmount, at: h.createdAt })),
     ]
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, 15);

@@ -250,15 +250,15 @@ export class StockReportService {
       ]),
       MerchantCharge.aggregate([
         { $match: { eventId: eid } },
-        { $group: { _id: '$merchantId', gross: { $sum: '$amount' }, fee: { $sum: '$fee' }, net: { $sum: '$netAmount' }, count: { $sum: 1 } } },
+        { $group: { _id: '$merchantId', gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, fee: { $sum: '$fee' }, net: { $sum: '$netAmount' }, count: { $sum: 1 } } },
       ]),
       MerchantCharge.aggregate([
         { $match: { eventId: eid } },
-        { $group: { _id: { $ifNull: ['$staffName', null] }, gross: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $group: { _id: { $ifNull: ['$staffName', null] }, gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, count: { $sum: 1 } } },
       ]),
       MerchantCharge.aggregate([
         { $match: { eventId: eid } },
-        { $group: { _id: { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] }, gross: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $group: { _id: { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] }, gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, count: { $sum: 1 } } },
       ]),
       StockMovement.aggregate([
         { $match: { eventId: eid, reason: StockMovementReason.SALE } },

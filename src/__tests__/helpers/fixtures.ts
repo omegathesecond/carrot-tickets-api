@@ -12,6 +12,7 @@ import { ResellerHub } from '@models/resellerHub.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 
 export interface SeedPublishedEventOptions {
+  eventId?: mongoose.Types.ObjectId;
   price?: number;
   capacity?: number;
   ticketTypeName?: string;
@@ -39,6 +40,7 @@ export async function seedPublishedEvent(
   const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const event = await Event.create({
+    ...(opts.eventId ? { _id: opts.eventId } : {}),
     vendorId,
     name: 'Snapshot Test Event',
     venue: 'Test Venue',

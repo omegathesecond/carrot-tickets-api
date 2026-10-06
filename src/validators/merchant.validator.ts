@@ -13,6 +13,7 @@ export const MAX_QTY_PER_LINE = 1000;
  * catalogue) must be present. merchantId/eventId come from the JWT.
  */
 export const chargeSchema = Joi.object({
+  quotedTotal: Joi.number().integer().min(1).max(MAX_CHARGE_CENTS).required(),
   bandUid: uid.required(),
   clientTxnId: Joi.string().trim().required(),
   // Accepted-but-discarded: attribution now comes ONLY from the verified
@@ -33,3 +34,5 @@ export const chargeSchema = Joi.object({
     }))
     .min(1).max(MAX_LINES),
 }).xor('amount', 'items');
+
+export const chargeQuoteSchema = chargeSchema.fork(['bandUid', 'clientTxnId', 'quotedTotal'], (schema) => schema.forbidden());

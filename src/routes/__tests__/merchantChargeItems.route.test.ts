@@ -65,7 +65,7 @@ it('itemised charge returns 200 with the priced breakdown and new balance', asyn
     // A stale POS may still send staffName in the body. It must NOT cause a
     // validation rejection (200, not 400) and must NOT reach the record —
     // the token's operatorName ('Thabo Dlamini') is what gets stored.
-    .send({ bandUid, clientTxnId: 'c1', staffName: 'Sipho', items: [{ productId: beerId, qty: 2 }] });
+    .send({ bandUid, quotedTotal: 5000, clientTxnId: 'c1', staffName: 'Sipho', items: [{ productId: beerId, qty: 2 }] });
   expect(res.status).toBe(200);
   expect(res.body.data.amount).toBe(5000);
   expect(res.body.data.newBalance).toBe(95000);
@@ -80,7 +80,7 @@ it('an out-of-stock line declines with 409 out_of_stock, wallet untouched', asyn
   const { eventId, bandUid, merchantId, beerId, merchantOperatorId } = await setup({ beerStock: 1 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, clientTxnId: 'c2', items: [{ productId: beerId, qty: 5 }] });
+    .send({ bandUid, quotedTotal: 12500, clientTxnId: 'c2', items: [{ productId: beerId, qty: 5 }] });
   expect(res.status).toBe(409);
   // Standard ApiResponseUtil envelope stringifies the 4th arg into `error`
   // (same pattern the pre-existing 402 test asserts on) — parse before matching.
@@ -92,7 +92,7 @@ it('rejects sending both amount and items with 400', async () => {
   const { eventId, bandUid, merchantId, beerId, merchantOperatorId } = await setup();
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, clientTxnId: 'c3', amount: 300, items: [{ productId: beerId, qty: 1 }] });
+    .send({ bandUid, quotedTotal: 300, clientTxnId: 'c3', amount: 300, items: [{ productId: beerId, qty: 1 }] });
   expect(res.status).toBe(400);
 });
 
@@ -100,7 +100,7 @@ it('still accepts an amount-only charge (200, un-itemised)', async () => {
   const { eventId, bandUid, merchantId, merchantOperatorId } = await setup();
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, clientTxnId: 'c4', amount: 300 });
+    .send({ bandUid, quotedTotal: 300, clientTxnId: 'c4', amount: 300 });
   expect(res.status).toBe(200);
   expect(res.body.data.items).toBeUndefined();
 });

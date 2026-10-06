@@ -66,7 +66,7 @@ it('charges a wallet by band uid and credits the merchant', async () => {
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c1' });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c1' });
 
   expect(res.status).toBe(200);
   expect(res.body.success).toBe(true);
@@ -80,7 +80,7 @@ it('splits the fee when the merchant has a commissionPercent', async () => {
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000, commissionPercent: 10 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-fee' });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c-fee' });
 
   expect(res.status).toBe(200);
   expect(res.body.data.fee).toBe(30);
@@ -91,7 +91,7 @@ it('declines with 402 on insufficient balance, leaving the wallet unchanged (sta
   const { eventId, bandUid, merchantId, walletId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 100 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, amount: 500, clientTxnId: 'c-decline' });
+    .send({ bandUid, quotedTotal: 500, amount: 500, clientTxnId: 'c-decline' });
 
   expect(res.status).toBe(402);
   // Standard { success, message, error } envelope — NOT a bespoke shape.
@@ -109,7 +109,7 @@ it('rejects a non-cashless event with 400', async () => {
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ cashless: false, balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-noncashless' });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c-noncashless' });
 
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/cashless/i);
@@ -125,7 +125,7 @@ it('rejects a charge against a cancelled (non-published) cashless event with 400
 
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-cancelled' });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c-cancelled' });
 
   expect(res.status).toBe(400);
   expect(res.body.message).toMatch(/published/i);
@@ -146,13 +146,13 @@ it('ignores a forged permissions array — authorization comes from the operator
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId, [])}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-forged-empty-perms' });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c-forged-empty-perms' });
 
   expect(res.status).toBe(200);
 });
 
 it('rejects an unauthenticated request with 401', async () => {
-  const res = await request(app).post('/api/merchant/charge').send({ bandUid: '04a22b1c3d4e5f', amount: 300, clientTxnId: 'c-noauth' });
+  const res = await request(app).post('/api/merchant/charge').send({ bandUid: '04a22b1c3d4e5f', quotedTotal: 300, amount: 300, clientTxnId: 'c-noauth' });
   expect(res.status).toBe(401);
 });
 
@@ -160,14 +160,14 @@ it('404s an unknown band uid', async () => {
   const { eventId, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid: 'aaaaaaaaaaaaaa', amount: 300, clientTxnId: 'c-unknownband' });
+    .send({ bandUid: 'aaaaaaaaaaaaaa', quotedTotal: 300, amount: 300, clientTxnId: 'c-unknownband' });
 
   expect(res.status).toBe(404);
 });
 
 it('is idempotent on clientTxnId at the HTTP layer', async () => {
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
-  const body = { bandUid, amount: 300, clientTxnId: 'dup-http' };
+  const body = { bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'dup-http' };
   const first = await request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`).send(body);
   const second = await request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`).send(body);
 
@@ -181,7 +181,7 @@ it('rejects a bad-scope token (e.g. a reseller token) with 401', async () => {
   const notMerchantToken = jwt.sign({ scope: 'reseller', resellerId: 'r1', hubId: null, operatorId: 'op1', role: 'reseller_operator', permissions: [] }, JWT_SECRET);
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${notMerchantToken}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-badscope', eventId });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c-badscope', eventId });
 
   expect(res.status).toBe(401);
 });
@@ -196,7 +196,7 @@ it('rejects a legacy token minted before per-person operators — no anonymous c
 
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${legacy}`)
-    .send({ bandUid, amount: 300, clientTxnId: 'c-legacy' });
+    .send({ bandUid, quotedTotal: 300, amount: 300, clientTxnId: 'c-legacy' });
 
   expect(res.status).toBe(401);
   const w = await Wallet.findById(walletId).lean();
@@ -209,7 +209,7 @@ it('rejects a malformed productId on an itemised charge with 400, not a CastErro
   const { eventId, bandUid, merchantId, merchantOperatorId } = await seedMerchantAndFundedBand({ balance: 1000 });
   const res = await request(app).post('/api/merchant/charge')
     .set('Authorization', `Bearer ${token(merchantId, eventId, merchantOperatorId)}`)
-    .send({ bandUid, clientTxnId: 'c-bad-product-id', items: [{ productId: 'not-an-object-id', qty: 1 }] });
+    .send({ bandUid, quotedTotal: 300, clientTxnId: 'c-bad-product-id', items: [{ productId: 'not-an-object-id', qty: 1 }] });
 
   expect(res.status).toBe(400);
   expect(res.body.success).toBe(false);

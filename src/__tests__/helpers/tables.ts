@@ -1,3 +1,5 @@
+import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
+import { Event } from '@models/event.model';
 /**
  * Shared fixtures for waiter-table tests (Tasks 8, 9, 10). Modelled on the
  * stall/product/stock seeding in merchantCharge.items.service.test.ts, so
@@ -41,6 +43,7 @@ export interface SeededStall {
 
 /** A Merchant on EVENT, a Product on it at `price` cents, stocked `onHand` units. */
 export async function seedStall(opts: SeedStallOptions): Promise<SeededStall> {
+  if (!(await Event.exists({ _id: EVENT }))) await seedPublishedEvent({ eventId: EVENT });
   const merchant = await Merchant.create({
     name: 'Test Stall', eventId: EVENT,
     ...(opts.commissionPercent == null ? {} : { commissionPercent: opts.commissionPercent }),

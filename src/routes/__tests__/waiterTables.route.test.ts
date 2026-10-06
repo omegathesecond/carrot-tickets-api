@@ -414,7 +414,7 @@ describe('waiter tables — settle a table', () => {
     const walletId = await fundedTag(eventId, '04a22b1c', 10000);
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 6000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     expect(res.status).toBe(200);
     expect(res.body.data.walletBalance).toBe(4000);
@@ -434,7 +434,7 @@ describe('waiter tables — settle a table', () => {
     await fundedTag(eventId, '04a22b1c', 4500);
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 6000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     expect(res.status).toBe(402);
     expect(res.body.message).toMatch(/15\.00 short/);
@@ -447,7 +447,7 @@ describe('waiter tables — settle a table', () => {
     const { eventId, token } = await seedFloor(canSettle);
     const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 1 });
     await fundedTag(eventId, '04a22b1c', 10000);
-    const body = { bandUid: '04a22b1c', clientTxnId: 's1' };
+    const body = { quotedTotal: 3000, bandUid: '04a22b1c', clientTxnId: 's1' };
     await request(app).post(`/api/waiter/tables/${tableId}/settle`)
       .set('Authorization', `Bearer ${token}`).send(body);
 
@@ -463,7 +463,7 @@ describe('waiter tables — settle a table', () => {
     const { tableId } = await tableWithDrinks(eventId, token, { label: '7', price: 3000, qty: 1 });
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 3000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     expect(res.status).toBe(404);
     expect(res.body.message).toMatch(/no wallet/i);
@@ -480,7 +480,7 @@ describe('waiter tables — settle a table', () => {
     await fundedTag(eventId, '04a22b1c', 10000);
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 3000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     expect(res.status).toBe(403);
     expect(res.body.message).toMatch(/waiter:settle_tables/);
@@ -525,7 +525,7 @@ describe('waiter tables — revocation and event lifecycle', () => {
     await Waiter.updateOne({ _id: waiterId }, { $set: { isActive: false } });
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 3000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     // Refused at AUTHENTICATION now, not at event scope: authenticateWaiter
     // re-reads the row before any handler runs.
@@ -539,7 +539,7 @@ describe('waiter tables — revocation and event lifecycle', () => {
     await Waiter.deleteOne({ _id: waiterId });
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 3000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     // Refused at AUTHENTICATION now, not at event scope: authenticateWaiter
     // re-reads the row before any handler runs.
@@ -553,7 +553,7 @@ describe('waiter tables — revocation and event lifecycle', () => {
     await Event.updateOne({ _id: eventId }, { $set: { status: EventStatus.CANCELLED } });
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-      .set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 's1' });
+      .set('Authorization', `Bearer ${token}`).send({ quotedTotal: 3000, bandUid: '04a22b1c', clientTxnId: 's1' });
 
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/not published/i);
@@ -592,4 +592,19 @@ describe('waiter tables — revocation and event lifecycle', () => {
     expect(res.status).toBe(404);
     expect(res.body.message).toMatch(/not found/i);
   });
+});
+
+it('quotes the full table charge and enforces the reviewed amount on settlement', async () => {
+  const { eventId, token } = await seedFloor([...WAITER_PERMISSIONS, WaiterPermission.SETTLE_TABLES]);
+  const { tableId } = await tableWithDrinks(eventId, token, { label: 'quote', price: 3000, qty: 2 });
+  await Event.updateOne({ _id: eventId }, { $set: { purchaseCharge: { type: 'fixed', value: 250 } } });
+  await fundedTag(eventId, '04a22b1c', 10000);
+  const quote = await request(app).get(`/api/waiter/tables/${tableId}/quote`).set('Authorization', `Bearer ${token}`);
+  expect(quote.status).toBe(200);
+  expect(quote.body.data).toEqual({ subtotal: 6000, purchaseChargeAmount: 250, total: 6250 });
+  const missing = await request(app).post(`/api/waiter/tables/${tableId}/settle`).set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 'quote' });
+  expect(missing.status).toBe(400);
+  const paid = await request(app).post(`/api/waiter/tables/${tableId}/settle`).set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 'quote', quotedTotal: 6250 });
+  expect(paid.status).toBe(200);
+  expect(paid.body.data.walletBalance).toBe(3750);
 });

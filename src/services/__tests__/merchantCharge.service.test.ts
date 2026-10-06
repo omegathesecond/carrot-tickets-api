@@ -1,3 +1,4 @@
+import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { WalletService } from '@services/wallet.service';
 import { MerchantService, WalletDeclinedError, MAX_CHARGE_CENTS } from '@services/merchant.service';
@@ -20,7 +21,7 @@ afterAll(disconnectTestDb);
 let __loginCodeSeq = 0;
 
 async function seedFundedWallet(amount = 1000) {
-  const eventId = new mongoose.Types.ObjectId();
+  const { eventId } = await seedPublishedEvent();
   const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
   await WalletService.topUpCash({
     walletId: String(w._id), eventId: String(eventId), amount, recordedBy: 'op1', clientTxnId: 'seed-topup',
@@ -323,7 +324,7 @@ it('rejects an amount over MAX_CHARGE_CENTS', async () => {
 it('WalletDeclinedError carries a machine-readable reason', async () => {
   // A freshly-minted wallet defaults to balance 0 — seedFundedWallet(0) would
   // itself reject (topUpCash requires amount > 0), so create the wallet bare.
-  const eventId = new mongoose.Types.ObjectId();
+  const { eventId } = await seedPublishedEvent();
   const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
   const walletId = String(w._id);
   const bandUid = '04a22b1c3d4e5f';

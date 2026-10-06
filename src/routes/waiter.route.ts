@@ -28,6 +28,7 @@ router.post('/tables/:id/stalls/:merchantId/accept', requireWaiterPermission(Wai
 // SETTLE_TABLES, deliberately NOT MANAGE_TABLES: serving a table and taking
 // money for it are different jobs, and the money one is a separate per-person
 // grant (see WAITER_PERMISSIONS, which omits it).
+router.get('/tables/:id/quote', requireWaiterPermission(WaiterPermission.SETTLE_TABLES), WaiterController.quoteTable);
 router.post('/tables/:id/settle', requireWaiterPermission(WaiterPermission.SETTLE_TABLES), WaiterController.settleTable);
 
 export default router;

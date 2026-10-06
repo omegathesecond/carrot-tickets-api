@@ -8,6 +8,8 @@ export enum LedgerAccountType {
   MERCHANT = 'merchant',
   /** Revenue: Carrot service/commission income. Credit-normal (negative = earned). */
   FEES = 'fees',
+  /** Liability: customer purchase charges owed to this event's organizer. */
+  ORGANIZER = 'organizer',
 }
 
 /** Where float money physically sits. Only meaningful on FLOAT postings. */

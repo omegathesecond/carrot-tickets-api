@@ -1,4 +1,5 @@
 // api/src/controllers/merchant.controller.ts
+import { PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import { Request, Response } from 'express';
 import Joi from 'joi';
 import mongoose from 'mongoose';
@@ -15,7 +16,7 @@ import { StockAlertService } from '@services/stockAlert.service';
 import { StockTransferService } from '@services/stockTransfer.service';
 import { PosCatalogService } from '@services/posCatalog.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
-import { chargeSchema } from '@validators/merchant.validator';
+import { chargeSchema, chargeQuoteSchema } from '@validators/merchant.validator';
 import { posCountSchema, posStockAdjustSchema, posTransferSchema } from '@validators/stock.validator';
 import { toBaseUnits } from '@utils/stockUnits.util';
 import { StockMovementReason } from '@interfaces/stock.interface';
@@ -37,6 +38,18 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
 };
 
 export class MerchantController {
+  static async quote(req: Request, res: Response): Promise<any> {
+    try {
+      const eventId = eventTill(req, res, NO_TAGS_AT_VENUES);
+      if (!eventId) return;
+      const { error, value } = chargeQuoteSchema.validate(req.body);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const event = await Event.findById(eventId).lean();
+      if (!event || !event.cashless || event.status !== EventStatus.PUBLISHED) return ApiResponseUtil.badRequest(res, 'Event is not available for cashless purchases');
+      return ApiResponseUtil.success(res, await MerchantService.quote({ eventId, ...value }));
+    } catch (e: any) { return ApiResponseUtil.error(res, e.message || 'Could not price purchase', 500); }
+  }
+
   /**
    * POST /api/merchant/charge — tap-to-pay: debit the tapped band's wallet
    * and credit this merchant + the platform fee (cashless spec).
@@ -69,6 +82,7 @@ export class MerchantController {
       const result = await MerchantService.charge({
         merchantId, eventId, walletId: String(wallet._id), bandUid,
         clientTxnId: value.clientTxnId,
+        quotedTotal: value.quotedTotal,
         ...(value.amount != null ? { amount: value.amount } : {}),
         ...(value.items ? { items: value.items } : {}),
         // The PERSON who rang this up comes ONLY from the verified JWT. A
@@ -88,6 +102,7 @@ export class MerchantController {
       return ApiResponseUtil.success(res, {
         newBalance: result.wallet.balance,
         amount: result.charge.amount,
+        purchaseChargeAmount: result.charge.purchaseChargeAmount,
         fee: result.charge.fee,
         merchantNet: result.charge.netAmount,
         ...(result.charge.items ? { items: result.charge.items } : {}),
@@ -98,6 +113,7 @@ export class MerchantController {
       // customer's card is fine, we're out of this product" apart from "the
       // customer can't pay." Checked before WalletDeclinedError only for
       // readability — the two error classes never overlap on one throw.
+      if (e instanceof PurchaseTotalChangedError) return ApiResponseUtil.error(res, e.message, 409);
       if (e instanceof StockDeclinedError) {
         return ApiResponseUtil.error(res, `Out of stock`, 409, {
           reason: e.reason, productId: e.productId, available: e.available,

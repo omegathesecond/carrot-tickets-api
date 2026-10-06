@@ -1,3 +1,4 @@
+import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import mongoose from 'mongoose';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { MerchantService } from '@services/merchant.service';
@@ -17,6 +18,7 @@ const eventId = new mongoose.Types.ObjectId();
 let __loginCodeSeq = 0;
 
 async function seed({ balance = 100000, beerStock = 100, waterStock = 100, commissionPercent = 0 } = {}) {
+  await seedPublishedEvent({ eventId });
   const merchant = await Merchant.create({ name: 'Bar 1', eventId, commissionPercent } as any);
   const operator = await new MerchantOperator({
     fullName: 'Sipho Nkosi', merchantId: merchant._id, eventId, loginCode: `4KZ9P${__loginCodeSeq++ % 10}`, pin: '111111',

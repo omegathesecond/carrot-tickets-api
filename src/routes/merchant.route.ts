@@ -9,6 +9,8 @@ const router = Router();
 /** All routes below require a valid merchant JWT (POST /api/operator/login → type:'merchant'). */
 router.use(authenticateMerchant);
 
+router.post('/quote', requireMerchantPermission(MerchantPermission.CHARGE), MerchantController.quote);
+
 router.post(
   '/charge',
   requireMerchantPermission(MerchantPermission.CHARGE),

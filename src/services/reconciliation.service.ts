@@ -11,7 +11,8 @@ export interface InvariantReport {
   walletsOwed: number;
   merchantsOwed: number;
   feesEarned: number;
-  /** float − (walletsOwed + merchantsOwed + feesEarned). Always 0 in a sound journal. */
+  organizerOwed: number;
+  /** float − (walletsOwed + merchantsOwed + feesEarned + organizerOwed). Always 0 in a sound journal. */
   drift: number;
 }
 
@@ -92,7 +93,7 @@ export const RECENT_CASHLESS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export class ReconciliationService {
   /**
-   * Verify the ledger's accounting identity: float == walletsOwed + merchantsOwed + feesEarned.
+   * Verify the ledger's accounting identity: float == walletsOwed + merchantsOwed + feesEarned + organizerOwed.
    *
    * Returns ok: true only if the identity holds exactly (drift === 0). This proves that
    * every posted transaction balanced (summed to zero), so no entries bypassed LedgerService.post().
@@ -105,15 +106,16 @@ export class ReconciliationService {
    * Must be paired with checkJournalIntegrity(); see class doc for why.
    */
   static async checkInvariant(eventId: string): Promise<InvariantReport> {
-    const [float, walletsOwed, merchantsOwed, feesEarned] = await Promise.all([
+    const [float, walletsOwed, merchantsOwed, feesEarned, organizerOwed] = await Promise.all([
       LedgerService.floatBalance(eventId),
       LedgerService.totalOwed(eventId, LedgerAccountType.WALLET),
       LedgerService.totalOwed(eventId, LedgerAccountType.MERCHANT),
       LedgerService.totalOwed(eventId, LedgerAccountType.FEES),
+      LedgerService.totalOwed(eventId, LedgerAccountType.ORGANIZER),
     ]);
 
-    const drift = float - (walletsOwed + merchantsOwed + feesEarned);
-    return { ok: drift === 0, float, walletsOwed, merchantsOwed, feesEarned, drift };
+    const drift = float - (walletsOwed + merchantsOwed + feesEarned + organizerOwed);
+    return { ok: drift === 0, float, walletsOwed, merchantsOwed, feesEarned, organizerOwed, drift };
   }
 
   /**

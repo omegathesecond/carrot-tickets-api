@@ -1,3 +1,5 @@
+import { Event } from '@models/event.model';
+import { purchaseChargeAmount, PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import mongoose from 'mongoose';
 import { Table } from '@models/table.model';
 import {
@@ -322,6 +324,18 @@ async function advanceFulfilment(params: {
 }
 
 export class TableService {
+  static async quote(tableId: string, eventId: string) {
+    const table = await Table.findOne({ _id: tableId, eventId, status: 'open' });
+    if (!table) throw new Error('Open table not found');
+    const shares = await TableService.shareOutByStall(table, new mongoose.Types.ObjectId(eventId));
+    const subtotal = shares.reduce((sum, s) => sum + s.gross, 0);
+    if (subtotal <= 0) throw new Error('there is nothing on this table to charge for');
+    const event = await Event.findById(eventId).lean();
+    if (!event) throw new Error('Event not found');
+    const surcharge = purchaseChargeAmount(subtotal, event.purchaseCharge);
+    return { subtotal, purchaseChargeAmount: surcharge, total: subtotal + surcharge };
+  }
+
   static async open(params: { eventId: string; label: string; openedBy: string }): Promise<ITable> {
     const label = params.label.trim();
     if (!label) throw new Error('label is required');
@@ -676,6 +690,7 @@ export class TableService {
    * table is refused.
    */
   static async settle(params: {
+    quotedTotal?: number;
     tableId: string; eventId: string; bandUid: string;
     /** The waiter (a Waiter _id) taking the money — attribution on every charge row. */
     settledBy: string;
@@ -704,7 +719,19 @@ export class TableService {
     if (!table.items.length) throw new Error('there is nothing on this table');
 
     const stalls = await TableService.shareOutByStall(table, eventObjId);
-    const total = stalls.reduce((t, s) => t + s.gross, 0);
+    const subtotal = stalls.reduce((t, s) => t + s.gross, 0);
+    if (subtotal <= 0) throw new Error('there is nothing on this table to charge for');
+    const event = await Event.findById(eventObjId).lean();
+    if (!event) throw new Error('Event not found');
+    const surcharge = purchaseChargeAmount(subtotal, event.purchaseCharge);
+    const total = subtotal + surcharge;
+    if (params.quotedTotal !== undefined && params.quotedTotal !== total) throw new PurchaseTotalChangedError();
+    let allocated = 0;
+    const surchargeShares = stalls.map((s, index) => {
+      const share = index === stalls.length - 1 ? surcharge - allocated : Number(BigInt(surcharge) * BigInt(s.gross) / BigInt(subtotal));
+      allocated += share;
+      return share;
+    });
     // Every line comped to zero. There is no money to move and no charge row
     // that would validate (MerchantCharge floors at 1 cent), so this is not a
     // settle — the waiter voids it.
@@ -719,6 +746,7 @@ export class TableService {
 
     const postings: Posting[] = [
       { account: { type: LedgerAccountType.WALLET, ref: String(wallet._id) }, delta: total },
+      ...(surcharge > 0 ? [{ account: { type: LedgerAccountType.ORGANIZER }, delta: -surcharge }] : []),
       ...stalls.flatMap((s): Posting[] => [
         { account: { type: LedgerAccountType.MERCHANT, ref: s.merchantId }, delta: -s.net },
         ...(s.fee > 0 ? [{ account: { type: LedgerAccountType.FEES }, delta: -s.fee }] : []),
@@ -729,6 +757,9 @@ export class TableService {
     try {
       let out!: TableSettlement;
       await session.withTransaction(async () => {
+        const currentEvent = await Event.findById(eventObjId).session(session).lean();
+        if (!currentEvent) throw new Error('Event not found');
+        if (purchaseChargeAmount(subtotal, currentEvent.purchaseCharge) !== surcharge) throw new PurchaseTotalChangedError();
         // The status guard is what stops two simultaneous settles from both
         // charging the guest: exactly one findOneAndUpdate can move the table
         // off 'open'. settleTxnId goes down in the SAME $set, so the loser can
@@ -818,9 +849,9 @@ export class TableService {
         // second bill — and so a stall's takings report reads a table charge
         // exactly like a till charge.
         const charges = await MerchantCharge.create(
-          stalls.map((s) => ({
+          stalls.map((s, index) => ({
             merchantId: s.merchantId, eventId, walletId: wallet._id, bandUid,
-            amount: s.gross, fee: s.fee, netAmount: s.net,
+            amount: s.gross + surchargeShares[index]!, purchaseChargeAmount: surchargeShares[index]!, fee: s.fee, netAmount: s.net,
             clientTxnId: `${clientTxnId}:${s.merchantId}`, status: 'completed',
             items: s.lines.map((l) => ({
               productId: l.productId, name: l.name, unitPrice: l.unitPrice,

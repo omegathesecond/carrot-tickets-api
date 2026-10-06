@@ -1,3 +1,4 @@
+import { PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
@@ -81,6 +82,16 @@ async function waiterMayWorkTable(
 }
 
 export class WaiterController {
+  static async quoteTable(req: Request, res: Response): Promise<any> {
+    try {
+      const event = await loadWaiterEvent(req, res);
+      if (!event) return;
+      if (!HEX24.test(String(req.params.id))) return ApiResponseUtil.badRequest(res, 'Invalid table id');
+      if (!(await waiterMayWorkTable(req, res, String(req.params.id), String(event._id)))) return;
+      return ApiResponseUtil.success(res, await TableService.quote(String(req.params.id), String(event._id)));
+    } catch (e: any) { return ApiResponseUtil.error(res, e.message || 'Could not price table', 500); }
+  }
+
   /** GET /api/waiter/events — the one event this waiter works. */
   static async getEvents(req: Request, res: Response): Promise<any> {
     const event = await loadWaiterEvent(req, res);
@@ -325,12 +336,15 @@ export class WaiterController {
     if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
 
     try {
+      if (!Number.isSafeInteger(req.body.quotedTotal) || req.body.quotedTotal <= 0) return ApiResponseUtil.badRequest(res, 'quotedTotal is required');
       const settlement = await TableService.settle({
+        quotedTotal: req.body.quotedTotal,
         tableId: req.params['id']!, eventId: String(event._id), bandUid,
         settledBy: waiter.waiterId, staffName: waiter.fullName, clientTxnId,
       });
       return ApiResponseUtil.success(res, settlement);
     } catch (e) {
+      if (e instanceof PurchaseTotalChangedError) return ApiResponseUtil.error(res, e.message, 409, { reason: 'table_changed' });
       // 402, with the shortfall in the payload so the handheld can tell the
       // guest what to add at the desk rather than just "declined".
       if (e instanceof TableShortfallError) {

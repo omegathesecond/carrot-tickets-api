@@ -1,3 +1,4 @@
+import { purchaseChargeSchema } from '@utils/purchaseCharge.util';
 import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
@@ -339,6 +340,7 @@ export const createEventSchema = Joi.object({
 }).custom(priceRangeCheck);
 
 export const updateEventSchema = Joi.object({
+  purchaseCharge: purchaseChargeSchema,
   name: Joi.string().trim().max(200).optional(),
   description: Joi.string().max(2000).optional(),
   venue: Joi.string().trim().max(200).optional(),
