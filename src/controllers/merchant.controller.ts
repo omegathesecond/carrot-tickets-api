@@ -40,8 +40,7 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
 export class MerchantController {
   static async quote(req: Request, res: Response): Promise<any> {
     try {
-      const eventId = eventTill(req, res, NO_TAGS_AT_VENUES);
-      if (!eventId) return;
+      const { eventId } = (req as any).merchant as MerchantToken;
       const { error, value } = chargeQuoteSchema.validate(req.body);
       if (error) return ApiResponseUtil.badRequest(res, error.message);
       const event = await Event.findById(eventId).lean();
