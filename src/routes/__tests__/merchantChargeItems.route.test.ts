@@ -38,7 +38,7 @@ async function setup({ beerStock = 100 }: { beerStock?: number } = {}) {
   const bandUid = '04a1b2c3d4e5';
   await enrolTags(eventId, bandUid);
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
-  await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: 100000, recordedBy: 'op1', clientTxnId: 'seed' });
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(w._id), eventId: String(eventId), amount: 100000, recordedBy: 'op1', clientTxnId: 'seed' });
   const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0 });
   // The charge transaction re-reads the operator and refuses a missing or
   // deactivated one, so the token has to name a row that really exists.

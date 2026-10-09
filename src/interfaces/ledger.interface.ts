@@ -18,6 +18,10 @@ export enum FloatTag {
   KESHLESS = 'keshless',
   /** Physical cash collected at a cash desk, not yet banked. */
   CASH_DESK = 'cash_desk',
+  /** Card payments approved on the organizer's separate card machine. */
+  CARD_DESK = 'card_desk',
+  /** Physical cash handed to a collector with both parties' confirmation. */
+  COLLECTOR_CASH = 'collector_cash',
   /**
    * Cash handed back to an attendee at the office after the event. Distinct
    * from CASH_DESK on purpose: tagging an office refund as cash-desk would

@@ -74,7 +74,7 @@ async function fundedWallet(amount: number, bandUid: string): Promise<IWallet> {
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({
     eventId: String(EVENT), bandUid,
   });
-  const { wallet: funded } = await WalletService.topUpCash({
+  const { wallet: funded } = await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(wallet._id), eventId: String(EVENT), amount,
     recordedBy: 'fixture-desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });

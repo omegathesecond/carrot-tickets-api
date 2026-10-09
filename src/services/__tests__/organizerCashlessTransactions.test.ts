@@ -135,3 +135,21 @@ describe('OrganizerCashlessService.transactions — the organizer-facing columns
     expect(transactions[0]!.actorName).toBe('Desk Dumi');
   });
 });
+
+it('reports cash/card separately to the organizer, including per-cashier totals', async () => {
+  await connectTestDb();
+  try {
+    const cashierId = String(new mongoose.Types.ObjectId());
+    const wallet = await walletWithTag('04AABBCC');
+    await topup(wallet._id as mongoose.Types.ObjectId, { amount: 500, method: 'cash', recordedBy: cashierId });
+    await topup(wallet._id as mongoose.Types.ObjectId, { amount: 700, method: 'card', recordedBy: cashierId });
+    const summary = await OrganizerCashlessService.summary(String(EVENT));
+    expect(summary.circulated).toBe(1200);
+    expect(summary.cashTopups).toBe(500);
+    expect(summary.cardTopups).toBe(700);
+    expect(summary.cashiers[0]!.cashTopups).toBe(500);
+    expect(summary.cashiers[0]!.cardTopups).toBe(700);
+    const { transactions } = await OrganizerCashlessService.transactions({ eventId: String(EVENT) });
+    expect(new Set(transactions.map(t => t.method))).toEqual(new Set(['cash', 'card']));
+  } finally { await disconnectTestDb(); }
+});

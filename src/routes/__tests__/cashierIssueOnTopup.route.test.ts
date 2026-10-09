@@ -53,7 +53,7 @@ async function seedDesk(opts: { canIssue: boolean }) {
 const topup = (token: string, eventId: string, body: Record<string, unknown>) =>
   request(app).post('/api/cashier/topup')
     .set('Authorization', `Bearer ${token}`)
-    .send({ eventId, ...body });
+    .send({ method: 'cash', eventId, ...body });
 
 describe('a granted cashier turns a blank tag into a funded wallet in one tap', () => {
   it('registers the tag, gives it a wallet and loads it', async () => {

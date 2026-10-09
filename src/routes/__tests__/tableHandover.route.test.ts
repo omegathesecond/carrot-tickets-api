@@ -97,7 +97,7 @@ async function settledFloor(): Promise<Floor> {
   const tag = `04b0${String(seq++).padStart(4, '0')}`;
   await enrolTags(eventId, tag);
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId, bandUid: tag });
-  await WalletService.topUpCash({
+  await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(wallet._id), eventId, amount: 50000,
     recordedBy: 'desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });

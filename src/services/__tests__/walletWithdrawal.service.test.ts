@@ -15,7 +15,7 @@ afterAll(disconnectTestDb);
 async function seedFundedWallet(amount = 1000) {
   const eventId = new mongoose.Types.ObjectId();
   const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
-  await WalletService.topUpCash({
+  await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(w._id), eventId: String(eventId), amount, recordedBy: 'op1', clientTxnId: 'seed-topup',
   });
   return { eventId: String(eventId), walletId: String(w._id) };

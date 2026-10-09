@@ -11,7 +11,7 @@ import { WalletDeclinedError } from '@services/merchant.service';
 import { CashierService } from '@services/cashier.service';
 import { EventTagService } from '@services/eventTag.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
-import { cashTopupSchema } from '@validators/reseller.validator';
+import { deskTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
 import { CashierToken, CashierPermission } from '@interfaces/cashier.interface';
 import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
@@ -25,7 +25,7 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
 
 /**
  * Load a cashless, PUBLISHED event or send the right 4xx. Mirrors the lifecycle
- * guards in ResellerController.cashTopup / MerchantController.charge — a cashier
+ * guards in ResellerController.topup / MerchantController.charge — a cashier
  * token must not move money at a non-cashless, cancelled, or not-yet-live event.
  *
  * Also the single chokepoint for the cashier's event assignment: every money
@@ -114,12 +114,12 @@ export class CashierController {
 
   /**
    * POST /api/cashier/topup — load cash onto a band's wallet. Same money move as
-   * the reseller desk (WalletService.topUpCash), tagged recordedByType 'Cashier'
+   * the reseller desk (WalletService.topUpAtDesk), tagged recordedByType 'Cashier'
    * so it attributes to this cashier in reports and her own transactions.
    */
   static async topup(req: Request, res: Response): Promise<any> {
     try {
-      const { error, value } = cashTopupSchema.validate(req.body);
+      const { error, value } = deskTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const event = await loadCashlessEvent(req, res, value.eventId);
@@ -174,10 +174,10 @@ export class CashierController {
 
       if (!wallet) return ApiResponseUtil.error(res, 'No wallet for that band/ticket', 404);
 
-      const result = await WalletService.topUpCash({
+      const result = await WalletService.topUpAtDesk({
         walletId: String(wallet._id),
         eventId: value.eventId,
-        amount: value.amount,
+        amount: value.amount, method: value.method,
         recordedBy: cashier.cashierId,
         recordedByType: 'Cashier',
         clientTxnId: value.clientTxnId,
@@ -185,6 +185,7 @@ export class CashierController {
       return ApiResponseUtil.success(res, {
         newBalance: result.wallet.balance,
         amount: result.topup.amount,
+        method: result.topup.method,
       });
     } catch (e: any) {
       if (e instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, e.message, 409);

@@ -30,7 +30,7 @@ async function seed(balance = 10000) {
   const { eventId, vendorId } = await seedPublishedEvent();
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
   const wallet = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), bandUid: '04a22b1c', status: 'active' });
-  await WalletService.topUpCash({ walletId: String(wallet._id), eventId, amount: balance, recordedBy: 'desk', clientTxnId: 'topup' });
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(wallet._id), eventId, amount: balance, recordedBy: 'desk', clientTxnId: 'topup' });
   const merchant = await Merchant.create({ eventId, name: 'Stall', commissionPercent: 10 });
   const operator = await MerchantOperator.create({ eventId, merchantId: merchant._id, fullName: 'Operator', loginCode: String(operatorSeq++), pin: '111111' });
   const params = { eventId, merchantId: String(merchant._id), merchantOperatorId: String(operator._id), operatorName: 'Operator', walletId: String(wallet._id), bandUid: '04a22b1c', amount: 3000, clientTxnId: 'purchase' };

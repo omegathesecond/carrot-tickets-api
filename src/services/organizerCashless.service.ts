@@ -11,6 +11,7 @@ import { BandBinding } from '@models/bandBinding.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
 const MAX_TRANSACTIONS_PAGE = 500;
+const sumTopupMethod = (method: 'cash' | 'card') => ({ $sum: { $cond: [{ $eq: ['$method', method] }, '$amount', 0] } });
 const sumField = (field: string) => [{ $group: { _id: null, total: { $sum: field }, count: { $sum: 1 } } }];
 
 /**
@@ -28,7 +29,7 @@ export class OrganizerCashlessService {
 
     const [topupAgg, withdrawAgg, chargeAgg, leftBehindAgg, fundedAgg, vendorAgg, cashierTopupAgg, cashierWithdrawAgg] =
       await Promise.all([
-        WalletTopup.aggregate([{ $match: { eventId: eid } }, ...sumField('$amount')]),
+        WalletTopup.aggregate([{ $match: { eventId: eid } }, { $group: { _id: null, total: { $sum: '$amount' }, cashTopups: sumTopupMethod('cash'), cardTopups: sumTopupMethod('card') } }]),
         WalletWithdrawal.aggregate([{ $match: { eventId: eid } }, ...sumField('$amount')]),
         MerchantCharge.aggregate([
           { $match: { eventId: eid } },
@@ -42,7 +43,7 @@ export class OrganizerCashlessService {
         ]),
         WalletTopup.aggregate([
           { $match: { eventId: eid, recordedByType: 'Cashier' } },
-          { $group: { _id: '$recordedBy', toppedUp: { $sum: '$amount' }, n: { $sum: 1 } } },
+          { $group: { _id: '$recordedBy', toppedUp: { $sum: '$amount' }, cashTopups: sumTopupMethod('cash'), cardTopups: sumTopupMethod('card'), n: { $sum: 1 } } },
         ]),
         WalletWithdrawal.aggregate([
           { $match: { eventId: eid, recordedByType: 'Cashier' } },
@@ -71,15 +72,15 @@ export class OrganizerCashlessService {
       .sort((a: any, b: any) => b.gross - a.gross);
 
     // Per-cashier activity, merging top-ups + withdrawals, joined to cashier names.
-    const byCashier = new Map<string, { toppedUp: number; withdrawn: number; txnCount: number }>();
+    const byCashier = new Map<string, { cashTopups: number; cardTopups: number; toppedUp: number; withdrawn: number; txnCount: number }>();
     for (const t of cashierTopupAgg) {
       const k = String(t._id);
-      const c = byCashier.get(k) || { toppedUp: 0, withdrawn: 0, txnCount: 0 };
-      c.toppedUp += t.toppedUp; c.txnCount += t.n; byCashier.set(k, c);
+      const c = byCashier.get(k) || { cashTopups: 0, cardTopups: 0, toppedUp: 0, withdrawn: 0, txnCount: 0 };
+      c.cashTopups += t.cashTopups; c.cardTopups += t.cardTopups; c.toppedUp += t.toppedUp; c.txnCount += t.n; byCashier.set(k, c);
     }
     for (const w of cashierWithdrawAgg) {
       const k = String(w._id);
-      const c = byCashier.get(k) || { toppedUp: 0, withdrawn: 0, txnCount: 0 };
+      const c = byCashier.get(k) || { cashTopups: 0, cardTopups: 0, toppedUp: 0, withdrawn: 0, txnCount: 0 };
       c.withdrawn += w.withdrawn; c.txnCount += w.n; byCashier.set(k, c);
     }
     const cashierIds = [...byCashier.keys()].filter((id) => /^[0-9a-fA-F]{24}$/.test(id));
@@ -92,6 +93,7 @@ export class OrganizerCashlessService {
       .sort((a, b) => (b.toppedUp + b.withdrawn) - (a.toppedUp + a.withdrawn));
 
     return {
+      cashTopups: topupAgg[0]?.cashTopups ?? 0, cardTopups: topupAgg[0]?.cardTopups ?? 0,
       circulated, spent, withdrawn, leftBehind, fees, purchaseCharges: chargeAgg[0]?.purchaseCharges ?? 0,
       walletsFunded: fundedAgg[0]?.n ?? 0,
       vendors,
@@ -185,8 +187,8 @@ export class OrganizerCashlessService {
     ]);
 
     const merged = [
-      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, at: t.createdAt, ref: t.clientTxnId ?? null, status: t.status ?? 'completed', walletId: String(t.walletId), actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
-      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, at: w.createdAt, ref: w.clientTxnId ?? null, status: w.status ?? 'completed', walletId: String(w.walletId), actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
+      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, method: t.method, amount: t.amount, at: t.createdAt, ref: t.clientTxnId ?? null, status: t.status ?? 'completed', walletId: String(t.walletId), actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
+      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, method: w.method, amount: w.amount, at: w.createdAt, ref: w.clientTxnId ?? null, status: w.status ?? 'completed', walletId: String(w.walletId), actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
       ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, ref: c.clientTxnId ?? null, status: c.status ?? 'completed', walletId: String(c.walletId), bandUid: c.bandUid, purchaseChargeAmount: c.purchaseChargeAmount, fee: c.fee, netAmount: c.netAmount, actorType: 'Merchant', actorId: c.merchantId ? String(c.merchantId) : null })),
     ].sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime());
 

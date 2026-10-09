@@ -112,7 +112,7 @@ async function seedStallOn(eventId: string, opts: { price: number; onHand: numbe
 async function fundedTag(eventId: string, bandUid: string, amount: number) {
   await enrolTags(eventId, bandUid);
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId, bandUid });
-  await WalletService.topUpCash({
+  await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(wallet._id), eventId, amount,
     recordedBy: 'route-test-desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });

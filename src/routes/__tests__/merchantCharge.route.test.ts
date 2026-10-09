@@ -33,7 +33,7 @@ async function seedMerchantAndFundedBand(opts: { cashless?: boolean; balance?: n
   await enrolTags(eventId, bandUid, 'aaaaaaaaaaaaaa');
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
   if (balance > 0) {
-    await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: balance, recordedBy: 'op1', clientTxnId: 'seed-topup' });
+    await WalletService.topUpAtDesk({ method: 'cash', walletId: String(w._id), eventId: String(eventId), amount: balance, recordedBy: 'op1', clientTxnId: 'seed-topup' });
   }
 
   const merchant = await Merchant.create({
@@ -116,7 +116,7 @@ it('rejects a non-cashless event with 400', async () => {
 });
 
 // FIX 1: a merchant token must not be able to drain wallets at a cancelled
-// (non-published) event, mirroring ResellerController.cashTopup's lifecycle
+// (non-published) event, mirroring ResellerController.topup's lifecycle
 // guard. Without this, a merchant whose event got cancelled after their JWT
 // was issued could keep charging.
 it('rejects a charge against a cancelled (non-published) cashless event with 400, wallet unchanged', async () => {

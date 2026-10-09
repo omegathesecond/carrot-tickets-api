@@ -43,7 +43,7 @@ async function setup() {
   const bandUid = '04b1c2d3e4f5';
   await enrolTags(eventId, bandUid);
   await WalletService.bindBand(String(w._id), bandUid, 'op1');
-  await WalletService.topUpCash({ walletId: String(w._id), eventId: String(eventId), amount: 1_000_000, recordedBy: 'op1', clientTxnId: 'seed' });
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(w._id), eventId: String(eventId), amount: 1_000_000, recordedBy: 'op1', clientTxnId: 'seed' });
   const merchant = await Merchant.create({ name: 'Bar', eventId, commissionPercent: 0 });
   // The charge transaction re-reads the operator and refuses a missing or
   // deactivated one, so the token has to name a row that really exists.
@@ -60,8 +60,12 @@ async function setup() {
     merchantOperatorId: String(operator._id), productId: String(product._id), vToken,
   };
 }
-const sell = (m: string, e: string, op: string, band: string, productId: string, qty: number, id: string) =>
-  request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${mToken(m, e, op)}`).send({ bandUid: band, clientTxnId: id, items: [{ productId, qty }] });
+const sell = async (m: string, e: string, op: string, band: string, productId: string, qty: number, id: string) => {
+  const token = mToken(m, e, op);
+  const items = [{ productId, qty }];
+  const quote = await request(app).post('/api/merchant/quote').set('Authorization', `Bearer ${token}`).send({ items }).expect(200);
+  return request(app).post('/api/merchant/charge').set('Authorization', `Bearer ${token}`).send({ bandUid: band, clientTxnId: id, items, quotedTotal: quote.body.data.total });
+};
 
 it('alerts once on downward crossing, stays quiet while armed, re-alerts after replenish', async () => {
   const { eventId, vendorId, bandUid, merchantId, merchantOperatorId, productId, vToken } = await setup();

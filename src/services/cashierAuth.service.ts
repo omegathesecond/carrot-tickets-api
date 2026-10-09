@@ -1,3 +1,4 @@
+import { HttpError } from '@utils/httpError.util';
 // api/src/services/cashierAuth.service.ts
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { Cashier } from '@models/cashier.model';
@@ -5,7 +6,7 @@ import { CASHIER_PERMISSIONS, CashierToken } from '@interfaces/cashier.interface
 import { grantedCashierPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
-import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
+import { verifyOperatorPin } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 
@@ -15,6 +16,12 @@ const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
  * discipline — issuing a cashier-scoped JWT instead of a gate one.
  */
 export class CashierAuthService {
+  static async confirmPin(cashierId: string, pin: unknown) {
+    if (typeof pin !== 'string' || !/^\d{6}$/.test(pin)) throw new HttpError(400, 'Enter your own 6-digit cashier PIN');
+    const cashier = await Cashier.findOne({ _id: cashierId, isActive: true }).select('+pin');
+    if (!cashier) throw new HttpError(403, 'Staff account is inactive');
+    await verifyOperatorPin(Cashier, cashier, pin);
+  }
   static async login(loginCode: string, pin: string) {
     if (typeof loginCode !== 'string' || typeof pin !== 'string') {
       throw new Error('Invalid credentials');
@@ -22,19 +29,7 @@ export class CashierAuthService {
     const cashier = await Cashier.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!cashier) throw new Error('Invalid credentials');
 
-    if (cashier.lockedUntil && cashier.lockedUntil.getTime() > Date.now()) {
-      throw new Error('Account locked. Try again later.');
-    }
-
-    const ok = await cashier.comparePin(pin);
-    if (!ok) {
-      // Counted on the server, not on this loaded document — N guesses in
-      // flight together must reach N and lock, not all write 1.
-      await recordFailedPinAttempt(Cashier, cashier._id as any);
-      throw new Error('Invalid credentials');
-    }
-
-    await clearPinLockout(Cashier, cashier._id as any);
+    await verifyOperatorPin(Cashier, cashier, pin);
 
     const isSuperAdmin = cashier.scope === 'platform';
     const payload: Record<string, unknown> = {

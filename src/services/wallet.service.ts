@@ -1,8 +1,9 @@
+import { CashDeskService } from '@services/cashDesk.service';
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
 import { EventTagService } from '@services/eventTag.service';
-import { WalletTopup, IWalletTopup, TopupRecordedByType } from '@models/walletTopup.model';
+import { WalletTopup, IWalletTopup, TopupRecordedByType, TopupMethod } from '@models/walletTopup.model';
 import { WalletWithdrawal, IWalletWithdrawal } from '@models/walletWithdrawal.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { LedgerService } from '@services/ledger.service';
@@ -14,7 +15,7 @@ import { assertValidBandUid } from '@utils/bandUid.util';
  * Safety ceiling on a single cash top-up, in minor units (cents): R100,000.
  * This is an adjustable defense-in-depth limit against ledger inflation from a
  * fat-fingered or malicious amount — NOT a business rule. Enforced both in the
- * reseller Joi schema (cashTopupSchema.amount) and here in topUpCash, so a
+ * reseller Joi schema (deskTopupSchema.amount) and here in topUpAtDesk, so a
  * caller that bypasses validation still cannot inflate.
  */
 export const MAX_TOPUP_CENTS = 10_000_000;
@@ -30,10 +31,10 @@ export const MAX_TOPUP_CENTS = 10_000_000;
 export class WalletIdempotencyMismatchError extends Error {
   readonly reason = 'idempotency_mismatch' as const;
   constructor(
-    public readonly recordedAmount: number,
-    public readonly requestedAmount: number,
+    public readonly recordedValue: number | string,
+    public readonly requestedValue: number | string,
   ) {
-    super('clientTxnId already used with a different amount');
+    super(`clientTxnId already used with a different ${typeof recordedValue === 'string' ? 'payment method' : 'amount'}`);
     this.name = 'WalletIdempotencyMismatchError';
   }
 }
@@ -50,6 +51,12 @@ function assertReplayMatches(recordedAmount: number, requestedAmount: number): v
  * This service does NOT mutate `balance` — top-up (SP3) and tap-to-pay (SP5) do,
  * each through an atomic CAS plus a balanced ledger posting.
  */
+function assertTopupReplayMatches(topup: IWalletTopup, eventId: string, amount: number, method: TopupMethod): void {
+  assertReplayMatches(topup.amount, amount);
+  if (topup.method !== method) throw new WalletIdempotencyMismatchError(topup.method, method);
+  if (String(topup.eventId) !== eventId.toLowerCase()) throw new Error('wallet not found for this event');
+}
+
 export class WalletService {
   /**
    * Get-or-create the wallet for one TICKET (the chosen identity: one wallet per
@@ -418,10 +425,11 @@ export class WalletService {
    *     credit and ledger legs), and we then re-read and return the winner's
    *     row instead of the loser's failure.
    */
-  static async topUpCash(params: {
+  static async topUpAtDesk(params: {
     walletId: string;
     eventId: string;
     amount: number;
+    method: TopupMethod;
     recordedBy: string;
     /** Actor population recording the top-up. Defaults to ResellerOperator — the
      * only historical caller — so the reseller desk path is unchanged; the
@@ -429,8 +437,9 @@ export class WalletService {
     recordedByType?: TopupRecordedByType;
     clientTxnId: string;
   }): Promise<{ wallet: IWallet; topup: IWalletTopup }> {
-    const { walletId, eventId, amount, recordedBy, clientTxnId } = params;
+    const { walletId, eventId, amount, method, recordedBy, clientTxnId } = params;
     const recordedByType: TopupRecordedByType = params.recordedByType ?? 'ResellerOperator';
+    if (method !== 'cash' && method !== 'card') throw new Error('method must be cash or card');
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new Error('amount must be a positive integer (cents)');
     }
@@ -447,16 +456,19 @@ export class WalletService {
     // WalletIdempotencyMismatchError.
     const existing = await WalletTopup.findOne({ walletId, clientTxnId });
     if (existing) {
-      assertReplayMatches(existing.amount, amount);
+      assertTopupReplayMatches(existing, eventId, amount, method);
       const w = await Wallet.findById(existing.walletId);
       if (!w) throw new Error('wallet not found');
       return { wallet: w, topup: existing };
     }
 
+    const cashDesk = method === 'cash' && recordedByType === 'Cashier';
+    if (cashDesk) await CashDeskService.ensure(eventId, recordedBy);
     const session = await mongoose.startSession();
     try {
       let out!: { wallet: IWallet; topup: IWalletTopup };
       await session.withTransaction(async () => {
+        if (cashDesk) await CashDeskService.touch(eventId, recordedBy, session);
         // Atomic credit; pipeline update keeps balance & cashFundedBalance
         // consistent (the model's cashFundedBalance<=balance pre('validate')
         // hook does NOT fire on updates — see wallet.model.ts).
@@ -470,7 +482,7 @@ export class WalletService {
             {
               $set: {
                 balance: { $add: ['$balance', amount] },
-                cashFundedBalance: { $add: ['$cashFundedBalance', amount] },
+                cashFundedBalance: { $add: ['$cashFundedBalance', method === 'cash' ? amount : 0] },
               },
             },
           ],
@@ -481,7 +493,7 @@ export class WalletService {
         await LedgerService.post({
           eventId,
           postings: [
-            { account: { type: LedgerAccountType.FLOAT }, delta: amount, tag: FloatTag.CASH_DESK },
+            { account: { type: LedgerAccountType.FLOAT }, delta: amount, tag: method === 'cash' ? FloatTag.CASH_DESK : FloatTag.CARD_DESK },
             { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: -amount },
           ],
           refType: 'wallet_topup',
@@ -490,7 +502,7 @@ export class WalletService {
         });
 
         const [topup] = await WalletTopup.create(
-          [{ walletId, eventId, amount, method: 'cash', status: 'completed', recordedBy, recordedByType, clientTxnId }],
+          [{ walletId, eventId, amount, method, status: 'completed', recordedBy, recordedByType, clientTxnId }],
           { session },
         );
         if (!topup) throw new Error('wallet topup insert failed');
@@ -506,7 +518,7 @@ export class WalletService {
         const topup = await WalletTopup.findOne({ walletId, clientTxnId });
         const wallet = topup ? await Wallet.findById(topup.walletId) : null;
         if (topup && wallet) {
-          assertReplayMatches(topup.amount, amount);
+          assertTopupReplayMatches(topup, eventId, amount, method);
           return { wallet, topup };
         }
       }
@@ -518,7 +530,7 @@ export class WalletService {
 
   /**
    * Cash-OUT at a desk (cashless spec — cashier slice): the mirror image of
-   * topUpCash. A cashier hands physical cash back to the attendee, so we DEBIT
+   * topUpAtDesk. A cashier hands physical cash back to the attendee, so we DEBIT
    * the wallet and pay the venue's cash float down.
    *
    * Money direction and safety are borrowed wholesale from MerchantService.charge:
@@ -578,10 +590,13 @@ export class WalletService {
       return { wallet: w, withdrawal: existing };
     }
 
+    const cashDesk = method === 'cash' && recordedByType === 'Cashier';
+    if (cashDesk) await CashDeskService.ensure(eventId, recordedBy);
     const session = await mongoose.startSession();
     try {
       let out!: { wallet: IWallet; withdrawal: IWalletWithdrawal };
       await session.withTransaction(async () => {
+        if (cashDesk) await CashDeskService.touch(eventId, recordedBy, session);
         const wallet = await Wallet.findOneAndUpdate(
           { _id: walletId, eventId, status: 'active', balance: { $gte: amount } },
           [
@@ -662,7 +677,7 @@ export class WalletService {
       MerchantCharge.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
     ]);
     const history = [
-      ...topups.map(h => ({ type: 'topup' as const, amount: h.amount, at: h.createdAt })),
+      ...topups.map(h => ({ type: 'topup' as const, method: h.method, amount: h.amount, at: h.createdAt })),
       ...withdrawals.map(h => ({ type: 'withdrawal' as const, amount: h.amount, at: h.createdAt })),
       ...charges.map(h => ({ type: 'purchase' as const, amount: h.amount, purchaseChargeAmount: h.purchaseChargeAmount, at: h.createdAt })),
     ]

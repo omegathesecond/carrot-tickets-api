@@ -84,7 +84,7 @@ class ReplayedCharge extends Error {
 /**
  * Merchant tap-to-pay money movement (cashless spec) — DOES NOT mutate
  * `balance` outside this one atomic CAS. Same transaction shape as
- * WalletService.topUpCash (open session.withTransaction, atomic
+ * WalletService.topUpAtDesk (open session.withTransaction, atomic
  * aggregation-pipeline wallet update, LedgerService.post on the same
  * session, a durable record write, idempotent on clientTxnId including
  * E11000 recovery) but DEBITS the wallet instead of crediting it, and splits
@@ -225,7 +225,7 @@ export class MerchantService {
         // Atomic CAS debit: the guard (status active + sufficient balance)
         // and the decrement are the SAME operation, so no concurrent tap can
         // ever push the balance negative. cashFundedBalance is drawn down
-        // first and floored at 0 via $max, mirroring topUpCash's pipeline
+        // first and floored at 0 via $max, mirroring topUpAtDesk's pipeline
         // update and the CAS-debit pattern documented in wallet.model.ts.
         const wallet = await Wallet.findOneAndUpdate(
           { _id: walletId, eventId, status: 'active', balance: { $gte: total } },

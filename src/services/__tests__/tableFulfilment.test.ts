@@ -36,7 +36,7 @@ async function twoStallTable(): Promise<{ table: ITable; bar: string; kitchen: s
 async function fundedTag(amount: number, bandUid: string) {
   await enrolTags(EVENT, bandUid);
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId: String(EVENT), bandUid });
-  await WalletService.topUpCash({
+  await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(wallet._id), eventId: String(EVENT), amount,
     recordedBy: 'fixture-desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });

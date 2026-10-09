@@ -15,7 +15,7 @@ afterAll(disconnectTestDb);
 // Reconciliation invariant (cashless spec §3) after a MIX of top-ups (credits)
 // and merchant tap-to-pay charges (debits) on the same event — proves
 // MerchantService.charge's postings are as balanced and internally
-// consistent as WalletService.topUpCash's, not just individually correct in
+// consistent as WalletService.topUpAtDesk's, not just individually correct in
 // isolation.
 it('shows no drift after a mix of top-ups and merchant charges, including a declined (rejected) charge', async () => {
   const { eventId } = await seedPublishedEvent();
@@ -33,8 +33,8 @@ it('shows no drift after a mix of top-ups and merchant charges, including a decl
   }).save();
 
   // Top-ups: wallet 1 gets 2000, wallet 2 gets 1500.
-  await WalletService.topUpCash({ walletId: String(w1._id), eventId: String(eventId), amount: 2000, recordedBy: 'op1', clientTxnId: 't1' });
-  await WalletService.topUpCash({ walletId: String(w2._id), eventId: String(eventId), amount: 1500, recordedBy: 'op1', clientTxnId: 't2' });
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(w1._id), eventId: String(eventId), amount: 2000, recordedBy: 'op1', clientTxnId: 't1' });
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(w2._id), eventId: String(eventId), amount: 1500, recordedBy: 'op1', clientTxnId: 't2' });
 
   // Charges: merchant A charges wallet 1 twice (with commission), merchant B
   // charges wallet 2 once (no commission).

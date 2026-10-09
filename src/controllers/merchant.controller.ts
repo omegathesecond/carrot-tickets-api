@@ -67,7 +67,7 @@ export class MerchantController {
       const event = await Event.findById(eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
       if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
-      // Lifecycle guard, mirroring ResellerController.cashTopup: a merchant
+      // Lifecycle guard, mirroring ResellerController.topup: a merchant
       // token must not be able to drain wallets at a cancelled or
       // not-yet-live event.
       if (event.status !== EventStatus.PUBLISHED) {

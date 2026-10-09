@@ -25,6 +25,8 @@ export enum OperatorGrant {
    * `type: 'register'` rather than `type: 'gate'`.
    */
   ISSUE_TAGS = 'issue_tags',
+  /** Cash custody transfers, confirmed by the cashier handing over. */
+  COLLECT_CASH = 'collect_cash',
   /**
    * The stall's STOCK CONTROLLER. Receives deliveries into this stall, writes
    * off breakage, and moves stock to another stall — all scoped to the stall
@@ -59,6 +61,7 @@ const TICKETS_BY_GRANT: Partial<Record<OperatorGrant, TicketsPermission>> = {
 
 /** Grants → the cashier namespace (cashiers log in through their own middleware). */
 const CASHIER_BY_GRANT: Partial<Record<OperatorGrant, CashierPermission>> = {
+  [OperatorGrant.COLLECT_CASH]: CashierPermission.COLLECT_CASH,
   [OperatorGrant.ISSUE_TAGS]: CashierPermission.ISSUE_TAGS,
 };
 

@@ -56,7 +56,7 @@ async function seedEventWithTables() {
   const bandUid = 'aa11bb22';
   await enrolTags(EVENT, bandUid);
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId: String(EVENT), bandUid });
-  await WalletService.topUpCash({
+  await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(wallet._id), eventId: String(EVENT), amount: 10000,
     recordedBy: 'fixture-desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });

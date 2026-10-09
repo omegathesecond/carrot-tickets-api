@@ -8,7 +8,7 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { EventService } from '@services/event.service';
 import { AllocationService } from '@services/allocation.service';
 import { EventStatus } from '@interfaces/event.interface';
-import { cashTopupSchema } from '@validators/reseller.validator';
+import { deskTopupSchema } from '@validators/reseller.validator';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
@@ -376,12 +376,12 @@ export class ResellerController {
   /**
    * Wallets: Cash top-up at a desk (spec §5.2). Resolves the wallet by bandUid
    * OR ticketId (xor'd in the schema), gates on Event.cashless, and delegates
-   * the atomic credit + ledger posting to WalletService.topUpCash. recordedBy
+   * the atomic credit + ledger posting to WalletService.topUpAtDesk. recordedBy
    * comes ONLY from the verified JWT (req.reseller.operatorId), never the body.
    */
-  static async cashTopup(req: Request, res: Response): Promise<any> {
+  static async topup(req: Request, res: Response): Promise<any> {
     try {
-      const { error, value } = cashTopupSchema.validate(req.body);
+      const { error, value } = deskTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       // Same chokepoint as /sales: event ids are public, so without this a
@@ -405,9 +405,9 @@ export class ResellerController {
         : await Wallet.findOne({ ticketId: value.ticketId, eventId: value.eventId });
       if (!wallet) return ApiResponseUtil.error(res, 'No wallet for that band/ticket', 404);
 
-      const result = await WalletService.topUpCash({
+      const result = await WalletService.topUpAtDesk({
         walletId: String(wallet._id), eventId: value.eventId,
-        amount: value.amount, recordedBy: (req as any).reseller.operatorId, clientTxnId: value.clientTxnId,
+        amount: value.amount, method: value.method, recordedBy: (req as any).reseller.operatorId, clientTxnId: value.clientTxnId,
       });
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {

@@ -1,10 +1,12 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
+export type TopupMethod = 'cash' | 'card';
+
 export type TopupRecordedByType = 'ResellerOperator' | 'Cashier' | 'MerchantOperator' | 'Platform';
 
 export interface IWalletTopup extends Document {
   walletId: Types.ObjectId; eventId: Types.ObjectId; amount: number;
-  method: 'cash'; status: 'completed'; recordedBy: string;
+  method: TopupMethod; status: 'completed'; recordedBy: string;
   /** Actor population that recorded this top-up. Existing rows predate the field
    * and are all reseller-desk top-ups, hence the ResellerOperator default. */
   recordedByType: TopupRecordedByType;
@@ -14,7 +16,7 @@ const walletTopupSchema = new Schema<IWalletTopup>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   eventId: { type: Schema.Types.ObjectId, required: true, index: true },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
-  method: { type: String, enum: ['cash'], required: true },
+  method: { type: String, enum: ['cash', 'card'], required: true },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
   recordedBy: { type: String, required: true, index: true },
   recordedByType: { type: String, enum: ['ResellerOperator', 'Cashier', 'MerchantOperator', 'Platform'], required: true, default: 'ResellerOperator' },

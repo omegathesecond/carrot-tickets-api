@@ -1,3 +1,4 @@
+import { CashCollectionController } from '@controllers/cashCollection.controller';
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
 import { TicketPdfController } from '@controllers/ticketPdf.controller';
@@ -69,6 +70,7 @@ router.post('/auth/handoff/exchange', TicketsController.socialHandoffExchange);
  * - Service key (x-service-key header) for proxied app requests from main Keshless API
  */
 router.use(dualAuth);
+router.get('/events/:eventId/cash-collections', requireSuperAdminOrPermission(TicketsPermission.VIEW_REVENUE), CashCollectionController.report);
 
 /**
  * Admin-only settings routes (super admin only)

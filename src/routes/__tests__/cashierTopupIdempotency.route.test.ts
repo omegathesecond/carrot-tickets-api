@@ -55,7 +55,7 @@ async function seedDesk() {
 it('POST /topup: 409s a reused clientTxnId with a different amount; same amount replays', async () => {
   const { eventId, wallet, token } = await seedDesk();
   const post = (amount: number) => request(app).post('/api/cashier/topup')
-    .set('Authorization', `Bearer ${token}`).send({ bandUid: TAG, eventId, amount, clientTxnId: 'tu-1' });
+    .set('Authorization', `Bearer ${token}`).send({ method: 'cash', bandUid: TAG, eventId, amount, clientTxnId: 'tu-1' });
 
   expect((await post(500)).status).toBe(200);
 
@@ -72,7 +72,7 @@ it('POST /topup: 409s a reused clientTxnId with a different amount; same amount 
 
 it('POST /withdraw: 409s a reused clientTxnId with a different amount; same amount replays', async () => {
   const { eventId, wallet, token } = await seedDesk();
-  await WalletService.topUpCash({ walletId: String(wallet._id), eventId, amount: 1000, recordedBy: 'seed', clientTxnId: 'seed' });
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(wallet._id), eventId, amount: 1000, recordedBy: 'seed', clientTxnId: 'seed' });
   const post = (amount: number) => request(app).post('/api/cashier/withdraw')
     .set('Authorization', `Bearer ${token}`).send({ bandUid: TAG, eventId, amount, clientTxnId: 'wd-1' });
 
@@ -87,4 +87,24 @@ it('POST /withdraw: 409s a reused clientTxnId with a different amount; same amou
   expect(replay.body.data.newBalance).toBe(700);
   expect((await Wallet.findById(wallet._id))!.balance).toBe(700);
   expect(await WalletWithdrawal.countDocuments({ walletId: wallet._id })).toBe(1);
+});
+
+it('requires Cash or Card on every request and records card-machine reloads', async () => {
+  const { eventId, wallet, token } = await seedDesk();
+  const body = { bandUid: TAG, eventId, amount: 500, clientTxnId: 'card-record' };
+  const post = (payload: object) => request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`).send(payload);
+  expect((await post(body)).status).toBe(400);
+  expect((await post({ ...body, method: 'other' })).status).toBe(400);
+  const first = await post({ ...body, method: 'card' });
+  expect(first.status).toBe(200);
+  expect(first.body.data.method).toBe('card');
+  expect((await Wallet.findById(wallet._id))!.cashFundedBalance).toBe(0);
+  const replay = await post({ ...body, method: 'card' });
+  expect(replay.status).toBe(200);
+  const changed = await post({ ...body, method: 'cash' });
+  expect(changed.status).toBe(409);
+  expect(changed.body.message).toMatch(/different payment method/);
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(500);
+  // A different reload must supply its own method again.
+  expect((await post({ ...body, clientTxnId: 'next' })).status).toBe(400);
 });
