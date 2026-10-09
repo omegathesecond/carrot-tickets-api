@@ -671,15 +671,17 @@ export class WalletService {
     // A true statement: top-ups (money in), withdrawals (cash out), and vendor
     // charges (spend) merged and time-sorted, so the balance-check and receipt
     // screens can show how the current balance was arrived at.
-    const [topups, withdrawals, charges] = await Promise.all([
+    const [topups, withdrawals, charges, reversals] = await Promise.all([
       WalletTopup.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
       WalletWithdrawal.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
       MerchantCharge.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(10).lean(),
+      MerchantCharge.find({ walletId: wallet._id, status: 'reversed' }).sort({ 'reversal.at': -1 }).limit(10).lean(),
     ]);
     const history = [
       ...topups.map(h => ({ type: 'topup' as const, method: h.method, amount: h.amount, at: h.createdAt })),
       ...withdrawals.map(h => ({ type: 'withdrawal' as const, amount: h.amount, at: h.createdAt })),
       ...charges.map(h => ({ type: 'purchase' as const, amount: h.amount, purchaseChargeAmount: h.purchaseChargeAmount, at: h.createdAt })),
+      ...reversals.map(h => ({ type: 'reversal' as const, amount: h.amount, at: h.reversal!.at })),
     ]
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, 15);

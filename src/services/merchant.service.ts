@@ -11,6 +11,7 @@ import { LedgerAccountType } from '@interfaces/ledger.interface';
 import { Product } from '@models/product.model';
 import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
+import { HttpError } from '@utils/httpError.util';
 
 // Re-exported so the controller can import both declines from
 // @services/merchant.service if convenient.
@@ -237,7 +238,7 @@ export class MerchantService {
               },
             },
           ],
-          { new: true, session },
+          { new: false, session },
         );
 
         if (!wallet) {
@@ -258,6 +259,12 @@ export class MerchantService {
           }
           throw new WalletDeclinedError('insufficient_balance', 'insufficient balance', fresh.balance);
         }
+
+        // The atomic debit returns its pre-image, capturing the funding split
+        // without another read or a temporary field on the customer's wallet.
+        const cashFundedAmount = Math.min(wallet.cashFundedBalance, total);
+        wallet.balance -= total;
+        wallet.cashFundedBalance -= cashFundedAmount;
 
         // Decrement stock per line inside the SAME transaction. A
         // StockDeclinedError aborts the txn → the wallet debit above rolls back.
@@ -302,7 +309,7 @@ export class MerchantService {
 
         const [charge] = await MerchantCharge.create(
           [{
-            merchantId, eventId, walletId, bandUid, amount: total, purchaseChargeAmount: surcharge, fee, netAmount: net, clientTxnId, status: 'completed',
+            merchantId, eventId, walletId, bandUid, amount: total, purchaseChargeAmount: surcharge, fee, netAmount: net, clientTxnId, status: 'completed', cashFundedAmount,
             ...(itemSnapshots ? { items: itemSnapshots } : {}),
             merchantOperatorId, staffName: operatorName,
           }],
@@ -337,6 +344,7 @@ export class MerchantService {
     charge: IMerchantCharge,
     requested: { amount?: number; items?: ReadonlyArray<{ productId: unknown; qty: number }> },
   ): Promise<{ wallet: IWallet; charge: IMerchantCharge }> {
+    if (charge.status === 'reversed') throw new HttpError(409, 'This sale was reversed. Start a new sale.');
     // Only a repeat of the SAME sale is a replay. An amount-charge must match
     // the committed amount exactly; an itemised charge must match the
     // committed basket (merged by product, so duplicate lines don't matter);
@@ -371,7 +379,11 @@ export class MerchantService {
       fee: number;
       netAmount: number;
       bandUid: string;
-      status: 'completed';
+      status: 'completed' | 'reversed';
+      canReverse: boolean;
+      reversalUnavailableReason: string | null;
+      items: IMerchantCharge['items'];
+      reversal: IMerchantCharge['reversal'];
       createdAt: Date;
     }>;
     summary: { totalCharged: number; totalNet: number; totalFee: number; count: number };
@@ -381,7 +393,7 @@ export class MerchantService {
     const [rows, aggResult] = await Promise.all([
       MerchantCharge.find({ merchantId }).sort({ createdAt: -1 }).limit(limit).lean(),
       MerchantCharge.aggregate([
-        { $match: { merchantId: new mongoose.Types.ObjectId(merchantId) } },
+        { $match: { merchantId: new mongoose.Types.ObjectId(merchantId), status: 'completed' } },
         {
           $group: {
             _id: null,
@@ -402,6 +414,10 @@ export class MerchantService {
       netAmount: c.netAmount,
       bandUid: c.bandUid,
       status: c.status,
+      canReverse: c.status === 'completed' && !c.waiterId && Number.isSafeInteger(c.cashFundedAmount),
+      reversalUnavailableReason: c.waiterId ? 'Table payments must be reversed as a whole' : !Number.isSafeInteger(c.cashFundedAmount) ? 'This sale predates reversal support' : null,
+      items: c.items,
+      reversal: c.reversal,
       createdAt: c.createdAt,
     }));
 

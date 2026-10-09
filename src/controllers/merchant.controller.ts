@@ -16,7 +16,8 @@ import { StockAlertService } from '@services/stockAlert.service';
 import { StockTransferService } from '@services/stockTransfer.service';
 import { PosCatalogService } from '@services/posCatalog.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
-import { chargeSchema, chargeQuoteSchema } from '@validators/merchant.validator';
+import { chargeSchema, chargeQuoteSchema, merchantBalanceSchema, merchantReversalSchema } from '@validators/merchant.validator';
+import { MerchantReversalService } from '@services/merchantReversal.service';
 import { posCountSchema, posStockAdjustSchema, posTransferSchema } from '@validators/stock.validator';
 import { toBaseUnits } from '@utils/stockUnits.util';
 import { StockMovementReason } from '@interfaces/stock.interface';
@@ -24,7 +25,8 @@ import {
   TableService, TableFulfilmentNotFoundError, TableFulfilmentStateError,
 } from '@services/table.service';
 import { TableFulfilmentStatus } from '@interfaces/table.interface';
-import { HEX24 } from '@utils/controllerHelpers.util';
+import { HEX24, failWithHttpError } from '@utils/controllerHelpers.util';
+import { HttpError } from '@utils/httpError.util';
 
 /** The statuses a stall may filter its table feed by — see MerchantController.tables. */
 const FULFILMENT_STATUSES: TableFulfilmentStatus[] = ['paid', 'handed_out', 'collected'];
@@ -38,6 +40,28 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
 };
 
 export class MerchantController {
+  static async balance(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = merchantBalanceSchema.validate(req.query);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const { eventId } = (req as any).merchant as MerchantToken;
+      const event = await Event.findById(eventId).select('cashless').lean();
+      if (!event?.cashless) return ApiResponseUtil.badRequest(res, 'Event is not cashless');
+      const wallet = await Wallet.findOne({ eventId, bandUid: normalizeBandUid(value.bandUid) }).select('balance status bandUid').lean();
+      if (!wallet) return ApiResponseUtil.notFound(res, 'No wallet for that band at this event');
+      return ApiResponseUtil.success(res, { balance: wallet.balance, status: wallet.status, bandUid: wallet.bandUid });
+    } catch (e) { return failWithHttpError(res, e, 'Could not check band balance'); }
+  }
+
+  static async reverse(req: Request, res: Response): Promise<any> {
+    try {
+      if (!HEX24.test(String(req.params.id))) return ApiResponseUtil.badRequest(res, 'Invalid sale ID');
+      const { error, value } = merchantReversalSchema.validate(req.body);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const result = await MerchantReversalService.reverse({ ...(req as any).merchant, ...value, chargeId: String(req.params.id) });
+      return ApiResponseUtil.success(res, { amount: result.charge.amount, newBalance: result.wallet.balance, status: result.charge.status, reversal: result.charge.reversal });
+    } catch (e) { return failWithHttpError(res, e, 'Could not reverse sale'); }
+  }
   static async quote(req: Request, res: Response): Promise<any> {
     try {
       const { eventId } = (req as any).merchant as MerchantToken;
@@ -138,6 +162,7 @@ export class MerchantController {
           reason: e.reason, clientTxnId: e.clientTxnId,
         });
       }
+      if (e instanceof HttpError) return failWithHttpError(res, e, 'Charge failed');
       const msg = e?.message || 'Charge failed';
       const status = /not found|cashless|amount|not active|exactly one|products? not found|positive integer/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);

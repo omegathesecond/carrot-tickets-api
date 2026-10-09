@@ -45,7 +45,7 @@ export class StockReportService {
       // contribute to neither — see `itemisedSplit` on the dashboard for how
       // much revenue that is.
       MerchantCharge.aggregate([
-        { $match: { eventId: eid } },
+        { $match: { eventId: eid, status: 'completed' } },
         { $unwind: '$items' },
         {
           $group: {
@@ -194,6 +194,7 @@ export class StockReportService {
       switch (g._id.reason) {
         case StockMovementReason.TRANSFER_IN: r.transferIn += g.qty; break;
         case StockMovementReason.TRANSFER_OUT: r.transferOut += -g.qty; break;
+        case StockMovementReason.SALE_REVERSAL:
         case StockMovementReason.SALE: r.sold += -g.qty; break;
         case StockMovementReason.COUNT_ADJUST: r.countAdjust += g.qty; break;
         case StockMovementReason.SPOILAGE: r.spoilage += -g.qty; break;
@@ -245,24 +246,24 @@ export class StockReportService {
 
     const [productRevenue, byBar, byEmployee, split, peak, closingCounts, stockRows, saleWindow, products, merchants] = await Promise.all([
       MerchantCharge.aggregate([
-        { $match: { eventId: eid } }, { $unwind: '$items' },
+        { $match: { eventId: eid, status: 'completed' } }, { $unwind: '$items' },
         { $group: { _id: '$items.productId', revenue: { $sum: '$items.lineTotal' }, units: { $sum: '$items.qty' } } },
       ]),
       MerchantCharge.aggregate([
-        { $match: { eventId: eid } },
+        { $match: { eventId: eid, status: 'completed' } },
         { $group: { _id: '$merchantId', gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, fee: { $sum: '$fee' }, net: { $sum: '$netAmount' }, count: { $sum: 1 } } },
       ]),
       MerchantCharge.aggregate([
-        { $match: { eventId: eid } },
+        { $match: { eventId: eid, status: 'completed' } },
         { $group: { _id: { $ifNull: ['$staffName', null] }, gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, count: { $sum: 1 } } },
       ]),
       MerchantCharge.aggregate([
-        { $match: { eventId: eid } },
+        { $match: { eventId: eid, status: 'completed' } },
         { $group: { _id: { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] }, gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, count: { $sum: 1 } } },
       ]),
       StockMovement.aggregate([
-        { $match: { eventId: eid, reason: StockMovementReason.SALE } },
-        { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: { $abs: '$delta' } } } },
+        { $match: { eventId: eid, reason: { $in: [StockMovementReason.SALE, StockMovementReason.SALE_REVERSAL] } } },
+        { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: { $multiply: ['$delta', -1] } } } },
       ]),
       StockCount.aggregate([
         { $match: { eventId: eid, phase: 'closing' } }, { $sort: { at: -1 } },
@@ -270,8 +271,8 @@ export class StockReportService {
       ]),
       ProductStock.find({ eventId: eid }).lean(),
       StockMovement.aggregate([
-        { $match: { eventId: eid, reason: StockMovementReason.SALE, at: { $gte: windowStart } } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, units: { $sum: { $abs: '$delta' } } } },
+        { $match: { eventId: eid, reason: { $in: [StockMovementReason.SALE, StockMovementReason.SALE_REVERSAL] }, at: { $gte: windowStart } } },
+        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, units: { $sum: { $multiply: ['$delta', -1] } } } },
       ]),
       Product.find({ eventId: eid }).select('name').lean(),
       Merchant.find({ eventId: eid }).select('name').lean(),

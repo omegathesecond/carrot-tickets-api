@@ -33,7 +33,10 @@ export interface IMerchantCharge extends Document {
   /** amount - purchaseChargeAmount - fee: stall earnings, integer cents. */
   netAmount: number;
   clientTxnId: string;
-  status: 'completed';
+  status: 'completed' | 'reversed';
+  /** Exact cash-funded portion consumed by this debit. Never inferred for older sales. */
+  cashFundedAmount?: number;
+  reversal?: { by: Types.ObjectId; staffName: string; reason: string; at: Date; restocked: boolean; ledgerTxnId: string };
   items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }>;
   /**
    * Snapshot of the human who took this charge at sale time — the operator's
@@ -59,7 +62,16 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
   fee: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'fee must be integer cents' } },
   netAmount: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'netAmount must be integer cents' } },
   clientTxnId: { type: String, required: true },
-  status: { type: String, enum: ['completed'], required: true, default: 'completed' },
+  status: { type: String, enum: ['completed', 'reversed'], required: true, default: 'completed' },
+  cashFundedAmount: { type: Number, min: 0, validate: Number.isSafeInteger },
+  reversal: { type: new Schema({
+    by: { type: Schema.Types.ObjectId, required: true },
+    staffName: { type: String, required: true },
+    reason: { type: String, required: true, maxlength: 300 },
+    at: { type: Date, required: true },
+    restocked: { type: Boolean, required: true },
+    ledgerTxnId: { type: String, required: true },
+  }, { _id: false }), required: false },
   items: {
     type: [new Schema({
       productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },

@@ -36,3 +36,11 @@ export const chargeSchema = Joi.object({
 }).xor('amount', 'items');
 
 export const chargeQuoteSchema = chargeSchema.fork(['bandUid', 'clientTxnId', 'quotedTotal'], (schema) => schema.forbidden());
+
+export const merchantBalanceSchema = Joi.object({ bandUid: uid.required() });
+export const merchantReversalSchema = Joi.object({
+  bandUid: uid.required(),
+  pin: Joi.string().pattern(/^\d{6}$/).required(),
+  reason: Joi.string().trim().min(3).max(300).required(),
+  restock: Joi.boolean().strict().required(),
+});

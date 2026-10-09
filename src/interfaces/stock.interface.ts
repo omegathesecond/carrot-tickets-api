@@ -20,6 +20,7 @@ export enum ProductCategory {
 export enum StockMovementReason {
   RECEIVE = 'receive',
   SALE = 'sale',
+  SALE_REVERSAL = 'sale_reversal',
   TRANSFER_IN = 'transfer_in',
   TRANSFER_OUT = 'transfer_out',
   COUNT_ADJUST = 'count_adjust',

@@ -8,6 +8,8 @@ const router = Router();
 
 /** All routes below require a valid merchant JWT (POST /api/operator/login → type:'merchant'). */
 router.use(authenticateMerchant);
+router.get('/balance', requireMerchantPermission(MerchantPermission.CHARGE), MerchantController.balance);
+router.post('/transactions/:id/reverse', requireMerchantPermission(MerchantPermission.CHARGE), MerchantController.reverse);
 
 router.post('/quote', requireMerchantPermission(MerchantPermission.CHARGE), MerchantController.quote);
 
