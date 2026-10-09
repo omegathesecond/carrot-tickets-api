@@ -46,19 +46,13 @@ async function seedEventWithTables() {
 
   // OPEN: 2 x 3000 = 6000, never settled or voided.
   const openStall = await seedStallAndTable({ price: 3000, onHand: 10 });
-  await TableService.addItem({
-    tableId: String(openStall.table._id), eventId: String(EVENT),
-    merchantId: openStall.merchantId, productId: openStall.productId, qty: 2, addedBy: 'w1',
-  });
+  await TableService.addItems({ tableId: String(openStall.table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId: openStall.merchantId, productId: openStall.productId, qty: 2 }] });
 
   // SETTLED: 1 x 4500, charged for real against a funded tag — settle is a
   // real service call, not a hand-set status:'settled', so this table is
   // exactly what a waiter closing out a tab produces.
   const settleStall = await seedStallAndTable({ price: 4500, onHand: 10 });
-  await TableService.addItem({
-    tableId: String(settleStall.table._id), eventId: String(EVENT),
-    merchantId: settleStall.merchantId, productId: settleStall.productId, qty: 1, addedBy: 'w1',
-  });
+  await TableService.addItems({ tableId: String(settleStall.table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId: settleStall.merchantId, productId: settleStall.productId, qty: 1 }] });
   const bandUid = 'aa11bb22';
   await enrolTags(EVENT, bandUid);
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId: String(EVENT), bandUid });
@@ -76,10 +70,7 @@ async function seedEventWithTables() {
   // VOIDED: 1 x 3000, walked out — the number that tells the organizer table
   // service is costing them money.
   const voidStall = await seedStallAndTable({ price: 3000, onHand: 10 });
-  await TableService.addItem({
-    tableId: String(voidStall.table._id), eventId: String(EVENT),
-    merchantId: voidStall.merchantId, productId: voidStall.productId, qty: 1, addedBy: 'w1',
-  });
+  await TableService.addItems({ tableId: String(voidStall.table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId: voidStall.merchantId, productId: voidStall.productId, qty: 1 }] });
   await TableService.voidTable({
     tableId: String(voidStall.table._id), eventId: String(EVENT), reason: 'walked out', voidedBy: 'w1',
   });

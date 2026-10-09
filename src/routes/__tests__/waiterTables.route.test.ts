@@ -128,7 +128,7 @@ async function tableWithDrinks(
     .set('Authorization', `Bearer ${token}`).send({ label: opts.label });
   const tableId = opened.body.data._id;
   await request(app).post(`/api/waiter/tables/${tableId}/items`)
-    .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: opts.qty });
+    .set('Authorization', `Bearer ${token}`).send({ items: [{ merchantId, productId, qty: opts.qty }] });
   return { tableId, merchantId, productId };
 }
 
@@ -215,8 +215,7 @@ describe('waiter tables — open and list', () => {
     const res = await request(app)
       .post(`/api/waiter/tables/${opened.body.data._id}/items`)
       .set('Authorization', `Bearer ${theirs.token}`)
-      .send({ merchantId: new mongoose.Types.ObjectId().toString(),
-        productId: new mongoose.Types.ObjectId().toString(), qty: 1 });
+      .send({ items: [{ merchantId: new mongoose.Types.ObjectId().toString(), productId: new mongoose.Types.ObjectId().toString(), qty: 1 }] });
 
     // 404 not 403 — a waiter has no business learning the id is real.
     expect(res.status).toBe(404);
@@ -270,7 +269,7 @@ describe('waiter tables — add an item', () => {
     const tableId = opened.body.data._id;
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/items`)
-      .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: 2 });
+      .set('Authorization', `Bearer ${token}`).send({ items: [{ merchantId, productId, qty: 2 }] });
 
     expect(res.status).toBe(200);
     expect(res.body.data.items).toHaveLength(1);
@@ -287,11 +286,7 @@ describe('waiter tables — add an item', () => {
     const someTableId = new mongoose.Types.ObjectId().toString();
 
     const res = await request(app).post(`/api/waiter/tables/${someTableId}/items`)
-      .set('Authorization', `Bearer ${token}`).send({
-        merchantId: new mongoose.Types.ObjectId().toString(),
-        productId: new mongoose.Types.ObjectId().toString(),
-        qty: 1,
-      });
+      .set('Authorization', `Bearer ${token}`).send({ items: [{ merchantId: new mongoose.Types.ObjectId().toString(), productId: new mongoose.Types.ObjectId().toString(), qty: 1 }] });
 
     expect(res.status).not.toBe(403);
   });
@@ -310,7 +305,7 @@ describe('waiter tables — add an item', () => {
     const { merchantId, productId } = await seedStallOn(mine.eventId, { price: 3000, onHand: 10 });
 
     const res = await request(app).post(`/api/waiter/tables/${otherTableId}/items`)
-      .set('Authorization', `Bearer ${mine.token}`).send({ merchantId, productId, qty: 1 });
+      .set('Authorization', `Bearer ${mine.token}`).send({ items: [{ merchantId, productId, qty: 1 }] });
 
     expect(res.status).not.toBe(200);
     expect(res.body.message).toMatch(/not found/i);
@@ -328,7 +323,7 @@ describe('waiter tables — add an item', () => {
     const tableId = opened.body.data._id;
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/items`)
-      .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: 1 });
+      .set('Authorization', `Bearer ${token}`).send({ items: [{ merchantId, productId, qty: 1 }] });
 
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/closed/i);
@@ -343,7 +338,7 @@ describe('waiter tables — remove an item', () => {
       .set('Authorization', `Bearer ${token}`).send({ label: '7' });
     const tableId = opened.body.data._id;
     const added = await request(app).post(`/api/waiter/tables/${tableId}/items`)
-      .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: 2 });
+      .set('Authorization', `Bearer ${token}`).send({ items: [{ merchantId, productId, qty: 2 }] });
     const lineId = added.body.data.items[0]._id;
 
     const res = await request(app).delete(`/api/waiter/tables/${tableId}/items/${lineId}`)
@@ -378,7 +373,7 @@ describe('waiter tables — void a table', () => {
       .set('Authorization', `Bearer ${token}`).send({ label: '7' });
     const tableId = opened.body.data._id;
     await request(app).post(`/api/waiter/tables/${tableId}/items`)
-      .set('Authorization', `Bearer ${token}`).send({ merchantId, productId, qty: 2 });
+      .set('Authorization', `Bearer ${token}`).send({ items: [{ merchantId, productId, qty: 2 }] });
 
     const res = await request(app).post(`/api/waiter/tables/${tableId}/void`)
       .set('Authorization', `Bearer ${token}`).send({ reason: 'walked out' });
@@ -607,4 +602,30 @@ it('quotes the full table charge and enforces the reviewed amount on settlement'
   const paid = await request(app).post(`/api/waiter/tables/${tableId}/settle`).set('Authorization', `Bearer ${token}`).send({ bandUid: '04a22b1c', clientTxnId: 'quote', quotedTotal: 6250 });
   expect(paid.status).toBe(200);
   expect(paid.body.data.walletBalance).toBe(3750);
+});
+
+
+it('rejects missing/invalid basket payloads before touching stock', async () => {
+  const { eventId, token } = await seedFloor();
+  const { merchantId, productId } = await seedStallOn(eventId, { price: 3000, onHand: 10 });
+  const opened = await request(app).post('/api/waiter/tables').set('Authorization', `Bearer ${token}`).send({ label: '7' });
+  const id = opened.body.data._id;
+  for (const body of [{ merchantId, productId, qty: 1 }, { items: [] }, { items: [{ merchantId, productId, qty: 0 }] }, { items: [{ merchantId: 'bad', productId, qty: 1 }] }]) {
+    const res = await request(app).post(`/api/waiter/tables/${id}/items`).set('Authorization', `Bearer ${token}`).send(body);
+    expect(res.status).toBe(400);
+  }
+  expect((await Table.findById(id))!.subtotal).toBe(0);
+  expect(await StockService.getOnHand(merchantId, productId)).toBe(10);
+});
+
+it('refuses a coworker removal without returning stock', async () => {
+  const mine = await seedFloor();
+  const theirs = await seedCoworker(mine);
+  const { tableId, merchantId, productId } = await tableWithDrinks(mine.eventId, mine.token, { label: '7', price: 3000, qty: 2 });
+  const table = await Table.findById(tableId);
+  const lineId = String(table!.items[0]!._id);
+  const res = await request(app).delete(`/api/waiter/tables/${tableId}/items/${lineId}`).set('Authorization', `Bearer ${theirs.token}`);
+  expect(res.status).toBe(404);
+  expect((await Table.findById(tableId))!.items).toHaveLength(1);
+  expect(await StockService.getOnHand(merchantId, productId)).toBe(18);
 });

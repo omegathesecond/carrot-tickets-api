@@ -15,7 +15,7 @@ describe('TableService.voidTable', () => {
     // The drinks were consumed or walked. Returning them to the shelf would make
     // a real loss look like it never happened; a voided table IS the record of it.
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
-    await TableService.addItem({ tableId: String(table._id), eventId: String(table.eventId), merchantId, productId, qty: 2, addedBy: 'w1' });
+    await TableService.addItems({ tableId: String(table._id), eventId: String(table.eventId), addedBy: 'w1', items: [{ merchantId, productId, qty: 2 }] });
 
     const after = await TableService.voidTable({ tableId: String(table._id), eventId: String(table.eventId), reason: 'walked out', voidedBy: 'w1' });
 

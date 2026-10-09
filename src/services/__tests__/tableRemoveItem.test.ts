@@ -16,7 +16,7 @@ describe('TableService.removeItem', () => {
   // half of the equal-value swap subtotal cannot see. See ITable.revision.
   it('bumps the table revision on every removal', async () => {
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
-    const withItem = await TableService.addItem({ tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1' });
+    const withItem = await TableService.addItems({ tableId: String(table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId, productId, qty: 1 }] });
     expect(withItem.revision).toBe(1);
 
     const after = await TableService.removeItem({
@@ -28,7 +28,7 @@ describe('TableService.removeItem', () => {
 
   it('returns the stock — this is the mis-punch, the drink never left the counter', async () => {
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
-    const withItem = await TableService.addItem({ tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 2, addedBy: 'w1' });
+    const withItem = await TableService.addItems({ tableId: String(table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId, productId, qty: 2 }] });
     expect(await onHandFor(merchantId, productId)).toBe(8);
 
     const after = await TableService.removeItem({
@@ -42,7 +42,7 @@ describe('TableService.removeItem', () => {
 
   it('refuses on a settled table', async () => {
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
-    const withItem = await TableService.addItem({ tableId: String(table._id), eventId: String(EVENT), merchantId, productId, qty: 1, addedBy: 'w1' });
+    const withItem = await TableService.addItems({ tableId: String(table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId, productId, qty: 1 }] });
     await Table.updateOne({ _id: table._id }, { $set: { status: 'settled' } });
 
     await expect(TableService.removeItem({

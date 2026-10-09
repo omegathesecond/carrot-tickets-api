@@ -235,18 +235,20 @@ export class WaiterController {
     }
   }
 
-  /** POST /api/waiter/tables/:id/items — add an item from a stall, moving its stock. */
-  static async addItem(req: Request, res: Response): Promise<any> {
-    const event = await loadWaiterEvent(req, res);
-    if (!event) return;
-    const waiter = (req as any).waiter as WaiterToken;
-    const { merchantId, productId, qty } = req.body || {};
-    if (!merchantId || !productId) return ApiResponseUtil.badRequest(res, 'merchantId and productId are required');
-    if (!Number.isInteger(qty) || qty <= 0) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
+  /** POST /api/waiter/tables/:id/items — add a basket, moving its stock atomically. */
+  static async addItems(req: Request, res: Response): Promise<any> {
     try {
-      const table = await TableService.addItem({
-        tableId: req.params['id']!, eventId: String(event._id), merchantId, productId, qty, addedBy: waiter.waiterId,
+      const event = await loadWaiterEvent(req, res);
+      if (!event) return;
+      const waiter = (req as any).waiter as WaiterToken;
+      const { items } = req.body || {};
+      if (!HEX24.test(String(req.params.id))) return ApiResponseUtil.badRequest(res, 'Invalid table id');
+      if (!Array.isArray(items) || items.length === 0 || items.length > 100) return ApiResponseUtil.badRequest(res, 'items must contain between 1 and 100 products');
+      if (items.some(i => !i || !HEX24.test(String(i.merchantId)) || !HEX24.test(String(i.productId)))) return ApiResponseUtil.badRequest(res, 'Valid merchantId and productId are required');
+      if (items.some(i => !Number.isSafeInteger(i.qty) || i.qty <= 0)) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
+      const openedBy = waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ? undefined : waiter.waiterId;
+      const table = await TableService.addItems({
+        tableId: req.params['id']!, eventId: String(event._id), items, addedBy: waiter.waiterId, openedBy,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -262,20 +264,21 @@ export class WaiterController {
       // the request itself named a stall that cannot take new items right
       // now, same class of problem as "not sold at that stall"/"not found".
       const status = /not open/i.test(msg) ? 409
-        : /not sold at that stall|not found|stall is closed/i.test(msg) ? 400 : 500;
+        : /table not found/i.test(msg) ? 404 : /not sold at that stall|not found|stall is closed/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);
     }
   }
 
   /** DELETE /api/waiter/tables/:id/items/:lineId — remove a mis-punched line, returning its stock. */
   static async removeItem(req: Request, res: Response): Promise<any> {
-    const event = await loadWaiterEvent(req, res);
-    if (!event) return;
-    const waiter = (req as any).waiter as WaiterToken;
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
     try {
+      const event = await loadWaiterEvent(req, res);
+      if (!event) return;
+      const waiter = (req as any).waiter as WaiterToken;
+      const openedBy = waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ? undefined : waiter.waiterId;
+      if (!HEX24.test(String(req.params.id)) || !HEX24.test(String(req.params.lineId))) return ApiResponseUtil.badRequest(res, 'Invalid table or line id');
       const table = await TableService.removeItem({
-        tableId: req.params['id']!, eventId: String(event._id), lineId: req.params['lineId']!, removedBy: waiter.waiterId,
+        tableId: req.params['id']!, eventId: String(event._id), lineId: req.params['lineId']!, removedBy: waiter.waiterId, openedBy,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {

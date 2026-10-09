@@ -57,8 +57,8 @@ async function seedTwoStallTable(opts: {
     openedBy: String(WAITER), items: [], subtotal: 0,
   });
   const args = { tableId: String(opened._id), eventId: String(EVENT), qty: 1, addedBy: String(WAITER) };
-  await TableService.addItem({ ...args, merchantId: A.merchantId, productId: A.productId });
-  const table = await TableService.addItem({ ...args, merchantId: B.merchantId, productId: B.productId });
+  await TableService.addItems({ ...args, items: [{ merchantId: A.merchantId, productId: A.productId, qty: args.qty }] });
+  const table = await TableService.addItems({ ...args, items: [{ merchantId: B.merchantId, productId: B.productId, qty: args.qty }] });
 
   return { table, stallA: A.merchantId, stallB: B.merchantId, productA: A.productId, productB: B.productId };
 }
@@ -249,10 +249,7 @@ describe('TableService.settle', () => {
     const realStartSession = mongoose.startSession.bind(mongoose);
     const spy = jest.spyOn(mongoose, 'startSession').mockImplementationOnce(async (...args) => {
       // Priced at 4500; this lands before the flip and makes it 6000.
-      await TableService.addItem({
-        tableId: String(table._id), eventId: String(EVENT),
-        merchantId: stallB, productId: productB, qty: 1, addedBy: String(WAITER),
-      });
+      await TableService.addItems({ tableId: String(table._id), eventId: String(EVENT), addedBy: String(WAITER), items: [{ merchantId: stallB, productId: productB, qty: 1 }] });
       return realStartSession(...args);
     });
 
@@ -291,10 +288,7 @@ describe('TableService.settle', () => {
         tableId: String(table._id), eventId: String(EVENT),
         lineId: String(lineB._id), removedBy: String(WAITER),
       });
-      await TableService.addItem({
-        tableId: String(table._id), eventId: String(EVENT),
-        merchantId: stallC.merchantId, productId: stallC.productId, qty: 1, addedBy: String(WAITER),
-      });
+      await TableService.addItems({ tableId: String(table._id), eventId: String(EVENT), addedBy: String(WAITER), items: [{ merchantId: stallC.merchantId, productId: stallC.productId, qty: 1 }] });
       return realStartSession(...args);
     });
 

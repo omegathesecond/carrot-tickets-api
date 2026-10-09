@@ -89,7 +89,7 @@ async function settledFloor(): Promise<Floor> {
   for (const s of [bar, kitchen]) {
     await request(app).post(`/api/waiter/tables/${tableId}/items`)
       .set('Authorization', waiterAuth)
-      .send({ merchantId: s.merchantId, productId: s.productId, qty: 1 });
+      .send({ items: [{ merchantId: s.merchantId, productId: s.productId, qty: 1 }] }).expect(200);
   }
 
   // Padded: a band uid must be at least 8 hex chars, and a single-digit
@@ -101,8 +101,10 @@ async function settledFloor(): Promise<Floor> {
     walletId: String(wallet._id), eventId, amount: 50000,
     recordedBy: 'desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });
+  const quote = await request(app).get(`/api/waiter/tables/${tableId}/quote`)
+    .set('Authorization', waiterAuth).expect(200);
   await request(app).post(`/api/waiter/tables/${tableId}/settle`)
-    .set('Authorization', waiterAuth).send({ bandUid: tag, clientTxnId: `st-${seq++}` });
+    .set('Authorization', waiterAuth).send({ bandUid: tag, clientTxnId: `st-${seq++}`, quotedTotal: quote.body.data.total }).expect(200);
 
   return { eventId, waiterAuth, tableId, bar, kitchen };
 }
