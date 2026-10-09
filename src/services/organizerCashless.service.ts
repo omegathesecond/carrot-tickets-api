@@ -7,11 +7,11 @@ import { Merchant } from '@models/merchant.model';
 import { Cashier } from '@models/cashier.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { Wallet } from '@models/wallet.model';
+import { sumTopupMethod } from '@utils/topupTotals.util';
 import { BandBinding } from '@models/bandBinding.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
 const MAX_TRANSACTIONS_PAGE = 500;
-const sumTopupMethod = (method: 'cash' | 'card') => ({ $sum: { $cond: [{ $eq: ['$method', method] }, '$amount', 0] } });
 const sumField = (field: string) => [{ $group: { _id: null, total: { $sum: field }, count: { $sum: 1 } } }];
 
 /**

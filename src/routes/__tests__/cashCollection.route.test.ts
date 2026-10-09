@@ -34,11 +34,11 @@ async function seed() {
 }
 it('only the cashier confirms, custody transfers once and card money is excluded', async () => {
   const s = await seed(); const pickup = (await s.create().expect(200)).body.data;
-  expect((await s.desk().expect(200)).body.data).toMatchObject({ cashOnHand: 10000, collected: 0, collectorHeld: 0, pending: [expect.objectContaining({ collectorName: 'Collector One', amount: 8000 })] });
+  expect((await s.desk().expect(200)).body.data).toMatchObject({ cashTopups: 10000, cardTopups: 90000, cashOnHand: 10000, collected: 0, collectorHeld: 0, pending: [expect.objectContaining({ collectorName: 'Collector One', amount: 8000 })] });
   await s.resolve(pickup._id, 'confirm', s.collectorToken).expect(403);
   await s.resolve(pickup._id).expect(200); await s.resolve(pickup._id).expect(200);
   expect((await s.desk()).body.data).toMatchObject({ cashOnHand: 2000, collected: 8000, pending: [] });
-  expect((await s.desk(s.collectorToken)).body.data).toMatchObject({ collectorHeld: 8000 });
+  expect((await s.desk(s.collectorToken)).body.data).toMatchObject({ collectorHeld: 8000, cashiers: [expect.objectContaining({ id: String(s.cashier._id), cashTopups: 10000, cardTopups: 90000, cashOnHand: 2000 })] });
   expect(await LedgerEntry.countDocuments({ refType: 'cash_collection' })).toBe(2);
   expect(await LedgerService.floatBalance(s.eventId, FloatTag.CASH_DESK)).toBe(2000);
   expect(await LedgerService.floatBalance(s.eventId, FloatTag.COLLECTOR_CASH)).toBe(8000);
@@ -88,7 +88,7 @@ it('organiser report scopes events and shows both parties and all confirmed cash
   await report(vendorToken(String(new mongoose.Types.ObjectId()))).expect(403);
   await report(vendorToken(String(s.vendorId), [])).expect(403);
   const data = (await report(vendorToken(String(s.vendorId))).expect(200)).body.data;
-  expect(data).toMatchObject({ currency: 'SZL', cashOnHand: 2000, collectorHeld: 8000, pendingCount: 0, collectors: [expect.objectContaining({ fullName: 'Collector One', held: 8000 })] });
+  expect(data).toMatchObject({ currency: 'SZL', cashTopups: 10000, cardTopups: 90000, cashiers: expect.arrayContaining([expect.objectContaining({ cashTopups: 10000, cardTopups: 90000, cashOnHand: 2000 })]), cashOnHand: 2000, collectorHeld: 8000, pendingCount: 0, collectors: [expect.objectContaining({ fullName: 'Collector One', held: 8000 })] });
   expect(data.collections[0]).toMatchObject({ cashierName: 'Cashier One', collectorName: 'Collector One', status: 'confirmed', resolvedBy: String(s.cashier._id) });
 });
 
@@ -107,4 +107,17 @@ it('removing staff does not hide their recorded cash from the report', async () 
   const report = await (await import('@services/cashCollection.service')).CashCollectionService.report(s.eventId);
   expect(report.cashOnHand).toBe(2000);
   expect(report.cashiers).toContainEqual(expect.objectContaining({ fullName: 'Cashier One', isActive: false, cashOnHand: 2000 }));
+});
+
+it('card-only activity remains visible after staff removal and cannot be collected as cash', async () => {
+  const s = await seed();
+  const cardCashier = await Cashier.create({ fullName: 'Card Desk', loginCode: '4KZ803', pin: '123456', scope: 'organizer', vendorId: s.vendorId, eventId: s.event._id });
+  await WalletService.topUpAtDesk({ walletId: String(s.wallet._id), eventId: s.eventId, amount: 20000, method: 'card', recordedBy: String(cardCashier._id), recordedByType: 'Cashier', clientTxnId: 'card-only' });
+  await s.create(1, 'no-card-cash', s.collectorToken, String(cardCashier._id)).expect(409);
+  const collectorDesk = (await s.desk(s.collectorToken)).body.data;
+  expect(collectorDesk.cashiers).toContainEqual(expect.objectContaining({ fullName: 'Card Desk', cashTopups: 0, cardTopups: 20000, cashOnHand: 0 }));
+  await Cashier.deleteOne({ _id: cardCashier._id });
+  const report = await (await import('@services/cashCollection.service')).CashCollectionService.report(s.eventId);
+  expect(report).toMatchObject({ cashTopups: 10000, cardTopups: 110000, cashOnHand: 10000 });
+  expect(report.cashiers).toContainEqual(expect.objectContaining({ id: String(cardCashier._id), isActive: false, cashTopups: 0, cardTopups: 20000, cashOnHand: 0 }));
 });
