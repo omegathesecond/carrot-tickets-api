@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedCashlessEvent } from '@controllers/organizerCashless.controller';
-import { TagReportService, type TagStatus } from '@services/tagReport.service';
+import { TagReportService, parseTagCursor, type TagStatus, type TagSort } from '@services/tagReport.service';
 
 /**
  * The organizer's read surface over the tags at one cashless event. Writes live
@@ -31,9 +31,22 @@ export class TagReportController {
 
       // Reject malformed params here so they never reach the aggregation as an
       // invalid ObjectId and surface as a 500.
-      const hex24 = /^[0-9a-fA-F]{24}$/;
+      const rawSort = req.query['sort'] ? String(req.query['sort']) : undefined;
+      if (rawSort && rawSort !== 'balance' && rawSort !== 'recent') {
+        return ApiResponseUtil.badRequest(res, 'invalid sort');
+      }
+      const sort: TagSort = (rawSort as TagSort | undefined) ?? 'recent';
+
+      const rawFunded = req.query['funded'] ? String(req.query['funded']) : undefined;
+      if (rawFunded !== undefined && rawFunded !== 'true' && rawFunded !== 'false') {
+        return ApiResponseUtil.badRequest(res, 'invalid funded');
+      }
+
+      // Validated AGAINST THE SORT, not just for shape: the two sorts mint
+      // different cursor tokens, and one used under the other would page from
+      // the wrong place — a silently wrong page of a money list.
       const cursor = req.query['cursor'] ? String(req.query['cursor']) : undefined;
-      if (cursor && !hex24.test(cursor)) return ApiResponseUtil.badRequest(res, 'invalid cursor');
+      if (cursor && !parseTagCursor(cursor, sort)) return ApiResponseUtil.badRequest(res, 'invalid cursor');
 
       const rawLimit = req.query['limit'] ? Number(req.query['limit']) : undefined;
       if (rawLimit !== undefined && (!Number.isInteger(rawLimit) || rawLimit < 1)) {
@@ -49,6 +62,8 @@ export class TagReportController {
         ...(cursor ? { cursor } : {}),
         ...(status ? { status: status as TagStatus } : {}),
         ...(req.query['q'] ? { q: String(req.query['q']) } : {}),
+        ...(rawFunded === 'true' ? { funded: true } : {}),
+        ...(rawSort ? { sort } : {}),
       }));
     } catch (err: any) {
       console.error('Tag list error:', err);
