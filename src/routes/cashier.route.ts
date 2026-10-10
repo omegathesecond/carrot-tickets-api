@@ -26,7 +26,7 @@ router.post(
 
 router.post(
   '/topup',
-  requireCashierPermission(CashierPermission.CASH_TOPUP),
+  // The validated payment method determines the grant inside the controller.
   CashierController.topup,
 );
 

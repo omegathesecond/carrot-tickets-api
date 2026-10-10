@@ -42,7 +42,7 @@ async function seedDesk() {
   const event = await cashlessEvent(vendorId);
   const cashier = await Cashier.create({
     fullName: 'Nomsa', loginCode: `4KZ${__loginCodeSeq++}`, pin: '222222',
-    scope: 'organizer', vendorId, eventId: event._id,
+    scope: 'organizer', vendorId, eventId: event._id, grants: ['issue_tags'],
   });
   const ticket = await Ticket.create({
     eventId: event._id, vendorId, ticketType: 'General', price: 100, status: TicketStatus.SOLD,
@@ -77,7 +77,7 @@ it('403s a cashier DEACTIVATED after login, whose token still has days to run', 
   const res = await bind(token, ticket.ticketId);
 
   expect(res.status).toBe(403);
-  expect(res.body.message).toBe('You are not assigned to this event');
+  expect(res.body.message).toBe('Cashier account is inactive');
   expect(await Wallet.countDocuments({ ticketId: ticket._id, bandUid: TAG })).toBe(0);
 });
 

@@ -32,6 +32,19 @@ import { IWaiter } from '@interfaces/waiter.interface';
  */
 export type EventScope = string[] | null;
 
+type CashierAccessRecord = Pick<ICashier, 'eventId' | 'scope' | 'isActive' | 'vendorId' | 'grants' | 'fullName'>;
+const cashierReads = new WeakMap<Request, { id: string; row: Promise<CashierAccessRecord | null> }>();
+
+/** One current cashier read per request, shared by capability and event checks. */
+export function loadCashierForRequest(req: Request, cashierId: string): Promise<CashierAccessRecord | null> {
+  const cached = cashierReads.get(req);
+  if (cached?.id === cashierId) return cached.row;
+  const row = Cashier.findById(cashierId).select('eventId scope isActive vendorId grants fullName')
+    .lean<CashierAccessRecord | null>().exec();
+  cashierReads.set(req, { id: cashierId, row });
+  return row;
+}
+
 /**
  * Intersects two tiers, treating null as the identity (an unassigned tier
  * narrows nothing). Two assigned tiers with nothing in common yield [], which
@@ -114,38 +127,10 @@ async function resellerOperatorScope(operatorId: string): Promise<EventScope> {
  * it fails closed. Only a PLATFORM cashier — Carrot's own staff — resolves to
  * null, because she is legitimately global.
  */
-async function cashierScope(cashierId: string): Promise<EventScope> {
-  // Read the SINGULAR eventId — a cashier has no eventIds set at all. The
-  // Pick<ICashier, …> annotation documents the shape and catches a rename
-  // on the INTERFACE, but note .lean<T>() is an unchecked cast: dropping
-  // the field from the SCHEMA while leaving it on ICashier would still
-  // compile. It is a help, not a guarantee — the fail-closed branches below
-  // are what actually hold the line.
-  const cashier = await Cashier.findById(cashierId).select('eventId scope isActive')
-    .lean<Pick<ICashier, 'eventId' | 'scope' | 'isActive'> | null>();
-
-  // A VANISHED row denies, unlike a missing gate/reseller operator which is
-  // read as unrestricted. A cashier token always names a real row, so nothing
-  // here means a deleted or unknown actor.
-  //
-  // This is not hypothetical: cleanup-eventless-cashiers.ts DELETES legacy
-  // rows, and authenticateCashier verifies the JWT with no database lookup
-  // at all while CashierAuthService mints 7-day tokens. Resolving to null
-  // would therefore flip a deleted cashier from "denied everywhere" (the
-  // empty-array case below) to "allowed everywhere" for up to a week —
-  // and since loadCashlessEvent does no vendor comparison of its own and
-  // event ids are public (they sit in /event/<slug>-<24hex> URLs), she
-  // could top up and cash out at any published cashless event of any
-  // organizer.
-  if (!cashier) return [];
-
-  // A DEACTIVATED row denies too, for the same reason a vanished one does:
-  // authenticateCashier does no database lookup and CashierAuthService
-  // mints 7-day tokens, so PATCH /cashiers/:id {isActive:false} would
-  // otherwise only stop her NEXT LOGIN while the token in her hand kept
-  // topping up and cashing out for the rest of the week. The row is already
-  // being read here, so this costs nothing beyond one more selected field.
-  if (!cashier.isActive) return [];
+async function cashierScope(req: Request, cashierId: string): Promise<EventScope> {
+  // Reuse the current authenticated row, including its singular eventId.
+  const cashier = await loadCashierForRequest(req, cashierId);
+  if (!cashier || !cashier.isActive) return [];
 
   // `scope` is selected precisely so the two no-event cases can be told
   // apart. An ORGANIZER cashier is REQUIRED to carry an event, so a row
@@ -238,7 +223,7 @@ export async function resolveOperatorEventScope(req: Request): Promise<EventScop
 
   const cashier = (req as any).cashier;
   if (cashier?.cashierId) {
-    return cashierScope(String(cashier.cashierId));
+    return cashierScope(req, String(cashier.cashierId));
   }
 
   const waiter = (req as any).waiter;
