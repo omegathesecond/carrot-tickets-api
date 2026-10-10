@@ -10,6 +10,7 @@ import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 export type WaiterScope = 'platform' | 'organizer';
 
 export interface IWaiter extends Document {
+  deletedAt?: Date;
   fullName: string;
   phoneNumber?: string;
   loginCode: string;

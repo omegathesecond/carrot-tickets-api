@@ -23,13 +23,13 @@ import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
 export class MerchantOperatorAdminController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const merchant = await Merchant.findById(req.params['merchantId']);
+      const merchant = await Merchant.findOne({ _id: req.params['merchantId'], deletedAt: null });
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
       const event = await loadOwnedEvent(req, res, String(merchant.eventId));
       if (!event) return; // 404 (event gone) or 403 (different organizer) already answered
 
       const operators = await MerchantOperator
-        .find({ merchantId: merchant._id })
+        .find({ merchantId: merchant._id, deletedAt: null })
         .sort({ createdAt: -1 });
       ApiResponseUtil.success(res, { operators });
     } catch (err) { next(err); }
@@ -37,7 +37,7 @@ export class MerchantOperatorAdminController {
 
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const merchant = await Merchant.findById(req.params['merchantId']);
+      const merchant = await Merchant.findOne({ _id: req.params['merchantId'], deletedAt: null });
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
       const event = await loadOwnedEvent(req, res, String(merchant.eventId));
       if (!event) return;
@@ -67,9 +67,9 @@ export class MerchantOperatorAdminController {
 
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await MerchantOperator.findById(req.params['id']);
+      const operator = await MerchantOperator.findOne({ _id: req.params['id'], deletedAt: null });
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
-      const merchant = await Merchant.findById(operator.merchantId);
+      const merchant = await Merchant.findOne({ _id: operator.merchantId, deletedAt: null });
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
       const event = await loadOwnedEvent(req, res, String(merchant.eventId));
       if (!event) return;
@@ -83,6 +83,12 @@ export class MerchantOperatorAdminController {
           ApiResponseUtil.badRequest(res, 'fullName must be a non-empty string'); return;
         }
         operator.fullName = req.body.fullName;
+      }
+      if ('phoneNumber' in req.body) {
+        if (typeof req.body.phoneNumber !== 'string') {
+          ApiResponseUtil.badRequest(res, 'phoneNumber must be a string'); return;
+        }
+        operator.phoneNumber = req.body.phoneNumber.trim() || undefined;
       }
       if ('isActive' in req.body) {
         // `!!` read the STRING "false" as true — a client sending the flag as
@@ -103,9 +109,9 @@ export class MerchantOperatorAdminController {
 
   static async resetPin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await MerchantOperator.findById(req.params['id']).select('+pin');
+      const operator = await MerchantOperator.findOne({ _id: req.params['id'], deletedAt: null }).select('+pin');
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
-      const merchant = await Merchant.findById(operator.merchantId);
+      const merchant = await Merchant.findOne({ _id: operator.merchantId, deletedAt: null });
       if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
       const event = await loadOwnedEvent(req, res, String(merchant.eventId));
       if (!event) return;

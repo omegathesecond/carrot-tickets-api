@@ -12,6 +12,7 @@ import { Document, Types } from 'mongoose';
 export type CashierScope = 'platform' | 'organizer';
 
 export interface ICashier extends Document {
+  deletedAt?: Date;
   /**
    * Per-person money and tag-desk capabilities on top of the read-only role.
    * Stored by the shared applyOperatorCredentials mixin,

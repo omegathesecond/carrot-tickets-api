@@ -395,3 +395,12 @@ export const optionalTicketsAuth = async (
     next();
   }
 };
+
+/** Super Admin bypass with the same live-account check as the single-permission gate. */
+export const requireSuperAdminOrAnyPermission = (permissions: TicketsPermission[]) => {
+  const requireAny = requireAnyPermission(permissions);
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if ((req as any).ticketsUser?.isSuperAdmin) return requireSuperAdmin(req, res, next);
+    return requireAny(req, res, next);
+  };
+};

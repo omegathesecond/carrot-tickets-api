@@ -34,7 +34,7 @@ export class MerchantAdminController {
       const eventId = String(req.query['eventId'] || '');
       const event = await loadOwnedEvent(req, res, eventId);
       if (!event) return;
-      const merchants = await Merchant.find({ eventId }).sort({ createdAt: -1 });
+      const merchants = await Merchant.find({ eventId, deletedAt: null }).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, merchants);
     } catch (err) { next(err); }
   }
@@ -68,15 +68,23 @@ export class MerchantAdminController {
   /** PATCH /api/tickets/merchants/:id { name?, commissionPercent?, isActive? } */
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const merchant = await Merchant.findById(req.params['id']);
+      const merchant = await Merchant.findOne({ _id: req.params['id'], deletedAt: null });
       if (!merchant) { ApiResponseUtil.notFound(res, 'Vendor not found'); return; }
       const event = await loadOwnedEvent(req, res, String(merchant.eventId));
       if (!event) return; // ownership failure already answered
 
-      if (typeof req.body.name === 'string' && req.body.name.trim()) merchant.name = req.body.name.trim();
+      if ('name' in req.body) {
+        if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
+          ApiResponseUtil.badRequest(res, 'name must be a non-empty string'); return;
+        }
+        merchant.name = req.body.name.trim();
+      }
       if (req.body.commissionPercent !== undefined) {
         const c = Number(req.body.commissionPercent);
-        if (Number.isFinite(c)) merchant.commissionPercent = Math.min(100, Math.max(0, c));
+        if (!Number.isFinite(c) || c < 0 || c > 100 || req.body.commissionPercent === '' || req.body.commissionPercent === null) {
+          ApiResponseUtil.badRequest(res, 'commissionPercent must be between 0 and 100'); return;
+        }
+        merchant.commissionPercent = c;
       }
       if ('isActive' in req.body) merchant.status = req.body.isActive ? 'active' : 'suspended';
       else if (req.body.status === 'active' || req.body.status === 'suspended') merchant.status = req.body.status;

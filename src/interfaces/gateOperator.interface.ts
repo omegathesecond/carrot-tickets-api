@@ -4,6 +4,7 @@ import { Document, Types } from 'mongoose';
 export type GateOperatorScope = 'platform' | 'organizer';
 
 export interface IGateOperator extends Document {
+  deletedAt?: Date;
   fullName: string;
   phoneNumber?: string;
   loginCode: string;

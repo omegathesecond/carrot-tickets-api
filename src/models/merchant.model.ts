@@ -14,6 +14,7 @@ import { IMerchant } from '@interfaces/merchant.interface';
  * and one person can be revoked without rotating the whole stall.
  */
 const merchantSchema = new Schema<IMerchant>({
+  deletedAt: { type: Date },
   name: { type: String, required: true, trim: true },
   eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
   commissionPercent: { type: Number, default: 0, min: 0, max: 100 },

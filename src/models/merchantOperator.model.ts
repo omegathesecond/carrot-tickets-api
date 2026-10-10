@@ -10,6 +10,7 @@ import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
  * ever references this document.
  */
 const merchantOperatorSchema = new Schema<IMerchantOperator>({
+  deletedAt: { type: Date },
   fullName: { type: String, required: true, trim: true },
   phoneNumber: { type: String, trim: true },
   merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true, index: true, immutable: true },
@@ -22,7 +23,7 @@ const merchantOperatorSchema = new Schema<IMerchantOperator>({
   toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
 });
 
-applyOperatorCredentials(merchantOperatorSchema);
+applyOperatorCredentials(merchantOperatorSchema, true);
 
 merchantOperatorSchema.index({ merchantId: 1, isActive: 1 });
 

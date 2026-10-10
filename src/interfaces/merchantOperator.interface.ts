@@ -10,6 +10,7 @@ import { OperatorGrant } from '@interfaces/operatorGrant.interface';
  * the whole stall's PIN.
  */
 export interface IMerchantOperator extends Document {
+  deletedAt?: Date;
   fullName: string;
   phoneNumber?: string;
   /** The stall this person works. Immutable — move = new operator. */
