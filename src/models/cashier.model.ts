@@ -15,6 +15,7 @@ import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
  * here. See the `eventId` field below instead.
  */
 const cashierSchema = new Schema<ICashier>({
+  deletedAt: { type: Date },
   fullName: { type: String, required: true, trim: true },
   phoneNumber: { type: String, trim: true, unique: true, sparse: true },
   loginCode: { type: String, required: true, unique: true, index: true, trim: true },
@@ -36,7 +37,7 @@ const cashierSchema = new Schema<ICashier>({
   toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
 });
 
-applyOperatorCredentials(cashierSchema);
+applyOperatorCredentials(cashierSchema, true);
 
 cashierSchema.index({ vendorId: 1, isActive: 1 });
 cashierSchema.index({ eventId: 1, isActive: 1 });

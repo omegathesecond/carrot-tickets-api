@@ -1,3 +1,10 @@
+import { requireSuperAdminOrAnyPermission } from '@middleware/ticketsAuth.middleware';
+import { MerchantOperator } from '@models/merchantOperator.model';
+import { GateOperator } from '@models/gateOperator.model';
+import { Waiter } from '@models/waiter.model';
+import { Cashier } from '@models/cashier.model';
+import { Merchant } from '@models/merchant.model';
+import { deleteEventResource, revealEventOperatorPin } from '@controllers/eventResourceDelete.controller';
 import { CashCollectionController } from '@controllers/cashCollection.controller';
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
@@ -611,11 +618,11 @@ router.get(
 /**
  * Gate Operator Admin Routes
  */
-router.get('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.list);
-router.post('/gate-operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
-router.patch('/gate-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
-router.get('/gate-operators/:id/activity', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.activity);
-router.post('/gate-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
+router.get('/gate-operators', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.list);
+router.post('/gate-operators', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.create);
+router.patch('/gate-operators/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.update);
+router.get('/gate-operators/:id/activity', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.activity);
+router.post('/gate-operators/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), GateOperatorAdminController.resetPin);
 
 /**
  * Services business enquiry inbox — leads submitted via
@@ -629,11 +636,11 @@ router.patch('/services/enquiries/:id/status', requireTicketsPermission(TicketsP
  * desk staff who top up + cash out attendee wallets. Same MANAGE_ACCESS gate +
  * organizer-scoping as gate operators; a cashier is NOT a reseller.
  */
-router.get('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.list);
-router.post('/cashiers', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.create);
-router.get('/cashiers/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.transactions);
-router.patch('/cashiers/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.update);
-router.post('/cashiers/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.resetPin);
+router.get('/cashiers', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.list);
+router.post('/cashiers', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.create);
+router.get('/cashiers/:id/transactions', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.transactions);
+router.patch('/cashiers/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.update);
+router.post('/cashiers/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), CashierAdminController.resetPin);
 
 /**
  * Waiter Admin Routes — an organizer hires/disables the floor staff who open
@@ -659,18 +666,18 @@ router.post('/waiters/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermi
 // MANAGER-role organizer holds MANAGE_STOCK without MANAGE_ACCESS (see
 // TICKETS_ROLE_PERMISSIONS) — mirroring the tab's own gate is a read, not
 // access management. Create/edit/operators below stay MANAGE_ACCESS-only.
-router.get('/merchants', requireAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.list);
-router.post('/merchants', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
-router.get('/merchants/:id/transactions', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
-router.patch('/merchants/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
+router.get('/merchants', requireSuperAdminOrAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.list);
+router.post('/merchants', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
+router.get('/merchants/:id/transactions', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
+router.patch('/merchants/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
 
 /**
  * The people on a stall's till. Same MANAGE_ACCESS gate as the stall itself.
  */
-router.get('/merchants/:merchantId/operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.list);
-router.post('/merchants/:merchantId/operators', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.create);
-router.patch('/merchant-operators/:id', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.update);
-router.post('/merchant-operators/:id/reset-pin', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.resetPin);
+router.get('/merchants/:merchantId/operators', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.list);
+router.post('/merchants/:merchantId/operators', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.create);
+router.patch('/merchant-operators/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.update);
+router.post('/merchant-operators/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.resetPin);
 
 /**
  * Organizer Cashless Reporting — the "you're in charge" view of one event:
@@ -813,5 +820,16 @@ router.patch('/menu-orders/:id', requireTicketsPermission(TicketsPermission.MANA
 // (not the Mongo _id) that the buyer's QR code encodes.
 router.post('/menu-orders/scan', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.lookupOrderByCode);
 router.post('/menu-orders/collect', requireTicketsPermission(TicketsPermission.MANAGE_MENU), MenuAdminController.collectOrder);
+
+// Super Admin removal and credential viewing for event staff.
+router.delete('/merchants/:id', requireSuperAdmin, deleteEventResource(Merchant, true));
+router.delete('/cashiers/:id', requireSuperAdmin, deleteEventResource(Cashier));
+router.delete('/waiters/:id', requireSuperAdmin, deleteEventResource(Waiter));
+router.delete('/gate-operators/:id', requireSuperAdmin, deleteEventResource(GateOperator));
+router.delete('/merchant-operators/:id', requireSuperAdmin, deleteEventResource(MerchantOperator));
+router.post('/cashiers/:id/reveal-pin', requireSuperAdmin, revealEventOperatorPin(Cashier));
+router.post('/waiters/:id/reveal-pin', requireSuperAdmin, revealEventOperatorPin(Waiter));
+router.post('/gate-operators/:id/reveal-pin', requireSuperAdmin, revealEventOperatorPin(GateOperator));
+router.post('/merchant-operators/:id/reveal-pin', requireSuperAdmin, revealEventOperatorPin(MerchantOperator));
 
 export default router;

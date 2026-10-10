@@ -5,6 +5,7 @@ import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
 import { applyOperatorEventScope } from '@models/operatorEventScope.schema';
 
 const gateOperatorSchema = new Schema<IGateOperator>({
+  deletedAt: { type: Date },
   fullName: { type: String, required: true, trim: true },
   phoneNumber: { type: String, trim: true, unique: true, sparse: true },
   loginCode: { type: String, required: true, unique: true, index: true, trim: true },
@@ -17,7 +18,7 @@ const gateOperatorSchema = new Schema<IGateOperator>({
   toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
 });
 
-applyOperatorCredentials(gateOperatorSchema);
+applyOperatorCredentials(gateOperatorSchema, true);
 applyOperatorEventScope(gateOperatorSchema);
 
 gateOperatorSchema.index({ vendorId: 1, isActive: 1 });

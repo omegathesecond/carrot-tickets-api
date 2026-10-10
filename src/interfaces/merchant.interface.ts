@@ -10,6 +10,7 @@ export type MerchantStatus = 'active' | 'suspended';
  * MerchantOperator documents, each with their own loginCode + PIN.
  */
 export interface IMerchant extends Document {
+  deletedAt?: Date;
   name: string;
   /** The event this merchant sells at — a merchant is scoped to ONE event. */
   eventId: Types.ObjectId;
