@@ -19,6 +19,8 @@ import { WaiterPermission, WAITER_PERMISSIONS } from '@interfaces/waiter.interfa
 export enum OperatorGrant {
   TOPUP_CASH = 'topup_cash',
   TOPUP_CARD = 'topup_card',
+  TOPUP_DELTAPAY = 'topup_deltapay',
+  TOPUP_MOBILE_MONEY = 'topup_mobile_money',
   WITHDRAW_CASH = 'withdraw_cash',
   /**
    * The REGISTER desk. Two jobs, one capability because they are the same
@@ -66,6 +68,8 @@ const TICKETS_BY_GRANT: Partial<Record<OperatorGrant, TicketsPermission>> = {
 const CASHIER_BY_GRANT: Partial<Record<OperatorGrant, CashierPermission>> = {
   [OperatorGrant.TOPUP_CASH]: CashierPermission.CASH_TOPUP,
   [OperatorGrant.TOPUP_CARD]: CashierPermission.CARD_TOPUP,
+  [OperatorGrant.TOPUP_DELTAPAY]: CashierPermission.DELTAPAY_TOPUP,
+  [OperatorGrant.TOPUP_MOBILE_MONEY]: CashierPermission.MOBILE_MONEY_TOPUP,
   [OperatorGrant.WITHDRAW_CASH]: CashierPermission.CASH_WITHDRAW,
   [OperatorGrant.COLLECT_CASH]: CashierPermission.COLLECT_CASH,
   [OperatorGrant.ISSUE_TAGS]: CashierPermission.ISSUE_TAGS,

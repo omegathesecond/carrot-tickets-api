@@ -42,6 +42,8 @@ export interface ICashier extends Document {
 export enum CashierPermission {
   CASH_TOPUP = 'cashier:cash_topup',
   CARD_TOPUP = 'cashier:card_topup',
+  DELTAPAY_TOPUP = 'cashier:deltapay_topup',
+  MOBILE_MONEY_TOPUP = 'cashier:mobile_money_topup',
   CASH_WITHDRAW = 'cashier:cash_withdraw',
   VIEW_EVENTS = 'cashier:view_events',
   VIEW_OWN_TRANSACTIONS = 'cashier:view_own_transactions',

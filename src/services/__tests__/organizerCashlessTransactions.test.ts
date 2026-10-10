@@ -143,13 +143,19 @@ it('reports cash/card separately to the organizer, including per-cashier totals'
     const wallet = await walletWithTag('04AABBCC');
     await topup(wallet._id as mongoose.Types.ObjectId, { amount: 500, method: 'cash', recordedBy: cashierId });
     await topup(wallet._id as mongoose.Types.ObjectId, { amount: 700, method: 'card', recordedBy: cashierId });
+    await topup(wallet._id as mongoose.Types.ObjectId, { amount: 1100, method: 'deltapay', recordedBy: cashierId });
+    await topup(wallet._id as mongoose.Types.ObjectId, { amount: 1300, method: 'mobile_money', recordedBy: cashierId });
     const summary = await OrganizerCashlessService.summary(String(EVENT));
-    expect(summary.circulated).toBe(1200);
+    expect(summary.circulated).toBe(3600);
+    expect(summary.deltapayTopups).toBe(1100);
+    expect(summary.mobileMoneyTopups).toBe(1300);
+    expect(summary.cashiers[0]!.deltapayTopups).toBe(1100);
+    expect(summary.cashiers[0]!.mobileMoneyTopups).toBe(1300);
     expect(summary.cashTopups).toBe(500);
     expect(summary.cardTopups).toBe(700);
     expect(summary.cashiers[0]!.cashTopups).toBe(500);
     expect(summary.cashiers[0]!.cardTopups).toBe(700);
     const { transactions } = await OrganizerCashlessService.transactions({ eventId: String(EVENT) });
-    expect(new Set(transactions.map(t => t.method))).toEqual(new Set(['cash', 'card']));
+    expect(new Set(transactions.map(t => t.method))).toEqual(new Set(['cash', 'card', 'deltapay', 'mobile_money']));
   } finally { await disconnectTestDb(); }
 });

@@ -7,7 +7,7 @@ import { Merchant } from '@models/merchant.model';
 import { Cashier } from '@models/cashier.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { Wallet } from '@models/wallet.model';
-import { sumTopupMethod } from '@utils/topupTotals.util';
+import { topupTotalsGroup, readTopupTotals, sumTopupTotals, TopupTotals } from '@utils/topupTotals.util';
 import { BandBinding } from '@models/bandBinding.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
@@ -29,7 +29,7 @@ export class OrganizerCashlessService {
 
     const [topupAgg, withdrawAgg, chargeAgg, leftBehindAgg, fundedAgg, vendorAgg, cashierTopupAgg, cashierWithdrawAgg] =
       await Promise.all([
-        WalletTopup.aggregate([{ $match: { eventId: eid } }, { $group: { _id: null, total: { $sum: '$amount' }, cashTopups: sumTopupMethod('cash'), cardTopups: sumTopupMethod('card') } }]),
+        WalletTopup.aggregate([{ $match: { eventId: eid } }, { $group: { _id: null, total: { $sum: '$amount' }, ...topupTotalsGroup() } }]),
         WalletWithdrawal.aggregate([{ $match: { eventId: eid } }, ...sumField('$amount')]),
         MerchantCharge.aggregate([
           { $match: { eventId: eid, status: 'completed' } },
@@ -43,7 +43,7 @@ export class OrganizerCashlessService {
         ]),
         WalletTopup.aggregate([
           { $match: { eventId: eid, recordedByType: 'Cashier' } },
-          { $group: { _id: '$recordedBy', toppedUp: { $sum: '$amount' }, cashTopups: sumTopupMethod('cash'), cardTopups: sumTopupMethod('card'), n: { $sum: 1 } } },
+          { $group: { _id: '$recordedBy', toppedUp: { $sum: '$amount' }, ...topupTotalsGroup(), n: { $sum: 1 } } },
         ]),
         WalletWithdrawal.aggregate([
           { $match: { eventId: eid, recordedByType: 'Cashier' } },
@@ -72,15 +72,15 @@ export class OrganizerCashlessService {
       .sort((a: any, b: any) => b.gross - a.gross);
 
     // Per-cashier activity, merging top-ups + withdrawals, joined to cashier names.
-    const byCashier = new Map<string, { cashTopups: number; cardTopups: number; toppedUp: number; withdrawn: number; txnCount: number }>();
+    const byCashier = new Map<string, TopupTotals & { toppedUp: number; withdrawn: number; txnCount: number }>();
     for (const t of cashierTopupAgg) {
       const k = String(t._id);
-      const c = byCashier.get(k) || { cashTopups: 0, cardTopups: 0, toppedUp: 0, withdrawn: 0, txnCount: 0 };
-      c.cashTopups += t.cashTopups; c.cardTopups += t.cardTopups; c.toppedUp += t.toppedUp; c.txnCount += t.n; byCashier.set(k, c);
+      const c = byCashier.get(k) || { ...readTopupTotals(), toppedUp: 0, withdrawn: 0, txnCount: 0 };
+      Object.assign(c, sumTopupTotals([c, readTopupTotals(t)])); c.toppedUp += t.toppedUp; c.txnCount += t.n; byCashier.set(k, c);
     }
     for (const w of cashierWithdrawAgg) {
       const k = String(w._id);
-      const c = byCashier.get(k) || { cashTopups: 0, cardTopups: 0, toppedUp: 0, withdrawn: 0, txnCount: 0 };
+      const c = byCashier.get(k) || { ...readTopupTotals(), toppedUp: 0, withdrawn: 0, txnCount: 0 };
       c.withdrawn += w.withdrawn; c.txnCount += w.n; byCashier.set(k, c);
     }
     const cashierIds = [...byCashier.keys()].filter((id) => /^[0-9a-fA-F]{24}$/.test(id));
@@ -93,7 +93,7 @@ export class OrganizerCashlessService {
       .sort((a, b) => (b.toppedUp + b.withdrawn) - (a.toppedUp + a.withdrawn));
 
     return {
-      cashTopups: topupAgg[0]?.cashTopups ?? 0, cardTopups: topupAgg[0]?.cardTopups ?? 0,
+      ...readTopupTotals(topupAgg[0]),
       circulated, spent, withdrawn, leftBehind, fees, purchaseCharges: chargeAgg[0]?.purchaseCharges ?? 0,
       walletsFunded: fundedAgg[0]?.n ?? 0,
       vendors,

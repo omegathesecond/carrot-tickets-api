@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
 import { EventTagService } from '@services/eventTag.service';
-import { WalletTopup, IWalletTopup, TopupRecordedByType, TopupMethod } from '@models/walletTopup.model';
+import { WalletTopup, IWalletTopup, TopupRecordedByType, TopupMethod, TOPUP_METHODS } from '@models/walletTopup.model';
 import { WalletWithdrawal, IWalletWithdrawal } from '@models/walletWithdrawal.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { LedgerService } from '@services/ledger.service';
@@ -439,7 +439,13 @@ export class WalletService {
   }): Promise<{ wallet: IWallet; topup: IWalletTopup }> {
     const { walletId, eventId, amount, method, recordedBy, clientTxnId } = params;
     const recordedByType: TopupRecordedByType = params.recordedByType ?? 'ResellerOperator';
-    if (method !== 'cash' && method !== 'card') throw new Error('method must be cash or card');
+    if (!TOPUP_METHODS.includes(method)) throw new Error('Invalid top-up payment method');
+    const floatTags: Record<TopupMethod, FloatTag> = {
+      cash: FloatTag.CASH_DESK,
+      card: FloatTag.CARD_DESK,
+      deltapay: FloatTag.DELTAPAY_DESK,
+      mobile_money: FloatTag.MOBILE_MONEY_DESK,
+    };
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new Error('amount must be a positive integer (cents)');
     }
@@ -493,7 +499,7 @@ export class WalletService {
         await LedgerService.post({
           eventId,
           postings: [
-            { account: { type: LedgerAccountType.FLOAT }, delta: amount, tag: method === 'cash' ? FloatTag.CASH_DESK : FloatTag.CARD_DESK },
+            { account: { type: LedgerAccountType.FLOAT }, delta: amount, tag: floatTags[method] },
             { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: -amount },
           ],
           refType: 'wallet_topup',

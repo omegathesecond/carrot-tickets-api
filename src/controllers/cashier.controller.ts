@@ -11,6 +11,7 @@ import { WalletDeclinedError } from '@services/merchant.service';
 import { CashierService } from '@services/cashier.service';
 import { EventTagService } from '@services/eventTag.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
+import { TopupMethod } from '@models/walletTopup.model';
 import { deskTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
 import { CashierToken, CashierPermission } from '@interfaces/cashier.interface';
@@ -123,7 +124,13 @@ export class CashierController {
       const { error, value } = deskTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
-      const permission = value.method === 'cash' ? CashierPermission.CASH_TOPUP : CashierPermission.CARD_TOPUP;
+      const permissions: Record<TopupMethod, CashierPermission> = {
+        cash: CashierPermission.CASH_TOPUP,
+        card: CashierPermission.CARD_TOPUP,
+        deltapay: CashierPermission.DELTAPAY_TOPUP,
+        mobile_money: CashierPermission.MOBILE_MONEY_TOPUP,
+      };
+      const permission = permissions[value.method as TopupMethod];
       if (!(req as any).cashier.permissions.includes(permission)) {
         return ApiResponseUtil.forbidden(res, `This cashier is not allowed to reload by ${value.method}`);
       }
@@ -272,12 +279,21 @@ export class CashierController {
    * param, so a cashier can never see another cashier's desk.
    */
   static async transactions(req: Request, res: Response): Promise<any> {
+    return CashierController.transactionHistory(req, res, false);
+  }
+
+  /** Extended history for clients that understand all four deposit methods. */
+  static async transactionsAllMethods(req: Request, res: Response): Promise<any> {
+    return CashierController.transactionHistory(req, res, true);
+  }
+
+  private static async transactionHistory(req: Request, res: Response, allMethods: boolean): Promise<any> {
     try {
       const cashier = (req as any).cashier as CashierToken;
       const rawLimit = Number(req.query.limit);
       const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 50;
       const eventId = req.query.eventId ? String(req.query.eventId) : undefined;
-      const result = await CashierService.listTransactions({ cashierId: cashier.cashierId, eventId, limit });
+      const result = await CashierService.listTransactions({ cashierId: cashier.cashierId, eventId, limit, ...(allMethods ? {} : { methods: ['cash', 'card'] as const }) });
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load transactions', 500);

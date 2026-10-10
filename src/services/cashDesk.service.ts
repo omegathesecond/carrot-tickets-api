@@ -2,7 +2,7 @@ import mongoose, { ClientSession } from 'mongoose';
 import { CashDeskLock } from '@models/cashDeskLock.model';
 import { WalletTopup } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
-import { sumTopupMethod } from '@utils/topupTotals.util';
+import { topupTotalsGroup, readTopupTotals } from '@utils/topupTotals.util';
 import { CashCollection } from '@models/cashCollection.model';
 
 export class CashDeskService {
@@ -25,10 +25,10 @@ export class CashDeskService {
       const rows = await q; return rows[0]?.total ?? 0;
     }
     async function topupTotals() {
-      const query = WalletTopup.aggregate([{ $match: match }, { $group: { _id: null, cashTopups: sumTopupMethod('cash'), cardTopups: sumTopupMethod('card') } }]);
+      const query = WalletTopup.aggregate([{ $match: match }, { $group: { _id: null, ...topupTotalsGroup() } }]);
       if (session) query.session(session);
       const rows = await query;
-      return { cashTopups: rows[0]?.cashTopups ?? 0, cardTopups: rows[0]?.cardTopups ?? 0 };
+      return readTopupTotals(rows[0]);
     }
     const withdrawals = () => sum(WalletWithdrawal, { ...match, method: 'cash' });
     const collections = () => sum(CashCollection, { eventId: match.eventId, cashierId: new mongoose.Types.ObjectId(cashierId), status: 'confirmed' });
@@ -37,7 +37,7 @@ export class CashDeskService {
     const [topups, cashWithdrawals, collected] = session
       ? [await topupTotals(), await withdrawals(), await collections()] as const
       : await Promise.all([topupTotals(), withdrawals(), collections()]);
-    const { cashTopups, cardTopups } = topups;
-    return { cashTopups, cardTopups, cashWithdrawals, collected, cashOnHand: cashTopups - cashWithdrawals - collected };
+    const { cashTopups } = topups;
+    return { ...topups, cashWithdrawals, collected, cashOnHand: cashTopups - cashWithdrawals - collected };
   }
 }
