@@ -1,13 +1,13 @@
 // api/src/interfaces/operatorGrant.interface.ts
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
-import { CashierPermission } from '@interfaces/cashier.interface';
+import { CashierPermission, CASHIER_PERMISSIONS } from '@interfaces/cashier.interface';
 import { MerchantPermission } from '@interfaces/merchant.interface';
 import { WaiterPermission, WAITER_PERMISSIONS } from '@interfaces/waiter.interface';
 
 /**
  * Capabilities an organizer can grant to an INDIVIDUAL operator, on top of
  * whatever their role already carries. Roles stay the floor (a gate operator
- * always scans, a cashier always tops up); grants are the per-person extras,
+ * always scans, a cashier can read her desk); grants are per-person capabilities,
  * which is what makes this RBAC rather than four fixed job descriptions.
  *
  * Stored namespace-free on the operator row, and each auth service translates
@@ -17,6 +17,9 @@ import { WaiterPermission, WAITER_PERMISSIONS } from '@interfaces/waiter.interfa
  * nothing there.
  */
 export enum OperatorGrant {
+  TOPUP_CASH = 'topup_cash',
+  TOPUP_CARD = 'topup_card',
+  WITHDRAW_CASH = 'withdraw_cash',
   /**
    * The REGISTER desk. Two jobs, one capability because they are the same
    * person at the same table: enrol the organizer's physical tags into an
@@ -61,6 +64,9 @@ const TICKETS_BY_GRANT: Partial<Record<OperatorGrant, TicketsPermission>> = {
 
 /** Grants → the cashier namespace (cashiers log in through their own middleware). */
 const CASHIER_BY_GRANT: Partial<Record<OperatorGrant, CashierPermission>> = {
+  [OperatorGrant.TOPUP_CASH]: CashierPermission.CASH_TOPUP,
+  [OperatorGrant.TOPUP_CARD]: CashierPermission.CARD_TOPUP,
+  [OperatorGrant.WITHDRAW_CASH]: CashierPermission.CASH_WITHDRAW,
   [OperatorGrant.COLLECT_CASH]: CashierPermission.COLLECT_CASH,
   [OperatorGrant.ISSUE_TAGS]: CashierPermission.ISSUE_TAGS,
 };
@@ -94,6 +100,11 @@ export function grantedCashierPermissions(grants?: string[] | null): CashierPerm
     .filter((g): g is OperatorGrant => OPERATOR_GRANTS.includes(g as OperatorGrant))
     .map((g) => CASHIER_BY_GRANT[g])
     .filter((p): p is CashierPermission => p !== undefined);
+}
+
+/** Shared by login and live request authorization; JWT grants never authorize money. */
+export function deriveCashierPermissions(grants?: string[] | null): CashierPermission[] {
+  return [...CASHIER_PERMISSIONS, ...grantedCashierPermissions(grants)];
 }
 
 export function grantedMerchantPermissions(grants?: string[] | null): MerchantPermission[] {

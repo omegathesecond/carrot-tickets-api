@@ -105,6 +105,7 @@ export class CashierController {
         .limit(100)
         .lean();
       return ApiResponseUtil.success(res, {
+        permissions: cashier.permissions,
         events: events.map((e: any) => ({ id: String(e._id), name: e.name, venue: e.venue, eventDate: e.eventDate })),
       });
     } catch (e: any) {
@@ -121,6 +122,11 @@ export class CashierController {
     try {
       const { error, value } = deskTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const permission = value.method === 'cash' ? CashierPermission.CASH_TOPUP : CashierPermission.CARD_TOPUP;
+      if (!(req as any).cashier.permissions.includes(permission)) {
+        return ApiResponseUtil.forbidden(res, `This cashier is not allowed to reload by ${value.method}`);
+      }
 
       const event = await loadCashlessEvent(req, res, value.eventId);
       if (!event) return;

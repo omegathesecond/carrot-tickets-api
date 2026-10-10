@@ -17,7 +17,7 @@ import { WalletTopup } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
 import { WalletService } from '@services/wallet.service';
 import { EventStatus } from '@interfaces/event.interface';
-import { CASHIER_PERMISSIONS } from '@interfaces/cashier.interface';
+import { CashierPermission, CASHIER_PERMISSIONS } from '@interfaces/cashier.interface';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const TAG = '04a22b1c';
@@ -28,7 +28,7 @@ afterAll(disconnectTestDb);
 
 let __loginCodeSeq = 800;
 
-async function seedDesk() {
+async function seedDesk(grants = ['topup_cash', 'topup_card', 'withdraw_cash']) {
   const vendorId = new mongoose.Types.ObjectId();
   const future = new Date(Date.now() + 7 * 864e5);
   const event = await Event.create({
@@ -37,7 +37,7 @@ async function seedDesk() {
   });
   const cashier = await Cashier.create({
     fullName: 'Nomsa', loginCode: `4KZ${__loginCodeSeq++}`, pin: '222222',
-    scope: 'organizer', vendorId, eventId: event._id,
+    scope: 'organizer', vendorId, eventId: event._id, grants,
   });
   const wallet = await WalletService.ensureWalletForTicket({
     ticketId: String(new mongoose.Types.ObjectId()), eventId: String(event._id),
@@ -49,7 +49,7 @@ async function seedDesk() {
     permissions: CASHIER_PERMISSIONS, isSuperAdmin: false, fullName: 'Nomsa',
     vendorId: String(vendorId), eventId: String(event._id),
   }, JWT_SECRET);
-  return { eventId: String(event._id), wallet, token };
+  return { eventId: String(event._id), wallet, token, cashier };
 }
 
 it('POST /topup: 409s a reused clientTxnId with a different amount; same amount replays', async () => {
@@ -107,4 +107,57 @@ it('requires Cash or Card on every request and records card-machine reloads', as
   expect((await Wallet.findById(wallet._id))!.balance).toBe(500);
   // A different reload must supply its own method again.
   expect((await post({ ...body, clientTxnId: 'next' })).status).toBe(400);
+});
+
+
+it('cash-only access refuses card and withdrawals without changing money', async () => {
+  const {eventId, wallet, token} = await seedDesk(['topup_cash']);
+  const post = (method: string) => request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`)
+    .send({method, eventId, bandUid: TAG, amount: 500, clientTxnId: method});
+  expect((await post('card')).status).toBe(403);
+  expect((await post('cash')).status).toBe(200);
+  expect((await request(app).post('/api/cashier/withdraw').set('Authorization', `Bearer ${token}`)
+    .send({eventId, bandUid: TAG, amount: 100, clientTxnId: 'denied'})).status).toBe(403);
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(500);
+  expect(await WalletWithdrawal.countDocuments()).toBe(0);
+  expect(await WalletTopup.countDocuments()).toBe(1);
+});
+
+it('admin grant additions and revocations take effect for the same existing token', async () => {
+  const {eventId, wallet, token, cashier} = await seedDesk(['topup_cash']);
+  const post = (method: string, id: string) => request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`)
+    .send({method, eventId, bandUid: TAG, amount: 500, clientTxnId: id});
+  await Cashier.updateOne({_id:cashier._id}, {$set:{grants:['topup_card']}});
+  expect((await post('cash', 'denied')).status).toBe(403);
+  expect((await post('card', 'allowed')).status).toBe(200);
+  const events = await request(app).get('/api/cashier/events').set('Authorization', `Bearer ${token}`);
+  expect(events.body.data.permissions).toContain(CashierPermission.CARD_TOPUP);
+  expect(events.body.data.permissions).not.toContain(CashierPermission.CASH_TOPUP);
+  await Cashier.updateOne({_id:cashier._id}, {$set:{grants:[]}});
+  expect((await post('card', 'revoked')).status).toBe(403);
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(500);
+});
+
+it('a legacy permissive token cannot grant an unconfigured cashier money access', async()=> {
+  const {eventId, wallet, cashier} = await seedDesk([]);
+  const token = jwt.sign({scope:'cashier', cashierId:String(cashier._id), permissions:Object.values(CashierPermission)}, JWT_SECRET);
+  expect((await request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`)
+    .send({method:'cash', eventId, bandUid:TAG, amount:500, clientTxnId:'old'})).status).toBe(403);
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(0);
+  expect(await WalletTopup.countDocuments()).toBe(0);
+});
+
+
+it('shares the cashier lookup between permission and event checks within each HTTP request', async()=>{
+  const {token,cashier} = await seedDesk(['topup_cash']);
+  const read = jest.spyOn(Cashier, 'findById');
+  try {
+    expect((await request(app).get('/api/cashier/events').set('Authorization', `Bearer ${token}`)).status).toBe(200);
+    expect(read).toHaveBeenCalledTimes(1);
+    await Cashier.updateOne({_id:cashier._id}, {$set:{grants:['topup_card']}});
+    const changed = await request(app).get('/api/cashier/events').set('Authorization', `Bearer ${token}`);
+    expect(changed.body.data.permissions).toContain(CashierPermission.CARD_TOPUP);
+    expect(changed.body.data.permissions).not.toContain(CashierPermission.CASH_TOPUP);
+    expect(read).toHaveBeenCalledTimes(2);
+  } finally {read.mockRestore();}
 });
