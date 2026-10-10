@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { TOPUP_METHODS } from '@models/walletTopup.model';
 import { MAX_TOPUP_CENTS } from '@services/wallet.service';
 
 const uid = Joi.string().trim().lowercase().pattern(/^[0-9a-f]{8,}$/);
@@ -13,7 +14,7 @@ export const deskTopupSchema = Joi.object({
   ticketId: Joi.string().trim().regex(/^[0-9a-fA-F]{24}$/),
   bandUid: uid,
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
-  method: Joi.string().valid('cash', 'card').required(),
+  method: Joi.string().valid(...TOPUP_METHODS).required(),
   amount: Joi.number().integer().min(1).max(MAX_TOPUP_CENTS).required(),
   clientTxnId: Joi.string().trim().required(),
 }).xor('ticketId', 'bandUid');

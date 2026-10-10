@@ -1,6 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type TopupMethod = 'cash' | 'card';
+export const TOPUP_METHODS = ['cash', 'card', 'deltapay', 'mobile_money'] as const;
+export type TopupMethod = typeof TOPUP_METHODS[number];
 
 export type TopupRecordedByType = 'ResellerOperator' | 'Cashier' | 'MerchantOperator' | 'Platform';
 
@@ -16,7 +17,7 @@ const walletTopupSchema = new Schema<IWalletTopup>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   eventId: { type: Schema.Types.ObjectId, required: true, index: true },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
-  method: { type: String, enum: ['cash', 'card'], required: true },
+  method: { type: String, enum: TOPUP_METHODS, required: true },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },
   recordedBy: { type: String, required: true, index: true },
   recordedByType: { type: String, enum: ['ResellerOperator', 'Cashier', 'MerchantOperator', 'Platform'], required: true, default: 'ResellerOperator' },

@@ -151,6 +151,24 @@ it('deduplicates concurrent card-machine reloads', async () => {
 
 it('requires a payment method inside the service too', async () => {
   const { eventId, walletId } = await seedActiveWallet();
-  await expect(WalletService.topUpAtDesk({ walletId, eventId, amount: 500, recordedBy: 'desk', clientTxnId: 'missing' } as any)).rejects.toThrow(/method must be cash or card/);
+  await expect(WalletService.topUpAtDesk({ walletId, eventId, amount: 500, recordedBy: 'desk', clientTxnId: 'missing' } as any)).rejects.toThrow(/Invalid top-up payment method/);
   expect((await Wallet.findById(walletId))!.balance).toBe(0);
+});
+
+it.each([
+  ['deltapay', FloatTag.DELTAPAY_DESK],
+  ['mobile_money', FloatTag.MOBILE_MONEY_DESK],
+] as const)('keeps %s receipts in their own float and out of cash-funded balance', async (method, tag) => {
+  const { eventId, walletId } = await seedActiveWallet();
+  const params = { method, walletId, eventId, amount: 500, recordedBy: 'desk', recordedByType: 'Cashier' as const, clientTxnId: 'external' };
+  await WalletService.topUpAtDesk(params);
+  await WalletService.topUpAtDesk(params);
+  expect((await Wallet.findById(walletId))!.balance).toBe(500);
+  expect((await Wallet.findById(walletId))!.cashFundedBalance).toBe(0);
+  expect(await WalletTopup.countDocuments({ walletId })).toBe(1);
+  expect(await LedgerService.floatBalance(eventId, tag)).toBe(500);
+  expect(await LedgerService.floatBalance(eventId, FloatTag.CARD_DESK)).toBe(0);
+  expect(await LedgerService.floatBalance(eventId, FloatTag.CASH_DESK)).toBe(0);
+  expect(await LedgerService.accountBalance(eventId, { type: LedgerAccountType.WALLET, ref: walletId })).toBe(-500);
+  await expect(WalletService.topUpAtDesk({ ...params, method: 'card' })).rejects.toBeInstanceOf(WalletIdempotencyMismatchError);
 });

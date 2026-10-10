@@ -121,3 +121,20 @@ it('card-only activity remains visible after staff removal and cannot be collect
   expect(report).toMatchObject({ cashTopups: 10000, cardTopups: 110000, cashOnHand: 10000 });
   expect(report.cashiers).toContainEqual(expect.objectContaining({ id: String(cardCashier._id), isActive: false, cashTopups: 0, cardTopups: 20000, cashOnHand: 0 }));
 });
+
+it('reports DeltaPay/Mobile Money receipts without increasing collectable cash', async () => {
+  const s = await seed();
+  for (const [method, amount] of [['deltapay', 30000], ['mobile_money', 40000]] as const) {
+    await WalletService.topUpAtDesk({ method, amount, walletId: String(s.wallet._id), eventId: s.eventId, recordedBy: String(s.cashier._id), recordedByType: 'Cashier', clientTxnId: method });
+  }
+  expect((await s.desk().expect(200)).body.data).toMatchObject({ cashTopups: 10000, cardTopups: 90000, deltapayTopups: 30000, mobileMoneyTopups: 40000, cashOnHand: 10000 });
+  const report = await (await import('@services/cashCollection.service')).CashCollectionService.report(s.eventId);
+  expect(report).toMatchObject({ cashTopups: 10000, cardTopups: 90000, deltapayTopups: 30000, mobileMoneyTopups: 40000, cashOnHand: 10000 });
+  expect(report.cashiers).toContainEqual(expect.objectContaining({ deltapayTopups: 30000, mobileMoneyTopups: 40000, cashOnHand: 10000 }));
+  await s.create(10001).expect(409); // External receipts cannot fund a cash pickup.
+  const pickup = (await s.create().expect(200)).body.data;
+  await s.resolve(pickup._id).expect(200);
+  expect((await s.desk().expect(200)).body.data.cashOnHand).toBe(2000);
+  expect(await LedgerService.floatBalance(s.eventId, FloatTag.DELTAPAY_DESK)).toBe(30000);
+  expect(await LedgerService.floatBalance(s.eventId, FloatTag.MOBILE_MONEY_DESK)).toBe(40000);
+});

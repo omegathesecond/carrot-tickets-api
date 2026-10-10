@@ -4,7 +4,7 @@ import { Cashier } from '@models/cashier.model';
 import { CashCollection, ICashCollection } from '@models/cashCollection.model';
 import { WalletTopup } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
-import { sumTopupMethod } from '@utils/topupTotals.util';
+import { topupTotalsGroup, readTopupTotals, sumTopupTotals } from '@utils/topupTotals.util';
 import { CashDeskService } from '@services/cashDesk.service';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
@@ -100,7 +100,7 @@ export class CashCollectionService {
   static async report(eventId: string) {
     const id = new mongoose.Types.ObjectId(eventId);
     const [topups, withdrawals, confirmed, pendingCount, history, assigned] = await Promise.all([
-      WalletTopup.aggregate([{ $match: { eventId: id, recordedByType: 'Cashier', status: 'completed' } }, { $group: { _id: '$recordedBy', cashTopups: sumTopupMethod('cash'), cardTopups: sumTopupMethod('card') } }]),
+      WalletTopup.aggregate([{ $match: { eventId: id, recordedByType: 'Cashier', status: 'completed' } }, { $group: { _id: '$recordedBy', ...topupTotalsGroup() } }]),
       WalletWithdrawal.aggregate([{ $match: { eventId: id, recordedByType: 'Cashier', method: 'cash', status: 'completed' } }, { $group: { _id: '$recordedBy', total: { $sum: '$amount' } } }]),
       CashCollection.find({ eventId, status: 'confirmed' }).select('cashierId collectorId collectorName amount').lean(),
       CashCollection.countDocuments({ eventId, status: 'pending' }),
@@ -112,14 +112,14 @@ export class CashCollectionService {
     const cashiers = ids.map(cashierId => {
       const c = names.find(row => String(row._id) === cashierId);
       const topup = topups.find(t => String(t._id) === cashierId);
-      const cashTopups = topup?.cashTopups ?? 0;
-      const cardTopups = topup?.cardTopups ?? 0;
+      const totals = readTopupTotals(topup);
+      const { cashTopups } = totals;
       const cashWithdrawals = withdrawals.find(t => String(t._id) === cashierId)?.total ?? 0;
       const collected = confirmed.filter(t => String(t.cashierId) === cashierId).reduce((n, t) => n + t.amount, 0);
-      return { id: cashierId, fullName: c?.fullName ?? history.find(row => String(row.cashierId) === cashierId)?.cashierName ?? `Removed staff (${cashierId})`, isActive: c?.isActive === true, cashTopups, cardTopups, cashWithdrawals, collected, cashOnHand: cashTopups - cashWithdrawals - collected };
+      return { id: cashierId, fullName: c?.fullName ?? history.find(row => String(row.cashierId) === cashierId)?.cashierName ?? `Removed staff (${cashierId})`, isActive: c?.isActive === true, ...totals, cashWithdrawals, collected, cashOnHand: cashTopups - cashWithdrawals - collected };
     });
     const collectors = new Map<string, { id: string; fullName: string; held: number }>();
     for (const row of confirmed) { const key = String(row.collectorId); const c = collectors.get(key) ?? { id: key, fullName: row.collectorName, held: 0 }; c.held += row.amount; collectors.set(key, c); }
-    return { cashiers, cashTopups: cashiers.reduce((n, c) => n + c.cashTopups, 0), cardTopups: cashiers.reduce((n, c) => n + c.cardTopups, 0), collectors: [...collectors.values()], cashOnHand: cashiers.reduce((n, c) => n + c.cashOnHand, 0), collectorHeld: confirmed.reduce((n, c) => n + c.amount, 0), pendingCount, collections: history };
+    return { cashiers, ...sumTopupTotals(cashiers), collectors: [...collectors.values()], cashOnHand: cashiers.reduce((n, c) => n + c.cashOnHand, 0), collectorHeld: confirmed.reduce((n, c) => n + c.amount, 0), pendingCount, collections: history };
   }
 }

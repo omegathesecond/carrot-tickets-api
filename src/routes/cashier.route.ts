@@ -48,6 +48,8 @@ router.get(
   CashierController.transactions,
 );
 
+router.get('/transactions/all-methods', requireCashierPermission(CashierPermission.VIEW_OWN_TRANSACTIONS), CashierController.transactionsAllMethods);
+
 router.get('/cash-desk', requireCashierPermission(CashierPermission.VIEW_OWN_TRANSACTIONS), CashCollectionController.desk);
 // Collection authorization is resolved from live grants, never the stale JWT.
 router.post('/cash-collections', CashCollectionController.create);

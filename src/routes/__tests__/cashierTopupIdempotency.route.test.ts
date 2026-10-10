@@ -161,3 +161,59 @@ it('shares the cashier lookup between permission and event checks within each HT
     expect(read).toHaveBeenCalledTimes(2);
   } finally {read.mockRestore();}
 });
+
+it.each([
+  ['deltapay', 'topup_deltapay', CashierPermission.DELTAPAY_TOPUP],
+  ['mobile_money', 'topup_mobile_money', CashierPermission.MOBILE_MONEY_TOPUP],
+])('records %s only with its own live grant, without changing the cash/card contract', async (method, grant, permission) => {
+  const { eventId, wallet, token, cashier } = await seedDesk();
+  const body = { method, bandUid: TAG, eventId, amount: 500, clientTxnId: 'external-1' };
+  const post = () => request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`).send(body);
+  await post().expect(403); // Neither existing money grant authorizes this method.
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(0);
+  expect(await WalletTopup.countDocuments()).toBe(0);
+  await Cashier.updateOne({ _id: cashier._id }, { $set: { grants: [grant, 'topup_cash', 'topup_card'] } });
+  const first = await post().expect(200);
+  expect(first.body.data).toMatchObject({ method, newBalance: 500 });
+  await post().expect(200);
+  expect(await WalletTopup.countDocuments()).toBe(1);
+  const events = await request(app).get('/api/cashier/events').set('Authorization', `Bearer ${token}`).expect(200);
+  expect(events.body.data.permissions).toContain(permission);
+  expect((await Wallet.findById(wallet._id))!.cashFundedBalance).toBe(0);
+  await request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`)
+    .send({ ...body, method: 'card' }).expect(409);
+  await Cashier.updateOne({ _id: cashier._id }, { $set: { grants: ['topup_cash', 'topup_card'] } });
+  await post().expect(403);
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(500);
+});
+
+it('keeps shipped POS history cash/card-only and exposes full history on the new endpoint', async () => {
+  const { eventId, wallet, token, cashier } = await seedDesk(['topup_cash', 'topup_card', 'topup_deltapay', 'topup_mobile_money']);
+  for (const [method, amount] of [['cash', 500], ['card', 700], ['deltapay', 1100], ['mobile_money', 1300]] as const) {
+    const res = await request(app).post('/api/cashier/topup').set('Authorization', `Bearer ${token}`)
+      .send({ method, bandUid: TAG, eventId, amount, clientTxnId: method }).expect(200);
+    // Shipped APK's charge parser still receives the same required numeric field.
+    expect(Number.isInteger(res.body.data.newBalance)).toBe(true);
+  }
+  const get = (path: string) => request(app).get(`/api/cashier/${path}?eventId=${eventId}`).set('Authorization', `Bearer ${token}`);
+  const old = (await get('transactions').expect(200)).body.data;
+  expect(new Set(old.transactions.map((t: any) => t.method))).toEqual(new Set(['cash', 'card']));
+  expect(old.summary).toMatchObject({ cashTopups: 500, cardTopups: 700, toppedUp: 1200, count: 2 });
+  const limited = (await request(app).get(`/api/cashier/transactions?eventId=${eventId}&limit=1`).set('Authorization', `Bearer ${token}`).expect(200)).body.data;
+  expect(limited.transactions).toHaveLength(1);
+  expect(['cash', 'card']).toContain(limited.transactions[0].method);
+  expect(limited.summary.toppedUp).toBeGreaterThan(0);
+  const full = (await get('transactions/all-methods').expect(200)).body.data;
+  expect(new Set(full.transactions.map((t: any) => t.method))).toEqual(new Set(['cash', 'card', 'deltapay', 'mobile_money']));
+  expect(full.summary).toMatchObject({ cashTopups: 500, cardTopups: 700, deltapayTopups: 1100, mobileMoneyTopups: 1300, toppedUp: 3600, count: 4 });
+  const desk = (await get('cash-desk').expect(200)).body.data;
+  expect(desk).toMatchObject({ cashTopups: 500, cardTopups: 700, deltapayTopups: 1100, mobileMoneyTopups: 1300, cashOnHand: 500 });
+  const balance = await request(app).get(`/api/cashier/balance?eventId=${eventId}&bandUid=${TAG}`).set('Authorization', `Bearer ${token}`).expect(200);
+  expect(balance.body.data.balance).toBe(3600);
+  expect((await Wallet.findById(wallet._id))!.cashFundedBalance).toBe(500);
+  // The new endpoint retains existing actor isolation, rather than opening event-wide access.
+  const other = await seedDesk();
+  const unrelated = await request(app).get(`/api/cashier/transactions/all-methods?eventId=${eventId}`).set('Authorization', `Bearer ${other.token}`).expect(200);
+  expect(unrelated.body.data.transactions).toHaveLength(0);
+  expect(String(cashier._id)).not.toBe(String(other.cashier._id));
+});

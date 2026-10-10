@@ -20,6 +20,10 @@ export enum FloatTag {
   CASH_DESK = 'cash_desk',
   /** Card payments approved on the organizer's separate card machine. */
   CARD_DESK = 'card_desk',
+  /** DeltaPay receipts confirmed on a separate device. */
+  DELTAPAY_DESK = 'deltapay_desk',
+  /** Mobile Money receipts confirmed on a separate device. */
+  MOBILE_MONEY_DESK = 'mobile_money_desk',
   /** Physical cash handed to a collector with both parties' confirmation. */
   COLLECTOR_CASH = 'collector_cash',
   /**

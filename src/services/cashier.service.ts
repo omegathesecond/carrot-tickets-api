@@ -1,8 +1,9 @@
 // api/src/services/cashier.service.ts
 import mongoose from 'mongoose';
-import { WalletTopup } from '@models/walletTopup.model';
+import { WalletTopup, TopupMethod } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
 import { Wallet } from '@models/wallet.model';
+import { TopupTotals, totalRecordedTopups } from '@utils/topupTotals.util';
 
 export interface CashierTxn {
   id: string;
@@ -28,16 +29,18 @@ export class CashierService {
     cashierId: string;
     eventId?: string;
     limit?: number;
+    /** Only the released POS history endpoint restricts its understood methods. */
+    methods?: readonly TopupMethod[];
   }): Promise<{
     transactions: CashierTxn[];
-    summary: { cashTopups: number; cardTopups: number; toppedUp: number; withdrawn: number; net: number; count: number };
+    summary: TopupTotals & { toppedUp: number; withdrawn: number; net: number; count: number };
   }> {
-    const { cashierId, eventId, limit = 50 } = params;
+    const { cashierId, eventId, limit = 50, methods } = params;
     const scope: Record<string, unknown> = { recordedBy: cashierId };
     if (eventId) scope['eventId'] = new mongoose.Types.ObjectId(eventId);
 
     const [topups, withdrawals] = await Promise.all([
-      WalletTopup.find(scope).sort({ createdAt: -1 }).limit(limit).lean(),
+      WalletTopup.find({ ...scope, ...(methods ? { method: { $in: methods } } : {}) }).sort({ createdAt: -1 }).limit(limit).lean(),
       WalletWithdrawal.find(scope).sort({ createdAt: -1 }).limit(limit).lean(),
     ]);
 
@@ -58,14 +61,13 @@ export class CashierService {
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, limit);
 
-    const cashTopups = topups.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardTopups = topups.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const totals = totalRecordedTopups(topups);
     const toppedUp = topups.reduce((s, t) => s + t.amount, 0);
     const withdrawn = withdrawals.reduce((s, w) => s + w.amount, 0);
 
     return {
       transactions,
-      summary: { cashTopups, cardTopups, toppedUp, withdrawn, net: toppedUp - withdrawn, count: topups.length + withdrawals.length },
+      summary: { ...totals, toppedUp, withdrawn, net: toppedUp - withdrawn, count: topups.length + withdrawals.length },
     };
   }
 }
