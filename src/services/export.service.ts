@@ -2,6 +2,8 @@ import { TicketSale } from '@models/ticketSale.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketScan } from '@models/ticketScan.model';
 import { Event } from '@models/event.model';
+import { MerchantService } from '@services/merchant.service';
+import { SalesStatementPdfService } from '@services/salesStatementPdf.service';
 import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 export interface ExportQuery {
@@ -31,7 +33,15 @@ export class ExportService {
   /**
    * Export sales to CSV
    */
-  static async exportSalesToCSV(query: ExportSalesQuery): Promise<string> {
+  static async exportSalesToCSV(query: ExportSalesQuery, statement?: { eventName: string; currency: string }): Promise<string> {
+    return this.arrayToCSV(await this.salesRows(query, statement));
+  }
+
+  static async exportSalesStatementPdf(query: ExportSalesQuery, statement: { eventName: string; currency: string }): Promise<Buffer> {
+    return SalesStatementPdfService.render(await this.salesRows(query, statement), 'event');
+  }
+
+  private static async salesRows(query: ExportSalesQuery, statement?: { eventName: string; currency: string }): Promise<any[][]> {
     try {
       const {
         vendorId, eventId, startDate, endDate,
@@ -113,11 +123,70 @@ export class ExportService {
         ];
       });
 
-      return this.arrayToCSV([headers, ...rows]);
+      if (statement) {
+        if (sales.some(sale => !Number.isFinite(sale.refundedQuantity) || !Number.isFinite(sale.refundedAmount))) {
+          throw new Error('Sales refund counters are missing. Run the sale-refunds backfill before generating a statement.');
+        }
+        headers[10] = 'Sold At (UTC)';
+        sales.forEach((sale, index) => { rows[index]![10] = new Date(sale.soldAt).toISOString(); });
+        headers.push('Refunded Tickets', 'Refunded Amount', 'Net Tickets', 'Net Ticket Revenue');
+        sales.forEach((sale, index) => rows[index]!.push(
+          sale.refundedQuantity!,
+          sale.refundedAmount!.toFixed(2),
+          sale.quantity - sale.refundedQuantity!,
+          (sale.totalAmount - sale.refundedAmount!).toFixed(2),
+        ));
+        const totals = sales.reduce((sum, sale) => ({
+          quantity: sum.quantity + sale.quantity,
+          gross: sum.gross + sale.totalAmount,
+          refundedQuantity: sum.refundedQuantity + sale.refundedQuantity!,
+          refunds: sum.refunds + sale.refundedAmount!,
+        }), { quantity: 0, gross: 0, refundedQuantity: 0, refunds: 0 });
+        return [
+          ['Event Ticket Sales Statement'], ['Event', statement.eventName],
+          ['Currency', statement.currency], ['Generated At (UTC)', new Date().toISOString()],
+          ['Completed Sales', sales.length], ['Tickets Sold', totals.quantity],
+          ['Gross Ticket Revenue', totals.gross.toFixed(2)],
+          ['Refunded Tickets', totals.refundedQuantity], ['Refunded Amount', totals.refunds.toFixed(2)],
+          ['Net Tickets', totals.quantity - totals.refundedQuantity],
+          ['Net Ticket Revenue', (totals.gross - totals.refunds).toFixed(2)],
+          [''], headers, ...rows,
+        ];
+      }
+      return [headers, ...rows];
     } catch (error: any) {
       console.error('Export sales to CSV error:', error);
       throw new Error(error.message || 'Failed to export sales');
     }
+  }
+
+  static async exportMerchantStatementToCSV(merchantId: string, merchantName: string, eventName: string, currency: string): Promise<string> {
+    return this.arrayToCSV(await this.merchantRows(merchantId, merchantName, eventName, currency));
+  }
+
+  static async exportMerchantStatementPdf(merchantId: string, merchantName: string, eventName: string, currency: string): Promise<Buffer> {
+    return SalesStatementPdfService.render(await this.merchantRows(merchantId, merchantName, eventName, currency), 'merchant');
+  }
+
+  private static async merchantRows(merchantId: string, merchantName: string, eventName: string, currency: string): Promise<any[][]> {
+    // An export covers the entire ledger, independent of the detail page limit.
+    const { transactions, summary } = await MerchantService.listTransactions({ merchantId, limit: null });
+    const money = (cents: number) => (cents / 100).toFixed(2);
+    return [
+      ['Vendor Sales Statement'], ['Vendor', merchantName], ['Event', eventName],
+      ['Currency', currency], ['Generated At (UTC)', new Date().toISOString()],
+      ['Completed Sales', summary.count], ['Total Charged', money(summary.totalCharged)],
+      ['Commission', money(summary.totalFee)], ['Net Owed', money(summary.totalNet)],
+      ['Reversed Sales', transactions.filter(t => t.status === 'reversed').length],
+      ['Totals exclude reversed sales. Net owed is sales earnings before payouts.'], [''],
+      ['Sale ID', 'Sold At (UTC)', 'Status', 'Operator', 'Band', 'Charged', 'Customer Surcharge', 'Commission', 'Net Owed', 'Reversed At (UTC)', 'Reversal Reason'],
+      ...transactions.map(t => [
+        t.id, t.createdAt.toISOString(), t.status, t.staffName, t.bandUid,
+        money(t.amount), money(t.purchaseChargeAmount), money(t.fee),
+        money(t.status === 'completed' ? t.netAmount : 0),
+        t.reversal?.at.toISOString() ?? '', t.reversal?.reason ?? '',
+      ]),
+    ];
   }
 
   /**
@@ -452,7 +521,10 @@ export class ExportService {
       .map(row =>
         row
           .map(cell => {
-            const cellStr = String(cell || '');
+            // Preserve zero values and keep user-entered cells from becoming
+            // spreadsheet formulas when the statement is opened in Excel.
+            const raw = String(cell ?? '');
+            const cellStr = typeof cell === 'string' && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
             // Escape quotes and wrap in quotes if contains comma, quote, or newline
             if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
               return `"${cellStr.replace(/"/g, '""')}"`;
