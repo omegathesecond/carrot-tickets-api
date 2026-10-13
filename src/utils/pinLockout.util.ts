@@ -86,7 +86,7 @@ export async function clearPinLockout(model: Model<any>, id: Types.ObjectId | st
 
 /** Shared PIN proof for login and cash handover; failed guesses use the same
  * atomic counter so confirmation cannot become an unthrottled PIN oracle. */
-export async function verifyOperatorPin(model: Model<any>, operator: { _id: any; lockedUntil: Date | null; comparePin(pin: string): Promise<boolean> }, pin: string): Promise<void> {
+export async function verifyOperatorPin(model: Model<any>, operator: { _id: any; comparePin(pin: string): Promise<boolean> }, pin: string): Promise<void> {
   // Reserve BEFORE bcrypt: requests already in flight cannot bypass the cap.
   await reservePinAttempt(model, operator._id);
   if (!(await operator.comparePin(pin))) throw new HttpError(401, 'Invalid credentials');
