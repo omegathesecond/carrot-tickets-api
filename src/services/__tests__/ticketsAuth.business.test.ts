@@ -1,4 +1,4 @@
-import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { OtpService } from '@services/otp.service';
 import { Vendor } from '@models/vendor.model';
@@ -11,7 +11,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 // Bypass real OTP: run the guarded action, no code check.
 jest.spyOn(OtpService, 'withVerified').mockImplementation(async (_a, _i, _c, action: any) => action());
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 afterAll(disconnectTestDb);
 afterEach(async () => {
   await clearTestDb();

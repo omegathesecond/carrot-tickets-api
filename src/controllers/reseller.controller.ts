@@ -1,5 +1,7 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import Joi from 'joi';
+import { failAuthRequest } from '@utils/controllerHelpers.util';
 import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { ResellerAuthService } from '@services/resellerAuth.service';
@@ -27,7 +29,7 @@ export class ResellerController {
       const result = await ResellerAuthService.ownerLogin(email, password);
       return ApiResponseUtil.success(res, result, 'Signed in successfully');
     } catch (error: any) {
-      return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
+      return failAuthRequest(res, error, 'Failed to sign in');
     }
   }
 
@@ -123,7 +125,7 @@ export class ResellerController {
    */
   static async getEventTickets(req: Request, res: Response): Promise<any> {
     try {
-      const { id } = req.params;
+      const id = requireRouteParam(req, 'id');
 
       // Refuse before the lookup: an assigned reseller has no business reading
       // the tier names, prices or remaining capacity of somebody else's show.

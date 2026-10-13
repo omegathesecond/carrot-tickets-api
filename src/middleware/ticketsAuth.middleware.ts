@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { TicketsAuthService } from '@services/ticketsAuth.service';
+import { TicketsAuthService, SessionAuthError } from '@services/ticketsAuth.service';
 import { gateOperatorPermissions } from '@services/gateOperatorAuth.service';
 import { GateOperator } from '@models/gateOperator.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
@@ -30,14 +30,15 @@ export const authenticateTickets = async (
     }
 
     // Verify token
-    const decoded = TicketsAuthService.verifyToken(token);
+    const decoded = await TicketsAuthService.verifyAndResolveSession(token);
 
     // Attach Tickets user to request
     (req as any).ticketsUser = decoded;
 
     next();
   } catch (error: any) {
-    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    else next(error);
   }
 };
 
@@ -67,9 +68,11 @@ async function effectivePermissions(ticketsUser: any): Promise<string[] | null> 
   // trusted on its own say-so.
   if (!ticketsUser.userId) return null;
   const row = await GateOperator.findById(String(ticketsUser.userId))
-    .select('isActive grants')
-    .lean<{ isActive?: boolean; grants?: string[] } | null>();
+    .select('isActive grants scope vendorId')
+    .lean<{ isActive?: boolean; grants?: string[]; scope?: string; vendorId?: any } | null>();
   if (!row || !row.isActive) return null;
+  ticketsUser.isSuperAdmin = row.scope === 'platform';
+  ticketsUser.vendorId = row.vendorId ? String(row.vendorId) : undefined;
   return gateOperatorPermissions(row.grants);
 }
 
@@ -201,7 +204,7 @@ export const authenticateBuyer = async (
       return;
     }
 
-    const decoded = TicketsAuthService.verifyToken(token);
+    const decoded = await TicketsAuthService.verifyAndResolveSession(token);
     if ((decoded as any).userType !== 'buyer' || !((decoded as any).buyerId || (decoded as any).userPhone)) {
       ApiResponseUtil.unauthorized(res, 'Invalid buyer token');
       return;
@@ -210,7 +213,8 @@ export const authenticateBuyer = async (
     (req as any).ticketsUser = decoded;
     next();
   } catch (error: any) {
-    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    else next(error);
   }
 };
 
@@ -243,7 +247,7 @@ export const authenticateCommunityViewer = async (
       return;
     }
 
-    const decoded = TicketsAuthService.verifyToken(token) as any;
+    const decoded = await TicketsAuthService.verifyAndResolveSession(token) as any;
     const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);
     const isOrganizer =
       (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
@@ -255,7 +259,8 @@ export const authenticateCommunityViewer = async (
     (req as any).ticketsUser = decoded;
     next();
   } catch (error: any) {
-    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    else next(error);
   }
 };
 
@@ -283,7 +288,7 @@ export const authenticateBuyerOrOrganizer = async (
       ApiResponseUtil.unauthorized(res, 'No token provided');
       return;
     }
-    const decoded = TicketsAuthService.verifyToken(token) as any;
+    const decoded = await TicketsAuthService.verifyAndResolveSession(token) as any;
     const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);
     const isOrganizer =
       (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
@@ -294,7 +299,8 @@ export const authenticateBuyerOrOrganizer = async (
     (req as any).ticketsUser = decoded;
     next();
   } catch (error: any) {
-    ApiResponseUtil.unauthorized(res, error.message || 'Invalid or expired token');
+    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    else next(error);
   }
 };
 
@@ -316,13 +322,13 @@ export const optionalCommunityViewer = async (
   const token = authHeader?.replace('Bearer ', '');
   if (token) {
     try {
-      const decoded = TicketsAuthService.verifyToken(token) as any;
+      const decoded = await TicketsAuthService.verifyAndResolveSession(token) as any;
       const isBuyer = decoded.userType === 'buyer' && (decoded.buyerId || decoded.userPhone);
       const isOrganizer =
         (decoded.userType === 'vendor' || decoded.userType === 'sub-user') && decoded.vendorId;
       if (isBuyer || isOrganizer) (req as any).ticketsUser = decoded;
-    } catch {
-      // Invalid/expired token on a public read → treat as anonymous, don't 401.
+    } catch (error) {
+      if (!(error instanceof SessionAuthError)) { next(error); return; }
     }
   }
   next();
@@ -341,11 +347,11 @@ export const optionalCommunityViewer = async (
  * nothing.
  */
 export const requireSuperAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  if (!(await resolvePermissions(req, res, next))) return;
   if (!(req as any).ticketsUser?.isSuperAdmin) {
     ApiResponseUtil.forbidden(res, 'Super admin access required');
     return;
   }
-  if (!(await resolvePermissions(req, res, next))) return;
   next();
 };
 
@@ -384,15 +390,15 @@ export const optionalTicketsAuth = async (
     if (authHeader) {
       const token = authHeader.replace('Bearer ', '');
       if (token) {
-        const decoded = TicketsAuthService.verifyToken(token);
+        const decoded = await TicketsAuthService.verifyAndResolveSession(token);
         (req as any).ticketsUser = decoded;
       }
     }
 
     next();
   } catch (error) {
-    // Silent fail for optional auth
-    next();
+    if (error instanceof SessionAuthError) next();
+    else next(error);
   }
 };
 

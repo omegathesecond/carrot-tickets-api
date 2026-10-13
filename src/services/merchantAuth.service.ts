@@ -7,7 +7,7 @@ import { MerchantToken } from '@interfaces/merchant.interface';
 import { deriveMerchantPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
-import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
+import { verifyOperatorPin } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 
@@ -36,24 +36,12 @@ export class MerchantAuthService {
       .select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
-    if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {
-      throw new Error('Account locked. Try again later.');
-    }
-
-    const ok = await operator.comparePin(pin);
-    if (!ok) {
-      // Counted on the server, not on this loaded document — N guesses in
-      // flight together must reach N and lock, not all write 1.
-      await recordFailedPinAttempt(MerchantOperator, operator._id as any);
-      throw new Error('Invalid credentials');
-    }
-
     // The stall must still be active — suspending a stall must not leave its
     // people able to charge against it.
     const merchant = await Merchant.findOne({ _id: operator.merchantId, status: 'active' });
     if (!merchant) throw new Error('Invalid credentials');
 
-    await clearPinLockout(MerchantOperator, operator._id as any);
+    await verifyOperatorPin(MerchantOperator, operator, pin);
 
     // The app's vendor header shows this instead of a raw eventId — best
     // effort: a missing/deleted event must not block login, it just means

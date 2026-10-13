@@ -19,6 +19,7 @@ const vendorSchema = new Schema<IVendor>({
     sparse: true,
     trim: true
   },
+  authVersion: { type: Number, default: 0, required: true },
   password: {
     type: String,
     required: [true, 'Password is required'],
@@ -233,6 +234,7 @@ vendorSchema.pre('save', async function(next) {
 
     // Hash password if modified
     if (this.isModified('password')) {
+      this.authVersion += 1;
       const salt = await bcrypt.genSalt(12);
       this.password = await bcrypt.hash(this.password, salt);
     }

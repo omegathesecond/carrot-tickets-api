@@ -6,6 +6,7 @@ import { socketAuthMiddleware } from './socketAuth';
 import { registerChannelHandlers } from './channelHandlers';
 import { registerDmHandlers } from './dmHandlers';
 import { trackConnection } from './presence';
+import { TicketsAuthService } from '@services/ticketsAuth.service';
 
 export interface RealtimeServer {
   httpServer: HttpServer;
@@ -26,6 +27,21 @@ export function createRealtimeServer(corsOrigins: CorsOrigin): RealtimeServer {
 
   io.use(socketAuthMiddleware);
   io.on('connection', (socket) => {
+    const validateSession = async () => {
+      await TicketsAuthService.verifyAndResolveSession(socket.handshake.auth['token']);
+    };
+    // A socket must not turn a revoked/expired bearer into a permanent session.
+    socket.use((_packet, next) => {
+      validateSession().then(() => next()).catch((error) => {
+        next(error);
+        socket.disconnect(true);
+      });
+    });
+    const sessionCheck = setInterval(() => {
+      validateSession().catch(() => socket.disconnect(true));
+    }, 30_000);
+    sessionCheck.unref();
+    socket.on('disconnect', () => clearInterval(sessionCheck));
     trackConnection(socket);
     registerChannelHandlers(io, socket);
     registerDmHandlers(io, socket);

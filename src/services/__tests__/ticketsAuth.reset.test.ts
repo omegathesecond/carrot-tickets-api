@@ -1,4 +1,4 @@
-import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { Vendor } from '@models/vendor.model';
@@ -13,7 +13,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 jest.mock('@services/email.service');
 jest.mock('@services/sms.service');
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 afterAll(disconnectTestDb);
 
 beforeEach(() => {
@@ -115,7 +115,7 @@ describe('TicketsAuthService organizer password reset', () => {
 
   it('revokes existing refresh tokens on reset', async () => {
     const vendor = await Vendor.create({ businessName: 'Neogen', email: 'org@x.com', password: 'oldpass1' });
-    await RefreshToken.create({ token: 'stale-token', vendorId: vendor._id.toString(), userType: 'vendor', expiresAt: new Date(Date.now() + 3600_000), isRevoked: false });
+    await RefreshToken.create({ token: 'stale-token', authVersion: vendor.authVersion, vendorId: vendor._id.toString(), userType: 'vendor', expiresAt: new Date(Date.now() + 3600_000), isRevoked: false });
 
     await TicketsAuthService.requestPasswordResetOtp('org@x.com');
     await TicketsAuthService.resetPassword('org@x.com', lastEmailCode(), 'newpass1');

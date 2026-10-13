@@ -33,6 +33,7 @@ export interface IBuyerLocation {
  * Passwords are bcrypt-hashed via the pre-save hook and are never returned by default (`select: false`).
  */
 export interface IBuyer extends Document {
+  authVersion: number;
   phone?: string; // normalised, e.g. +26878422613 (optional — email-only buyers have none)
   email?: string; // lowercased, unique among buyers with an email
   emailVerifiedAt?: Date;
@@ -95,6 +96,7 @@ const buyerSchema = new Schema<IBuyer>(
     },
     emailVerifiedAt: { type: Date },
     phoneVerifiedAt: { type: Date },
+    authVersion: { type: Number, default: 0, required: true },
     password: {
       type: String,
       required: [true, 'Password is required'],
@@ -186,6 +188,7 @@ buyerSchema.pre('validate', function (next) {
 // Hash the password whenever it is set/changed.
 buyerSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
+  this.authVersion += 1;
   try {
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);

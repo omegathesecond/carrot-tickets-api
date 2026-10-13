@@ -5,7 +5,7 @@ import { WaiterToken } from '@interfaces/waiter.interface';
 import { deriveWaiterPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
-import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
+import { verifyOperatorPin } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 
@@ -24,19 +24,7 @@ export class WaiterAuthService {
     }).select('+pin');
     if (!waiter) throw new Error('Invalid credentials');
 
-    if (waiter.lockedUntil && waiter.lockedUntil.getTime() > Date.now()) {
-      throw new Error('Account locked. Try again later.');
-    }
-
-    const ok = await waiter.comparePin(pin);
-    if (!ok) {
-      // Counted on the server, not on this loaded document — N guesses in
-      // flight together must reach N and lock, not all write 1.
-      await recordFailedPinAttempt(Waiter, waiter._id as any);
-      throw new Error('Invalid credentials');
-    }
-
-    await clearPinLockout(Waiter, waiter._id as any);
+    await verifyOperatorPin(Waiter, waiter, pin);
 
     const isSuperAdmin = waiter.scope === 'platform';
     const payload: Record<string, unknown> = {

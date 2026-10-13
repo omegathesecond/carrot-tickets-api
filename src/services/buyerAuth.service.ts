@@ -3,6 +3,7 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { OtpService } from '@services/otp.service';
 import { classifyIdentifier, Identifier } from '@utils/identifier.util';
 import { JWT_SECRET } from '@config/jwt.config';
+import { SecurityRateLimitService } from '@services/securityRateLimit.service';
 
 /**
  * Buyer (ticket-holder) authentication.
@@ -50,6 +51,7 @@ export class BuyerAuthService {
       userType: 'buyer',
       app: 'tickets',
       buyerId: String(buyer._id),
+      authVersion: buyer.authVersion,
     };
     if (buyer.phone) payload['userPhone'] = buyer.phone;
     if (buyer.email) payload['userEmail'] = buyer.email;
@@ -83,6 +85,7 @@ export class BuyerAuthService {
       throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
     }
 
+    await SecurityRateLimitService.consume('buyer-login', id.value, 10, 15 * 60 * 1000);
     const existing = await this.findByIdentifier(id).select('+password');
     if (!existing) {
       // No account on this identifier yet — ownership must be proven via OTP
@@ -95,6 +98,7 @@ export class BuyerAuthService {
       throw new Error('Incorrect password. Please try again.');
     }
 
+    await SecurityRateLimitService.clear('buyer-login', id.value);
     existing.lastLoginAt = new Date();
     await existing.save();
 
@@ -151,14 +155,16 @@ export class BuyerAuthService {
     // account actually exists. If Buyer.create throws (e.g. a duplicate-key
     // race), the code stays valid so the buyer can simply retry rather than
     // being told it "expired".
-    const buyer = await OtpService.withVerified('buyer', id, code, () =>
-      Buyer.create({
+    const buyer = await OtpService.withVerified('buyer', id, code, async (session) => {
+      const [created] = await Buyer.create([{
         ...(id.channel === 'sms' ? { phone: id.value, phoneVerifiedAt: new Date() } : { email: id.value, emailVerifiedAt: new Date() }),
         password,
         ...(name ? { name } : {}),
         lastLoginAt: new Date(),
-      })
-    );
+      }], { session });
+      if (!created) throw new Error('Buyer creation returned no account');
+      return created;
+    });
 
     return { accessToken: this.signToken(buyer), identity: this.identityOf(buyer) };
   }
@@ -209,10 +215,10 @@ export class BuyerAuthService {
 
     // Verify first, apply the new password inside the guarded action, and only
     // consume the code once the save has landed (see OtpService.withVerified).
-    await OtpService.withVerified('buyer', id, code, async () => {
+    await OtpService.withVerified('buyer', id, code, async (session) => {
       buyer.password = newPassword;
       buyer.lastLoginAt = new Date();
-      await buyer.save();
+      await buyer.save({ session });
     });
 
     return { accessToken: this.signToken(buyer), identity: this.identityOf(buyer) };

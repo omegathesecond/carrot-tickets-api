@@ -19,6 +19,7 @@ import * as Sentry from '@sentry/node';
 
 import { getDatabaseURI, logDatabaseConfig, validateEnvironment } from '@config/database.config';
 import { buildCorsOrigin } from '@utils/corsOrigins.util';
+import { requireTextQuery } from '@middleware/queryParams.middleware';
 
 // Background sweeps (reservation expiry, card-sale reconciliation, event
 // reminders, stuck-update reconciliation) — consolidated in src/tasks.
@@ -83,6 +84,9 @@ handleUnhandledRejection();
 
 // Initialize Express app
 const app: Application = express();
+// Keep structured query input visible to the shape gate rather than silently
+// treating nested filters as unknown string keys.
+app.set('query parser', 'extended');
 
 // Middleware
 app.use(requestIdMiddleware); // Add request ID for tracking
@@ -101,6 +105,7 @@ app.use(cors({
   // instead of the client guessing, or re-parsing the message copy.
   exposedHeaders: ['Retry-After']
 }));
+app.use(requireTextQuery);
 
 // Parse JSON bodies with a size limit.
 //
@@ -199,13 +204,7 @@ app.use(notFoundHandler);
 
 // Sentry error handler - must be before custom error handler
 if (isSentryInitialised()) {
-  Sentry.setupExpressErrorHandler(app, {
-    shouldHandleError(error: any) {
-      // Report all errors with status >= 500 to Sentry
-      // Don't report client errors (4xx)
-      return !error.statusCode || error.statusCode >= 500;
-    },
-  });
+  Sentry.setupExpressErrorHandler(app);
 }
 
 // Global error handler - must be last

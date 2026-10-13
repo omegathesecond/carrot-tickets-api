@@ -15,6 +15,7 @@ export enum OperatorType {
 }
 
 export interface IVendor extends Document {
+  authVersion: number;
   _id: Types.ObjectId;
 
   // Authentication

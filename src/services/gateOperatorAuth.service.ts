@@ -9,7 +9,7 @@ import {
 import { grantedTicketsPermissions, OperatorGrant } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
-import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
+import { verifyOperatorPin } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 
@@ -40,19 +40,7 @@ export class GateOperatorAuthService {
     const operator = await GateOperator.findOne({ loginCode: normalizeLoginCode(loginCode), isActive: true }).select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
-    if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {
-      throw new Error('Account locked. Try again later.');
-    }
-
-    const ok = await operator.comparePin(pin);
-    if (!ok) {
-      // Counted on the server, not on this loaded document — N guesses in
-      // flight together must reach N and lock, not all write 1.
-      await recordFailedPinAttempt(GateOperator, operator._id as any);
-      throw new Error('Invalid credentials');
-    }
-
-    await clearPinLockout(GateOperator, operator._id as any);
+    await verifyOperatorPin(GateOperator, operator, pin);
 
     const isSuperAdmin = operator.scope === 'platform';
     const payload: Record<string, unknown> = {

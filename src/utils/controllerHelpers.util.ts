@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { HttpError, OtpCooldownError } from '@utils/httpError.util';
+import { SecurityRateLimitError } from '@services/securityRateLimit.service';
 
 export const HEX24 = /^[0-9a-f]{24}$/i;
 
@@ -22,6 +23,15 @@ export function failOtpRequest(res: Response, error: any, fallback: string) {
     return ApiResponseUtil.error(res, error.message, error.statusCode);
   }
   return ApiResponseUtil.error(res, error?.message || fallback, 400);
+}
+
+export function failAuthRequest(res: Response, error: any, fallback: string) {
+  if (error instanceof SecurityRateLimitError) {
+    res.set('Retry-After', String(error.retryAfterSeconds));
+    return ApiResponseUtil.error(res, error.message, 429);
+  }
+  if (error instanceof HttpError) return ApiResponseUtil.error(res, error.message, error.statusCode);
+  return ApiResponseUtil.unauthorized(res, error?.message || fallback);
 }
 
 export interface MessageCursorParams {
@@ -55,4 +65,11 @@ export function parseMessageCursorParams(req: Request, res: Response): MessageCu
     return null;
   }
   return { before, after, limit };
+}
+
+/** Named route parameters in this API are single text segments, never wildcard arrays. */
+export function requireRouteParam(req: Request, name: string): string {
+  const value = req.params[name];
+  if (typeof value !== 'string' || !value) throw new HttpError(400, `Invalid route parameter: ${name}`);
+  return value;
 }

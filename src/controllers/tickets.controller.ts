@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import Joi from 'joi';
 import { PaymentMethod, PaymentStatus, SalesChannel, TicketStatus } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { failWithHttpError, failOtpRequest } from '@utils/controllerHelpers.util';
+import { failWithHttpError, failOtpRequest, failAuthRequest } from '@utils/controllerHelpers.util';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { EventService } from '@services/event.service';
 import { TicketService } from '@services/ticket.service';
@@ -65,7 +65,7 @@ export class TicketsController {
       ApiResponseUtil.success(res, result, 'Login successful');
     } catch (error: any) {
       console.error('Login error:', error);
-      ApiResponseUtil.error(res, error.message || 'Login failed', 401);
+      failAuthRequest(res, error, 'Login failed');
     }
   }
 

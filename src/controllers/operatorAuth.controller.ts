@@ -11,6 +11,7 @@ import { MerchantAuthService } from '@services/merchantAuth.service';
 import { CashierAuthService } from '@services/cashierAuth.service';
 import { WaiterAuthService } from '@services/waiterAuth.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { failAuthRequest } from '@utils/controllerHelpers.util';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
 
 export class OperatorAuthController {
@@ -70,7 +71,7 @@ export class OperatorAuthController {
           return;
         }
       } catch (e: any) {
-        ApiResponseUtil.unauthorized(res, e.message || 'Invalid credentials');
+        failAuthRequest(res, e, 'Invalid credentials');
         return;
       }
       ApiResponseUtil.unauthorized(res, 'Invalid credentials');

@@ -1,4 +1,5 @@
-import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { SecurityRateLimit } from '@models/securityRateLimit.model';
+import { connectLedgerTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { Buyer } from '@models/buyer.model';
 import { BuyerOtp } from '@models/buyerOtp.model';
@@ -10,7 +11,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 jest.mock('@services/email.service');
 jest.mock('@services/sms.service');
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 afterAll(disconnectTestDb);
 
 afterEach(async () => {
@@ -226,6 +227,7 @@ describe('BuyerAuthService OTP resend cooldown', () => {
       { destination: 'cool2@x.com' },
       { $set: { createdAt: new Date(Date.now() - 61_000) } }
     );
+    await SecurityRateLimit.updateMany({}, { $set: { resetAt: new Date(Date.now() - 1000) } });
     await expect(BuyerAuthService.requestRegistrationOtp('cool2@x.com'))
       .resolves.toMatchObject({ channel: 'email', identifier: 'cool2@x.com' });
     expect((EmailService.sendOtp as jest.Mock).mock.calls).toHaveLength(2);

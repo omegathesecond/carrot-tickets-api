@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
@@ -214,8 +215,8 @@ export class WaiterController {
     const event = await loadWaiterEvent(req, res);
     if (!event) return;
     const waiter = (req as any).waiter as WaiterToken;
-    const tableId = String(req.params['id']);
-    const merchantId = String(req.params['merchantId']);
+    const tableId = String(requireRouteParam(req, 'id'));
+    const merchantId = String(requireRouteParam(req, 'merchantId'));
     // Shape-checked before either is cast: an unguarded ObjectId cast throws a
     // CastError out of a handler Express 4 does not await, so the request
     // hangs instead of answering — the same trap loadWaiterEvent documents.
@@ -248,7 +249,7 @@ export class WaiterController {
       if (items.some(i => !Number.isSafeInteger(i.qty) || i.qty <= 0)) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
       const openedBy = waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ? undefined : waiter.waiterId;
       const table = await TableService.addItems({
-        tableId: req.params['id']!, eventId: String(event._id), items, addedBy: waiter.waiterId, openedBy,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), items, addedBy: waiter.waiterId, openedBy,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -278,7 +279,7 @@ export class WaiterController {
       const openedBy = waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ? undefined : waiter.waiterId;
       if (!HEX24.test(String(req.params.id)) || !HEX24.test(String(req.params.lineId))) return ApiResponseUtil.badRequest(res, 'Invalid table or line id');
       const table = await TableService.removeItem({
-        tableId: req.params['id']!, eventId: String(event._id), lineId: req.params['lineId']!, removedBy: waiter.waiterId, openedBy,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), lineId: requireRouteParam(req, 'lineId'), removedBy: waiter.waiterId, openedBy,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -297,10 +298,10 @@ export class WaiterController {
     if (!event) return;
     const waiter = (req as any).waiter as WaiterToken;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : '';
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
+    if (!(await waiterMayWorkTable(req, res, requireRouteParam(req, 'id'), String(event._id)))) return;
     try {
       const table = await TableService.voidTable({
-        tableId: req.params['id']!, eventId: String(event._id), reason, voidedBy: waiter.waiterId,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), reason, voidedBy: waiter.waiterId,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -336,13 +337,13 @@ export class WaiterController {
     // handheld. One generated server-side would be new on every attempt and
     // every retry would be a second bill.
     if (!clientTxnId) return ApiResponseUtil.badRequest(res, 'clientTxnId is required');
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
+    if (!(await waiterMayWorkTable(req, res, requireRouteParam(req, 'id'), String(event._id)))) return;
 
     try {
       if (!Number.isSafeInteger(req.body.quotedTotal) || req.body.quotedTotal <= 0) return ApiResponseUtil.badRequest(res, 'quotedTotal is required');
       const settlement = await TableService.settle({
         quotedTotal: req.body.quotedTotal,
-        tableId: req.params['id']!, eventId: String(event._id), bandUid,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), bandUid,
         settledBy: waiter.waiterId, staffName: waiter.fullName, clientTxnId,
       });
       return ApiResponseUtil.success(res, settlement);
