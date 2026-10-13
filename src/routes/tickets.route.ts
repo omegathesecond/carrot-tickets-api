@@ -8,6 +8,7 @@ import { deleteEventResource, revealEventOperatorPin } from '@controllers/eventR
 import { CashCollectionController } from '@controllers/cashCollection.controller';
 import { Router } from 'express';
 import { TicketsController } from '@controllers/tickets.controller';
+import { SalesStatementController } from '@controllers/salesStatement.controller';
 import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import {
   authenticateTickets,
@@ -597,6 +598,9 @@ router.get(
 /**
  * Export Routes
  */
+router.get('/events/:eventId/sales-statement', requireSuperAdminOrPermission(TicketsPermission.EXPORT_REPORTS), SalesStatementController.event);
+router.get('/merchants/:id/sales-statement', requireSuperAdminOrPermission(TicketsPermission.EXPORT_REPORTS), SalesStatementController.merchant);
+
 router.get(
   '/export/sales',
   requireTicketsPermission(TicketsPermission.EXPORT_REPORTS),

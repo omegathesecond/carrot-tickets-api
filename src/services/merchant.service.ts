@@ -370,7 +370,7 @@ export class MerchantService {
    */
   static async listTransactions(params: {
     merchantId: string;
-    limit?: number;
+    limit?: number | null;
   }): Promise<{
     transactions: Array<{
       id: string;
@@ -385,13 +385,14 @@ export class MerchantService {
       items: IMerchantCharge['items'];
       reversal: IMerchantCharge['reversal'];
       createdAt: Date;
+      staffName: string;
     }>;
     summary: { totalCharged: number; totalNet: number; totalFee: number; count: number };
   }> {
     const { merchantId, limit = 50 } = params;
 
     const [rows, aggResult] = await Promise.all([
-      MerchantCharge.find({ merchantId }).sort({ createdAt: -1 }).limit(limit).lean(),
+      MerchantCharge.find({ merchantId }).sort({ createdAt: -1 }).limit(limit ?? 0).lean(),
       MerchantCharge.aggregate([
         { $match: { merchantId: new mongoose.Types.ObjectId(merchantId), status: 'completed' } },
         {
@@ -419,6 +420,7 @@ export class MerchantService {
       items: c.items,
       reversal: c.reversal,
       createdAt: c.createdAt,
+      staffName: c.staffName,
     }));
 
     const agg = aggResult[0];
