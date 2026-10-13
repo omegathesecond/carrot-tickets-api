@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { R2Service } from '@utils/r2.service';
@@ -22,7 +23,7 @@ export class MediaController {
    */
   static async uploadPoster(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -82,7 +83,7 @@ export class MediaController {
    */
   static async uploadThumbnail(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -143,7 +144,7 @@ export class MediaController {
    */
   static async uploadGalleryImages(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const files = req.files as Express.Multer.File[];
 
@@ -201,7 +202,7 @@ export class MediaController {
    */
   static async uploadQRCode(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -262,12 +263,15 @@ export class MediaController {
    */
   static async deleteMedia(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const { url, mediaType } = req.body;
       const ticketsUser = (req as any).ticketsUser;
 
       if (!url || !mediaType) {
         return ApiResponseUtil.validationError(res, 'URL and media type are required');
+      }
+      if (!['poster', 'thumbnail', 'gallery', 'qrcode'].includes(mediaType) || typeof url !== 'string') {
+        return ApiResponseUtil.validationError(res, 'Invalid media type or URL');
       }
 
       // Verify event exists and belongs to vendor (or superadmin)
@@ -280,7 +284,16 @@ export class MediaController {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
 
-      // Delete from R2
+      // Authorize the OBJECT, not only the event used to reach this endpoint.
+      const urls = mediaType === 'gallery' ? event.galleryImages || [] :
+        [mediaType === 'poster' ? event.posterUrl : mediaType === 'thumbnail' ? event.thumbnailUrl : event.qrCodeUrl];
+      if (!urls.includes(url)) return ApiResponseUtil.notFound(res, 'Media not found on this event');
+      const expectedFolder = R2Service.getEventMediaFolder(String(event._id), mediaType);
+      const publicPrefix = process.env['R2_PUBLIC_URL'];
+      const expectedPrefix = publicPrefix ? `${publicPrefix}/${expectedFolder}/` : `${expectedFolder}/`;
+      if (!url.startsWith(expectedPrefix)) return ApiResponseUtil.forbidden(res, 'Media is outside this event');
+
+      // Delete only after ownership, type and storage scope are proven.
       await R2Service.deleteEventMediaByUrl(url);
 
       // Remove from event document
@@ -322,7 +335,7 @@ export class MediaController {
    */
   static async listEventMedia(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
 
       // Verify event exists and belongs to vendor (or superadmin)
@@ -360,7 +373,7 @@ export class MediaController {
    */
   static async uploadWristbandAsset(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -407,7 +420,7 @@ export class MediaController {
     mediaType: 'menu-item' | 'product',
   ): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 

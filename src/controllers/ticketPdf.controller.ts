@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import { Ticket } from '@models/ticket.model';
 import { ITicket, TicketPdfStatus } from '@interfaces/ticket.interface';
@@ -64,7 +65,7 @@ export class TicketPdfController {
   /** GET /api/public/tickets/:ticketId/pdf — one ticket as a downloadable PDF. */
   static async downloadTicketPdf(req: Request, res: Response): Promise<any> {
     try {
-      const ticketId = req.params['ticketId'];
+      const ticketId = requireRouteParam(req, 'ticketId');
       if (!ticketId) {
         return ApiResponseUtil.badRequest(res, 'Ticket id is required');
       }
@@ -98,7 +99,7 @@ export class TicketPdfController {
     try {
       const ticketsUser = (req as any).ticketsUser || {};
       const ticket = await TicketService.resolveVendorTicket(
-        req.params['ticketId'] as string,
+        requireRouteParam(req, 'ticketId'),
         ticketsUser.vendorId as string,
         ticketsUser.isSuperAdmin || false,
       );
@@ -203,7 +204,7 @@ export class TicketPdfController {
    */
   static async getTicketPdf(req: Request, res: Response): Promise<any> {
     try {
-      const idOrCode = req.params['ticketId'];
+      const idOrCode = requireRouteParam(req, 'ticketId');
       if (!idOrCode) {
         return ApiResponseUtil.badRequest(res, 'Ticket id is required');
       }

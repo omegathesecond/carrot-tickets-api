@@ -1,14 +1,14 @@
 // api/src/routes/__tests__/businessAuth.route.test.ts
 import request from 'supertest';
 import app from '@/app';
-import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { OtpService } from '@services/otp.service';
 import { ServiceCategory } from '@models/serviceCategory.model';
 
 // Bypass real OTP: run the guarded action, no code check (mirrors A3's service test).
 jest.spyOn(OtpService, 'withVerified').mockImplementation(async (_a, _i, _c, action: any) => action());
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 // serviceCategory is DB-driven (ServiceCategoryService.isValidActive) — seed
 // the one category this suite uses before every test.
 beforeEach(async () => {

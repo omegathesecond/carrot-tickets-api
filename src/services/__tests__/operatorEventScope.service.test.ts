@@ -123,13 +123,13 @@ describe('a vanished row fails closed', () => {
     expect(await resolveOperatorEventScope(ownerReq(resellerId))).toEqual([]);
   });
 
-  it('still holds a till to the reseller scope when the till row is gone', async () => {
+  it('denies a till whose operator row is gone', async () => {
     const a = oid();
     const resellerId = await seedScopedReseller([a]);
 
     const scope = await resolveOperatorEventScope(tillReq(resellerId, oid().toString()));
 
-    expect(scope).toEqual([a.toString()]);
+    expect(scope).toEqual([]);
   });
 });
 

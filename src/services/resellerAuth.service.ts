@@ -4,7 +4,8 @@ import { Reseller } from '@models/reseller.model';
 import { ResellerRole, RESELLER_ROLE_PERMISSIONS, ResellerToken } from '@interfaces/resellerPermission.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
-import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
+import { verifyOperatorPin } from '@utils/pinLockout.util';
+import { SecurityRateLimitService } from '@services/securityRateLimit.service';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 
@@ -27,19 +28,7 @@ export class ResellerAuthService {
     const company = await Reseller.findById(operator.resellerId).select('isActive status').lean();
     if (!company || !company.isActive || company.status === 'suspended') throw new Error('Invalid credentials');
 
-    if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {
-      throw new Error('Account locked. Try again later.');
-    }
-
-    const ok = await operator.comparePin(pin);
-    if (!ok) {
-      // Counted on the server, not on this loaded document — N guesses in
-      // flight together must reach N and lock, not all write 1.
-      await recordFailedPinAttempt(ResellerOperator, operator._id as any);
-      throw new Error('Invalid credentials');
-    }
-
-    await clearPinLockout(ResellerOperator, operator._id as any);
+    await verifyOperatorPin(ResellerOperator, operator, pin);
 
     const role = operator.role as ResellerRole;
     const payload: ResellerToken = {
@@ -73,11 +62,13 @@ export class ResellerAuthService {
    * never reveals whether an email exists.
    */
   static async ownerLogin(email: string, password: string) {
+    await SecurityRateLimitService.consume('reseller-owner-login', email, 10, 15 * 60 * 1000);
     const reseller = await Reseller.findOne({ email: email.toLowerCase().trim(), isActive: true }).select('+password');
-    if (!reseller || !reseller.password) throw new Error('Invalid credentials');
+    if (!reseller || !reseller.password || reseller.status !== 'active') throw new Error('Invalid credentials');
 
     const ok = await reseller.comparePassword(password);
     if (!ok) throw new Error('Invalid credentials');
+    await SecurityRateLimitService.clear('reseller-owner-login', email);
 
     const role: ResellerRole = 'reseller_admin' as ResellerRole;
     const payload: ResellerToken = {

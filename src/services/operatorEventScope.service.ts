@@ -91,14 +91,12 @@ async function resellerScope(resellerId: string): Promise<EventScope> {
 /**
  * An individual till's tier.
  *
- * Unlike the company row above, a missing operator resolves to null — the
- * caller is still held to the reseller tier, which is what actually bounds
- * them. Denying here as well would lock out a till mid-shift over a row that
- * an admin merely re-created.
+ * A missing or deactivated operator fails closed, even when the reseller
+ * company remains active. Deleting an assigned till cannot widen its access.
  */
 async function resellerOperatorScope(operatorId: string): Promise<EventScope> {
   const operator = await ResellerOperator.findById(operatorId).select('eventIds isActive').lean();
-  if (!operator) return null;
+  if (!operator) return [];
 
   // A DEACTIVATED till denies, unlike a missing one. PATCH
   // /reseller/operators/:id {isActive:false} is the only per-person

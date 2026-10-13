@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Joi from 'joi';
@@ -27,7 +28,7 @@ import { toPublicEventCard } from '@/utils/eventCard.util';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { Update } from '@models/update.model';
-import { failWithHttpError, failOtpRequest } from '@utils/controllerHelpers.util';
+import { failWithHttpError, failOtpRequest, failAuthRequest } from '@utils/controllerHelpers.util';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 import { normalizeHashtag } from '@utils/hashtags.util';
 import { UpdateController } from '@controllers/update.controller';
@@ -754,7 +755,7 @@ export class PublicController {
    */
   static async getTopicPosts(req: Request, res: Response): Promise<any> {
     try {
-      const tag = normalizeHashtag(req.params['tag']);
+      const tag = normalizeHashtag(requireRouteParam(req, 'tag'));
       if (!tag) {
         return ApiResponseUtil.validationError(res, 'Invalid tag');
       }
@@ -794,7 +795,7 @@ export class PublicController {
    */
   static async getPublicEvent(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
 
       // Validate eventId format
       if (!eventId || !eventId.match(/^[0-9a-fA-F]{24}$/)) {
@@ -942,7 +943,7 @@ export class PublicController {
       return ApiResponseUtil.success(res, result, 'Signed in successfully');
     } catch (error: any) {
       console.error('Buyer login error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
+      return failAuthRequest(res, error, 'Failed to sign in');
     }
   }
 
@@ -1111,7 +1112,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const referenceId = req.params['referenceId']!;
+      const referenceId = requireRouteParam(req, 'referenceId');
       const sale = await TicketService.getMomoSaleByReference(referenceId);
 
       const owns =
@@ -1172,7 +1173,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const paymentId = req.params['paymentId']!;
+      const paymentId = requireRouteParam(req, 'paymentId');
       const sale = await TicketService.getCardSaleByPaymentId(paymentId);
 
       const owns =
@@ -1262,7 +1263,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const checkoutId = req.params['checkoutId']!;
+      const checkoutId = requireRouteParam(req, 'checkoutId');
       const sale = await TicketService.getYocoSaleByCheckoutId(checkoutId);
 
       const owns =
@@ -1339,7 +1340,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const ref = String(req.params['ref'] || '');
+      const ref = String(requireRouteParam(req, 'ref') || '');
       if (!ref) return ApiResponseUtil.success(res, { status: 'none' });
 
       const sale = await TicketService.getYeboPaySaleByRefForBuyer(ref, buyer);
@@ -1431,7 +1432,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const sessionId = req.params['sessionId']!;
+      const sessionId = requireRouteParam(req, 'sessionId');
       const sale = await TicketService.getDeltapaySaleBySessionId(sessionId);
 
       const owns =

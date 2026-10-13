@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { MediaController } from '@controllers/media.controller';
-import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
+import { authenticateTickets, requireTicketsPermission, requireSuperAdminOrPermission } from '@middleware/ticketsAuth.middleware';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import {
   posterUpload,
   thumbnailUpload,
@@ -15,6 +16,17 @@ import {
 } from '@middleware/media.middleware';
 
 const router = Router();
+
+router.use(authenticateTickets);
+router.use((req, res, next) => {
+  // Media routes must enforce the same capability as their owning feature.
+  const permission = req.path.endsWith('/menu-item') ? TicketsPermission.MANAGE_MENU :
+    req.path.endsWith('/product') ? TicketsPermission.MANAGE_STOCK :
+    req.path.endsWith('/wristband') ? TicketsPermission.PRINT_WRISTBANDS :
+    req.method === 'GET' ? TicketsPermission.VIEW_EVENTS : TicketsPermission.EDIT_EVENT;
+  return (permission === TicketsPermission.PRINT_WRISTBANDS ?
+    requireSuperAdminOrPermission(permission) : requireTicketsPermission(permission))(req, res, next);
+});
 
 /**
  * Media Upload Routes for Carrot Tickets
@@ -32,7 +44,6 @@ const router = Router();
  */
 router.post(
   '/events/:eventId/poster',
-  authenticateTickets,
   validateEventAccess,
   posterUpload.single('poster'),
   handleMulterError,
@@ -49,7 +60,6 @@ router.post(
  */
 router.post(
   '/events/:eventId/thumbnail',
-  authenticateTickets,
   validateEventAccess,
   thumbnailUpload.single('thumbnail'),
   handleMulterError,
@@ -66,7 +76,6 @@ router.post(
  */
 router.post(
   '/events/:eventId/gallery',
-  authenticateTickets,
   validateEventAccess,
   galleryUpload.array('gallery', 10),
   handleMulterError,
@@ -83,7 +92,6 @@ router.post(
  */
 router.post(
   '/events/:eventId/qrcode',
-  authenticateTickets,
   validateEventAccess,
   qrcodeUpload.single('qrcode'),
   handleMulterError,
@@ -100,7 +108,6 @@ router.post(
  */
 router.post(
   '/events/:eventId/wristband',
-  authenticateTickets,
   wristbandUpload.single('artwork'),
   handleMulterError,
   validateFileUpload,
@@ -116,7 +123,6 @@ router.post(
  */
 router.post(
   '/events/:eventId/menu-item',
-  authenticateTickets,
   validateEventAccess,
   itemImageUpload.single('image'),
   handleMulterError,
@@ -133,7 +139,6 @@ router.post(
  */
 router.post(
   '/events/:eventId/product',
-  authenticateTickets,
   validateEventAccess,
   itemImageUpload.single('image'),
   handleMulterError,
@@ -149,7 +154,6 @@ router.post(
  */
 router.delete(
   '/events/:eventId',
-  authenticateTickets,
   validateEventAccess,
   MediaController.deleteMedia
 );
@@ -161,7 +165,6 @@ router.delete(
  */
 router.get(
   '/events/:eventId/list',
-  authenticateTickets,
   validateEventAccess,
   MediaController.listEventMedia
 );

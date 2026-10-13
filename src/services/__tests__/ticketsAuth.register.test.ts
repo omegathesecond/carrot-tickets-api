@@ -1,4 +1,4 @@
-import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { Vendor } from '@models/vendor.model';
@@ -11,7 +11,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 jest.mock('@services/email.service');
 jest.mock('@services/sms.service');
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 afterAll(disconnectTestDb);
 
 beforeEach(() => {

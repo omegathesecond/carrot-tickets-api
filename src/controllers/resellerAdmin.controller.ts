@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { NextFunction, Request, Response } from 'express';
 import { Reseller } from '@models/reseller.model';
 import { validateEventAssignment } from '@services/operatorEventScope.service';
@@ -40,7 +41,7 @@ export class ResellerAdminController {
 
   static async getReseller(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const reseller = await Reseller.findById(req.params['id']);
+      const reseller = await Reseller.findById(requireRouteParam(req, 'id'));
       if (!reseller) {
         ApiResponseUtil.notFound(res, 'Reseller not found');
         return;
@@ -74,7 +75,7 @@ export class ResellerAdminController {
         update['eventIds'] = assignment.eventIds;
       }
       const reseller = await Reseller.findByIdAndUpdate(
-        req.params['id'],
+        requireRouteParam(req, 'id'),
         { $set: update },
         { new: true, runValidators: true },
       );
@@ -92,7 +93,7 @@ export class ResellerAdminController {
 
   static async createHub(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hub = await ResellerHub.create({ ...req.body, resellerId: req.params['id'] });
+      const hub = await ResellerHub.create({ ...req.body, resellerId: requireRouteParam(req, 'id') });
       ApiResponseUtil.created(res, hub);
     } catch (err: any) {
       next(err);
@@ -101,7 +102,7 @@ export class ResellerAdminController {
 
   static async listHubs(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hubs = await ResellerHub.find({ resellerId: req.params['id'] }).sort({ createdAt: -1 });
+      const hubs = await ResellerHub.find({ resellerId: requireRouteParam(req, 'id') }).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, hubs);
     } catch (err: any) {
       next(err);
@@ -110,7 +111,7 @@ export class ResellerAdminController {
 
   static async getHub(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hub = await ResellerHub.findById(req.params['hubId']);
+      const hub = await ResellerHub.findById(requireRouteParam(req, 'hubId'));
       if (!hub) {
         ApiResponseUtil.notFound(res, 'Hub not found');
         return;
@@ -123,7 +124,7 @@ export class ResellerAdminController {
 
   static async getHubAnalytics(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hub = await ResellerHub.findById(req.params['hubId']);
+      const hub = await ResellerHub.findById(requireRouteParam(req, 'hubId'));
       if (!hub) {
         ApiResponseUtil.notFound(res, 'Hub not found');
         return;
@@ -137,7 +138,7 @@ export class ResellerAdminController {
         if (!t) return;
         from = f; to = t;
       }
-      const analytics = await HubAnalyticsService.getHubAnalytics(req.params['hubId']!, from, to);
+      const analytics = await HubAnalyticsService.getHubAnalytics(requireRouteParam(req, 'hubId'), from, to);
       ApiResponseUtil.success(res, analytics);
     } catch (err: any) {
       next(err);
@@ -148,7 +149,7 @@ export class ResellerAdminController {
 
   static async createOperator(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hub = await ResellerHub.findById(req.params['hubId']);
+      const hub = await ResellerHub.findById(requireRouteParam(req, 'hubId'));
       if (!hub) {
         ApiResponseUtil.notFound(res, 'Hub not found');
         return;
@@ -175,7 +176,7 @@ export class ResellerAdminController {
 
   static async resetOperatorPin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await ResellerOperator.findById(req.params['id']).select('+pin');
+      const operator = await ResellerOperator.findById(requireRouteParam(req, 'id')).select('+pin');
       if (!operator) {
         ApiResponseUtil.notFound(res, 'Operator not found');
         return;
@@ -195,7 +196,7 @@ export class ResellerAdminController {
 
   static async listOperators(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operators = await ResellerOperator.find({ hubId: req.params['hubId'] }).sort({ createdAt: -1 });
+      const operators = await ResellerOperator.find({ hubId: requireRouteParam(req, 'hubId') }).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, operators);
     } catch (err: any) {
       next(err);
@@ -211,7 +212,7 @@ export class ResellerAdminController {
       const to = parseDate(req.query['to'], 'to', res);
       if (!to) return;
 
-      const result = await SettlementService.previewResellerSettlement(req.params['id']!, from, to);
+      const result = await SettlementService.previewResellerSettlement(requireRouteParam(req, 'id'), from, to);
       ApiResponseUtil.success(res, result);
     } catch (err: any) {
       next(err);
@@ -226,7 +227,7 @@ export class ResellerAdminController {
       if (!to) return;
 
       const settlement = await SettlementService.closeResellerSettlement(
-        req.params['id']!,
+        requireRouteParam(req, 'id'),
         from,
         to,
         (req as any).ticketsUser.vendorId,
@@ -240,7 +241,7 @@ export class ResellerAdminController {
   static async markResellerSettlementPaid(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const settlement = await SettlementService.markResellerSettlementPaid(
-        req.params['sid']!,
+        requireRouteParam(req, 'sid'),
         (req as any).ticketsUser.vendorId,
         req.body.paymentReference,
       );
@@ -264,7 +265,7 @@ export class ResellerAdminController {
       const to = parseDate(req.query['to'], 'to', res);
       if (!to) return;
 
-      const result = await SettlementService.previewOrganizerPayout(req.params['id']!, from, to);
+      const result = await SettlementService.previewOrganizerPayout(requireRouteParam(req, 'id'), from, to);
       ApiResponseUtil.success(res, result);
     } catch (err: any) {
       next(err);
@@ -279,7 +280,7 @@ export class ResellerAdminController {
       if (!to) return;
 
       const payout = await SettlementService.closeOrganizerPayout(
-        req.params['id']!,
+        requireRouteParam(req, 'id'),
         from,
         to,
         (req as any).ticketsUser.vendorId,
@@ -293,7 +294,7 @@ export class ResellerAdminController {
   static async markOrganizerPayoutPaid(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const payout = await SettlementService.markOrganizerPayoutPaid(
-        req.params['pid']!,
+        requireRouteParam(req, 'pid'),
         (req as any).ticketsUser.vendorId,
         req.body.paymentReference,
       );

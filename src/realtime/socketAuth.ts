@@ -24,7 +24,7 @@ export async function socketAuthMiddleware(
       return next(new Error('Please sign in first'));
     }
 
-    const decoded: any = TicketsAuthService.verifyToken(token);
+    const decoded: any = await TicketsAuthService.verifyAndResolveSession(token);
 
     // Vendor / sub-user session — the brand is the actor (mirrors
     // resolveActorFromRequest + authenticateCommunityViewer on the REST side).
