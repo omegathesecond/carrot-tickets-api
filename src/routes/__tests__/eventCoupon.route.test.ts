@@ -42,10 +42,10 @@ it('requires organizer auth, rejects client-supplied prices, and supports quote 
   expect(await Ticket.countDocuments()).toBe(1);
 });
 
-it('enforces organizer ownership on listing, generation and disable', async () => {
+it('enforces organizer ownership and ignores forged admin claims on listing, generation and disable', async () => {
   const f = await fixture();
   const other = await Vendor.create({ businessName: 'Other organizer', email: 'other@example.test', password: 'password123' });
-  const token = jwt.sign({ app: 'tickets', authVersion: other.authVersion, userType: 'vendor', vendorId: String(other._id) }, process.env['JWT_SECRET']!);
+  const token = jwt.sign({ app: 'tickets', authVersion: other.authVersion, userType: 'vendor', isSuperAdmin: true, vendorId: String(other._id) }, process.env['JWT_SECRET']!);
   const base = `/api/tickets/events/${f.eventId}/coupons`;
   await request(app).get(base).set('Authorization', `Bearer ${token}`).expect(404);
   await request(app).post(base).set('Authorization', `Bearer ${token}`).send({ discountType: 'percentage', discountValue: 10 }).expect(404);
@@ -62,4 +62,18 @@ it('requires the event-edit permission on every organizer coupon operation', asy
   await request(app).get(base).set('Authorization', 'Bearer no-permissions').expect(403);
   await request(app).post(base).set('Authorization', 'Bearer no-permissions').send({ discountType: 'percentage', discountValue: 10 }).expect(403);
   await request(app).post(`${base}/012345678901234567890123/disable`).set('Authorization', 'Bearer no-permissions').expect(403);
+});
+
+it("lets a verified Carrot admin manage another organizer's coupons while retaining the event owner", async () => {
+  const f = await fixture();
+  const admin = await Vendor.create({ businessName: 'Carrot admin', email: 'admin@example.test', password: 'password123', isSuperAdmin: true });
+  const token = jwt.sign({ app: 'tickets', authVersion: admin.authVersion, userType: 'vendor', vendorId: String(admin._id) }, process.env['JWT_SECRET']!);
+  const base = `/api/tickets/events/${f.eventId}/coupons`;
+  const created = await request(app).post(base).set('Authorization', `Bearer ${token}`).send({ discountType: 'percentage', discountValue: 10 }).expect(201);
+  const coupon = created.body.data.coupons[0];
+  expect(coupon.vendorId).toBe(f.vendorId);
+  const listed = await request(app).get(base).set('Authorization', `Bearer ${token}`).expect(200);
+  expect(listed.body.data.coupons[0]._id).toBe(coupon._id);
+  await request(app).post(`${base}/${coupon._id}/disable`).set('Authorization', `Bearer ${token}`).expect(200);
+  expect((await EventCoupon.findById(coupon._id))!.disabled).toBe(true);
 });

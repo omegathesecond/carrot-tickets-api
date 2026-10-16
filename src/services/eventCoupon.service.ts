@@ -22,16 +22,17 @@ export interface CreateCouponsInput {
 }
 
 export class EventCouponService {
-  private static async ownedEvent(eventId: string, vendorId: string) {
+  private static async accessibleEvent(eventId: string, vendorId: string, isSuperAdmin: boolean) {
     if (!HEX24.test(eventId)) throw new HttpError(400, 'Invalid event ID');
-    const event = await Event.findOne({ _id: eventId, vendorId });
+    // Match the event dashboard's existing admin-or-owner access policy.
+    const event = await Event.findOne({ _id: eventId, ...(!isSuperAdmin ? { vendorId } : {}) });
     if (!event) throw new HttpError(404, 'Event not found');
     assertCarrotTicketing(event);
     return event;
   }
 
-  static async create(eventId: string, vendorId: string, input: CreateCouponsInput) {
-    const event = await this.ownedEvent(eventId, vendorId);
+  static async create(eventId: string, vendorId: string, input: CreateCouponsInput, isSuperAdmin = false) {
+    const event = await this.accessibleEvent(eventId, vendorId, isSuperAdmin);
     if (!Number.isInteger(input.count) || input.count < 1 || input.count > 100) throw new HttpError(400, 'Generate 1 to 100 codes at a time');
     if (!['percentage', 'fixed'].includes(input.discountType) || !Number.isFinite(input.discountValue) || input.discountValue < 0.01 ||
         round2(input.discountValue) !== input.discountValue || (input.discountType === 'percentage' && input.discountValue > 100)) {
@@ -46,14 +47,14 @@ export class EventCouponService {
     // before the first checkout rather than implicitly creating it in a transaction.
     await EventCoupon.init();
     return EventCoupon.insertMany(Array.from({ length: input.count }, () => ({
-      eventId, vendorId, code: `CT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`,
+      eventId, vendorId: event.vendorId, code: `CT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`,
       label: input.label, discountType: input.discountType, discountValue: input.discountValue,
       ticketTypeIds: [...new Set(input.ticketTypeIds)], expiresAt: input.expiresAt,
     })));
   }
 
-  static async list(eventId: string, vendorId: string, page: number) {
-    await this.ownedEvent(eventId, vendorId);
+  static async list(eventId: string, vendorId: string, page: number, isSuperAdmin = false) {
+    await this.accessibleEvent(eventId, vendorId, isSuperAdmin);
     const [coupons, total] = await Promise.all([
       EventCoupon.find({ eventId }).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * 50).limit(50).lean(),
       EventCoupon.countDocuments({ eventId }),
@@ -73,8 +74,8 @@ export class EventCouponService {
     }) };
   }
 
-  static async disable(eventId: string, vendorId: string, couponId: string) {
-    await this.ownedEvent(eventId, vendorId);
+  static async disable(eventId: string, vendorId: string, couponId: string, isSuperAdmin = false) {
+    await this.accessibleEvent(eventId, vendorId, isSuperAdmin);
     if (!HEX24.test(couponId)) throw new HttpError(400, 'Invalid coupon ID');
     // Disabling prevents future locks; it never revokes a discount that a
     // buyer has already reserved with a payment provider.

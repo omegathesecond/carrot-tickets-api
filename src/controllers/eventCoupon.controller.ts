@@ -30,7 +30,7 @@ export class EventCouponController {
     try {
       const vendorId = (req as any).ticketsUser?.vendorId;
       if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Authentication required');
-      const coupons = await EventCouponService.create(requireRouteParam(req, 'eventId'), String(vendorId), value);
+      const coupons = await EventCouponService.create(requireRouteParam(req, 'eventId'), String(vendorId), value, (req as any).ticketsUser?.isSuperAdmin === true);
       return ApiResponseUtil.created(res, { coupons }, 'Single-use coupons generated');
     } catch (error) { return failWithHttpError(res, error, 'Could not generate coupons'); }
   }
@@ -41,7 +41,7 @@ export class EventCouponController {
     try {
       const vendorId = (req as any).ticketsUser?.vendorId;
       if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Authentication required');
-      return ApiResponseUtil.success(res, await EventCouponService.list(requireRouteParam(req, 'eventId'), String(vendorId), value.page));
+      return ApiResponseUtil.success(res, await EventCouponService.list(requireRouteParam(req, 'eventId'), String(vendorId), value.page, (req as any).ticketsUser?.isSuperAdmin === true));
     } catch (error) { return failWithHttpError(res, error, 'Could not load coupons'); }
   }
 
@@ -49,7 +49,7 @@ export class EventCouponController {
     try {
       const vendorId = (req as any).ticketsUser?.vendorId;
       if (!vendorId) return ApiResponseUtil.unauthorized(res, 'Authentication required');
-      const coupon = await EventCouponService.disable(requireRouteParam(req, 'eventId'), String(vendorId), requireRouteParam(req, 'couponId'));
+      const coupon = await EventCouponService.disable(requireRouteParam(req, 'eventId'), String(vendorId), requireRouteParam(req, 'couponId'), (req as any).ticketsUser?.isSuperAdmin === true);
       return ApiResponseUtil.success(res, { coupon });
     } catch (error) { return failWithHttpError(res, error, 'Could not disable coupon'); }
   }
