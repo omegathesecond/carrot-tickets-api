@@ -86,6 +86,7 @@ export interface ITicket extends Document {
 }
 
 export interface ITicketSale extends Document {
+  coupon?: import('./eventCoupon.interface').CouponSnapshot;
   _id: Types.ObjectId;
 
   // Sale Identification

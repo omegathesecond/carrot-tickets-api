@@ -1,3 +1,4 @@
+import { EventCouponController } from '@controllers/eventCoupon.controller';
 import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
 import { BuyerProfileController } from '@controllers/buyerProfile.controller';
@@ -377,6 +378,8 @@ router.post('/services/:businessId/reviews', authenticateBuyerOrOrganizer, Servi
  * @access  Buyer (Bearer buyer token). Keshless card number + PIN for >= E50.
  * @body    eventId, ticketTypeId, quantity, customerName?, keshlessCardNumber, keshlessPin?
  */
+router.post('/coupons/quote', authenticateBuyer, EventCouponController.quote);
+
 router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 
 /**

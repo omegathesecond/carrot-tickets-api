@@ -1,3 +1,4 @@
+import { cartItemsSchema, couponCodeSchema } from '@validators/checkout.validator';
 import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
@@ -127,32 +128,6 @@ const contactMessageSchema = Joi.object({
   message: Joi.string().trim().min(1).max(5000).required(),
 });
 
-// Validation schema for Peach card purchase initiation
-/**
- * The cart a buyer is checking out: one entry per tier, 1..20 lines.
- *
- * MAX_TICKETS_PER_ORDER caps the WHOLE cart, not each line — otherwise the
- * order limit could be exceeded by splitting across tiers, the same hole the
- * per-account cap has (see resolveCart). Shared by every purchase rail so no
- * two of them can disagree about what a valid cart is.
- */
-const cartItemsSchema = Joi.array()
-  .items(Joi.object({
-    ticketTypeId: Joi.string().hex().length(24).required(),
-    quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
-  }))
-  .min(1)
-  .max(20)
-  .custom((value: Array<{ quantity: number }>, helpers) => {
-    const total = value.reduce((sum, l) => sum + l.quantity, 0);
-    if (total > MAX_TICKETS_PER_ORDER) {
-      return helpers.message({ custom: `You can buy at most ${MAX_TICKETS_PER_ORDER} tickets per order` } as never);
-    }
-    return value;
-  })
-  .optional();
-
-
 /**
  * TEMPORARY — multi-tier cutover compatibility. REMOVE once no traffic sends
  * the legacy shape (watch for `[cart-compat]` in the logs).
@@ -181,6 +156,7 @@ const legacyTierFields = {
 // checkout schema below; see ShareEarnService.registerPendingReferral.
 const shareEarnFields = {
   referralCode: Joi.string().trim().max(40).optional(),
+  couponCode: couponCodeSchema.optional(),
 };
 
 /**
@@ -253,6 +229,7 @@ const momoInitiateSchema = Joi.object({
 // TicketService.claimFreeTicket, never from this body; the quantity cap here
 // is just defence-in-depth parity with the paid paths.
 const freeClaimSchema = Joi.object({
+  couponCode: couponCodeSchema.optional(),
   eventId: Joi.string().hex().length(24).required(),
   items: cartItemsSchema,
   ...legacyTierFields,
@@ -871,12 +848,13 @@ export class PublicController {
         keshlessCardNumber,
         keshlessPin,
         referralCode: typeof value.referralCode === 'string' ? value.referralCode : undefined,
+        couponCode: value.couponCode,
       });
 
       return ApiResponseUtil.created(res, result, 'Tickets purchased successfully!');
     } catch (error: any) {
       console.error('Purchase tickets error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to purchase tickets');
+      return failWithHttpError(res, error, 'Failed to purchase tickets');
     }
   }
 
@@ -902,6 +880,7 @@ export class PublicController {
       }
 
       const result = await TicketService.claimFreeTicket({
+        couponCode: value.couponCode,
         eventId: value.eventId,
         items: cartItemsFrom(value),
         customerPhone: buyer.phone,
@@ -913,7 +892,7 @@ export class PublicController {
       return ApiResponseUtil.created(res, result, 'Your free ticket is confirmed!');
     } catch (error: any) {
       console.error('Claim free ticket error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to get your ticket');
+      return failWithHttpError(res, error, 'Failed to get your ticket');
     }
   }
 

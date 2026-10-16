@@ -108,6 +108,7 @@ export class ReservationService {
           {
             _id: r.saleId,
             paymentStatus: PaymentStatus.PENDING,
+            coupon: { $exists: false },
             paymentMethod: { $nin: this.NO_AUTO_FAIL_METHODS },
             // Conditional MoMo carve-out: a sale we can still ask MTN about is
             // owned by reconcilePendingMomoSales, not by this timer. One filter,

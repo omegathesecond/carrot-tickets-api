@@ -8,6 +8,7 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { Ticket } from '@models/ticket.model';
 import { normalizePhone } from '@utils/phone.util';
 import type { CartLine, ResolvedCart, ResolvedLine } from '@interfaces/cart.interface';
+import { EventCouponService } from '@services/eventCoupon.service';
 
 /**
  * Collapses duplicate tiers so every downstream check sees one line per tier.
@@ -124,6 +125,7 @@ async function assertWithinAccountCap(p: {
  * be satisfied in full throws, naming the tier at fault.
  */
 export async function resolveCart(input: {
+  couponCode?: string;
   eventId: string;
   items: CartLine[];
   method: PaymentMethod;
@@ -168,10 +170,15 @@ export async function resolveCart(input: {
     });
   }
 
-  assertMethodCompatible(lines, input.method);
   assertSingleAttribution(lines);
 
+  if (input.couponCode && (input.channel ?? SalesChannel.ONLINE) !== SalesChannel.ONLINE) {
+    throw new Error('Coupons can only be redeemed in online checkout');
+  }
+  const coupon = input.couponCode ? await EventCouponService.apply(input.eventId, input.couponCode, lines) : undefined;
+
   const faceTotal = round2(lines.reduce((sum, l) => sum + l.subtotal, 0));
+  if (!coupon || faceTotal > 0) assertMethodCompatible(lines, input.method);
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
 
   await assertWithinAccountCap({
@@ -204,6 +211,7 @@ export async function resolveCart(input: {
   }
 
   return {
+    ...(coupon ? { coupon } : {}),
     event,
     lines,
     totalQuantity,

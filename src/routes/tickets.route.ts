@@ -1,3 +1,4 @@
+import { EventCouponController } from '@controllers/eventCoupon.controller';
 import { requireSuperAdminOrAnyPermission } from '@middleware/ticketsAuth.middleware';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { GateOperator } from '@models/gateOperator.model';
@@ -727,6 +728,11 @@ router.delete('/vote-comments/:commentId', requireTicketsPermission(TicketsPermi
  * fulfilment (MANAGE_ACCESS — the same permission that gates other
  * organizer moderation actions, e.g. vote-comment removal above).
  */
+// Coupons are organizer-owned pricing decisions; viewing includes redemption data.
+router.get('/events/:eventId/coupons', requireTicketsPermission(TicketsPermission.EDIT_EVENT), EventCouponController.list);
+router.post('/events/:eventId/coupons', requireTicketsPermission(TicketsPermission.EDIT_EVENT), EventCouponController.create);
+router.post('/events/:eventId/coupons/:couponId/disable', requireTicketsPermission(TicketsPermission.EDIT_EVENT), EventCouponController.disable);
+
 router.get('/events/:eventId/share-earn/campaign', requireTicketsPermission(TicketsPermission.VIEW_STATS), ShareEarnOrganizerController.getCampaign);
 router.put('/events/:eventId/share-earn/campaign', requireTicketsPermission(TicketsPermission.EDIT_EVENT), ShareEarnOrganizerController.upsertCampaign);
 router.post('/events/:eventId/share-earn/campaign/activate', requireTicketsPermission(TicketsPermission.EDIT_EVENT), ShareEarnOrganizerController.activate);
