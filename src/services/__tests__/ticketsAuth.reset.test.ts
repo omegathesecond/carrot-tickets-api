@@ -76,6 +76,50 @@ describe('TicketsAuthService organizer password reset', () => {
     });
   });
 
+  it.each(['provider@x.com', '+26878422613'])('resets a service provider via %s across both login handles without changing its profile', async (identifier) => {
+    const provider = await Vendor.create({
+      businessName: 'Provider business', operatorType: 'services', serviceCategories: ['sound_hire'],
+      email: 'provider@x.com', phoneNumber: '+26878422613', password: 'oldpass1',
+    });
+    await Buyer.create({ email: 'provider@x.com', phone: '+26878422613', password: 'buyerpass1' });
+    const before = await Vendor.findById(provider._id).lean();
+    await TicketsAuthService.requestPasswordResetOtp(identifier);
+    const code = identifier.includes('@') ? lastEmailCode() : lastSmsCode();
+    await TicketsAuthService.resetPassword(identifier, code, 'newpass1');
+    for (const handle of ['provider@x.com', '+26878422613']) {
+      await expect(TicketsAuthService.login(handle, 'newpass1')).resolves.toMatchObject({
+        user: { _id: provider._id, operatorType: 'services' },
+      });
+      await expect(TicketsAuthService.login(handle, 'oldpass1')).rejects.toThrow(/invalid credentials/i);
+      await expect(BuyerAuthService.login(handle, 'buyerpass1')).resolves.toMatchObject({ requiresRegistration: false });
+    }
+    await expect(TicketsAuthService.resetPassword(identifier, code, 'otherpass1')).rejects.toThrow();
+    const after = await Vendor.findById(provider._id).lean();
+    // Only authentication metadata may change: all profile/business fields survive.
+    for (const key of ['authVersion', 'updatedAt', 'lastLoginAt']) {
+      delete (before as any)[key];
+      delete (after as any)[key];
+    }
+    expect(after).toEqual(before);
+  });
+
+  it('keeps the provider reset code usable when persistence fails', async () => {
+    await Vendor.create({ businessName: 'Provider', operatorType: 'services', serviceCategories: ['sound_hire'], email: 'provider@x.com', password: 'oldpass1' });
+    await TicketsAuthService.requestPasswordResetOtp('provider@x.com');
+    const code = lastEmailCode();
+    const save = jest.spyOn(Vendor.prototype, 'save').mockRejectedValueOnce(new Error('Password write failed'));
+    try {
+      await expect(TicketsAuthService.resetPassword('provider@x.com', code, 'newpass1')).rejects.toThrow('Password write failed');
+    } finally {
+      save.mockRestore();
+    }
+    expect((await BuyerOtp.findOne({ audience: 'vendor', destination: 'provider@x.com' }))!.consumed).toBe(false);
+    await expect(TicketsAuthService.login('provider@x.com', 'oldpass1')).resolves.toBeTruthy();
+    await expect(TicketsAuthService.resetPassword('provider@x.com', code, 'newpass1')).resolves.toBeTruthy();
+    await expect(TicketsAuthService.login('provider@x.com', 'oldpass1')).rejects.toThrow(/invalid credentials/i);
+    await expect(TicketsAuthService.login('provider@x.com', 'newpass1')).resolves.toBeTruthy();
+  });
+
   it('rejects an unknown identifier', async () => {
     await expect(TicketsAuthService.requestPasswordResetOtp('nobody@x.com')).rejects.toThrow(/couldn't find an organizer/i);
     expect(EmailService.sendOtp).not.toHaveBeenCalled();
