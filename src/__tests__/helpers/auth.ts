@@ -1,3 +1,4 @@
+import { Buyer } from '@models/buyer.model';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
@@ -41,4 +42,12 @@ export function signVendorToken(vendorId: string, extra: Record<string, unknown>
     { app: 'tickets', userType: 'vendor', vendorId, isSuperAdmin: false, role: 'owner', permissions: [], ...extra },
     JWT_SECRET,
   );
+}
+
+/** Mint a current buyer session from the persisted account, never a phone-only JWT. */
+export async function signPersistedBuyerToken(phone: string): Promise<string> {
+  const buyer = await Buyer.findOne({ phone });
+  if (!buyer) throw new Error(`Missing persisted buyer fixture: ${phone}`);
+  return jwt.sign({ app: 'tickets', userType: 'buyer', userPhone: buyer.phone,
+    buyerId: String(buyer._id), authVersion: buyer.authVersion }, JWT_SECRET);
 }
