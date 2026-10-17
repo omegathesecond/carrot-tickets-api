@@ -2,12 +2,12 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken } from '@/__tests__/helpers/auth';
+import { signPersistedBuyerToken } from '@/__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventPlan } from '@models/eventPlan.model';
 
-const auth = (phone: string) => ({ Authorization: `Bearer ${signBuyerToken(phone)}` });
+const auth = async (phone: string) => ({ Authorization: `Bearer ${await signPersistedBuyerToken(phone)}` });
 const ADMIN = '+26878422613';
 const FRIEND = '+26878000001';
 const OUTSIDER = '+26878000002';
@@ -36,7 +36,7 @@ async function makePlan(visibility: 'public' | 'private' = 'public') {
   const event = await makeEvent();
   const created = await request(app)
     .post('/api/social/plans')
-    .set(auth(ADMIN))
+    .set(await auth(ADMIN))
     .send({ eventId: String(event._id), name: 'Social plan', visibility, joinPolicy: 'open' })
     .expect(201);
   return { planId: created.body.data.id as string, event };
@@ -54,27 +54,27 @@ describe('event plan social engagement (like/save/share/comment)', () => {
     const { planId, event } = await makePlan('public');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
 
-    const liked = await request(app).post(`/api/social/plans/${planId}/like`).set(auth(FRIEND)).expect(200);
+    const liked = await request(app).post(`/api/social/plans/${planId}/like`).set(await auth(FRIEND)).expect(200);
     expect(liked.body.data).toEqual({ active: true, likeCount: 1, saveCount: 0 });
 
     // Event-detail "Plans With Friends" card.
-    const onEvent = await request(app).get(`/api/social/plans/event/${event._id}`).set(auth(FRIEND)).expect(200);
+    const onEvent = await request(app).get(`/api/social/plans/event/${event._id}`).set(await auth(FRIEND)).expect(200);
     expect(onEvent.body.data.plans[0].likeCount).toBe(1);
     expect(onEvent.body.data.plans[0].viewerReactions).toEqual({ liked: true, saved: false });
 
     // Full plan detail.
-    const detail = await request(app).get(`/api/social/plans/${planId}`).set(auth(FRIEND)).expect(200);
+    const detail = await request(app).get(`/api/social/plans/${planId}`).set(await auth(FRIEND)).expect(200);
     expect(detail.body.data.plan.likeCount).toBe(1);
     expect(detail.body.data.plan.viewerReactions.liked).toBe(true);
 
     // A different viewer never sees FRIEND's like as their own.
     await makeBuyer(OUTSIDER, 'Out', 'out_one');
-    const asOutsider = await request(app).get(`/api/social/plans/${planId}`).set(auth(OUTSIDER)).expect(200);
+    const asOutsider = await request(app).get(`/api/social/plans/${planId}`).set(await auth(OUTSIDER)).expect(200);
     expect(asOutsider.body.data.plan.likeCount).toBe(1);
     expect(asOutsider.body.data.plan.viewerReactions.liked).toBe(false);
 
     // Toggling again unlikes.
-    const unliked = await request(app).post(`/api/social/plans/${planId}/like`).set(auth(FRIEND)).expect(200);
+    const unliked = await request(app).post(`/api/social/plans/${planId}/like`).set(await auth(FRIEND)).expect(200);
     expect(unliked.body.data).toEqual({ active: false, likeCount: 0, saveCount: 0 });
   });
 
@@ -82,10 +82,10 @@ describe('event plan social engagement (like/save/share/comment)', () => {
     const { planId } = await makePlan('public');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
 
-    const saved = await request(app).post(`/api/social/plans/${planId}/save`).set(auth(FRIEND)).expect(200);
+    const saved = await request(app).post(`/api/social/plans/${planId}/save`).set(await auth(FRIEND)).expect(200);
     expect(saved.body.data).toEqual({ active: true, likeCount: 0, saveCount: 1 });
 
-    const detail = await request(app).get(`/api/social/plans/${planId}`).set(auth(FRIEND)).expect(200);
+    const detail = await request(app).get(`/api/social/plans/${planId}`).set(await auth(FRIEND)).expect(200);
     expect(detail.body.data.plan.viewerReactions).toEqual({ liked: false, saved: true });
   });
 
@@ -99,11 +99,11 @@ describe('event plan social engagement (like/save/share/comment)', () => {
 
   it('rejects like/save/share/comment on a private plan even for the admin', async () => {
     const { planId } = await makePlan('private');
-    await request(app).post(`/api/social/plans/${planId}/like`).set(auth(ADMIN)).expect(403);
-    await request(app).post(`/api/social/plans/${planId}/save`).set(auth(ADMIN)).expect(403);
+    await request(app).post(`/api/social/plans/${planId}/like`).set(await auth(ADMIN)).expect(403);
+    await request(app).post(`/api/social/plans/${planId}/save`).set(await auth(ADMIN)).expect(403);
     await request(app).post(`/api/social/plans/${planId}/share`).expect(403);
-    await request(app).post(`/api/social/plans/${planId}/comments`).set(auth(ADMIN)).send({ body: 'hey' }).expect(403);
-    await request(app).get(`/api/social/plans/${planId}/comments`).set(auth(ADMIN)).expect(403);
+    await request(app).post(`/api/social/plans/${planId}/comments`).set(await auth(ADMIN)).send({ body: 'hey' }).expect(403);
+    await request(app).get(`/api/social/plans/${planId}/comments`).set(await auth(ADMIN)).expect(403);
   });
 
   it('rejects unauthenticated like/save/comment', async () => {
@@ -120,7 +120,7 @@ describe('event plan social engagement (like/save/share/comment)', () => {
 
     const top = await request(app)
       .post(`/api/social/plans/${planId}/comments`)
-      .set(auth(FRIEND))
+      .set(await auth(FRIEND))
       .send({ body: 'Can’t wait for this one!' })
       .expect(201);
     expect(top.body.data.body).toBe('Can’t wait for this one!');
@@ -128,7 +128,7 @@ describe('event plan social engagement (like/save/share/comment)', () => {
 
     const reply = await request(app)
       .post(`/api/social/plans/${planId}/comments`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ body: 'Same here!', parentId: top.body.data.id })
       .expect(201);
     expect(reply.body.data.parentId).toBe(top.body.data.id);
@@ -136,7 +136,7 @@ describe('event plan social engagement (like/save/share/comment)', () => {
     // Replying to a reply is rejected (one level of nesting only).
     await request(app)
       .post(`/api/social/plans/${planId}/comments`)
-      .set(auth(FRIEND))
+      .set(await auth(FRIEND))
       .send({ body: 'nested', parentId: reply.body.data.id })
       .expect(400);
 
@@ -146,7 +146,7 @@ describe('event plan social engagement (like/save/share/comment)', () => {
     expect(list.body.data.comments[0].replies).toHaveLength(1);
     expect(list.body.data.comments[0].author.username).toBe('friend_one');
 
-    const likeComment = await request(app).post(`/api/social/plans/plan-comments/${top.body.data.id}/like`).set(auth(ADMIN)).expect(200);
+    const likeComment = await request(app).post(`/api/social/plans/plan-comments/${top.body.data.id}/like`).set(await auth(ADMIN)).expect(200);
     expect(likeComment.body.data).toEqual({ active: true, likeCount: 1 });
 
     const plan = await EventPlan.findById(planId);
@@ -157,10 +157,10 @@ describe('event plan social engagement (like/save/share/comment)', () => {
     const { planId } = await makePlan('public');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
 
-    const top = await request(app).post(`/api/social/plans/${planId}/comments`).set(auth(FRIEND)).send({ body: 'delete me' }).expect(201);
+    const top = await request(app).post(`/api/social/plans/${planId}/comments`).set(await auth(FRIEND)).send({ body: 'delete me' }).expect(201);
 
-    await request(app).delete(`/api/social/plans/plan-comments/${top.body.data.id}`).set(auth(ADMIN)).expect(403);
-    await request(app).delete(`/api/social/plans/plan-comments/${top.body.data.id}`).set(auth(FRIEND)).expect(200);
+    await request(app).delete(`/api/social/plans/plan-comments/${top.body.data.id}`).set(await auth(ADMIN)).expect(403);
+    await request(app).delete(`/api/social/plans/plan-comments/${top.body.data.id}`).set(await auth(FRIEND)).expect(200);
 
     const list = await request(app).get(`/api/social/plans/${planId}/comments`).expect(200);
     expect(list.body.data.comments).toHaveLength(0);
@@ -172,19 +172,19 @@ describe('event plan social engagement (like/save/share/comment)', () => {
   it('drops a plan changed from public to private out of the event listing while keeping its engagement counters', async () => {
     const { planId, event } = await makePlan('public');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
-    await request(app).post(`/api/social/plans/${planId}/like`).set(auth(FRIEND)).expect(200);
+    await request(app).post(`/api/social/plans/${planId}/like`).set(await auth(FRIEND)).expect(200);
 
     await request(app)
       .patch(`/api/social/plans/${planId}/visibility`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ visibility: 'private', confirmed: true })
       .expect(200);
 
-    const listOutsider = await request(app).get(`/api/social/plans/event/${event._id}`).set(auth(FRIEND)).expect(200);
+    const listOutsider = await request(app).get(`/api/social/plans/event/${event._id}`).set(await auth(FRIEND)).expect(200);
     expect(listOutsider.body.data.plans).toHaveLength(0);
 
     // Liking is now rejected, but the earlier like count is preserved.
-    await request(app).post(`/api/social/plans/${planId}/like`).set(auth(FRIEND)).expect(403);
+    await request(app).post(`/api/social/plans/${planId}/like`).set(await auth(FRIEND)).expect(403);
     const plan = await EventPlan.findById(planId);
     expect(plan!.likeCount).toBe(1);
   });
