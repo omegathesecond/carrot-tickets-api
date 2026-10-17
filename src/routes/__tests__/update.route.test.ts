@@ -1,8 +1,9 @@
 import request from 'supertest';
 import mongoose from 'mongoose';
+import { Vendor } from '@models/vendor.model';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signSuperAdminToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, signAdminSessionToken, signVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Update } from '@models/update.model';
 
@@ -26,7 +27,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'video', caption: 'my clip', items: [{ ext: 'mp4', contentType: 'video/mp4' }] })
       .expect(201);
     expect(res.body.data.uploads).toHaveLength(1);
@@ -38,7 +39,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'video', caption: '', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(400);
   });
@@ -51,7 +52,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', caption: 'trip', items: Array(3).fill({ ext: 'jpg', contentType: 'image/jpeg' }) });
     expect(res.status).toBe(201);
     expect(res.body.data.uploads).toHaveLength(3);
@@ -61,7 +62,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', items: Array(6).fill({ ext: 'jpg', contentType: 'image/jpeg' }) });
     expect(res.status).toBe(400);
   });
@@ -70,7 +71,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', caption: 'weekend!', category: 'weekend_recap', location: 'Manzini', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(201);
     const saved = await Update.findById(res.body.data.updateId);
@@ -82,7 +83,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', caption: 'regular post', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(201);
     const saved = await Update.findById(res.body.data.updateId);
@@ -94,7 +95,7 @@ describe('POST /api/public/updates', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', category: 'not-a-real-category', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(400);
   });
@@ -148,12 +149,12 @@ describe('DELETE /api/public/updates/:id', () => {
   // THE REPORTED GAP: remove() resolved only a buyer, so an organizer got 403
   // on their own brand post.
   it('allows a vendor to delete their own brand post', async () => {
-    const vendorId = new mongoose.Types.ObjectId();
+    const vendorId = (await Vendor.create({ businessName: 'Author brand', password: 'secret123' }))._id;
     const update = await seedVendorUpdate(String(vendorId));
 
     const res = await request(app)
       .delete(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendorId))}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(String(vendorId))}`)
       .expect(200);
     expect(res.body.data.ok).toBe(true);
 
@@ -163,12 +164,12 @@ describe('DELETE /api/public/updates/:id', () => {
 
   it("forbids a vendor from deleting a DIFFERENT brand's post", async () => {
     const author = new mongoose.Types.ObjectId();
-    const other = new mongoose.Types.ObjectId();
+    const other = (await Vendor.create({ businessName: 'Other brand', password: 'secret123' }))._id;
     const update = await seedVendorUpdate(String(author));
 
     await request(app)
       .delete(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signVendorToken(String(other))}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(String(other))}`)
       .expect(403);
 
     const reloaded = await Update.findById(update.id);
@@ -189,7 +190,7 @@ describe('DELETE /api/public/updates/:id', () => {
 
     await request(app)
       .delete(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(403);
 
     const reloaded = await Update.findById(update.id);
@@ -202,7 +203,7 @@ describe('DELETE /api/public/updates/:id', () => {
 
     const res = await request(app)
       .delete(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
     expect(res.body.data.ok).toBe(true);
 
@@ -217,7 +218,7 @@ describe('DELETE /api/public/updates/:id', () => {
 
     const res = await request(app)
       .delete(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .expect(200);
     expect(res.body.data.ok).toBe(true);
 
@@ -233,7 +234,7 @@ describe('DELETE /api/public/updates/:id', () => {
 
     await request(app)
       .delete(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(NON_AUTHOR_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(NON_AUTHOR_PHONE)}`)
       .expect(403);
 
     const reloaded = await Update.findById(update.id);
@@ -283,7 +284,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     const res = await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ caption: 'updated caption #music' })
       .expect(200);
 
@@ -304,7 +305,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ caption: '' })
       .expect(200);
 
@@ -314,12 +315,12 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
   });
 
   it('allows a vendor to edit their own brand post caption', async () => {
-    const vendorId = new mongoose.Types.ObjectId();
+    const vendorId = (await Vendor.create({ businessName: 'Author brand', password: 'secret123' }))._id;
     const update = await seedVendorUpdate(String(vendorId));
 
     const res = await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendorId))}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(String(vendorId))}`)
       .send({ caption: 'new brand caption' })
       .expect(200);
     expect(res.body.data.caption).toBe('new brand caption');
@@ -331,7 +332,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ caption: 'moderated caption' })
       .expect(200);
 
@@ -347,7 +348,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(NON_AUTHOR_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(NON_AUTHOR_PHONE)}`)
       .send({ caption: 'hijacked' })
       .expect(403);
 
@@ -357,12 +358,12 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
   it("forbids a vendor from editing a DIFFERENT brand's post", async () => {
     const author = new mongoose.Types.ObjectId();
-    const other = new mongoose.Types.ObjectId();
+    const other = (await Vendor.create({ businessName: 'Other brand', password: 'secret123' }))._id;
     const update = await seedVendorUpdate(String(author));
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signVendorToken(String(other))}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(String(other))}`)
       .send({ caption: 'hijacked' })
       .expect(403);
   });
@@ -386,7 +387,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ caption: 'x'.repeat(501) })
       .expect(400);
   });
@@ -397,7 +398,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({})
       .expect(400);
   });
@@ -410,7 +411,7 @@ describe('PATCH /api/public/updates/:id (edit caption)', () => {
 
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ caption: 'x' })
       .expect(404);
   });
