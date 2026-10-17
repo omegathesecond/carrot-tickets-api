@@ -12,3 +12,14 @@
 - Existing collections are unchanged; no secret/env changes or data backfill is required.
 
 Validation: `npm test -- --runInBand src/marketplace/__tests__/marketplace.test.ts`, `npm run build`.
+
+Service-provider matching: authenticated vendor owners can request
+`/api/marketplace/matched-opportunities` with the same filters/pagination as
+`/opportunities`. It matches any saved `Vendor.serviceCategories` identifier or
+its current catalogue label (exact, case-insensitive), before pagination. An
+account with no saved categories receives no matches. Other filters still apply;
+lookup failures surface as errors. The website defaults service providers to
+this view and lets them clear “Match my service categories” to browse all markets.
+
+The service-login task includes the existing Marketplace feature commits as a
+dependency because Marketplace has not yet landed on production branches.

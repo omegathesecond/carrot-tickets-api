@@ -11,6 +11,7 @@ import {
 import { Notification } from '@models/notification.model';
 import { NotificationService } from '@services/notification.service';
 import { Vendor } from '@models/vendor.model';
+import { ServiceCategory } from '@models/serviceCategory.model';
 import {
   connectLedgerTestDb,
   clearTestDb,
@@ -530,4 +531,36 @@ it('rolls back an approval if its notification fails instead of reporting succes
   expect(log).toHaveBeenCalled();
   notification.mockRestore();
   log.mockRestore();
+});
+
+describe('signup service category matching', () => {
+  it('matches opportunities from both saved categories and excludes unrelated opportunities', async () => {
+    await Vendor.updateOne({ _id: provider }, { $set: { serviceCategories: ['sound_hire', 'catering'] } });
+    await ServiceCategory.create([
+      { value: 'sound_hire', label: 'Sound hire' },
+      { value: 'catering', label: 'Catering' },
+    ]);
+    const sound = await createOpportunity({ name: 'Sound needed', categories: ['Sound hire'] });
+    const food = await createOpportunity({ name: 'Caterers needed', categories: ['catering'] });
+    await createOpportunity({ name: 'Crafts only', categories: ['Crafts'] });
+    await createOpportunity({ name: 'Not an exact category', categories: ['Catering supplies'] });
+    const matches = await auth(request(app).get(endpoint + '/matched-opportunities'));
+    expect(matches.status).toBe(200);
+    expect(matches.body.data.items.map((item: any) => item._id).sort()).toEqual([sound, food].sort());
+    const filtered = await auth(request(app).get(endpoint + '/matched-opportunities?category=catering'));
+    expect(filtered.body.data.items.map((item: any) => item._id)).toEqual([food]);
+    // Another account cannot inherit this provider's selections.
+    const other = await auth(request(app).get(endpoint + '/matched-opportunities'), organiser);
+    expect(other.body.data.items).toEqual([]);
+    const all = await request(app).get(endpoint + '/opportunities');
+    expect(all.body.data.items).toHaveLength(4);
+  });
+
+  it('requires owner authentication and surfaces lookup failures', async () => {
+    expect((await request(app).get(endpoint + '/matched-opportunities')).status).toBe(401);
+    expect((await request(app).get(endpoint + '/matched-opportunities').set('Authorization', 'Bearer sub-user')).status).toBe(403);
+    jest.spyOn(Vendor, 'findById').mockImplementationOnce(() => { throw new Error('Database unavailable'); });
+    const failed = await auth(request(app).get(endpoint + '/matched-opportunities'));
+    expect(failed.status).toBe(500);
+  });
 });

@@ -9,6 +9,7 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { HttpError } from '@utils/httpError.util';
 import { Vendor } from '@models/vendor.model';
+import { ServiceCategory } from '@models/serviceCategory.model';
 import { NotificationService } from '@services/notification.service';
 import {
   MarketApplication,
@@ -103,184 +104,193 @@ router.get('/options', (_req, res) =>
     regions: REGIONS,
   }),
 );
-router.get(
-  '/opportunities',
-  wrap(async (req, res) => {
-    const q = validate(
-      Joi.object({
-        search: Joi.string().max(200).allow(''),
-        location: Joi.string().max(200).allow(''),
-        date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/),
-        marketType: Joi.string().valid(...MARKET_TYPES),
-        category: Joi.string().max(200),
-        availability: Joi.string().valid(...AVAILABILITY),
-        maxFee: Joi.number().min(0),
-        minFee: Joi.number().min(0),
-        currency: Joi.string()
-          .length(3)
-          .uppercase()
-          .pattern(/^[A-Z]{3}$/),
-        available: Joi.boolean(),
-        page: Joi.number().integer().min(1).max(10000).default(1),
-      }),
-      req.query,
-    );
-    const filter: any = {
-      status: 'published',
-      applicationDeadline: { $gt: new Date() },
+const listOpportunities = wrap(async (req, res) => {
+  const q = validate(
+    Joi.object({
+      search: Joi.string().max(200).allow(''),
+      location: Joi.string().max(200).allow(''),
+      date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/),
+      marketType: Joi.string().valid(...MARKET_TYPES),
+      category: Joi.string().max(200),
+      availability: Joi.string().valid(...AVAILABILITY),
+      maxFee: Joi.number().min(0),
+      minFee: Joi.number().min(0),
+      currency: Joi.string()
+        .length(3)
+        .uppercase()
+        .pattern(/^[A-Z]{3}$/),
+      available: Joi.boolean(),
+      page: Joi.number().integer().min(1).max(10000).default(1),
+    }),
+    req.query,
+  );
+  const filter: any = {
+    status: 'published',
+    applicationDeadline: { $gt: new Date() },
+  };
+  const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (q.search)
+    filter.$or = ['name', 'organiser', 'description'].map((k) => ({
+      [k]: { $regex: literal(q.search), $options: 'i' },
+    }));
+  if (q.location)
+    filter.location = { $regex: literal(q.location), $options: 'i' };
+  for (const key of ['marketType', 'availability', 'currency'])
+    if (q[key]) filter[key] = q[key];
+  if (q.category) filter.categories = q.category;
+  if (req.path === '/matched-opportunities') {
+    const vendor = await Vendor.findById(actor(req)).select('serviceCategories').lean();
+    if (!vendor) throw new HttpError(404, 'Provider not found');
+    const selected = vendor.serviceCategories ?? [];
+    // Marketplace accepts category names as well as stable service identifiers.
+    // Resolve current labels from the same catalogue used during signup.
+    const categories = await ServiceCategory.find({ value: { $in: selected } })
+      .select('label').lean();
+    const terms = [...new Set([...selected, ...categories.map((c) => c.label)])];
+    filter.$and = [{ categories: { $in: terms.map((term) => new RegExp('^' + literal(term) + '$', 'i')) } }];
+  }
+  if (q.maxFee !== undefined || q.minFee !== undefined) {
+    if (!q.currency)
+      throw new HttpError(400, 'Select a currency when filtering stall fees');
+    filter.stallFee = {
+      ...(q.maxFee !== undefined ? { $lte: q.maxFee } : {}),
+      ...(q.minFee !== undefined ? { $gte: q.minFee } : {}),
     };
-    const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (q.search)
-      filter.$or = ['name', 'organiser', 'description'].map((k) => ({
-        [k]: { $regex: literal(q.search), $options: 'i' },
-      }));
-    if (q.location)
-      filter.location = { $regex: literal(q.location), $options: 'i' };
-    for (const key of ['marketType', 'availability', 'currency'])
-      if (q[key]) filter[key] = q[key];
-    if (q.category) filter.categories = q.category;
-    if (q.maxFee !== undefined || q.minFee !== undefined) {
-      if (!q.currency)
-        throw new HttpError(400, 'Select a currency when filtering stall fees');
-      filter.stallFee = {
-        ...(q.maxFee !== undefined ? { $lte: q.maxFee } : {}),
-        ...(q.minFee !== undefined ? { $gte: q.minFee } : {}),
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  filter.dates = q.date || { $gte: today };
+  const upcomingDates = q.date
+    ? { $literal: [q.date] }
+    : {
+        $filter: {
+          input: '$dates',
+          as: 'date',
+          cond: { $gte: ['$$date', today] },
+        },
       };
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    filter.dates = q.date || { $gte: today };
-    const upcomingDates = q.date
-      ? { $literal: [q.date] }
-      : {
-          $filter: {
-            input: '$dates',
-            as: 'date',
-            cond: { $gte: ['$$date', today] },
-          },
-        };
-    const items = await MarketOpportunity.aggregate([
-      { $match: filter },
-      {
-        $set: {
-          nextTradingDate: {
-            $min: upcomingDates,
-          },
+  const items = await MarketOpportunity.aggregate([
+    { $match: filter },
+    {
+      $set: {
+        nextTradingDate: {
+          $min: upcomingDates,
         },
       },
-      {
-        $lookup: {
-          from: MarketApplication.collection.name,
-          let: {
-            opportunityId: '$_id',
-            dates: upcomingDates,
-            scope: '$scope',
-          },
-          pipeline: [
-            {
-              $match: {
-                status: 'approved',
-                $expr: {
-                  $and: [
-                    { $eq: ['$opportunityId', '$$opportunityId'] },
-                    {
-                      $cond: [
-                        { $eq: ['$$scope', 'regular'] },
-                        { $eq: ['$scopeKey', 'regular'] },
-                        { $in: ['$scopeKey', '$$dates'] },
-                      ],
-                    },
-                  ],
-                },
+    },
+    {
+      $lookup: {
+        from: MarketApplication.collection.name,
+        let: {
+          opportunityId: '$_id',
+          dates: upcomingDates,
+          scope: '$scope',
+        },
+        pipeline: [
+          {
+            $match: {
+              status: 'approved',
+              $expr: {
+                $and: [
+                  { $eq: ['$opportunityId', '$$opportunityId'] },
+                  {
+                    $cond: [
+                      { $eq: ['$$scope', 'regular'] },
+                      { $eq: ['$scopeKey', 'regular'] },
+                      { $in: ['$scopeKey', '$$dates'] },
+                    ],
+                  },
+                ],
               },
             },
-            { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
-          ],
-          as: 'approvals',
-        },
+          },
+          { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
+        ],
+        as: 'approvals',
       },
-      {
-        $set: {
-          approvedProviders: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$approvals',
-                    as: 'approval',
-                    cond: {
-                      $eq: [
-                        '$$approval._id',
-                        {
-                          $cond: [
-                            { $eq: ['$scope', 'regular'] },
-                            'regular',
-                            q.date || '$nextTradingDate',
-                          ],
-                        },
-                      ],
-                    },
+    },
+    {
+      $set: {
+        approvedProviders: {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: '$approvals',
+                  as: 'approval',
+                  cond: {
+                    $eq: [
+                      '$$approval._id',
+                      {
+                        $cond: [
+                          { $eq: ['$scope', 'regular'] },
+                          'regular',
+                          q.date || '$nextTradingDate',
+                        ],
+                      },
+                    ],
                   },
                 },
-                as: 'approval',
-                in: '$$approval.count',
               },
+              as: 'approval',
+              in: '$$approval.count',
             },
           },
         },
       },
-      {
-        $set: {
-          remainingCapacity: {
-            $cond: [
-              { $eq: ['$capacity', null] },
-              null,
-              { $subtract: ['$capacity', '$approvedProviders'] },
-            ],
-          },
+    },
+    {
+      $set: {
+        remainingCapacity: {
+          $cond: [
+            { $eq: ['$capacity', null] },
+            null,
+            { $subtract: ['$capacity', '$approvedProviders'] },
+          ],
         },
       },
-      ...(q.available
-        ? [
-            {
-              $match: {
-                $expr: {
-                  $or: [
-                    { $eq: ['$capacity', null] },
-                    {
-                      $lt: [
-                        // An unfilled date may have no approval group at all.
-                        {
-                          $size: {
-                            $filter: {
-                              input: '$approvals',
-                              as: 'approval',
-                              cond: { $gte: ['$$approval.count', '$capacity'] },
-                            },
+    },
+    ...(q.available
+      ? [
+          {
+            $match: {
+              $expr: {
+                $or: [
+                  { $eq: ['$capacity', null] },
+                  {
+                    $lt: [
+                      // An unfilled date may have no approval group at all.
+                      {
+                        $size: {
+                          $filter: {
+                            input: '$approvals',
+                            as: 'approval',
+                            cond: { $gte: ['$$approval.count', '$capacity'] },
                           },
                         },
-                        {
-                          $cond: [
-                            { $eq: ['$scope', 'regular'] },
-                            1,
-                            { $size: upcomingDates },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
+                      },
+                      {
+                        $cond: [
+                          { $eq: ['$scope', 'regular'] },
+                          1,
+                          { $size: upcomingDates },
+                        ],
+                      },
+                    ],
+                  },
+                ],
               },
             },
-          ]
-        : []),
-      { $unset: ['approvals', '__v', 'revision'] },
-      { $sort: { nextTradingDate: 1, _id: 1 } },
-      { $skip: (q.page - 1) * 30 },
-      { $limit: 31 },
-    ]);
-    return ok(res, { items: items.slice(0, 30), hasMore: items.length > 30 });
-  }),
-);
+          },
+        ]
+      : []),
+    { $unset: ['approvals', '__v', 'revision'] },
+    { $sort: { nextTradingDate: 1, _id: 1 } },
+    { $skip: (q.page - 1) * 30 },
+    { $limit: 31 },
+  ]);
+  return ok(res, { items: items.slice(0, 30), hasMore: items.length > 30 });
+});
+router.get('/opportunities', listOpportunities);
 router.get(
   '/opportunities/:id',
   wrap(async (req, res) => {
@@ -307,6 +317,7 @@ router.use((req: Request, res: Response, next: NextFunction) => {
     return ApiResponseUtil.unauthorized(res, 'A business session is required');
   return next();
 });
+router.get('/matched-opportunities', listOpportunities);
 router.get(
   '/profiles',
   wrap(async (req, res) => {
