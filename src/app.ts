@@ -33,6 +33,7 @@ import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 import ticketsRoutes from '@routes/tickets.route';
 import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
+import marketplaceRoutes from './marketplace/routes';
 import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
 import deltapayRoutes from '@routes/deltapay.route';
@@ -176,6 +177,7 @@ app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored update
 app.use('/api/tickets/transport', transportRoutes);    // Vendor bus/shuttle inventory - before the broad /api/tickets
 app.use('/api/tickets/social', vendorSocialRoutes);   // Vendor (brand) social graph — before the broad /api/tickets
 app.use('/api/tickets/dm', vendorDmRoutes);           // Vendor (brand) DMs — before the broad /api/tickets
+app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller/transport', transportPosRoutes); // POS bus selling + boarding - before the broad /api/reseller
 app.use('/api/reseller', resellerRoutes);

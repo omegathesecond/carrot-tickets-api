@@ -1,3 +1,4 @@
+import { ClientSession } from 'mongoose';
 import { Notification, INotification, NotificationType, NotificationRecipientType } from '@models/notification.model';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
@@ -57,10 +58,12 @@ export class NotificationService {
     type: NotificationType,
     title: string,
     body: string,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    session?: ClientSession
   ): Promise<INotification | null> {
     try {
-      return await Notification.create({ recipientType, recipientId, type, title, body, data });
+      const [notification] = await Notification.create([{ recipientType, recipientId, type, title, body, data }], { session });
+      return notification!;
     } catch (err: any) {
       // Concurrent reminder sweeps race the dedupe read; the partial unique
       // index makes the second insert a no-op instead of a duplicate row.
