@@ -71,9 +71,14 @@ const vendorSchema = new Schema<IVendor>({
   // values can change without a code deploy. Membership in the active category
   // set is checked at signup by ServiceCategoryService.isValidActive
   // (TicketsAuthService.registerBusiness), not enforced here at the schema level.
-  serviceCategory: {
-    type: String,
-    trim: true,
+  serviceCategories: {
+    type: [{ type: String, trim: true }],
+    validate: {
+      validator: function (this: IVendor, values: string[]) {
+        return this.operatorType !== OperatorType.SERVICES || values.length > 0;
+      },
+      message: "Choose at least one service category",
+    },
     required: [
       function (this: IVendor) { return this.operatorType === OperatorType.SERVICES; },
       'A service category is required for service businesses',

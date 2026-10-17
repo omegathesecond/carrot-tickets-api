@@ -6,7 +6,7 @@ import { Schema, model, Document } from 'mongoose';
  * (src/constants/serviceCategories.ts, still the seed source — see
  * src/scripts/seed-service-categories.ts). Lets an admin add/rename/retire a
  * category with no code deploy. `value` is the stable identifier stored on
- * Vendor.serviceCategory and matched by the /services directory's
+ * Vendor.serviceCategories and matched by the /services directory's
  * `?category=` filter; `label` is the display string shown in pickers.
  *
  * A category is never hard-deleted — `isActive: false` retires it: it drops

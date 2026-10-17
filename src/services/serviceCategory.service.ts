@@ -83,7 +83,7 @@ export class ServiceCategoryService {
 
   /**
    * Admin update. `value` is deliberately NOT accepted here — it is
-   * immutable once created (it's what's persisted on Vendor.serviceCategory
+   * immutable once created (it's what's persisted on Vendor.serviceCategories
    * and matched by the /services `?category=` filter; renaming it out from
    * under existing vendors would silently orphan them).
    */

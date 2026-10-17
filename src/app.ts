@@ -26,6 +26,7 @@ import { requireTextQuery } from '@middleware/queryParams.middleware';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
+import { migrateServiceCategories } from '@/scripts/migrateServiceCategories';
 import { migrateLegacyEventCategories } from '@/scripts/migrateLegacyEventCategories';
 import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 
@@ -33,6 +34,7 @@ import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 import ticketsRoutes from '@routes/tickets.route';
 import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
+import marketplaceRoutes from './marketplace/routes';
 import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
 import deltapayRoutes from '@routes/deltapay.route';
@@ -176,6 +178,7 @@ app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored update
 app.use('/api/tickets/transport', transportRoutes);    // Vendor bus/shuttle inventory - before the broad /api/tickets
 app.use('/api/tickets/social', vendorSocialRoutes);   // Vendor (brand) social graph — before the broad /api/tickets
 app.use('/api/tickets/dm', vendorDmRoutes);           // Vendor (brand) DMs — before the broad /api/tickets
+app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller/transport', transportPosRoutes); // POS bus selling + boarding - before the broad /api/reseller
 app.use('/api/reseller', resellerRoutes);
@@ -228,7 +231,8 @@ if (process.env['NODE_ENV'] !== 'test') {
  * only then calls app.listen() — see src/boot.ts for why that order matters
  * on Cloud Run.
  */
-function initAfterConnect(): void {
+async function initAfterConnect(): Promise<void> {
+  await migrateServiceCategories();
   console.log(`📦 Database: ${mongoose.connection.name}`);
   // Log detailed database configuration
   logDatabaseConfig();
