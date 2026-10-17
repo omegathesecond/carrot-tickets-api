@@ -1,3 +1,5 @@
+import { Buyer } from '@models/buyer.model';
+import { BuyerAuthService } from '@services/buyerAuth.service';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
@@ -41,4 +43,11 @@ export function signVendorToken(vendorId: string, extra: Record<string, unknown>
     { app: 'tickets', userType: 'vendor', vendorId, isSuperAdmin: false, role: 'owner', permissions: [], ...extra },
     JWT_SECRET,
   );
+}
+
+/** Mint a current persisted buyer session, including identity and auth version. */
+export async function signBuyerSessionToken(phone: string): Promise<string> {
+  const buyer = await Buyer.findOne({ phone });
+  if (!buyer) throw new Error(`Missing buyer fixture: ${phone}`);
+  return BuyerAuthService.signToken(buyer);
 }

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { BuyerAuthService } from '@services/buyerAuth.service';
+import { signBuyerSessionToken as signBuyerToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Story } from '@models/story.model';
 import { FollowService } from '@services/follow.service';
@@ -18,13 +18,6 @@ jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn().moc
 
 const PHONE = '+26878422613';
 const AUTHOR_PHONE = '+26878400101';
-
-// Exercise the real session validator with the same versioned tokens as login.
-async function signBuyerToken(phone: string): Promise<string> {
-  const buyer = await Buyer.findOne({ phone });
-  if (!buyer) throw new Error(`Missing story buyer fixture: ${phone}`);
-  return BuyerAuthService.signToken(buyer);
-}
 
 describe('Stories API', () => {
   beforeAll(connectTestDb);
