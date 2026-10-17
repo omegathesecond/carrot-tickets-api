@@ -215,12 +215,12 @@ export class TicketsAuthService {
     email?: string;
     phoneNumber?: string;
     password: string;
-    serviceCategory: string;
+    serviceCategories: string[];
     startingPrice?: { amountCents: number; unit?: 'day' | 'event' | 'hour' };
     city?: string;
     code: string;
   }) {
-    const { businessName, email, phoneNumber, password, serviceCategory, startingPrice, city, code } = params;
+    const { businessName, email, phoneNumber, password, serviceCategories, startingPrice, city, code } = params;
 
     const id = this.signupIdentifier(email, phoneNumber);
     if (!password || password.length < 6) {
@@ -238,7 +238,8 @@ export class TicketsAuthService {
     // Categories are DB-driven now (ServiceCategoryService), not a hardcoded
     // enum — check BEFORE burning the OTP code, so an invalid category never
     // consumes it (same reasoning as the duplicate-account guards above).
-    if (!(await ServiceCategoryService.isValidActive(serviceCategory))) {
+    if (!Array.isArray(serviceCategories) || !serviceCategories.length ||
+      !(await Promise.all(serviceCategories.map((category) => ServiceCategoryService.isValidActive(category)))).every(Boolean)) {
       throw new Error('Choose a valid service category');
     }
 
@@ -249,7 +250,7 @@ export class TicketsAuthService {
         phoneNumber,
         password,
         operatorType: OperatorType.SERVICES,
-        serviceCategory,
+        serviceCategories,
         ...(startingPrice ? { startingPrice: { amountCents: startingPrice.amountCents, unit: startingPrice.unit ?? 'day' } } : {}),
         ...(city ? { address: { city } } : {}),
         // verificationStatus, isActive, isVerified and apps.tickets.enabled all

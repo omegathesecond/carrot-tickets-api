@@ -28,7 +28,7 @@ export interface BootDeps {
    * Everything that needs a live connection but must be in place before
    * traffic arrives: migrations, background sweeps, the realtime emitter.
    */
-  afterConnect?: () => void;
+  afterConnect?: () => void | Promise<void>;
   /** Opens the port. Called only once the database is connected. */
   listen: () => void;
   exit?: (code: number) => void;
@@ -51,7 +51,7 @@ export async function boot(deps: BootDeps): Promise<void> {
   log('✅ Connected to MongoDB');
 
   try {
-    deps.afterConnect?.();
+    await deps.afterConnect?.();
   } catch (err) {
     error('❌ Post-connect initialisation failed:', err);
     exit(1);

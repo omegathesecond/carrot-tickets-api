@@ -11,7 +11,7 @@ afterAll(disconnectTestDb);
 async function mkBiz(over: any = {}) {
   return Vendor.create({
     businessName: over.businessName ?? 'Luxe Decor', phoneNumber: over.phoneNumber ?? '+2687650' + Math.floor(Math.random()*100000),
-    password: 'secret1', operatorType: OperatorType.SERVICES, serviceCategory: over.serviceCategory ?? 'furniture_decor',
+    password: 'secret1', operatorType: OperatorType.SERVICES, serviceCategories: over.serviceCategories ?? ['furniture_decor'],
     verificationStatus: over.verificationStatus ?? VerificationStatus.VERIFIED, bio: over.bio ?? 'Elegant furniture & styling',
     address: over.address, startingPrice: over.startingPrice, isActive: over.isActive,
   });
@@ -54,9 +54,10 @@ describe('ServicesService.listDirectory', () => {
   });
 
   it('filters by category and searches by name', async () => {
-    await mkBiz({ businessName: 'SoundWave', serviceCategory: 'sound_hire' });
-    await mkBiz({ businessName: 'FoodFest', serviceCategory: 'food_stalls' });
+    await mkBiz({ businessName: 'SoundWave', serviceCategories: ['sound_hire', 'catering'] });
+    await mkBiz({ businessName: 'FoodFest', serviceCategories: ['food_stalls'] });
     expect((await ServicesService.listDirectory({ category: 'sound_hire' })).map((c) => c.businessName)).toEqual(['SoundWave']);
+    expect((await ServicesService.listDirectory({ category: 'catering' })).map((c) => c.businessName)).toEqual(['SoundWave']);
     expect((await ServicesService.listDirectory({ search: 'food' })).map((c) => c.businessName)).toEqual(['FoodFest']);
   });
 
@@ -72,7 +73,7 @@ describe('ServicesService.getBusinessProfile', () => {
     const v = await mkBiz({ startingPrice: { amountCents: 18000, unit: 'day' }, address: { city: 'Manzini', region: 'Manzini' } });
     const p = await ServicesService.getBusinessProfile(String(v._id));
     expect(p.businessName).toBe('Luxe Decor');
-    expect(p.serviceCategory).toBe('furniture_decor');
+    expect(p.serviceCategories).toEqual(['furniture_decor']);
     expect(p.startingPrice?.amountCents).toBe(18000);
     expect(p.city).toBe('Manzini');
     expect(p.verified).toBe(true);

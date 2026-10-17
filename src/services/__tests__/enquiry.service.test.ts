@@ -16,7 +16,7 @@ async function mkServicesBiz(over: any = {}) {
     phoneNumber: over.phoneNumber ?? '+2687650' + Math.floor(Math.random() * 100000),
     password: 'secret1',
     operatorType: OperatorType.SERVICES,
-    serviceCategory: over.serviceCategory ?? 'furniture_decor',
+    serviceCategories: over.serviceCategories ?? ['furniture_decor'],
     verificationStatus: over.verificationStatus ?? VerificationStatus.VERIFIED,
   });
 }

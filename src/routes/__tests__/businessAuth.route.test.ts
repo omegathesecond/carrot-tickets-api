@@ -9,7 +9,7 @@ import { ServiceCategory } from '@models/serviceCategory.model';
 jest.spyOn(OtpService, 'withVerified').mockImplementation(async (_a, _i, _c, action: any) => action());
 
 beforeAll(connectLedgerTestDb);
-// serviceCategory is DB-driven (ServiceCategoryService.isValidActive) — seed
+// serviceCategories is DB-driven (ServiceCategoryService.isValidActive) — seed
 // the one category this suite uses before every test.
 beforeEach(async () => {
   await ServiceCategory.create({ value: 'sound_hire', label: 'Sound hire', order: 0, isActive: true });
@@ -25,7 +25,7 @@ describe('POST /api/tickets/auth/business/register', () => {
     businessName: 'SoundWave Pro',
     phoneNumber: '+26876111222',
     password: 'secret1',
-    serviceCategory: 'sound_hire',
+    serviceCategories: ['sound_hire'],
     code: '000000',
   };
 
@@ -36,8 +36,15 @@ describe('POST /api/tickets/auth/business/register', () => {
     expect(res.body.data.user.operatorType).toBe('services');
   });
 
-  it('400s when serviceCategory is missing', async () => {
-    const { serviceCategory, ...rest } = validBody;
+  it.each([[], ['sound_hire', 'sound_hire'], ['sound_hire', 'unknown'], 'sound_hire'])(
+    'rejects invalid category selections: %j', async (serviceCategories) => {
+      const res = await request(app).post('/api/tickets/auth/business/register').send({ ...validBody, serviceCategories });
+      expect(res.status).toBe(400);
+    },
+  );
+
+  it('400s when serviceCategories is missing', async () => {
+    const { serviceCategories, ...rest } = validBody;
     const res = await request(app).post('/api/tickets/auth/business/register').send(rest);
     expect(res.status).toBe(400);
   });

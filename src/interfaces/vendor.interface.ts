@@ -36,7 +36,7 @@ export interface IVendor extends Document {
   // Plain string: categories are now DB-driven (ServiceCategory collection),
   // so an admin can add values beyond the seed constant — the runtime invariant
   // is enforced by ServiceCategoryService.isValidActive, not this type.
-  serviceCategory?: string;
+  serviceCategories?: string[];
   startingPrice?: { amountCents: number; unit: import('@/constants/serviceCategories').StartingPriceUnit };
 
   // Contact Information

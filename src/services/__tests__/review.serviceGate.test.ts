@@ -21,7 +21,7 @@ async function mkServicesBiz(over: any = {}) {
     phoneNumber: over.phoneNumber ?? '+2687650' + Math.floor(Math.random() * 100000),
     password: 'secret1',
     operatorType: over.operatorType ?? OperatorType.SERVICES,
-    serviceCategory: over.serviceCategory ?? 'furniture_decor',
+    serviceCategories: over.serviceCategories ?? ['furniture_decor'],
     verificationStatus: over.verificationStatus ?? VerificationStatus.VERIFIED,
     isActive: over.isActive ?? true,
   });
@@ -88,7 +88,7 @@ describe('ReviewService.submitServiceReview', () => {
   it('404s for a business that is not a verified, active SERVICES vendor', async () => {
     const buyer = await mkBuyer();
 
-    const eventsVendor = await mkServicesBiz({ operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    const eventsVendor = await mkServicesBiz({ operatorType: OperatorType.EVENTS, serviceCategories: undefined });
     await expect(
       ReviewService.submitServiceReview(String(eventsVendor._id), buyer, { rating: 5 })
     ).rejects.toMatchObject({ statusCode: 404 });
@@ -123,7 +123,7 @@ describe('ReviewService.submitBusinessReviewAsOrganizer', () => {
 
   it('lets an organizer review a business with NO enquiry gate, one review each (409 on a second)', async () => {
     const biz = await mkServicesBiz({ businessName: 'Luxe Decor' });
-    const organizer = await mkServicesBiz({ businessName: 'Mbabane Live', operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    const organizer = await mkServicesBiz({ businessName: 'Mbabane Live', operatorType: OperatorType.EVENTS, serviceCategories: undefined });
 
     // No prior enquiry needed — straight to a successful review.
     const review = await ReviewService.submitBusinessReviewAsOrganizer(
@@ -150,14 +150,14 @@ describe('ReviewService.submitBusinessReviewAsOrganizer', () => {
   });
 
   it('lets an organizer review a PENDING business (verification is a badge, not a gate)', async () => {
-    const organizer = await mkServicesBiz({ businessName: 'Reviewer Co', operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    const organizer = await mkServicesBiz({ businessName: 'Reviewer Co', operatorType: OperatorType.EVENTS, serviceCategories: undefined });
     const pending = await mkServicesBiz({ verificationStatus: VerificationStatus.PENDING });
     const review = await ReviewService.submitBusinessReviewAsOrganizer(String(pending._id), String(organizer._id), { rating: 5 });
     expect(String(review.vendorId)).toBe(String(pending._id));
   });
 
   it('404s for a REJECTED / SUSPENDED / inactive / non-services business', async () => {
-    const organizer = await mkServicesBiz({ businessName: 'Reviewer Co', operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    const organizer = await mkServicesBiz({ businessName: 'Reviewer Co', operatorType: OperatorType.EVENTS, serviceCategories: undefined });
     for (const status of [VerificationStatus.REJECTED, VerificationStatus.SUSPENDED]) {
       const takenDown = await mkServicesBiz({ verificationStatus: status });
       await expect(
@@ -168,7 +168,7 @@ describe('ReviewService.submitBusinessReviewAsOrganizer', () => {
     await expect(
       ReviewService.submitBusinessReviewAsOrganizer(String(inactive._id), String(organizer._id), { rating: 5 })
     ).rejects.toMatchObject({ statusCode: 404 });
-    const eventsVendor = await mkServicesBiz({ operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    const eventsVendor = await mkServicesBiz({ operatorType: OperatorType.EVENTS, serviceCategories: undefined });
     await expect(
       ReviewService.submitBusinessReviewAsOrganizer(String(eventsVendor._id), String(organizer._id), { rating: 5 })
     ).rejects.toMatchObject({ statusCode: 404 });
@@ -176,7 +176,7 @@ describe('ReviewService.submitBusinessReviewAsOrganizer', () => {
 
   it('surfaces the organizer reviewer as a business in listBusinessReviews', async () => {
     const biz = await mkServicesBiz({ businessName: 'Luxe Decor' });
-    const organizer = await mkServicesBiz({ businessName: 'Mbabane Live', operatorType: OperatorType.EVENTS, serviceCategory: undefined });
+    const organizer = await mkServicesBiz({ businessName: 'Mbabane Live', operatorType: OperatorType.EVENTS, serviceCategories: undefined });
     await ReviewService.submitBusinessReviewAsOrganizer(String(biz._id), String(organizer._id), { rating: 4, text: 'Solid partner' });
 
     const list = await ReviewService.listBusinessReviews(String(biz._id));
