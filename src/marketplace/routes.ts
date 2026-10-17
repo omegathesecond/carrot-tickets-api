@@ -149,18 +149,21 @@ router.get(
     }
     const today = new Date().toISOString().slice(0, 10);
     filter.dates = q.date || { $gte: today };
+    const upcomingDates = q.date
+      ? { $literal: [q.date] }
+      : {
+          $filter: {
+            input: '$dates',
+            as: 'date',
+            cond: { $gte: ['$$date', today] },
+          },
+        };
     const items = await MarketOpportunity.aggregate([
       { $match: filter },
       {
         $set: {
           nextTradingDate: {
-            $min: {
-              $filter: {
-                input: '$dates',
-                as: 'date',
-                cond: { $gte: ['$$date', q.date || today] },
-              },
-            },
+            $min: upcomingDates,
           },
         },
       },
@@ -169,7 +172,7 @@ router.get(
           from: MarketApplication.collection.name,
           let: {
             opportunityId: '$_id',
-            date: q.date || '$nextTradingDate',
+            dates: upcomingDates,
             scope: '$scope',
           },
           pipeline: [
@@ -180,22 +183,17 @@ router.get(
                   $and: [
                     { $eq: ['$opportunityId', '$$opportunityId'] },
                     {
-                      $eq: [
-                        '$scopeKey',
-                        {
-                          $cond: [
-                            { $eq: ['$$scope', 'regular'] },
-                            'regular',
-                            '$$date',
-                          ],
-                        },
+                      $cond: [
+                        { $eq: ['$$scope', 'regular'] },
+                        { $eq: ['$scopeKey', 'regular'] },
+                        { $in: ['$scopeKey', '$$dates'] },
                       ],
                     },
                   ],
                 },
               },
             },
-            { $count: 'count' },
+            { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
           ],
           as: 'approvals',
         },
@@ -203,7 +201,30 @@ router.get(
       {
         $set: {
           approvedProviders: {
-            $ifNull: [{ $arrayElemAt: ['$approvals.count', 0] }, 0],
+            $sum: {
+              $map: {
+                input: {
+                  $filter: {
+                    input: '$approvals',
+                    as: 'approval',
+                    cond: {
+                      $eq: [
+                        '$$approval._id',
+                        {
+                          $cond: [
+                            { $eq: ['$scope', 'regular'] },
+                            'regular',
+                            q.date || '$nextTradingDate',
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+                as: 'approval',
+                in: '$$approval.count',
+              },
+            },
           },
         },
       },
@@ -222,7 +243,32 @@ router.get(
         ? [
             {
               $match: {
-                $or: [{ capacity: null }, { remainingCapacity: { $gt: 0 } }],
+                $expr: {
+                  $or: [
+                    { $eq: ['$capacity', null] },
+                    {
+                      $lt: [
+                        // An unfilled date may have no approval group at all.
+                        {
+                          $size: {
+                            $filter: {
+                              input: '$approvals',
+                              as: 'approval',
+                              cond: { $gte: ['$$approval.count', '$capacity'] },
+                            },
+                          },
+                        },
+                        {
+                          $cond: [
+                            { $eq: ['$scope', 'regular'] },
+                            1,
+                            { $size: upcomingDates },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
               },
             },
           ]

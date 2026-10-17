@@ -182,6 +182,33 @@ it('publishes, searches literal text, filters fees and dates and sorts by the ne
     ).status,
   ).toBe(400);
 });
+it('keeps an opportunity available when a later trading date has capacity', async () => {
+  const marketId = await createOpportunity();
+  const profileId = await createProfile();
+  const approve = async (date: string) => {
+    const application = await apply(marketId, profileId, date);
+    expect(application.status).toBe(200);
+    const reviewed = await auth(
+      request(app).patch(endpoint + '/manage/applications/' + application.body.data._id),
+      organiser,
+    ).send({ status: 'approved' });
+    expect(reviewed.status).toBe(200);
+  };
+  const available = async (date?: string) => {
+    const response = await request(app).get(endpoint + '/opportunities')
+      .query({ available: true, ...(date ? { date } : {}) });
+    expect(response.status).toBe(200);
+    return response.body.data.items;
+  };
+  await approve('2099-11-18');
+  const items = await available();
+  expect(items.map((item: any) => item._id)).toEqual([marketId]);
+  expect(items[0]).toMatchObject({ nextTradingDate: '2099-11-18', approvedProviders: 1, remainingCapacity: 0 });
+  expect(await available('2099-11-18')).toHaveLength(0);
+  expect(await available('2099-11-25')).toHaveLength(1);
+  await approve('2099-11-25');
+  expect(await available()).toHaveLength(0);
+});
 it('enforces profile ownership and private document access, including authorised admins', async () => {
   const profileId = await createProfile();
   const uploaded = await upload(profileId);
