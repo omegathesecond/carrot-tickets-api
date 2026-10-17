@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { BuyerAuthService } from '@services/buyerAuth.service';
 import { Buyer } from '@models/buyer.model';
 import { Story } from '@models/story.model';
 import { FollowService } from '@services/follow.service';
@@ -18,6 +18,13 @@ jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn().moc
 
 const PHONE = '+26878422613';
 const AUTHOR_PHONE = '+26878400101';
+
+// Exercise the real session validator with the same versioned tokens as login.
+async function signBuyerToken(phone: string): Promise<string> {
+  const buyer = await Buyer.findOne({ phone });
+  if (!buyer) throw new Error(`Missing story buyer fixture: ${phone}`);
+  return BuyerAuthService.signToken(buyer);
+}
 
 describe('Stories API', () => {
   beforeAll(connectTestDb);
@@ -38,7 +45,7 @@ describe('Stories API', () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
       const res = await request(app)
         .post('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(201);
 
@@ -57,14 +64,14 @@ describe('Stories API', () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Suspended Poster', socialSuspendedAt: new Date() });
       await request(app)
         .post('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(403);
 
       await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'OK Poster' });
       await request(app)
         .post('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(AUTHOR_PHONE)}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(201);
     });
@@ -75,13 +82,13 @@ describe('Stories API', () => {
       const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
       const create = await request(app)
         .post('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(201);
 
       const res = await request(app)
         .post(`/api/social/stories/${create.body.data.storyId}/finalize`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
 
       expect(res.body.data.media.status).toBe('ready');
@@ -100,7 +107,7 @@ describe('Stories API', () => {
 
       await request(app)
         .post(`/api/social/stories/${story.id}/finalize`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(403);
     });
 
@@ -116,7 +123,7 @@ describe('Stories API', () => {
       await FollowService.follow(viewer, 'buyer', String(author._id));
       const story = await seedReadyStory(String(author._id));
 
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
       const first = await request(app).get('/api/social/stories').set('Authorization', auth).expect(200);
       expect(first.body.data.stories).toHaveLength(1);
       expect(first.body.data.stories[0].seen).toBe(false);
@@ -136,7 +143,7 @@ describe('Stories API', () => {
 
       const res = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
       expect(res.body.data.stories).toEqual([]);
     });
@@ -148,7 +155,7 @@ describe('Stories API', () => {
 
       const res = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
       expect(res.body.data.stories).toHaveLength(1);
       expect(res.body.data.stories[0].author.id).toBe(String(stranger._id));
@@ -162,7 +169,7 @@ describe('Stories API', () => {
 
       const res = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
       expect(res.body.data.stories).toEqual([]);
     });
@@ -182,7 +189,7 @@ describe('Stories API', () => {
 
       const res = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
       expect(res.body.data.stories[0].items[0].durationSec).toBe(5);
     });
@@ -202,7 +209,7 @@ describe('Stories API', () => {
 
       const res = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
       expect(res.body.data.stories[0].items[0].durationSec).toBe(30);
     });
@@ -215,19 +222,19 @@ describe('Stories API', () => {
 
       await request(app)
         .post(`/api/social/stories/${story.id}/seen`)
-        .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(AUTHOR_PHONE)}`)
         .expect(200);
 
       const mine = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
       expect(mine.body.data.stories[0].isOwn).toBe(true);
       expect(mine.body.data.stories[0].items[0].viewerCount).toBe(1);
 
       const theirs = await request(app)
         .get('/api/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(AUTHOR_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(AUTHOR_PHONE)}`)
         .expect(200);
       expect(theirs.body.data.stories[0].isOwn).toBe(false);
       expect(theirs.body.data.stories[0].items[0].viewerCount).toBeUndefined();
@@ -244,7 +251,7 @@ describe('Stories API', () => {
     it('does NOT record the author viewing their own story', async () => {
       const owner = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
       const story = await seedReadyStory(String(owner._id));
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
 
       await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', auth).expect(200);
 
@@ -265,7 +272,7 @@ describe('Stories API', () => {
       const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker' });
       const story = await seedReadyStory(String(author._id));
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
 
       const liked = await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', auth).expect(200);
       expect(liked.body.data.liked).toBe(true);
@@ -284,7 +291,7 @@ describe('Stories API', () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker' });
       await request(app)
         .post('/api/social/stories/000000000000000000000000/like')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(404);
     });
 
@@ -292,8 +299,8 @@ describe('Stories API', () => {
       const author = await Buyer.create({ phone: AUTHOR_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Author' });
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Liker' });
       const story = await seedReadyStory(String(author._id));
-      const likerAuth = `Bearer ${signBuyerToken(PHONE)}`;
-      const authorAuth = `Bearer ${signBuyerToken(AUTHOR_PHONE)}`;
+      const likerAuth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const authorAuth = `Bearer ${await signBuyerToken(AUTHOR_PHONE)}`;
 
       await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', likerAuth).expect(200);
 
@@ -312,12 +319,12 @@ describe('Stories API', () => {
       const second = await Buyer.create({ phone: '+26878400403', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Second Liker', username: 'secondl' });
       const story = await seedReadyStory(String(owner._id));
 
-      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', `Bearer ${signBuyerToken('+26878400402')}`).expect(200);
-      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', `Bearer ${signBuyerToken('+26878400403')}`).expect(200);
+      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', `Bearer ${await signBuyerToken('+26878400402')}`).expect(200);
+      await request(app).post(`/api/social/stories/${story.id}/like`).set('Authorization', `Bearer ${await signBuyerToken('+26878400403')}`).expect(200);
 
       const res = await request(app)
         .get(`/api/social/stories/${story.id}/likers`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
 
       expect(res.body.data.count).toBe(2);
@@ -334,7 +341,7 @@ describe('Stories API', () => {
 
       await request(app)
         .get(`/api/social/stories/${story.id}/likers`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(403);
     });
 
@@ -342,7 +349,7 @@ describe('Stories API', () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
       await request(app)
         .get('/api/social/stories/000000000000000000000000/likers')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(404);
     });
 
@@ -360,12 +367,12 @@ describe('Stories API', () => {
       await FollowService.follow(first, 'buyer', String(owner._id));
       await FollowService.follow(second, 'buyer', String(owner._id));
 
-      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', `Bearer ${signBuyerToken('+26878400202')}`).expect(200);
-      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', `Bearer ${signBuyerToken('+26878400303')}`).expect(200);
+      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', `Bearer ${await signBuyerToken('+26878400202')}`).expect(200);
+      await request(app).post(`/api/social/stories/${story.id}/seen`).set('Authorization', `Bearer ${await signBuyerToken('+26878400303')}`).expect(200);
 
       const res = await request(app)
         .get(`/api/social/stories/${story.id}/viewers`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
 
       expect(res.body.data.count).toBe(2);
@@ -381,7 +388,7 @@ describe('Stories API', () => {
 
       await request(app)
         .get(`/api/social/stories/${story.id}/viewers`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(403);
     });
 
@@ -389,7 +396,7 @@ describe('Stories API', () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
       await request(app)
         .get('/api/social/stories/000000000000000000000000/viewers')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(404);
     });
 
@@ -405,7 +412,7 @@ describe('Stories API', () => {
 
       await request(app)
         .delete(`/api/social/stories/${story.id}`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(200);
 
       expect(await Story.findById(story.id)).toBeNull();
@@ -418,7 +425,7 @@ describe('Stories API', () => {
 
       await request(app)
         .delete(`/api/social/stories/${story.id}`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(403);
       expect(await Story.findById(story.id)).not.toBeNull();
     });
@@ -427,7 +434,7 @@ describe('Stories API', () => {
       await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Owner' });
       await request(app)
         .delete('/api/social/stories/000000000000000000000000')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
         .expect(404);
     });
 
