@@ -2,15 +2,15 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { signVendorSessionToken, signStaffSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { extractPdfText } from '@/__tests__/helpers/pdfText';
 import { StockService } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
+import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
@@ -24,7 +24,8 @@ async function ownedCashlessEvent() {
   // assertions need a known name, and widening SeedPublishedEventOptions for
   // one suite would touch every caller.
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true, name: 'Ocean Summer Vibes' } });
-  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+  await Vendor.create({ _id: vendorId, businessName: 'Owner', password: 'secret123' });
+  const token = await signVendorSessionToken(String(vendorId));
   return { eventId, vendorId, token };
 }
 
@@ -68,22 +69,24 @@ describe('GET /api/tickets/events/:id/stock/reconciliation.pdf', () => {
   });
 
   it('rejects a caller without VIEW_REVENUE', async () => {
-    const { eventId } = await ownedCashlessEvent();
-    const token = signVendorToken('anyone', { permissions: [] });
+    const { eventId, vendorId } = await ownedCashlessEvent();
+    const token = await signStaffSessionToken(vendorId, []);
     const res = await request(app).get(url(eventId)).set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
   });
 
   it("forbids another vendor's event", async () => {
     const { eventId } = await ownedCashlessEvent();
-    const token = signVendorToken('someone-else', { permissions: [TicketsPermission.VIEW_REVENUE] });
+    const other = await Vendor.create({ businessName: 'Other', password: 'secret123' });
+    const token = await signVendorSessionToken(String(other._id));
     const res = await request(app).get(url(eventId)).set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
   });
 
   it('400s a non-cashless event', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({}); // cashless stays false
-    const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+    await Vendor.create({ _id: vendorId, businessName: 'Owner', password: 'secret123' });
+    const token = await signVendorSessionToken(String(vendorId));
     const res = await request(app).get(url(eventId)).set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(400);
   });
