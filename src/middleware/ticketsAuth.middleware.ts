@@ -410,3 +410,20 @@ export const requireSuperAdminOrAnyPermission = (permissions: TicketsPermission[
     return requireAny(req, res, next);
   };
 };
+
+/** Participant-only surface: keep buyer authentication and all unrelated
+ * permission gates unchanged; providers authenticate their live vendor session. */
+export const authenticatePlanParticipant = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  await authenticateBuyerOrOrganizer(req, res, async (error?: unknown) => {
+    if (error) return next(error);
+    try {
+      if ((req as any).ticketsUser.userType === 'buyer') return next();
+      const { resolvePlanParticipant } = await import('@utils/planParticipant.util');
+      if (!(await resolvePlanParticipant(req))) {
+        ApiResponseUtil.forbidden(res, 'This account cannot participate in plans or Share&Earn');
+        return;
+      }
+      next();
+    } catch (err) { next(err); }
+  });
+};

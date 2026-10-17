@@ -1,15 +1,25 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { resolvePlanParticipant } from '@utils/planParticipant.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { EventPlanService } from '@services/eventPlan.service';
 
 async function viewerId(req: Request): Promise<string | null> {
-  const buyer = await resolveBuyerFromRequest(req);
+  const buyer = await resolvePlanParticipant(req);
   return buyer ? String(buyer._id) : null;
 }
 
 export class EventPlanController {
+  static async participant(req: Request, res: Response): Promise<any> {
+    try {
+      const participant = await resolvePlanParticipant(req);
+      if (!participant) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      return ApiResponseUtil.success(res, { id: String(participant._id) });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load your plan identity');
+    }
+  }
+
   /** GET /api/social/plans/event/:eventId */
   static async listForEvent(req: Request, res: Response): Promise<any> {
     try {
@@ -24,7 +34,7 @@ export class EventPlanController {
   /** POST /api/social/plans */
   static async create(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const plan = await EventPlanService.create(buyer, req.body || {});
       const detail = await EventPlanService.getDetail(String(plan._id), String(buyer._id));
@@ -37,7 +47,7 @@ export class EventPlanController {
   /** GET /api/social/plans/mine?section=upcoming|invitations|past */
   static async mine(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const section = String(req.query['section'] || 'upcoming') as 'upcoming' | 'invitations' | 'past';
       if (!['upcoming', 'invitations', 'past'].includes(section)) return ApiResponseUtil.error(res, 'Invalid section', 400);
@@ -62,7 +72,7 @@ export class EventPlanController {
   /** GET /api/social/plans/:id/pending — admin-only invited+requested rows. */
   static async pending(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const pending = await EventPlanService.getPending(buyer, String(req.params['id'] || ''));
       return ApiResponseUtil.success(res, pending);
@@ -74,7 +84,7 @@ export class EventPlanController {
   /** PATCH /api/social/plans/:id */
   static async update(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.update(buyer, String(req.params['id'] || ''), req.body || {});
       const detail = await EventPlanService.getDetail(String(req.params['id'] || ''), String(buyer._id));
@@ -87,7 +97,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/cover/presign { ext, contentType } */
   static async presignCover(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const result = await EventPlanService.presignCoverUpload(
         buyer,
@@ -104,7 +114,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/cover/finalize { rawKey } */
   static async finalizeCover(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.finalizeCoverUpload(buyer, String(req.params['id'] || ''), String(req.body?.rawKey || ''));
       const detail = await EventPlanService.getDetail(String(req.params['id'] || ''), String(buyer._id));
@@ -117,7 +127,7 @@ export class EventPlanController {
   /** DELETE /api/social/plans/:id/cover */
   static async removeCover(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.removeCover(buyer, String(req.params['id'] || ''));
       const detail = await EventPlanService.getDetail(String(req.params['id'] || ''), String(buyer._id));
@@ -130,7 +140,7 @@ export class EventPlanController {
   /** PATCH /api/social/plans/:id/visibility { visibility, confirmed } */
   static async changeVisibility(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.changeVisibility(
         buyer,
@@ -148,7 +158,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/cancel */
   static async cancel(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.cancel(buyer, String(req.params['id'] || ''));
       return ApiResponseUtil.success(res, { ok: true }, 'Plan cancelled');
@@ -160,7 +170,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/join */
   static async join(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.requestToJoin(buyer, String(req.params['id'] || ''));
       const detail = await EventPlanService.getDetail(String(req.params['id'] || ''), String(buyer._id));
@@ -173,7 +183,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/leave */
   static async leave(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.leave(buyer, String(req.params['id'] || ''));
       return ApiResponseUtil.success(res, { ok: true }, 'You left the plan');
@@ -185,7 +195,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/invite { buyerIds: string[] } */
   static async invite(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const buyerIds = Array.isArray(req.body?.buyerIds) ? req.body.buyerIds.map(String) : [];
       const result = await EventPlanService.inviteMembers(buyer, String(req.params['id'] || ''), buyerIds);
@@ -198,7 +208,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/invite/:memberId/cancel */
   static async cancelInvite(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.cancelInvite(buyer, String(req.params['id'] || ''), String(req.params['memberId'] || ''));
       return ApiResponseUtil.success(res, { ok: true }, 'Invitation cancelled');
@@ -210,7 +220,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/members/:memberId/remove */
   static async removeMember(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.removeMember(buyer, String(req.params['id'] || ''), String(req.params['memberId'] || ''));
       return ApiResponseUtil.success(res, { ok: true }, 'Member removed');
@@ -222,7 +232,7 @@ export class EventPlanController {
   /** POST /api/social/plans/invites/:memberId/accept | decline */
   static async respondToInvite(req: Request, res: Response, accept: boolean): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.respondToInvite(buyer, String(req.params['memberId'] || ''), accept);
       return ApiResponseUtil.success(res, { status: accept ? 'accepted' : 'declined' });
@@ -242,7 +252,7 @@ export class EventPlanController {
   /** POST /api/social/plans/requests/:memberId/approve | decline */
   static async respondToRequest(req: Request, res: Response, approve: boolean): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.respondToRequest(buyer, String(req.params['memberId'] || ''), approve);
       return ApiResponseUtil.success(res, { status: approve ? 'accepted' : 'declined' });
@@ -262,7 +272,7 @@ export class EventPlanController {
   /** POST /api/social/plans/:id/attendance { status } */
   static async vote(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanService.vote(buyer, String(req.params['id'] || ''), req.body?.status);
       return ApiResponseUtil.success(res, { ok: true });
@@ -276,7 +286,7 @@ export class EventPlanController {
   static react(type: 'like' | 'save') {
     return async (req: Request, res: Response): Promise<any> => {
       try {
-        const buyer = await resolveBuyerFromRequest(req);
+        const buyer = await resolvePlanParticipant(req);
         if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
         const r = await EventPlanService.toggleReaction(String(req.params['id'] || ''), { type: 'buyer', id: String(buyer._id) }, type);
         return ApiResponseUtil.success(res, r);
