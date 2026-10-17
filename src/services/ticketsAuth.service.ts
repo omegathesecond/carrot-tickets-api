@@ -1016,6 +1016,27 @@ export class TicketsAuthService {
     };
   }
 
+  /** Organizer logout also invalidates the separate public-site SSO session.
+   * A single atomic version change revokes access, refresh and handoff tokens
+   * across organizer devices. Other account types retain refresh-only logout. */
+  static async logout(accessToken?: string, refreshToken?: string): Promise<void> {
+    if (refreshToken !== undefined && (typeof refreshToken !== 'string' || !refreshToken)) {
+      throw new HttpError(400, 'Refresh token must be a non-empty string.');
+    }
+    // Refresh credentials also permit logout after the access token expires.
+    const stored = refreshToken ? await RefreshToken.findOne({ token: refreshToken, isRevoked: false, expiresAt: { $gt: new Date() } }) : null;
+    const identity = stored || (accessToken ? await this.verifyAndResolveSession(accessToken) : null);
+    if (!identity) throw new SessionAuthError('A valid session is required to log out.');
+    if (identity.userType === 'vendor') {
+      await Vendor.updateOne(
+        { _id: identity.vendorId, authVersion: identity.authVersion },
+        { $inc: { authVersion: 1 } },
+      );
+    } else if (refreshToken) {
+      await this.revokeRefreshToken(refreshToken);
+    }
+  }
+
   /**
    * Revoke refresh token (for logout)
    */

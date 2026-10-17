@@ -232,11 +232,7 @@ export class TicketsController {
    */
   static async logout(req: Request, res: Response): Promise<any> {
     try {
-      const { refreshToken } = req.body;
-
-      if (refreshToken) {
-        await TicketsAuthService.revokeRefreshToken(refreshToken);
-      }
+      await TicketsAuthService.logout(req.headers.authorization?.replace(/^Bearer /, ""), req.body?.refreshToken);
 
       ApiResponseUtil.success(res, null, 'Logged out successfully');
     } catch (error: any) {
