@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '@/app';
@@ -8,7 +9,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-const superAdmin = () => jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [], isSuperAdmin: true }, JWT_SECRET);
+const superAdmin = async () => await signAdminSessionToken();
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -30,7 +31,7 @@ it('lists sold + checked-in tickets for the event, searchable', async () => {
   const other = await seedPublishedEvent({ vendorId: new mongoose.Types.ObjectId() });
   await seedTicket(other.eventId, other.vendorId); // other event, excluded
 
-  const auth = { Authorization: `Bearer ${superAdmin()}` };
+  const auth = { Authorization: `Bearer ${await superAdmin()}` };
   const all = await request(app).get(`/api/tickets/wristbands/tickets?eventId=${eventId}`).set(auth);
   expect(all.status).toBe(200);
   expect(all.body.data).toHaveLength(2);
@@ -44,7 +45,7 @@ it('lists sold + checked-in tickets for the event, searchable', async () => {
 
 it('403s without print_wristbands', async () => {
   const { eventId } = await seedPublishedEvent({});
-  const t = jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [], vendorId: new mongoose.Types.ObjectId().toHexString() }, JWT_SECRET);
+  const t = await seedVendorSessionToken(new mongoose.Types.ObjectId().toHexString(), { permissions: [] });
   const res = await request(app).get(`/api/tickets/wristbands/tickets?eventId=${eventId}`).set('Authorization', `Bearer ${t}`);
   expect(res.status).toBe(403);
 });

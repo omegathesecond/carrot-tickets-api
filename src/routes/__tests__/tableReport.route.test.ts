@@ -3,12 +3,12 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken, signSuperAdminToken } from '@/__tests__/helpers/auth';
+import { signVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
 import { EVENT, seedStallAndTable } from '@/__tests__/helpers/tables';
+import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { TableService } from '@services/table.service';
 import { WalletService } from '@services/wallet.service';
 
@@ -36,13 +36,13 @@ afterAll(disconnectTestDb);
  *   - one VOIDED table worth 3000, reason 'walked out'
  */
 async function seedEventWithTables() {
-  const vendorId = new mongoose.Types.ObjectId();
+  const vendorId = (await Vendor.create({ businessName: 'Owner', password: 'secret123' }))._id;
   const future = new Date(Date.now() + 7 * 864e5);
   await Event.create({
     _id: EVENT, vendorId, name: 'Fest', venue: 'V', eventDate: future, startTime: future,
     endTime: future, status: EventStatus.PUBLISHED, cashless: true, ticketTypes: [],
   });
-  const organizerToken = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+  const organizerToken = await signVendorSessionToken(String(vendorId));
 
   // OPEN: 2 x 3000 = 6000, never settled or voided.
   const openStall = await seedStallAndTable({ price: 3000, onHand: 10 });
@@ -94,9 +94,8 @@ describe('GET /api/tickets/events/:eventId/tables', () => {
 
   it('403s another organizer', async () => {
     const { eventId } = await seedEventWithTables();
-    const stranger = signVendorToken(new mongoose.Types.ObjectId().toString(), {
-      permissions: [TicketsPermission.VIEW_REVENUE],
-    });
+    const other = await Vendor.create({ businessName: 'Stranger', password: 'secret123' });
+    const stranger = await signVendorSessionToken(String(other._id));
     const res = await request(app).get(`/api/tickets/events/${eventId}/tables`)
       .set('Authorization', `Bearer ${stranger}`);
     expect(res.status).toBe(403);
@@ -107,9 +106,8 @@ describe('GET /api/tickets/events/:eventId/tables', () => {
   // this path — not merely the right status code.
   it('leaks no table data to a stranger organizer, not just the right status', async () => {
     const { eventId } = await seedEventWithTables();
-    const stranger = signVendorToken(new mongoose.Types.ObjectId().toString(), {
-      permissions: [TicketsPermission.VIEW_REVENUE],
-    });
+    const other = await Vendor.create({ businessName: 'Stranger', password: 'secret123' });
+    const stranger = await signVendorSessionToken(String(other._id));
     const res = await request(app).get(`/api/tickets/events/${eventId}/tables`)
       .set('Authorization', `Bearer ${stranger}`);
     expect(res.status).toBe(403);
@@ -119,7 +117,7 @@ describe('GET /api/tickets/events/:eventId/tables', () => {
   it('lets Carrot staff read it on an organizer they do not own', async () => {
     const { eventId } = await seedEventWithTables();
     const res = await request(app).get(`/api/tickets/events/${eventId}/tables`)
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`);
     expect(res.status).toBe(200);
   });
 });

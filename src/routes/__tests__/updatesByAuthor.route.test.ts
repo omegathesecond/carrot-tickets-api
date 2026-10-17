@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Update } from '@models/update.model';
 
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn(), reconcileStuckUpdates: jest.fn() }));
@@ -95,12 +95,12 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
     const update = await Update.create({ authorType: 'vendor', authorId, kind: 'image', caption: 'x', media: [readyImageMedia] });
     await request(app)
       .post(`/api/tickets/updates/${update.id}/like`)
-      .set('Authorization', `Bearer ${signVendorToken(viewerId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(viewerId)}`)
       .expect(200);
 
     const res = await request(app)
       .get(`/api/public/updates/by/vendor/${authorId.toHexString()}`)
-      .set('Authorization', `Bearer ${signVendorToken(viewerId)}`);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(viewerId)}`);
     expect(res.status).toBe(200);
     expect(res.body.data.items[0].viewerReactions).toEqual({ liked: true, saved: false });
   });
@@ -122,7 +122,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
 
     const res = await request(app)
       .get(`/api/public/updates/by/vendor/${vendorId.toHexString()}`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId.toHexString())}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId.toHexString())}`)
       .expect(200);
 
     expect(res.body.data.items[0].viewerIsAuthor).toBe(true);
@@ -138,7 +138,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
 
     const res = await request(app)
       .get(`/api/public/updates/by/vendor/${author.toHexString()}`)
-      .set('Authorization', `Bearer ${signVendorToken(other.toHexString())}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(other.toHexString())}`)
       .expect(200);
 
     expect(res.body.data.items[0].viewerIsAuthor).toBe(false);

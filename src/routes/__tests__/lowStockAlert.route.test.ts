@@ -8,7 +8,7 @@ import app from '@/app';
 import { JWT_SECRET } from '@config/jwt.config';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -53,7 +53,7 @@ async function setup() {
   const product = await Product.create({ eventId, name: 'Beer', category: 'beer', price: 100 });
   await StockService.applyMovement({ eventId, merchantId: merchant._id, productId: product._id, delta: 6, reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: 'v1' });
   // set threshold 5 via the organizer endpoint
-  const vToken = signVendorToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
+  const vToken = await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
   await request(app).patch(`/api/tickets/events/${eventId}/stock/threshold`).set('Authorization', `Bearer ${vToken}`).send({ merchantId: String(merchant._id), productId: String(product._id), lowStockThreshold: 5 });
   return {
     eventId: String(eventId), vendorId: String(vendorId), bandUid, merchantId: String(merchant._id),

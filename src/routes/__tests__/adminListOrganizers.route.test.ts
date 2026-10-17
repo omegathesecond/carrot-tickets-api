@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
-import { signSuperAdminToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { OperatorType } from '@interfaces/vendor.interface';
 
@@ -28,7 +28,7 @@ describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory',
     // Unfiltered list includes both, with the new fields present.
     const all = await request(app)
       .get('/api/tickets/admin/organizers')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`);
     expect(all.status).toBe(200);
     const servicesRow = all.body.data.organizers.find((o: any) => o.businessName === 'Luxe Decor');
     expect(servicesRow.operatorType).toBe('services');
@@ -40,7 +40,7 @@ describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory',
     // Filtered by operatorType=services returns only the services vendor.
     const filtered = await request(app)
       .get('/api/tickets/admin/organizers?operatorType=services')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`);
     expect(filtered.status).toBe(200);
     expect(filtered.body.data.organizers).toHaveLength(1);
     expect(filtered.body.data.organizers[0].businessName).toBe('Luxe Decor');
@@ -53,7 +53,7 @@ describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory',
     });
     const res = await request(app)
       .get('/api/tickets/admin/organizers?operatorType=bogus')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`);
     expect(res.status).toBe(200);
     expect(res.body.data.organizers).toHaveLength(1);
   });

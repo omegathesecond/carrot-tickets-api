@@ -1,6 +1,6 @@
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { Channel } from '@models/channel.model';
@@ -43,7 +43,7 @@ describe('channel handlers', () => {
   afterAll(disconnectTestDb);
 
   async function client(phone: string): Promise<ClientSocket> {
-    const c = await connectClient(rt.port, signBuyerToken(phone));
+    const c = await connectClient(rt.port, await signBuyerSessionToken(phone));
     clients.push(c);
     return c;
   }

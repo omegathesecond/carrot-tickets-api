@@ -7,7 +7,7 @@
  * Usage: MONGODB_URI='<uri>' npm run migrate:update-media-array
  */
 import mongoose from 'mongoose';
-import type { Db } from 'mongodb';
+import type { mongo } from 'mongoose';
 import { getDatabaseURI } from '../src/config/database.config';
 
 // Selects docs whose `media` field's own BSON type is exactly "object" (the
@@ -19,7 +19,7 @@ import { getDatabaseURI } from '../src/config/database.config';
 // on every re-run. `{ $type: '$media' }` inside $expr reports the field's
 // own top-level type ("object" | "array" | "missing" | "null" | ...) with no
 // element traversal, so already-migrated docs are correctly excluded.
-export async function migrateMediaToArray(db: Db): Promise<{ migrated: number }> {
+export async function migrateMediaToArray(db: mongo.Db): Promise<{ migrated: number }> {
   const res = await db
     .collection('updates')
     .updateMany({ $expr: { $eq: [{ $type: '$media' }, 'object'] } }, [

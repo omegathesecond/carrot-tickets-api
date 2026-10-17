@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '@/app';
@@ -5,7 +6,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-const superAdmin = () => jwt.sign({ app: 'tickets', userType: 'vendor', role: 'tickets_owner', permissions: [], isSuperAdmin: true }, JWT_SECRET);
+const superAdmin = async () => await signAdminSessionToken();
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -13,7 +14,7 @@ afterAll(disconnectTestDb);
 
 it('batch-issues and lists batches with ticket codes', async () => {
   const { eventId, ticketTypeId } = await seedPublishedEvent({ capacity: 30 });
-  const auth = { Authorization: `Bearer ${superAdmin()}` };
+  const auth = { Authorization: `Bearer ${await superAdmin()}` };
 
   const issued = await request(app).post('/api/tickets/wristbands/batch-issue').set(auth)
     .send({ eventId, ticketTypeId, quantity: 10 });
@@ -33,7 +34,7 @@ it('batch-issues and lists batches with ticket codes', async () => {
 it('rejects quantity outside 1..500 (400)', async () => {
   const { eventId, ticketTypeId } = await seedPublishedEvent({ capacity: 30 });
   const res = await request(app).post('/api/tickets/wristbands/batch-issue')
-    .set('Authorization', `Bearer ${superAdmin()}`)
+    .set('Authorization', `Bearer ${await superAdmin()}`)
     .send({ eventId, ticketTypeId, quantity: 0 });
   expect(res.status).toBe(400);
 });
@@ -41,14 +42,14 @@ it('rejects quantity outside 1..500 (400)', async () => {
 it('oversell surfaces as a 400 with the availability message', async () => {
   const { eventId, ticketTypeId } = await seedPublishedEvent({ capacity: 3 });
   const res = await request(app).post('/api/tickets/wristbands/batch-issue')
-    .set('Authorization', `Bearer ${superAdmin()}`)
+    .set('Authorization', `Bearer ${await superAdmin()}`)
     .send({ eventId, ticketTypeId, quantity: 10 });
   expect(res.status).toBe(400);
 });
 
 it('requires print_wristbands (403 for plain organizer)', async () => {
   const { eventId, ticketTypeId } = await seedPublishedEvent({});
-  const t = jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [], vendorId: eventId.slice(0, 24) }, JWT_SECRET);
+  const t = await seedVendorSessionToken(eventId.slice(0, 24), { permissions: [] });
   const res = await request(app).post('/api/tickets/wristbands/batch-issue')
     .set('Authorization', `Bearer ${t}`).send({ eventId, ticketTypeId, quantity: 1 });
   expect(res.status).toBe(403);

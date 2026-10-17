@@ -1,6 +1,6 @@
 // api/src/routes/__tests__/cashlessReconciliation.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -18,14 +18,10 @@ import { LedgerAccountType, FloatTag } from '@interfaces/ledger.interface';
  * had no way to surface.
  */
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64c000000000000000000a01';
 
-function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:view_revenue'], isSuperAdmin: !!opts.isSuperAdmin, vendorId: opts.vendorId,
-  }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
+  return opts.isSuperAdmin ? signAdminSessionToken() : seedVendorSessionToken(opts.vendorId!);
 }
 
 async function eventFor(vendorId: string, opts: { cashless: boolean }) {
@@ -69,7 +65,7 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
     const eventId = await eventFor(VENDOR_A, { cashless: true });
 
     const res = await request(app).get(url(eventId))
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
 
     expect(res.status).toBe(403);
     expect(res.body.message).toBe('Super admin access required');
@@ -77,7 +73,7 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
 
   it('returns 404 for an event that does not exist', async () => {
     const res = await request(app).get(url(new mongoose.Types.ObjectId().toString()))
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(404);
     // Pinned to the guard's own message so this cannot pass against the
@@ -89,7 +85,7 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
     const eventId = await eventFor(VENDOR_A, { cashless: false });
 
     const res = await request(app).get(url(eventId))
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(400);
     expect(res.body.message).toBe('Event is not cashless');
@@ -101,13 +97,13 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
     await journalTopup(eventId, walletId, 5000);
 
     const res = await request(app).get(url(eventId))
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.event).toEqual({ id: eventId, name: 'Festival' });
     expect(res.body.data.ok).toBe(true);
     expect(res.body.data.invariant).toEqual({
-      ok: true, float: 5000, walletsOwed: 5000, merchantsOwed: 0, feesEarned: 0, drift: 0,
+      ok: true, float: 5000, walletsOwed: 5000, merchantsOwed: 0, organizerOwed: 0, feesEarned: 0, drift: 0,
     });
     expect(res.body.data.journal).toEqual({ ok: true, unbalancedTxnIds: [] });
     expect(res.body.data.wallets).toEqual({ ok: true, checked: 1, drifted: [], invariantViolations: [], unknownWalletRefs: [] });
@@ -119,7 +115,7 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
     await journalTopup(eventId, walletId, 4000);
 
     const res = await request(app).get(url(eventId))
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.ok).toBe(false);
@@ -146,7 +142,7 @@ describe('GET /api/tickets/events/:eventId/cashless/reconciliation', () => {
     });
 
     const res = await request(app).get(url(eventId))
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.ok).toBe(false);

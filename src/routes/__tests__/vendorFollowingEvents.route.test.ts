@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -44,7 +44,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
 
     const res = await request(app)
       .get('/api/tickets/social/me/following/events')
-      .set('Authorization', `Bearer ${signVendorToken(String(brandId))}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(brandId))}`)
       .expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Soon Show', 'Later Show']);
   });
@@ -64,7 +64,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
 
     const res = await request(app)
       .get('/api/tickets/social/me/following/events')
-      .set('Authorization', `Bearer ${signVendorToken(String(brandId))}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(brandId))}`)
       .expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Published Future']);
   });
@@ -82,7 +82,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
 
     const res = await request(app)
       .get('/api/tickets/social/me/following/events')
-      .set('Authorization', `Bearer ${signVendorToken(String(sharedId))}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(sharedId))}`)
       .expect(200);
     expect(res.body.data.events).toEqual([]);
   });
@@ -90,7 +90,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
   it('returns an empty list when the brand follows no organizers', async () => {
     const res = await request(app)
       .get('/api/tickets/social/me/following/events')
-      .set('Authorization', `Bearer ${signVendorToken(String(new mongoose.Types.ObjectId()))}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(new mongoose.Types.ObjectId()))}`)
       .expect(200);
     expect(res.body.data.events).toEqual([]);
   });
@@ -99,7 +99,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
     await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', name: 'Buyer' });
     await request(app)
       .get('/api/tickets/social/me/following/events')
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(401);
     await request(app).get('/api/tickets/social/me/following/events').expect(401);
   });

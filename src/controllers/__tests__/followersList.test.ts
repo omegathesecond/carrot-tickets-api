@@ -1,13 +1,13 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken, signVendorSessionToken } from '@/__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Follow } from '@models/follow.model';
 
 const ME_PHONE = '+26878422613';
-const auth = (phone: string) => ({ Authorization: `Bearer ${signBuyerToken(phone)}` });
+const auth = async (phone: string) => ({ Authorization: `Bearer ${await signBuyerSessionToken(phone)}` });
 
 describe('GET /api/social/followers/:targetType/:targetId and /api/social/following/:targetType/:targetId', () => {
   beforeAll(async () => {
@@ -31,7 +31,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
 
     const res = await request(app)
       .get(`/api/social/followers/buyer/${target._id}`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
 
     const rows = res.body.data;
@@ -66,7 +66,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
 
     const res = await request(app)
       .get(`/api/social/following/buyer/${target._id}`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
 
     const rows = res.body.data;
@@ -89,7 +89,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
 
     const res = await request(app)
       .get(`/api/social/followers/organizer/${org._id}`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
 
     expect(res.body.data).toEqual([
@@ -105,7 +105,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
 
     const res = await request(app)
       .get(`/api/social/following/organizer/${org._id}`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
 
     expect(res.body.data).toEqual([
@@ -125,11 +125,11 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
 
     const page1 = await request(app)
       .get(`/api/social/followers/buyer/${target._id}?limit=2&page=1`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
     const page2 = await request(app)
       .get(`/api/social/followers/buyer/${target._id}?limit=2&page=2`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
 
     expect(page1.body.data).toHaveLength(2);
@@ -143,7 +143,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
     await Buyer.create({ phone: ME_PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
     await request(app)
       .get('/api/social/followers/nonsense/507f1f77bcf86cd799439011')
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(400);
   });
 
@@ -170,9 +170,10 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
     const follower = await Buyer.create({ phone: '+26878000002', password: 'secret1', name: 'FollowerA', username: 'follower_a' });
     await Follow.create({ followerType: 'buyer', followerId: follower._id, targetType: 'buyer', targetId: target._id });
 
+    const brand = await Vendor.create({ businessName: 'Viewer', password: 'secret123' });
     const res = await request(app)
       .get(`/api/social/followers/buyer/${target._id}`)
-      .set({ Authorization: `Bearer ${signVendorToken('507f1f77bcf86cd799439012')}` })
+      .set({ Authorization: `Bearer ${await signVendorSessionToken(String(brand._id))}` })
       .expect(200);
     expect(res.body.data).toEqual([
       { id: String(follower._id), type: 'buyer', username: 'follower_a', name: 'FollowerA', avatarUrl: null, isFollowing: false },
@@ -188,7 +189,7 @@ describe('GET /api/social/followers/:targetType/:targetId and /api/social/follow
 
     const res = await request(app)
       .get(`/api/social/followers/buyer/${target._id}`)
-      .set(auth(ME_PHONE))
+      .set(await auth(ME_PHONE))
       .expect(200);
     expect(res.body.data).toEqual([
       { id: String(follower._id), type: 'buyer', username: 'follower_a', name: 'FollowerA', avatarUrl: null, isFollowing: true },

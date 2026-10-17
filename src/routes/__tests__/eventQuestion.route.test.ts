@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerSessionToken as signBuyerToken, signVendorSessionToken as signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken as signBuyerSessionToken, signVendorSessionToken as seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 
@@ -37,7 +37,7 @@ describe('event Q&A routes', () => {
     await seedBuyer();
     await request(app)
       .post(`/api/community/${eventId}/questions`)
-      .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ body: '   ' })
       .expect(400);
   });
@@ -45,7 +45,7 @@ describe('event Q&A routes', () => {
   it('posts a question as a buyer, and it appears in GET with author + viewerHasLiked:false', async () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();
-    const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
@@ -75,7 +75,7 @@ describe('event Q&A routes', () => {
 
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
-      .set('Authorization', `Bearer ${await signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .send({ body: 'Gates open at 6pm.' })
       .expect(201);
 
@@ -88,7 +88,7 @@ describe('event Q&A routes', () => {
     await seedBuyer();
     await request(app)
       .post('/api/community/000000000000000000000000/questions')
-      .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ body: 'Anyone there?' })
       .expect(404);
   });
@@ -96,7 +96,7 @@ describe('event Q&A routes', () => {
   it('401s an anonymous reply and like', async () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();
-    const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
       .set('Authorization', auth)
@@ -112,8 +112,8 @@ describe('event Q&A routes', () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();
     const replier = await seedBuyer('+26878400002', 'Replier');
-    const auth = `Bearer ${await signBuyerToken(PHONE)}`;
-    const replierAuth = `Bearer ${await signBuyerToken('+26878400002')}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
+    const replierAuth = `Bearer ${await signBuyerSessionToken('+26878400002')}`;
 
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
@@ -145,7 +145,7 @@ describe('event Q&A routes', () => {
   it('400s an empty-body reply', async () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();
-    const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
       .set('Authorization', auth)
@@ -162,7 +162,7 @@ describe('event Q&A routes', () => {
   it('toggles a like on then off, flipping likeCount and viewerHasLiked', async () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();
-    const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
       .set('Authorization', auth)
@@ -198,7 +198,7 @@ describe('event Q&A routes', () => {
 
   it('404s replying to and liking a non-existent question', async () => {
     await seedBuyer();
-    const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     await request(app)
       .post('/api/community/questions/000000000000000000000000/replies')
       .set('Authorization', auth)
@@ -219,14 +219,14 @@ describe('event Q&A routes', () => {
       await seedBuyer();
       await request(app)
         .post('/api/community/questions')
-        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .send({ body: '   ' })
         .expect(400);
     });
 
     it('posts a general question with eventId: null, appears in the cross-event feed the same way', async () => {
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
       const created = await request(app)
         .post('/api/community/questions')
@@ -246,7 +246,7 @@ describe('event Q&A routes', () => {
     it("doesn't appear under any specific event's Q&A list", async () => {
       const { eventId } = await seedPublishedEvent();
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       await request(app).post('/api/community/questions').set('Authorization', auth).send({ body: 'General post' }).expect(201);
 
       const eventList = await request(app).get(`/api/community/${eventId}/questions`).expect(200);
@@ -255,7 +255,7 @@ describe('event Q&A routes', () => {
 
     it('supports reply and like on a general post, same as an event-scoped one', async () => {
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       const created = await request(app)
         .post('/api/community/questions')
         .set('Authorization', auth)
@@ -285,7 +285,7 @@ describe('event Q&A routes', () => {
     it('GET /api/public/questions/general returns only general posts, never an event-scoped one', async () => {
       const { eventId } = await seedPublishedEvent();
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
       await request(app).post(`/api/community/${eventId}/questions`).set('Authorization', auth).send({ body: 'Event-scoped post' }).expect(201);
       const general = await request(app).post('/api/community/questions').set('Authorization', auth).send({ body: 'General post' }).expect(201);
@@ -308,13 +308,13 @@ describe('event Q&A routes', () => {
 
       await request(app)
         .post(`/api/community/${eventId}/questions`)
-        .set('Authorization', `Bearer ${await signBuyerToken(SUSPENDED_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(SUSPENDED_PHONE)}`)
         .send({ body: 'Hello?' })
         .expect(403);
 
       await request(app)
         .post(`/api/community/${eventId}/questions`)
-        .set('Authorization', `Bearer ${await signBuyerToken(OK_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(OK_PHONE)}`)
         .send({ body: 'Hello?' })
         .expect(201);
     });
@@ -324,7 +324,7 @@ describe('event Q&A routes', () => {
       await seedBuyer();
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
-        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .send({ body: 'Question body' })
         .expect(201);
       const questionId = created.body.data.id;
@@ -334,14 +334,14 @@ describe('event Q&A routes', () => {
 
       await request(app)
         .post(`/api/community/questions/${questionId}/replies`)
-        .set('Authorization', `Bearer ${await signBuyerToken(SUSPENDED_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(SUSPENDED_PHONE)}`)
         .send({ body: 'A reply' })
         .expect(403);
 
-      await request(app).post(`/api/community/questions/${questionId}/join`).set('Authorization', `Bearer ${await signBuyerToken(OK_PHONE)}`).expect(200);
+      await request(app).post(`/api/community/questions/${questionId}/join`).set('Authorization', `Bearer ${await signBuyerSessionToken(OK_PHONE)}`).expect(200);
       await request(app)
         .post(`/api/community/questions/${questionId}/replies`)
-        .set('Authorization', `Bearer ${await signBuyerToken(OK_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(OK_PHONE)}`)
         .send({ body: 'A reply' })
         .expect(201);
     });
@@ -351,7 +351,7 @@ describe('event Q&A routes', () => {
       await seedBuyer();
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
-        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .send({ body: 'Question body' })
         .expect(201);
       const questionId = created.body.data.id;
@@ -361,13 +361,13 @@ describe('event Q&A routes', () => {
 
       await request(app)
         .post(`/api/community/questions/${questionId}/like`)
-        .set('Authorization', `Bearer ${await signBuyerToken(SUSPENDED_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(SUSPENDED_PHONE)}`)
         .expect(403);
 
-      await request(app).post(`/api/community/questions/${questionId}/join`).set('Authorization', `Bearer ${await signBuyerToken(OK_PHONE)}`).expect(200);
+      await request(app).post(`/api/community/questions/${questionId}/join`).set('Authorization', `Bearer ${await signBuyerSessionToken(OK_PHONE)}`).expect(200);
       await request(app)
         .post(`/api/community/questions/${questionId}/like`)
-        .set('Authorization', `Bearer ${await signBuyerToken(OK_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(OK_PHONE)}`)
         .expect(200);
     });
   });
@@ -380,7 +380,7 @@ describe('event Q&A routes', () => {
       await seedBuyer();
       await request(app)
         .post(`/api/community/${eventId}/questions`)
-        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .send({ body: TOO_LONG })
         .expect(400);
     });
@@ -388,7 +388,7 @@ describe('event Q&A routes', () => {
     it('400s an over-length reply body', async () => {
       const { eventId } = await seedPublishedEvent();
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
         .set('Authorization', auth)
@@ -409,7 +409,7 @@ describe('event Q&A routes', () => {
       await seedBuyer();
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
-        .set('Authorization', `Bearer ${await signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .send({ body: 'Question body' })
         .expect(201);
       const questionId = created.body.data.id;
@@ -421,7 +421,7 @@ describe('event Q&A routes', () => {
     it("auto-joins the topic's creator: the author is already a member and reports viewerIsMember true", async () => {
       const { eventId } = await seedPublishedEvent();
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
         .set('Authorization', auth)
@@ -440,8 +440,8 @@ describe('event Q&A routes', () => {
       const { eventId } = await seedPublishedEvent();
       await seedBuyer();
       const joiner = await seedBuyer('+26878400050', 'Joiner');
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
-      const joinerAuth = `Bearer ${await signBuyerToken('+26878400050')}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
+      const joinerAuth = `Bearer ${await signBuyerSessionToken('+26878400050')}`;
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
         .set('Authorization', auth)
@@ -466,8 +466,8 @@ describe('event Q&A routes', () => {
       const { eventId } = await seedPublishedEvent();
       await seedBuyer();
       const member = await seedBuyer('+26878400051', 'Member');
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
-      const memberAuth = `Bearer ${await signBuyerToken('+26878400051')}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
+      const memberAuth = `Bearer ${await signBuyerSessionToken('+26878400051')}`;
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)
         .set('Authorization', auth)
@@ -488,7 +488,7 @@ describe('event Q&A routes', () => {
 
     it('404s joining/leaving a non-existent topic', async () => {
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       await request(app).post('/api/community/questions/000000000000000000000000/join').set('Authorization', auth).expect(404);
       await request(app).post('/api/community/questions/000000000000000000000000/leave').set('Authorization', auth).expect(404);
     });
@@ -502,7 +502,7 @@ describe('event Q&A routes', () => {
 
     it('reflects a real member who joined via a general "Chat with Everyone" post', async () => {
       await seedBuyer();
-      const auth = `Bearer ${await signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       await request(app).post('/api/community/questions').set('Authorization', auth).send({ body: 'Hey everyone!' }).expect(201);
 
       const res = await request(app).get('/api/public/questions/general/members').expect(200);

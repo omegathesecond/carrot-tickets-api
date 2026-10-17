@@ -6,7 +6,7 @@ import { Ticket } from '@models/ticket.model';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import mongoose from 'mongoose';
 
 let token = ''; let vendorId = ''; let eventId: mongoose.Types.ObjectId;
@@ -18,7 +18,7 @@ beforeEach(async () => {
     password: 'Password1!', isActive: true, isVerified: true,
   });
   vendorId = v._id.toString();
-  token = signVendorToken(vendorId, { permissions: ['tickets:sell_tickets'] });
+  token = await seedVendorSessionToken(vendorId, { permissions: ['tickets:sell_tickets'] });
   const future = new Date(Date.now() + 7 * 86400000);
   const ev = await Event.create({
     vendorId: v._id, name: 'Gig', venue: 'Hall',

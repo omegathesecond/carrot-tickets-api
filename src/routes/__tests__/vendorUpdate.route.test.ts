@@ -2,7 +2,9 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signSuperAdminToken, signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken, signBuyerSessionToken, signVendorSessionToken } from '../../__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
+import { Buyer } from '@models/buyer.model';
 import { Update } from '@models/update.model';
 
 jest.mock('@utils/updatesR2', () => ({
@@ -20,14 +22,10 @@ describe('POST /api/tickets/updates (vendor)', () => {
   afterAll(disconnectTestDb);
 
   it('creates a vendor-authored update', async () => {
-    // signSuperAdminToken()'s vendorId ('admin-vendor-id') is a placeholder
-    // string, not a valid Mongo ObjectId, so it can't be persisted into
-    // Update.authorId (which is typed ObjectId). Use signVendorToken() with
-    // a real ObjectId for any assertion that touches the DB.
-    const vendorId = new mongoose.Types.ObjectId().toString();
+    const vendorId = String((await Vendor.create({ businessName: 'Author', password: 'secret123', logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg' }))._id);
     const res = await request(app)
       .post('/api/tickets/updates')
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(vendorId)}`)
       .send({ kind: 'image', caption: 'promo', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(201);
     expect(res.body.data.updateId).toBeTruthy();
@@ -42,21 +40,16 @@ describe('POST /api/tickets/updates (vendor)', () => {
   it('rejects a mismatched kind/contentType', async () => {
     await request(app)
       .post('/api/tickets/updates')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ kind: 'video', caption: '', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(400);
   });
 
-  // authenticateTickets only requires a valid `app: 'tickets'` JWT — it does
-  // NOT check userType (unlike authenticateBuyer, which explicitly rejects
-  // non-buyer tokens). A buyer token therefore passes the middleware, but
-  // carries no vendorId, so createAsVendor's own vendorId check 401s it.
-  // Documented deviation from the brief's framing ("authenticateTickets
-  // rejects buyer tokens") — the 401 still happens, just one layer up.
   it('401s a buyer token (no vendorId on the decoded token)', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret123', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     await request(app)
       .post('/api/tickets/updates')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`)
       .send({ kind: 'image', caption: 'promo', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(401);
   });
@@ -84,22 +77,22 @@ describe('POST /api/tickets/updates/:id/finalize (vendor)', () => {
     });
 
   it('finalizes the vendor own update', async () => {
-    const vendorId = new mongoose.Types.ObjectId().toString();
+    const vendorId = String((await Vendor.create({ businessName: 'Author', password: 'secret123', logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg' }))._id);
     const update = await seedVendorUpdate(vendorId);
     const res = await request(app)
       .post(`/api/tickets/updates/${update.id}/finalize`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(vendorId)}`)
       .expect(200);
     expect(res.body.data.media[0].status).toBe('ready');
   });
 
   it('forbids finalizing another vendor\'s update', async () => {
     const authorVendorId = new mongoose.Types.ObjectId().toString();
-    const requestingVendorId = new mongoose.Types.ObjectId().toString();
+    const requestingVendorId = String((await Vendor.create({ businessName: 'Other', password: 'secret123' }))._id);
     const update = await seedVendorUpdate(authorVendorId);
     await request(app)
       .post(`/api/tickets/updates/${update.id}/finalize`)
-      .set('Authorization', `Bearer ${signVendorToken(requestingVendorId)}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(requestingVendorId)}`)
       .expect(403);
   });
 });

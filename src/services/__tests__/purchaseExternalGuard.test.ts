@@ -86,6 +86,9 @@ describe('purchase refuses external events', () => {
 
   it('initiateCardPurchase throws for an external event', async () => {
     const { event, ticketTypeId } = await seedExternalEvent('Ext Card');
+    const previousResultUrl = process.env['CARD_RESULT_URL'];
+    process.env['CARD_RESULT_URL'] = 'https://example.test/card-result';
+    try {
 
     await expect(
       TicketService.initiateCardPurchase({
@@ -94,5 +97,9 @@ describe('purchase refuses external events', () => {
         customerPhone: '+26878422613',
       }),
     ).rejects.toThrow('externally');
+    } finally {
+      if (previousResultUrl === undefined) delete process.env['CARD_RESULT_URL'];
+      else process.env['CARD_RESULT_URL'] = previousResultUrl;
+    }
   });
 });

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 
 const PHONE = '+26878422613';
@@ -20,7 +20,7 @@ describe('PATCH/DELETE /api/social/me/location', () => {
 
     const res = await request(app)
       .patch('/api/social/me/location')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ lat: -26.3054, lng: 31.1367 })
       .expect(200);
 
@@ -37,7 +37,7 @@ describe('PATCH/DELETE /api/social/me/location', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
     await request(app)
       .patch('/api/social/me/location')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ lat: 91, lng: 31.1367 })
       .expect(400);
   });
@@ -46,7 +46,7 @@ describe('PATCH/DELETE /api/social/me/location', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
     await request(app)
       .patch('/api/social/me/location')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ lat: -26.3054, lng: 181 })
       .expect(400);
   });
@@ -55,7 +55,7 @@ describe('PATCH/DELETE /api/social/me/location', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me', username: 'me_one' });
     await request(app)
       .patch('/api/social/me/location')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ lat: -26.3054 })
       .expect(400);
   });
@@ -76,7 +76,7 @@ describe('PATCH/DELETE /api/social/me/location', () => {
 
     const res = await request(app)
       .delete('/api/social/me/location')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
     expect(res.body.data.ok).toBe(true);
 

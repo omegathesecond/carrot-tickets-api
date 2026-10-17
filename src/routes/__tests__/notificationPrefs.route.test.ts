@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 
 const PHONE = '+26878422613';
@@ -13,7 +13,7 @@ describe('notification preferences', () => {
 
   it('defaults all true; partial PATCH merges; me echoes them', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', username: 'prefs_user' });
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     let me = await request(app).get('/api/social/me').set('Authorization', auth).expect(200);
     expect(me.body.data.notificationPrefs).toEqual({

@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -19,7 +19,7 @@ async function seedWorld() {
   const channels = await Channel.find({ communityId: community._id });
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
   await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Chatty Buyer' });
-  const auth = `Bearer ${signBuyerToken(PHONE)}`;
+  const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
   return { seeded, community, bySlug, auth };
 }
 
@@ -172,7 +172,7 @@ describe('community message routes', () => {
 
     const OTHER = '+26878000099';
     await Buyer.create({ phone: OTHER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
-    const otherAuth = `Bearer ${signBuyerToken(OTHER)}`;
+    const otherAuth = `Bearer ${await signBuyerSessionToken(OTHER)}`;
     await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', otherAuth).expect(200);
 
     await request(app)

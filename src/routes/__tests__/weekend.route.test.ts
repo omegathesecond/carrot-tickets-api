@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 
 const PHONE = '+26878422613';
@@ -85,7 +85,7 @@ describe('Weekend routes', () => {
   describe('authenticated round trip', () => {
     it('lets a signed-in buyer set, read back, and remove their own status', async () => {
       await seedBuyer();
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
       const put = await request(app)
         .put('/api/social/weekend/me')
@@ -114,7 +114,7 @@ describe('Weekend routes', () => {
       };
       try {
         await seedBuyer();
-        const auth = `Bearer ${signBuyerToken(PHONE)}`;
+        const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
         const rejected = await request(app)
           .post('/api/social/weekend/media')
@@ -144,7 +144,7 @@ describe('Weekend routes', () => {
 
     it('surfaces a just-created status as the first, isOwner card in the "Who Has Plans" feed and See All page', async () => {
       await seedBuyer();
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
       await request(app)
         .put('/api/social/weekend/me')

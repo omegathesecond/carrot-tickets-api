@@ -1,16 +1,16 @@
 // Allocation = the existence of a ProductStock row. These routes let the
 // organizer state it directly instead of having to receive stock to imply it.
-// Harness mirrors stockAdmin.route.test.ts: signVendorToken + seedPublishedEvent.
+// Harness mirrors stockAdmin.route.test.ts: signVendorSessionToken + seedPublishedEvent.
 import request from 'supertest';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { signVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
+import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { Product } from '@models/product.model';
 import { ProductStock } from '@models/productStock.model';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
 beforeAll(connectLedgerTestDb, 60000);
 afterEach(clearTestDb);
@@ -19,7 +19,8 @@ afterAll(disconnectTestDb);
 async function ownedCashlessEvent() {
   const { eventId, vendorId } = await seedPublishedEvent({});
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
-  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
+  await Vendor.create({ _id: vendorId, businessName: 'Owner', password: 'secret123' });
+  const token = await signVendorSessionToken(String(vendorId));
   return { eventId: String(eventId), token };
 }
 
@@ -106,7 +107,8 @@ it('refuses an organizer who does not own the event', async () => {
   const { eventId } = await ownedCashlessEvent();
   const bar = await stall(eventId, 'Bar');
   const beer = await product(eventId, 'Castle Lite 330ml');
-  const intruder = signVendorToken('64b7c1f1f1f1f1f1f1f1f1f1', { permissions: [TicketsPermission.MANAGE_STOCK] });
+  const other = await Vendor.create({ businessName: 'Intruder', password: 'secret123' });
+  const intruder = await signVendorSessionToken(String(other._id));
 
   const res = await put(eventId, intruder, { productId: beer, merchantIds: [bar] });
 

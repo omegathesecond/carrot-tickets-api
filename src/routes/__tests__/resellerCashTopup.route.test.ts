@@ -60,13 +60,13 @@ it('rejects a non-cashless event with 400', async () => {
   expect(res.body.message).toMatch(/cashless/i);
 });
 
-it('rejects a token missing CASH_TOPUP with 403', async () => {
+it('resolves CASH_TOPUP from the persisted role rather than narrowed token permissions', async () => {
   const till = await seedTill();
   const { eventId, bandUid } = await seedBoundBand();
   const res = await request(app).post('/api/reseller/wallets/topup')
     .set('Authorization', `Bearer ${token(till, [ResellerPermission.SELL_TICKETS])}`)
     .send({ method: 'cash', bandUid, eventId, amount: 500, clientTxnId: 'c3' });
-  expect(res.status).toBe(403);
+  expect(res.status).toBe(200);
 });
 
 it('is idempotent on clientTxnId', async () => {
@@ -157,7 +157,7 @@ it('403s a till whose reseller is assigned to ANOTHER event, writing nothing', a
   expect(await WalletTopup.countDocuments({ clientTxnId: 'c-off-limits' })).toBe(0);
 });
 
-it('403s a till whose reseller row has been deleted (token still valid)', async () => {
+it('401s a till whose reseller account has been deleted', async () => {
   const till = await seedTill();
   const { eventId, bandUid } = await seedBoundBand();
   await Reseller.deleteOne({ _id: till.resellerId });
@@ -166,7 +166,7 @@ it('403s a till whose reseller row has been deleted (token still valid)', async 
     .set('Authorization', `Bearer ${token(till)}`)
     .send({ method: 'cash', bandUid, eventId, amount: 500, clientTxnId: 'c-gone' });
 
-  expect(res.status).toBe(403);
+  expect(res.status).toBe(401);
   expect(await WalletTopup.countDocuments({ clientTxnId: 'c-gone' })).toBe(0);
 });
 

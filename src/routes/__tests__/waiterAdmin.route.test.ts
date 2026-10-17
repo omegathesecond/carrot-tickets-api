@@ -1,6 +1,7 @@
 // api/src/routes/__tests__/waiterAdmin.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { signAdminSessionToken, signVendorSessionToken } from '@/__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -20,15 +21,11 @@ const FOREIGN_EVENT_MESSAGE = 'One or more events do not exist or belong to a di
 // organizer to hire for.
 const NO_ORGANIZER_MESSAGE = 'That event has no organizer to hire a waiter for';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64c000000000000000000a01';
 const VENDOR_B = '64c000000000000000000b02';
 
-function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:manage_access'], isSuperAdmin: !!opts.isSuperAdmin, vendorId: opts.vendorId,
-  }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
+  return opts.isSuperAdmin ? signAdminSessionToken() : signVendorSessionToken(opts.vendorId!);
 }
 
 async function eventFor(vendorId: string, name: string) {
@@ -56,6 +53,9 @@ let mySecondEventId: string;
 let otherVendorEventId: string;
 
 beforeEach(async () => {
+  await Vendor.create([{ _id: VENDOR_A, businessName: 'A', password: 'secret123' },
+    { _id: VENDOR_B, businessName: 'B', password: 'secret123' }]);
+
   myEventId = await eventFor(VENDOR_A, 'My Show');
   mySecondEventId = await eventFor(VENDOR_A, 'My Other Show');
   otherVendorEventId = await eventFor(VENDOR_B, 'Someone Elses Show');
@@ -63,7 +63,7 @@ beforeEach(async () => {
 
 async function hire(fullName: string, eventId: string) {
   const res = await request(app).post('/api/tickets/waiters')
-    .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+    .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
     .send({ fullName, eventId });
   return res.body.data.waiter;
 }
@@ -71,7 +71,7 @@ async function hire(fullName: string, eventId: string) {
 describe('POST /api/tickets/waiters', () => {
   it('hires a waiter onto one of my events, returning a login code and PIN once', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: myEventId });
 
     expect(res.status).toBe(201);
@@ -84,7 +84,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('requires an eventId for an organizer waiter', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo' });
 
     expect(res.status).toBe(400);
@@ -94,7 +94,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it("rejects an event belonging to another organizer", async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: otherVendorEventId });
 
     expect(res.status).toBe(400);
@@ -104,7 +104,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('rejects an event id that does not exist', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: new mongoose.Types.ObjectId().toString() });
 
     expect(res.status).toBe(400);
@@ -114,7 +114,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('derives the organizer from the event when an admin hires (super-admin token carries no organizer)', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Thabo', eventId: myEventId });
 
     expect(res.status).toBe(201);
@@ -131,7 +131,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('does NOT become permissive when a super-admin passes a vendorId that does not own the event', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Thabo', scope: 'organizer', vendorId: VENDOR_B, eventId: myEventId });
 
     expect(res.status).toBe(400);
@@ -148,7 +148,7 @@ describe('POST /api/tickets/waiters', () => {
     });
 
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Thabo', eventId: (community._id as any).toString() });
 
     expect(res.status).toBe(400);
@@ -158,7 +158,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('refuses an event that does not exist when deriving, with "Event not found"', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Thabo', eventId: new mongoose.Types.ObjectId().toString() });
 
     expect(res.status).toBe(400);
@@ -168,7 +168,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('an ordinary organizer still takes the vendor from their TOKEN, not the event', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: myEventId, vendorId: VENDOR_B });
 
     expect(res.status).toBe(201);
@@ -178,7 +178,7 @@ describe('POST /api/tickets/waiters', () => {
 
   it('lets a platform waiter be created with no event at all', async () => {
     const res = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Carrot Staff', scope: 'platform' });
 
     expect(res.status).toBe(201);
@@ -189,12 +189,12 @@ describe('POST /api/tickets/waiters', () => {
 describe('PATCH /api/tickets/waiters/:id', () => {
   it('ignores a singular eventId on update (the field is immutable)', async () => {
     const created = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: myEventId });
     const id = created.body.data.waiter._id;
 
     const res = await request(app).patch(`/api/tickets/waiters/${id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ eventId: mySecondEventId });
     expect(res.status).toBe(200);
 
@@ -204,13 +204,13 @@ describe('PATCH /api/tickets/waiters/:id', () => {
 
   it('400s a fullName that is not a non-empty string, rather than renaming her to it', async () => {
     const created = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: myEventId });
     const id = created.body.data.waiter._id;
 
     for (const fullName of [123, null, '', '   ']) {
       const res = await request(app).patch(`/api/tickets/waiters/${id}`)
-        .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+        .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
         .send({ fullName });
 
       expect(res.status).toBe(400);
@@ -223,13 +223,13 @@ describe('PATCH /api/tickets/waiters/:id', () => {
 
   it('400s a non-boolean isActive rather than coercing "false" to true', async () => {
     const created = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: myEventId });
     const id = created.body.data.waiter._id;
 
     for (const isActive of ['false', 'true', 0, 1, null]) {
       const res = await request(app).patch(`/api/tickets/waiters/${id}`)
-        .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+        .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
         .send({ isActive });
       expect(res.status).toBe(400);
       expect(res.body.message).toBe('isActive must be a boolean');
@@ -241,12 +241,12 @@ describe('PATCH /api/tickets/waiters/:id', () => {
 
   it('still updates the fields that ARE mutable, including disabling a waiter', async () => {
     const created = await request(app).post('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo', eventId: myEventId });
     const id = created.body.data.waiter._id;
 
     const res = await request(app).patch(`/api/tickets/waiters/${id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Thabo Nkosi', isActive: false });
 
     expect(res.status).toBe(200);
@@ -261,7 +261,7 @@ describe('PATCH /api/tickets/waiters/:id', () => {
     expect(hired.grants ?? []).toEqual([]);
 
     const res = await request(app).patch(`/api/tickets/waiters/${hired._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['settle_tables'] });
 
     expect(res.status).toBe(200);
@@ -273,7 +273,7 @@ describe('PATCH /api/tickets/waiters/:id', () => {
     const hired = await hire('Thabo', myEventId);
 
     const res = await request(app).patch(`/api/tickets/waiters/${hired._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['settle_tables', 'not_a_real_grant'] });
 
     expect(res.status).toBe(200);
@@ -283,11 +283,11 @@ describe('PATCH /api/tickets/waiters/:id', () => {
   it('leaves grants alone when the body does not mention them', async () => {
     const hired = await hire('Thabo', myEventId);
     await request(app).patch(`/api/tickets/waiters/${hired._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['settle_tables'] });
 
     await request(app).patch(`/api/tickets/waiters/${hired._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Thabo M' });
 
     const after = await Waiter.findById(hired._id);
@@ -311,7 +311,7 @@ describe('GET /api/tickets/waiters', () => {
     });
 
     const res = await request(app).get('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.map((w: { fullName: string }) => w.fullName).sort()).toEqual(['Sipho', 'Thabo']);
@@ -320,7 +320,7 @@ describe('GET /api/tickets/waiters', () => {
 
   it('filters the list to one event', async () => {
     const res = await request(app).get(`/api/tickets/waiters?eventId=${myEventId}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -329,7 +329,7 @@ describe('GET /api/tickets/waiters', () => {
 
   it('a super-admin sees every waiter when no event is named', async () => {
     const res = await request(app).get('/api/tickets/waiters')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.map((w: { fullName: string }) => w.fullName).sort()).toEqual(['Sipho', 'Thabo']);
@@ -342,7 +342,7 @@ describe('POST /api/tickets/waiters/:id/reset-pin', () => {
     await Waiter.updateOne({ _id: hired._id }, { failedPinAttempts: 3, lockedUntil: new Date(Date.now() + 60_000) });
 
     const res = await request(app).post(`/api/tickets/waiters/${hired._id}/reset-pin`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({});
 
     expect(res.status).toBe(200);
@@ -360,7 +360,7 @@ describe('POST /api/tickets/waiters/:id/reset-pin', () => {
     });
 
     const res = await request(app).post(`/api/tickets/waiters/${theirs._id}/reset-pin`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({});
 
     expect(res.status).toBe(404);

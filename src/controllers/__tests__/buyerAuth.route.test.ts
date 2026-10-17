@@ -1,16 +1,15 @@
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { BuyerAuthService } from '@services/buyerAuth.service';
 import mongoose from 'mongoose';
 import app from '@/app';
-import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Buyer } from '@models/buyer.model';
 import { Ticket } from '@models/ticket.model';
 import { EmailService } from '@services/email.service';
-import { JWT_SECRET } from '@config/jwt.config';
 
 jest.mock('@services/email.service');
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb, 60000);
 afterEach(async () => {
   await clearTestDb();
   jest.clearAllMocks();
@@ -65,10 +64,7 @@ describe('GET /api/public/my-tickets', () => {
       ticketId: 'Z',
       buyerId: buyer._id,
     } as any);
-    const token = jwt.sign(
-      { userType: 'buyer', app: 'tickets', buyerId: String(buyer._id), userEmail: 'mt@x.com' },
-      JWT_SECRET
-    );
+    const token = BuyerAuthService.signToken(buyer);
 
     const res = await request(app).get('/api/public/my-tickets').set('Authorization', `Bearer ${token}`);
 

@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { Buyer } from '@models/buyer.model';
 import publicRoutes from '@routes/public.route';
@@ -24,7 +24,7 @@ async function seedEvent() {
 
 const BUYER_PHONE = '+26878422613';
 const AVATAR_URL = 'https://cdn.test/avatar.jpg';
-const buyerAuth = () => ({ Authorization: `Bearer ${signBuyerToken(BUYER_PHONE)}` });
+const buyerAuth = async () => ({ Authorization: `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}` });
 
 describe('POST /api/public/events/:eventId/like', () => {
   beforeAll(connectTestDb);
@@ -51,18 +51,18 @@ describe('POST /api/public/events/:eventId/like', () => {
 
   it('404s an unknown event', async () => {
     const unknown = new mongoose.Types.ObjectId().toString();
-    const res = await request(app).post(`/api/public/events/${unknown}/like`).set(buyerAuth());
+    const res = await request(app).post(`/api/public/events/${unknown}/like`).set(await buyerAuth());
     expect(res.status).toBe(404);
   });
 
   it('toggles a like on then off for an authenticated buyer', async () => {
     const e = await seedEvent();
 
-    const on = await request(app).post(`/api/public/events/${e.id}/like`).set(buyerAuth());
+    const on = await request(app).post(`/api/public/events/${e.id}/like`).set(await buyerAuth());
     expect(on.status).toBe(200);
     expect(on.body.data).toEqual({ active: true, likeCount: 1 });
 
-    const off = await request(app).post(`/api/public/events/${e.id}/like`).set(buyerAuth());
+    const off = await request(app).post(`/api/public/events/${e.id}/like`).set(await buyerAuth());
     expect(off.body.data).toEqual({ active: false, likeCount: 0 });
   });
 
@@ -71,7 +71,7 @@ describe('POST /api/public/events/:eventId/like', () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
     const res = await request(app)
       .post(`/api/public/events/${e.id}/like`)
-      .set({ Authorization: `Bearer ${signVendorToken(vendorId)}` });
+      .set({ Authorization: `Bearer ${await seedVendorSessionToken(vendorId)}` });
     expect(res.status).toBe(200);
     expect(res.body.data.active).toBe(true);
   });
@@ -83,7 +83,7 @@ describe('POST /api/public/events/:eventId/like', () => {
     const e = await seedEvent();
     await Buyer.updateOne({ phone: BUYER_PHONE }, { $unset: { avatarUrl: 1 } });
 
-    const res = await request(app).post(`/api/public/events/${e.id}/like`).set(buyerAuth());
+    const res = await request(app).post(`/api/public/events/${e.id}/like`).set(await buyerAuth());
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('PHOTO_REQUIRED');

@@ -1,6 +1,6 @@
 // api/src/routes/__tests__/operatorEventAssignment.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -8,15 +8,11 @@ import { GateOperator } from '@models/gateOperator.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64b000000000000000000a01';
 const VENDOR_B = '64b000000000000000000b02';
 
-function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:manage_access'], isSuperAdmin: !!opts.isSuperAdmin, vendorId: opts.vendorId,
-  }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
+  return opts.isSuperAdmin ? signAdminSessionToken() : seedVendorSessionToken(opts.vendorId!);
 }
 
 async function eventFor(vendorId: string, name = 'Show') {
@@ -46,7 +42,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     const event = await eventFor(VENDOR_A, 'Assigned Show');
 
     const res = await request(app).post(path)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Staffer', eventIds: [(event._id as any).toString()] });
 
     expect(res.status).toBe(201);
@@ -55,7 +51,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
 
   it('defaults to an unrestricted operator when no events are named', async () => {
     const res = await request(app).post(path)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Staffer' });
 
     expect(res.status).toBe(201);
@@ -66,7 +62,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     const foreign = await eventFor(VENDOR_B, 'Someone Elses Show');
 
     const res = await request(app).post(path)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Staffer', eventIds: [(foreign._id as any).toString()] });
 
     expect(res.status).toBe(400);
@@ -75,7 +71,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
 
   it('refuses an event id that does not exist', async () => {
     const res = await request(app).post(path)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Staffer', eventIds: [new mongoose.Types.ObjectId().toString()] });
 
     expect(res.status).toBe(400);
@@ -90,7 +86,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     });
 
     const res = await request(app).patch(`${path}/${created._id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ eventIds: [(second._id as any).toString()] });
 
     expect(res.status).toBe(200);
@@ -105,7 +101,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     });
 
     const res = await request(app).patch(`${path}/${created._id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ eventIds: [] });
 
     expect(res.status).toBe(200);
@@ -119,7 +115,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     });
 
     const res = await request(app).patch(`${path}/${created._id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ eventIds: [(foreign._id as any).toString()] });
 
     expect(res.status).toBe(400);
@@ -133,7 +129,7 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     });
 
     const res = await request(app).patch(`${path}/${created._id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Renamed' });
 
     expect(res.status).toBe(200);
@@ -144,12 +140,12 @@ describe.each(POPULATIONS)('$label event assignment', ({ path, model, key }) => 
     const foreign = await eventFor(VENDOR_B, 'Vendor B Show');
 
     const ok = await request(app).post(path)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Staffer', scope: 'organizer', vendorId: VENDOR_B, eventIds: [(foreign._id as any).toString()] });
     expect(ok.status).toBe(201);
 
     const mismatched = await request(app).post(path)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Staffer2', scope: 'organizer', vendorId: VENDOR_A, eventIds: [(foreign._id as any).toString()] });
     expect(mismatched.status).toBe(400);
   });
