@@ -502,6 +502,7 @@ export class WeekendService {
 
   private static validatePlanMedia(media: { url: string; width?: number; height?: number; type: string }[] | undefined): IWeekendPlanMediaItem[] {
     const items = media ?? [];
+    if (items.length === 0) throw new HttpError(400, 'Attach at least one picture or video');
     if (items.length > WEEKEND_PLAN_MEDIA_MAX) throw new HttpError(400, `Attach at most ${WEEKEND_PLAN_MEDIA_MAX} pictures or videos`);
     const publicBase = process.env['UPDATES_R2_PUBLIC_URL'];
     return items.map((item) => {
@@ -533,6 +534,22 @@ export class WeekendService {
     const key = updatesR2.rawKey(ext);
     const uploadUrl = await updatesR2.presignPut(key, contentType);
     return { uploadUrl, publicUrl: updatesR2.publicUrl(key) };
+  }
+
+  /** Profile posts use the same audience and blocking rules as the feed, with no role restriction. */
+  static async getProfilePlans(viewer: IBuyer | null, username: string): Promise<WeekendFeedCardDto[]> {
+    const owner = await Buyer.findOne({ username: username.toLowerCase() }).select('username');
+    if (!owner) throw new HttpError(404, 'User not found');
+    const viewerId = viewer ? String(viewer._id) : null;
+    const isOwn = viewerId === String(owner._id);
+    const query: any = { buyerId: owner._id, source: 'plan_post', activeUntil: { $gt: new Date() } };
+    if (!isOwn) {
+      if (viewerId && await BlockService.isBlockedEitherWay(viewerId, String(owner._id))) return [];
+      const followingIds = viewerId ? await FollowService.followingIds(viewerId, 'buyer') : [];
+      query.$or = WeekendService.audienceOrClause(viewerId, followingIds.map(String));
+    }
+    const posts = await WeekendStatus.find(query).sort({ updatedAt: -1 });
+    return WeekendService.toFeedCards(posts, viewerId);
   }
 
   static async getOwnStatus(buyer: IBuyer): Promise<WeekendStatusDto | null> {
