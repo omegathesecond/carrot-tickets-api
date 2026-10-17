@@ -1,9 +1,9 @@
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { Ticket } from '@models/ticket.model';
@@ -11,15 +11,9 @@ import { TicketStatus } from '@interfaces/ticket.interface';
 import { Review } from '@models/review.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const PHONE = '+26878422613';
 
-function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin: false, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
+const sessionToken = (vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]) => seedVendorSessionToken(vendorId, { permissions });
 
 async function seedEndedWithTicket() {
   const seeded = await seedPublishedEvent();
@@ -43,7 +37,7 @@ describe('review routes', () => {
 
   it('buyer posts, public reads with aggregate, vendor replies', async () => {
     const seeded = await seedEndedWithTicket();
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const posted = await request(app)
       .post(`/api/public/events/${seeded.eventId}/reviews`)
@@ -60,7 +54,7 @@ describe('review routes', () => {
 
     await request(app)
       .post(`/api/tickets/reviews/${posted.body.data.id}/reply`)
-      .set('Authorization', `Bearer ${signVendorToken(seeded.vendorId)}`)
+      .set('Authorization', `Bearer ${await sessionToken(seeded.vendorId)}`)
       .send({ text: 'Thank you!' })
       .expect(200);
 
@@ -70,7 +64,7 @@ describe('review routes', () => {
 
   it('write requires auth (401), bad rating 400, double review 409, wrong vendor reply 403', async () => {
     const seeded = await seedEndedWithTicket();
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     await request(app).post(`/api/public/events/${seeded.eventId}/reviews`).send({ rating: 5 }).expect(401);
     await request(app).post(`/api/public/events/${seeded.eventId}/reviews`).set('Authorization', auth)
@@ -83,7 +77,7 @@ describe('review routes', () => {
 
     await request(app)
       .post(`/api/tickets/reviews/${first.body.data.id}/reply`)
-      .set('Authorization', `Bearer ${signVendorToken('aaaaaaaaaaaaaaaaaaaaaaaa')}`)
+      .set('Authorization', `Bearer ${await sessionToken('aaaaaaaaaaaaaaaaaaaaaaaa')}`)
       .send({ text: 'not mine' })
       .expect(403);
   });
@@ -94,11 +88,11 @@ describe('review routes', () => {
     const seeded = await seedEndedWithTicket();
     await request(app)
       .post('/api/tickets/reviews/not-an-id/reply')
-      .set('Authorization', `Bearer ${signVendorToken(seeded.vendorId)}`)
+      .set('Authorization', `Bearer ${await sessionToken(seeded.vendorId)}`)
       .send({ text: 'hi' })
       .expect(400);
 
-    const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
+    const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' }).catch(() => null);
     await request(app)
       .post('/api/public/events/not-an-id/reviews')

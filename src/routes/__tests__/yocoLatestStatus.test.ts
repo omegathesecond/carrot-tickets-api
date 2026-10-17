@@ -10,7 +10,7 @@ import express from 'express';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken } from '@/__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
@@ -21,7 +21,7 @@ app.use(express.json());
 app.use('/api/public', publicRoutes);
 
 const PHONE = '+26878422613';
-const auth = () => ({ Authorization: `Bearer ${signBuyerToken(PHONE)}` });
+const auth = async () => ({ Authorization: `Bearer ${await signBuyerSessionToken(PHONE)}` });
 
 beforeAll(connectTestDb);
 afterEach(clearTestDb);
@@ -49,7 +49,7 @@ describe('yoco latest status', () => {
   it('is NOT swallowed by the /:checkoutId/status route', async () => {
     await seedBuyerWithYocoSale(PaymentStatus.COMPLETED);
 
-    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(auth());
+    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(await auth());
 
     // If "latest" were captured as a checkout id, this would 404 "Payment not found".
     expect(res.status).toBe(200);
@@ -59,7 +59,7 @@ describe('yoco latest status', () => {
   it('reports a pending sale as pending', async () => {
     await seedBuyerWithYocoSale(PaymentStatus.PENDING);
 
-    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(auth());
+    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(await auth());
 
     expect(res.body.data.status).toBe('pending');
   });
@@ -67,7 +67,7 @@ describe('yoco latest status', () => {
   it('reports a failed sale as failed', async () => {
     await seedBuyerWithYocoSale(PaymentStatus.FAILED);
 
-    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(auth());
+    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(await auth());
 
     expect(res.body.data.status).toBe('failed');
   });
@@ -78,7 +78,7 @@ describe('yoco latest status', () => {
       avatarUrl: 'https://cdn.test/a.jpg',
     });
 
-    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(auth());
+    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(await auth());
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('none');
@@ -109,7 +109,7 @@ describe('yoco latest status', () => {
       avatarUrl: 'https://cdn.test/a.jpg',
     });
 
-    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(auth());
+    const res = await request(app).get('/api/public/purchase/yoco/latest/status').set(await auth());
 
     expect(res.body.data.status).toBe('none');
     expect(JSON.stringify(res.body)).not.toContain('ch_someone_else');

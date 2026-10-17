@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { R2Service } from '@utils/r2.service';
 
@@ -38,7 +38,7 @@ describe.each([
 ])('POST /api/media/events/:eventId/%s', (segment, mediaType) => {
   it('stores the file under its own media type and returns the url', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(String(vendorId));
+    const token = await seedVendorSessionToken(String(vendorId));
 
     const res = await request(app)
       .post(`/api/media/events/${eventId}/${segment}`)
@@ -55,7 +55,7 @@ describe.each([
 
   it('never writes the url onto a document — it only returns it', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(String(vendorId));
+    const token = await seedVendorSessionToken(String(vendorId));
 
     const res = await request(app)
       .post(`/api/media/events/${eventId}/${segment}`)
@@ -71,7 +71,7 @@ describe.each([
 
   it('refuses an event the caller does not own', async () => {
     const { eventId } = await seedPublishedEvent({});
-    const someoneElse = signVendorToken('64b000000000000000000a01');
+    const someoneElse = await seedVendorSessionToken('64b000000000000000000a01');
 
     const res = await request(app)
       .post(`/api/media/events/${eventId}/${segment}`)
@@ -83,7 +83,7 @@ describe.each([
 
   it('rejects a non-image file', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(String(vendorId));
+    const token = await seedVendorSessionToken(String(vendorId));
 
     const res = await request(app)
       .post(`/api/media/events/${eventId}/${segment}`)
@@ -96,7 +96,7 @@ describe.each([
 
   it('rejects a request with no file at all', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(String(vendorId));
+    const token = await seedVendorSessionToken(String(vendorId));
 
     const res = await request(app)
       .post(`/api/media/events/${eventId}/${segment}`)

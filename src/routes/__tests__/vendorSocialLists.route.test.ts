@@ -1,14 +1,14 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 
 let vseq = 0;
 const makeVendor = () => {
   vseq += 1;
-  return Vendor.create({ businessName: `Brand ${vseq}`, email: `vendor${vseq}@example.com`, phoneNumber: `+2687${8100000 + vseq}`, password: 'secret123' });
+  return Vendor.create({ logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', businessName: `Brand ${vseq}`, email: `vendor${vseq}@example.com`, phoneNumber: `+2687${8100000 + vseq}`, password: 'secret123' });
 };
 
 describe('/api/tickets/social/me/following|followers (vendor)', () => {
@@ -20,7 +20,7 @@ describe('/api/tickets/social/me/following|followers (vendor)', () => {
     const me = await makeVendor();
     const followedBrand = await makeVendor();
     const followedBuyer = await Buyer.create({ phone: '+26878000601', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Alice', username: 'alice_ff' });
-    const token = `Bearer ${signVendorToken(String(me._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(me._id))}`;
 
     await request(app).post('/api/tickets/social/follow').set('Authorization', token).send({ targetType: 'organizer', targetId: String(followedBrand._id) }).expect(200);
     await request(app).post('/api/tickets/social/follow').set('Authorization', token).send({ targetType: 'buyer', targetId: String(followedBuyer._id) }).expect(200);
@@ -37,22 +37,24 @@ describe('/api/tickets/social/me/following|followers (vendor)', () => {
     const followerBuyer = await Buyer.create({ phone: '+26878000602', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Bob' });
 
     // buyer follows me (buyer route resolves the buyer from the token phone)
-    await request(app).post('/api/social/follow').set('Authorization', `Bearer ${signBuyerToken('+26878000602')}`).send({ targetType: 'organizer', targetId: String(me._id) }).expect(200);
+    await request(app).post('/api/social/follow').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000602')}`).send({ targetType: 'organizer', targetId: String(me._id) }).expect(200);
     // brand follows me (vendor route)
-    await request(app).post('/api/tickets/social/follow').set('Authorization', `Bearer ${signVendorToken(String(followerBrand._id))}`).send({ targetType: 'organizer', targetId: String(me._id) }).expect(200);
+    await request(app).post('/api/tickets/social/follow').set('Authorization', `Bearer ${await seedVendorSessionToken(String(followerBrand._id))}`).send({ targetType: 'organizer', targetId: String(me._id) }).expect(200);
 
-    const res = await request(app).get('/api/tickets/social/me/followers').set('Authorization', `Bearer ${signVendorToken(String(me._id))}`).expect(200);
+    const res = await request(app).get('/api/tickets/social/me/followers').set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`).expect(200);
     expect(res.body.data.organizers.map((o: any) => o.id)).toEqual([String(followerBrand._id)]);
     expect(res.body.data.buyers.map((b: any) => b.id)).toEqual([String(followerBuyer._id)]);
   });
 
   it('401s a buyer token on /me/following (no vendorId)', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret123' });
     await request(app).get('/api/tickets/social/me/following')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
   });
 
   it('401s a buyer token on /me/followers (no vendorId)', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret123' });
     await request(app).get('/api/tickets/social/me/followers')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
   });
 });

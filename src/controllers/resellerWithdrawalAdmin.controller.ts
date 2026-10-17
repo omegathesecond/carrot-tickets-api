@@ -33,14 +33,14 @@ export class ResellerWithdrawalAdminController {
   static async markPaid(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       ApiResponseUtil.success(res,
-        await WithdrawalService.markPaid(requireRouteParam(req, 'id'), adminId(req), req.body.paymentReference));
+        await WithdrawalService.markPaid(requireRouteParam(req, 'id'), adminId(req), req.body?.paymentReference));
     } catch (err: any) { ResellerWithdrawalAdminController.guard(res, err, next); }
   }
 
   static async reject(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       ApiResponseUtil.success(res,
-        await WithdrawalService.reject(requireRouteParam(req, 'id'), adminId(req), req.body.notes));
+        await WithdrawalService.reject(requireRouteParam(req, 'id'), adminId(req), req.body?.notes));
     } catch (err: any) { ResellerWithdrawalAdminController.guard(res, err, next); }
   }
 

@@ -27,7 +27,8 @@ jest.mock('@services/keshlessPayment.service');
 
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, signVendorSessionToken } from '../../__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { Buyer } from '@models/buyer.model';
 import { MenuItem, MenuSection } from '@models/menuItem.model';
@@ -35,7 +36,6 @@ import { MenuOrder, MenuOrderFulfillmentStatus } from '@models/menuOrder.model';
 import { KeshlessPaymentService } from '@services/keshlessPayment.service';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
 const acceptPayment = KeshlessPaymentService.acceptPayment as jest.MockedFunction<typeof KeshlessPaymentService.acceptPayment>;
 
@@ -43,7 +43,7 @@ const VENDOR_A = '64c000000000000000000a01';
 const BUYER_PHONE = '+26878422613';
 const CARD = '1234567890123456';
 
-const organizerToken = () => signVendorToken(VENDOR_A, { permissions: [TicketsPermission.MANAGE_MENU] });
+const organizerToken = () => signVendorSessionToken(VENDOR_A);
 
 async function eventWith(status: EventStatus, vendorId = VENDOR_A): Promise<string> {
   const future = new Date(Date.now() + 7 * 864e5);
@@ -87,6 +87,9 @@ async function paidOrder(eventId: string, buyerId: mongoose.Types.ObjectId, over
 }
 
 beforeAll(connectTestDb);
+beforeEach(async () => {
+  await Vendor.create({ _id: VENDOR_A, businessName: 'Organiser', password: 'secret123' });
+});
 afterEach(async () => { await clearTestDb(); jest.clearAllMocks(); });
 afterAll(disconnectTestDb);
 
@@ -99,7 +102,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: itemId, quantity: 1 }], paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD });
 
     expect(res.status).toBe(404);
@@ -116,7 +119,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: itemId, quantity: 1 }], paymentMethod: PaymentMethod.MTN_MOMO, momoPhone: '76111111' });
 
     expect(res.status).toBe(404);
@@ -132,7 +135,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: itemId, quantity: 1 }], paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD });
 
     expect(res.status).toBe(201);
@@ -148,7 +151,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: itemId, quantity: 1 }], paymentMethod: PaymentMethod.MTN_MOMO, momoPhone: '76111111' });
 
     expect(res.status).toBe(503);
@@ -162,7 +165,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: 'not-an-object-id', quantity: 1 }], paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD });
 
     expect(res.status).toBe(400);
@@ -178,7 +181,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: itemId, quantity: 1 }], paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD });
 
     expect(res.status).toBe(409);
@@ -194,7 +197,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({ items: [{ menuItemId: itemId, quantity: 1 }], paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD });
 
     expect(res.status).toBe(400);
@@ -210,7 +213,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({
         items: [{ menuItemId: itemId, quantity: 2 }, { menuItemId: itemId, quantity: 3 }],
         paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD,
@@ -231,7 +234,7 @@ describe('POST /api/public/events/:eventId/menu-orders — placing a preorder', 
 
     const res = await request(app)
       .post(`/api/public/events/${eventId}/menu-orders`)
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .send({
         items: [{ menuItemId: itemId, quantity: 30 }, { menuItemId: itemId, quantity: 30 }],
         paymentMethod: PaymentMethod.KESHLESS_WALLET, keshlessCardNumber: CARD,
@@ -254,9 +257,9 @@ describe('PATCH /api/tickets/menu-orders/:id — fulfilment transitions', () => 
     eventId = await eventWith(EventStatus.PUBLISHED);
   });
 
-  const patch = (id: string, fulfillmentStatus: string) =>
+  const patch = async (id: string, fulfillmentStatus: string) =>
     request(app).patch(`/api/tickets/menu-orders/${id}`)
-      .set('Authorization', `Bearer ${organizerToken()}`)
+      .set('Authorization', `Bearer ${await organizerToken()}`)
       .send({ fulfillmentStatus });
 
   it('walks a paid order forward: new → preparing → ready → collected', async () => {
@@ -348,7 +351,7 @@ describe('GET /api/public/my-menu-orders — the buyer\'s order history', () => 
 
     const res = await request(app)
       .get('/api/public/my-menu-orders')
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -362,7 +365,7 @@ describe('GET /api/public/my-menu-orders — the buyer\'s order history', () => 
 
     const res = await request(app)
       .get('/api/public/my-menu-orders')
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data[0].eventId.name).toBe('Menu Night');
@@ -379,14 +382,14 @@ describe('POST /api/tickets/menu-orders/scan and /collect — QR collection scan
     eventId = await eventWith(EventStatus.PUBLISHED);
   });
 
-  const scan = (orderId: string, token = organizerToken()) =>
+  const scan = async (orderId: string, token?: string) =>
     request(app).post('/api/tickets/menu-orders/scan')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${token ?? await organizerToken()}`)
       .send({ orderId });
 
-  const collect = (orderId: string, token = organizerToken()) =>
+  const collect = async (orderId: string, token?: string) =>
     request(app).post('/api/tickets/menu-orders/collect')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${token ?? await organizerToken()}`)
       .send({ orderId });
 
   it('finds a paid order by its human-readable orderId (the QR payload)', async () => {

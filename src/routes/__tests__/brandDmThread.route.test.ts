@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { DmThread } from '@models/dmThread.model';
@@ -26,7 +26,7 @@ describe('buyer → brand DM thread (POST /api/dm/brand-threads)', () => {
       businessName: 'Loud Events', email: 'loud@example.com', password: 'secret123',
       phoneNumber: '+26878000055', logoUrl: null,
     });
-    return { buyer, vendor, auth: `Bearer ${signBuyerToken(PHONE)}` };
+    return { buyer, vendor, auth: `Bearer ${await signBuyerSessionToken(PHONE)}` };
   }
 
   it('opens a 1:1 with the brand — the view names the organizer, no contact leaks', async () => {

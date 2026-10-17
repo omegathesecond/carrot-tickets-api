@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 
@@ -14,7 +14,7 @@ describe('GET /api/tickets/social/users/search (vendor)', () => {
     const me = await Vendor.create({ businessName: 'Bhora Fest', email: 'me-search@example.com', phoneNumber: '+26878000701', password: 'secret123' });
     const other = await Vendor.create({ businessName: 'Bhora Nights', email: 'other-search@example.com', phoneNumber: '+26878000702', password: 'secret123' });
     await Buyer.create({ phone: '+26878000703', password: 'secret1', name: 'Bo', username: 'bhora_fan' });
-    const token = `Bearer ${signVendorToken(String(me._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(me._id))}`;
 
     const res = await request(app).get('/api/tickets/social/users/search?q=bho').set('Authorization', token).expect(200);
     expect(res.body.data.buyers.map((b: any) => b.username)).toContain('bhora_fan');
@@ -26,7 +26,7 @@ describe('GET /api/tickets/social/users/search (vendor)', () => {
   it('finds a usernameless buyer by display name', async () => {
     const me = await Vendor.create({ businessName: 'Name Search Co', email: 'ns@example.com', phoneNumber: '+26878000705', password: 'secret123' });
     await Buyer.create({ phone: '+26878000706', password: 'secret1', name: 'Sipho Dlamini' }); // no username (no social touch yet)
-    const token = `Bearer ${signVendorToken(String(me._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(me._id))}`;
 
     const res = await request(app).get('/api/tickets/social/users/search?q=sipho').set('Authorization', token).expect(200);
     expect(res.body.data.buyers).toHaveLength(1);
@@ -36,11 +36,12 @@ describe('GET /api/tickets/social/users/search (vendor)', () => {
 
   it('400s a too-short query', async () => {
     const me = await Vendor.create({ businessName: 'Solo Brand', email: 'solo@example.com', phoneNumber: '+26878000704', password: 'secret123' });
-    await request(app).get('/api/tickets/social/users/search?q=b').set('Authorization', `Bearer ${signVendorToken(String(me._id))}`).expect(400);
+    await request(app).get('/api/tickets/social/users/search?q=b').set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`).expect(400);
   });
 
   it('401s a buyer token (no vendorId)', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret123' });
     await request(app).get('/api/tickets/social/users/search?q=test')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
   });
 });

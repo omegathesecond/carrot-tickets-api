@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventReaction } from '@models/eventReaction.model';
@@ -92,7 +92,7 @@ describe('GET /api/public/calendar', () => {
 
     const res = await request(app)
       .get('/api/public/calendar?year=2026')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const byName = Object.fromEntries(res.body.data.events.map((e: any) => [e.name, e]));

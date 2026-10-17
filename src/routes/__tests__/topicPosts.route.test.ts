@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Update } from '@models/update.model';
 
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn(), reconcileStuckUpdates: jest.fn() }));
@@ -136,12 +136,12 @@ describe('GET /api/public/topics/:tag/posts', () => {
     const update = await Update.create(makeUpdate(['music']));
     await request(app)
       .post(`/api/tickets/updates/${update.id}/like`)
-      .set('Authorization', `Bearer ${signVendorToken(viewerId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(viewerId)}`)
       .expect(200);
 
     const res = await request(app)
       .get('/api/public/topics/music/posts')
-      .set('Authorization', `Bearer ${signVendorToken(viewerId)}`);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(viewerId)}`);
     expect(res.status).toBe(200);
     expect(res.body.data.posts[0].viewerReactions).toEqual({ liked: true, saved: false });
   });

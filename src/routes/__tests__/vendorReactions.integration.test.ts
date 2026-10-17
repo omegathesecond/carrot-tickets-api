@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Update } from '@models/update.model';
 
 describe('vendor reactions end-to-end via feed + getOne', () => {
@@ -12,7 +12,7 @@ describe('vendor reactions end-to-end via feed + getOne', () => {
 
   it('like via API is visible in getOne and the feed for that vendor', async () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
-    const token = `Bearer ${signVendorToken(vendorId)}`;
+    const token = `Bearer ${await seedVendorSessionToken(vendorId)}`;
     const u = await Update.create({
       authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),
       kind: 'image', caption: 'x', media: [{ rawKey: 'k', status: 'ready' }], status: 'active',

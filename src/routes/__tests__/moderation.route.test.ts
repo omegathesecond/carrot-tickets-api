@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken as signBuyerSessionToken, signVendorSessionToken, signStaffSessionToken, signAdminSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Channel } from '@models/channel.model';
@@ -38,8 +38,8 @@ async function seedWorld() {
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
 
   const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Chatty Buyer' });
-  const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
-  const vendorAuth = `Bearer ${signVendorToken(String(vendor._id))}`;
+  const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
+  const vendorAuth = `Bearer ${await signVendorSessionToken(String(vendor._id))}`;
 
   await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', buyerAuth).expect(200);
 
@@ -474,7 +474,7 @@ describe('organizer moderation routes', () => {
 
       const OUTSIDER = '+26878000060';
       await Buyer.create({ phone: OUTSIDER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
-      const outsiderAuth = `Bearer ${signBuyerToken(OUTSIDER)}`;
+      const outsiderAuth = `Bearer ${await signBuyerSessionToken(OUTSIDER)}`;
 
       await request(app)
         .get(`/api/community/channels/${general}/pins`)

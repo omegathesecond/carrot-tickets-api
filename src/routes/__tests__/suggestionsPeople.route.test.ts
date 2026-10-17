@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken as signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
 import { Ticket } from '@models/ticket.model';
@@ -22,7 +22,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: suggestion._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames).toContain('sugg_b');
     expect(usernames).not.toContain('friend_a'); // already followed
@@ -39,7 +39,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: suggestion._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const row = res.body.data.find((p: any) => p.username === 'sugg_b');
     expect(row).toEqual({
       id: String(suggestion._id),
@@ -67,7 +67,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: friendB._id, targetType: 'buyer', targetId: popular._id });
     await Follow.create({ followerType: 'buyer', followerId: friendA._id, targetType: 'buyer', targetId: lonely._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const popularRow = res.body.data.find((p: any) => p.username === 'popular_b');
     const lonelyRow = res.body.data.find((p: any) => p.username === 'lonely_d');
     expect(popularRow.mutualCount).toBe(2);
@@ -86,7 +86,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: suspended._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames).not.toContain('sus_b');
   });
@@ -102,7 +102,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: emptyAvatar._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: withAvatar._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames).not.toContain('no_avatar_b');
     expect(usernames).not.toContain('empty_avatar_c');
@@ -116,7 +116,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: noUsername._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const ids = res.body.data.map((p: any) => p.id);
     expect(ids).not.toContain(String(noUsername._id));
   });
@@ -129,7 +129,7 @@ describe('GET /api/social/suggestions/people', () => {
     const noUsername = await Buyer.create({ phone: '+26878000099', password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: 'NoHandle' });
     void noUsername;
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const row = res.body.data.find((p: any) => p.username === 'other_a');
     expect(row).toBeTruthy();
     expect(row.mutualCount).toBe(0);
@@ -151,7 +151,7 @@ describe('GET /api/social/suggestions/people', () => {
     });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: onlyFollow._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames).toContain('stranger_b');
     expect(usernames).not.toContain('friend_a'); // already followed
@@ -170,7 +170,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'buyer', targetId: friend._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: fof._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames.indexOf('fof_b')).toBeLessThan(usernames.indexOf('stranger_c'));
     expect(res.body.data.find((p: any) => p.username === 'fof_b').mutualCount).toBe(1);
@@ -195,7 +195,7 @@ describe('GET /api/social/suggestions/people', () => {
     for (const seed of [1, 7, 42, 999, 123456]) {
       const res = await request(app)
         .get(`/api/social/suggestions/people?seed=${seed}&limit=5`)
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .expect(200);
       expect(res.body.data[0].username).toBe('fof_b');
       expect(res.body.data[0].mutualCount).toBe(1);
@@ -220,11 +220,11 @@ describe('GET /api/social/suggestions/people', () => {
 
     const page1 = await request(app)
       .get('/api/social/suggestions/people?limit=2&page=1')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`)
       .expect(200);
     const page2 = await request(app)
       .get('/api/social/suggestions/people?limit=2&page=2')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`)
       .expect(200);
 
     expect(page1.body.data).toHaveLength(2);
@@ -255,7 +255,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Ticket.create({ eventId: sharedEventId, vendorId, ticketType: 'GA', price: 0, customerPhone: '+26878422613', status: TicketStatus.SOLD });
     await Ticket.create({ eventId: sharedEventId, vendorId, ticketType: 'GA', price: 0, customerPhone: '+26878000031', status: TicketStatus.SOLD });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const ids = res.body.data.map((p: any) => p.username);
     const sharesIndex = ids.indexOf('shares_event');
     const noEventIndex = ids.indexOf('no_event');
@@ -277,7 +277,7 @@ describe('GET /api/social/suggestions/people', () => {
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: otherCity._id });
     await Follow.create({ followerType: 'buyer', followerId: friend._id, targetType: 'buyer', targetId: sameCity._id });
 
-    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/people').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     const usernames = res.body.data.map((p: any) => p.username);
     expect(usernames.indexOf('same_city')).toBeLessThan(usernames.indexOf('other_city'));
   });
@@ -287,7 +287,7 @@ describe('GET /api/social/suggestions/people', () => {
     for (let i = 0; i < 8; i++) {
       await Buyer.create({ phone: `+2687000000${i}`, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: `P${i}`, username: `pp${i}` });
     }
-    const token = signBuyerToken(PHONE);
+    const token = await signBuyerSessionToken(PHONE);
     const a1 = await request(app).get('/api/social/suggestions/people?seed=7').set('Authorization', `Bearer ${token}`).expect(200);
     const a2 = await request(app).get('/api/social/suggestions/people?seed=7').set('Authorization', `Bearer ${token}`).expect(200);
     const b = await request(app).get('/api/social/suggestions/people?seed=999').set('Authorization', `Bearer ${token}`).expect(200);
@@ -300,7 +300,7 @@ describe('GET /api/social/suggestions/people', () => {
     for (let i = 0; i < 6; i++) {
       await Buyer.create({ phone: `+2687100000${i}`, password: 'secret1', avatarUrl: 'https://cdn.example.com/a.png', name: `Q${i}`, username: `qq${i}` });
     }
-    const token = signBuyerToken(PHONE);
+    const token = await signBuyerSessionToken(PHONE);
     const p1 = await request(app).get('/api/social/suggestions/people?seed=42&limit=2&page=1').set('Authorization', `Bearer ${token}`).expect(200);
     const p2 = await request(app).get('/api/social/suggestions/people?seed=42&limit=2&page=2').set('Authorization', `Bearer ${token}`).expect(200);
     const ids1 = p1.body.data.map((p: any) => p.id);

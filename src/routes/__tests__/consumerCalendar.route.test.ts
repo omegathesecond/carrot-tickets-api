@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventReaction } from '@models/eventReaction.model';
@@ -34,7 +34,7 @@ describe('GET /api/social/me/calendar', () => {
     const e = await makeEvent({ name: 'Aug Event', eventDate: new Date('2026-08-10'), startTime: new Date('2026-08-10'), endTime: new Date('2026-08-10') });
     await EventReaction.create({ eventId: e._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
-    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.monthCounts.Aug).toBe(1);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Aug Event']);
   });
@@ -51,7 +51,7 @@ describe('GET /api/social/me/calendar', () => {
     await EventReaction.create({ eventId: both._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     await Ticket.create({ eventId: both._id, vendorId: both.vendorId, ticketType: 'GA', price: 0, customerPhone: PHONE, status: TicketStatus.SOLD });
 
-    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.monthCounts.Mar).toBe(3);
     const names = res.body.data.events.map((c: any) => c.name);
     expect(names.sort()).toEqual(['Both', 'Saved Only', 'Ticketed Only']);
@@ -66,7 +66,7 @@ describe('GET /api/social/me/calendar', () => {
     const nextYear = await makeEvent({ name: 'In 2027', eventDate: new Date('2027-01-01') });
     await EventReaction.create({ eventId: nextYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
-    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['In 2026']);
     expect(res.body.data.monthCounts).toEqual({ Jan: 1 });
   });
@@ -79,13 +79,13 @@ describe('GET /api/social/me/calendar', () => {
     const lastYear = await makeEvent({ name: 'Last Year', eventDate: new Date(Date.UTC(now.getUTCFullYear() - 1, 5, 1)) });
     await EventReaction.create({ eventId: lastYear._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
-    const res = await request(app).get('/api/social/me/calendar').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/calendar').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['This Year']);
   });
 
   it('returns empty month counts and events when nothing saved or going', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
-    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/calendar?year=2026').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.monthCounts).toEqual({});
     expect(res.body.data.events).toEqual([]);
   });
@@ -108,7 +108,7 @@ describe('GET /api/social/me/following/events', () => {
     await makeEvent({ name: 'Later Show', vendorId, eventDate: later, endTime: later, status: EventStatus.PUBLISHED });
     await makeEvent({ name: 'Soon Show', vendorId, eventDate: soon, endTime: soon, status: EventStatus.PUBLISHED });
 
-    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Soon Show', 'Later Show']);
   });
 
@@ -122,7 +122,7 @@ describe('GET /api/social/me/following/events', () => {
     await makeEvent({ name: 'Followed Org', vendorId: followedVendor, eventDate: future, endTime: future, status: EventStatus.PUBLISHED });
     await makeEvent({ name: 'Unfollowed Org', vendorId: otherVendor, eventDate: future, endTime: future, status: EventStatus.PUBLISHED });
 
-    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Followed Org']);
   });
 
@@ -137,13 +137,13 @@ describe('GET /api/social/me/following/events', () => {
     await makeEvent({ name: 'Published Past', vendorId, eventDate: past, endTime: past, status: EventStatus.PUBLISHED });
     await makeEvent({ name: 'Published Future', vendorId, eventDate: future, endTime: future, status: EventStatus.PUBLISHED });
 
-    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Published Future']);
   });
 
   it('returns an empty list when the buyer follows no organizers', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
-    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events).toEqual([]);
   });
 
@@ -156,7 +156,7 @@ describe('GET /api/social/me/following/events', () => {
     const future = new Date(Date.now() + 60 * 60 * 1000);
     await makeEvent({ name: 'In Progress Show', vendorId, eventDate: past, startTime: past, endTime: future, status: EventStatus.PUBLISHED });
 
-    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['In Progress Show']);
   });
 

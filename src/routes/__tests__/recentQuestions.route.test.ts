@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventQuestion } from '@models/eventQuestion.model';
@@ -29,7 +29,7 @@ describe('GET /api/public/questions', () => {
     const eventB = await seedPublishedEvent();
     await Event.findByIdAndUpdate(eventB.eventId, { name: 'Winter Fest' });
     const buyer = await seedBuyer();
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const q1 = await request(app)
       .post(`/api/community/${eventA.eventId}/questions`)
@@ -69,7 +69,7 @@ describe('GET /api/public/questions', () => {
   it('defaults to 20 and does not go unbounded on a non-numeric limit query param', async () => {
     const { eventId } = await seedPublishedEvent();
     await seedBuyer();
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     for (let i = 0; i < 25; i++) {
       await request(app)
         .post(`/api/community/${eventId}/questions`)
@@ -90,7 +90,7 @@ describe('GET /api/public/questions', () => {
     await seedBuyer();
     await request(app)
       .post(`/api/community/${eventId}/questions`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ body: 'Anyone going?' })
       .expect(201);
 

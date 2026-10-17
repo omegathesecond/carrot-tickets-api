@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -55,7 +55,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
     Object.entries(fields()).forEach(([k, v]) => req.field(k, v));
     req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
     req.attach('media', Buffer.from('fake-jpeg-2'), { filename: 'crowd.jpg', contentType: 'image/jpeg' });
@@ -85,7 +85,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     (R2Service.uploadEventMedia as jest.Mock).mockRejectedValueOnce(new Error('R2 down'));
     const req = request(app)
       .post('/api/public/events/submit')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
     Object.entries(fields()).forEach(([k, v]) => req.field(k, v));
     req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
 
@@ -97,7 +97,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
     const withTiers = fields({
       ticketing: 'carrot',
       ticketTypes: JSON.stringify([{ name: 'General Admission', price: 100, quantity: 50 }]),
@@ -115,7 +115,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
     const noTickets = fields({ ticketing: 'carrot' });
     delete noTickets.externalTicketUrl;
     Object.entries(noTickets).forEach(([k, v]) => req.field(k, v));
@@ -132,7 +132,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
     const noTickets = fields({ ticketing: 'carrot' });
     delete noTickets.externalTicketUrl;
     Object.entries(noTickets).forEach(([k, v]) => req.field(k, v));
@@ -148,7 +148,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     await Buyer.create({ phone: other, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Attendee' });
     await request(app)
       .post(`/api/community/${eventId}/join`)
-      .set('Authorization', `Bearer ${signBuyerToken(other)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(other)}`)
       .expect(200);
 
     const roster = await request(app).get(`/api/community/${eventId}/members`).expect(200);
@@ -159,7 +159,7 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Lister' });
     const req = request(app)
       .post('/api/public/events/submit')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
     Object.entries(fields()).forEach(([k, v]) => req.field(k, v));
     await req.expect(400); // no poster attached
     expect(await Event.countDocuments({})).toBe(0);

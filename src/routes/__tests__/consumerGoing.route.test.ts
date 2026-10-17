@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { Community } from '@models/community.model';
@@ -25,7 +25,7 @@ describe('GET /api/social/me/going', () => {
     const ticketed = await Event.create({ vendorId: new mongoose.Types.ObjectId(), name: 'Ticketed', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
     await Ticket.create({ eventId: ticketed._id, vendorId: ticketed.vendorId, ticketType: 'GA', price: 0, customerPhone: PHONE, status: TicketStatus.SOLD });
 
-    const res = await request(app).get('/api/social/me/going').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/going').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const names = res.body.data.events.map((e: any) => e.name);
     expect(names).toContain('Joined');
     expect(names).toContain('Ticketed');

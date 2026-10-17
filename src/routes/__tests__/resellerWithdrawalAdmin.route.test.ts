@@ -2,30 +2,15 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
-import { signSuperAdminToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { seedOperator } from '../../__tests__/helpers/fixtures';
 import { ResellerCommissionWithdrawal } from '@models/resellerCommissionWithdrawal.model';
 import { TicketSale } from '@models/ticketSale.model';
-import jwt from 'jsonwebtoken';
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-
-function signNonSuperAdminToken(): string {
-  return jwt.sign(
-    {
-      app: 'tickets',
-      vendorId: 'regular-vendor-id',
-      userType: 'vendor',
-      isSuperAdmin: false,
-      role: 'owner',
-      permissions: [],
-    },
-    JWT_SECRET,
-  );
-}
+const signNonSuperAdminToken = () => seedVendorSessionToken('regular-vendor-id');
 
 async function seedWithdrawal(resellerId: string, operatorId: string, status: string = 'requested') {
   return ResellerCommissionWithdrawal.create({
@@ -60,7 +45,7 @@ it('non-super-admin (or no token) is rejected → 401/403', async () => {
   const noAuth = await request(app).get('/api/admin/withdrawals');
   expect(noAuth.status).toBe(401);
 
-  const nonAdmin = signNonSuperAdminToken();
+  const nonAdmin = await signNonSuperAdminToken();
   const restricted = await request(app)
     .get('/api/admin/withdrawals')
     .set('Authorization', `Bearer ${nonAdmin}`);
@@ -68,7 +53,7 @@ it('non-super-admin (or no token) is rejected → 401/403', async () => {
 });
 
 it('lists all withdrawals (optionally filtered by status)', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const { resellerId, operator } = await seedOperator();
 
   await seedWithdrawal(resellerId, operator._id.toString(), 'requested');
@@ -88,7 +73,7 @@ it('lists all withdrawals (optionally filtered by status)', async () => {
 });
 
 it('lists withdrawals for a specific reseller', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const { resellerId, operator } = await seedOperator();
 
   await seedWithdrawal(resellerId, operator._id.toString());
@@ -102,7 +87,7 @@ it('lists withdrawals for a specific reseller', async () => {
 });
 
 it('approve → mark-paid happy path: status becomes paid and sales are stamped', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const { resellerId, operator } = await seedOperator();
   const operatorId = operator._id.toString();
 
@@ -135,7 +120,7 @@ it('approve → mark-paid happy path: status becomes paid and sales are stamped'
 });
 
 it('approve → reject happy path: status becomes rejected', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const { resellerId, operator } = await seedOperator();
 
   const w = await seedWithdrawal(resellerId, operator._id.toString(), 'requested');
@@ -156,7 +141,7 @@ it('approve → reject happy path: status becomes rejected', async () => {
 });
 
 it('returns 404 for unknown withdrawal id on approve', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const missingId = new mongoose.Types.ObjectId().toString();
 
   const res = await request(app)
@@ -166,7 +151,7 @@ it('returns 404 for unknown withdrawal id on approve', async () => {
 });
 
 it('returns 404 when trying to mark-paid a rejected withdrawal', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const { resellerId, operator } = await seedOperator();
 
   const w = await seedWithdrawal(resellerId, operator._id.toString(), 'rejected');

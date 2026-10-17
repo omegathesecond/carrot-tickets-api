@@ -1,6 +1,6 @@
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { startTestRealtime, connectClient, TestRealtime } from './helpers';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { BuyerPresence } from '@models/buyerPresence.model';
 import { isBuyerOnline } from '@utils/buyerOnline.util';
@@ -36,7 +36,7 @@ describe('gateway presence', () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1' });
     expect(await isBuyerOnline(String(buyer._id))).toBe(false);
 
-    const client = await connectClient(rt.port, signBuyerToken(PHONE));
+    const client = await connectClient(rt.port, await signBuyerSessionToken(PHONE));
     clients.push(client);
     await waitFor(async () => (await BuyerPresence.countDocuments({ buyerId: buyer._id })) === 1);
     expect(await isBuyerOnline(String(buyer._id))).toBe(true);

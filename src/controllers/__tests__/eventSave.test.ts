@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { Buyer } from '@models/buyer.model';
 import { EventReaction } from '@models/eventReaction.model';
@@ -24,7 +24,7 @@ async function seedEvent() {
 }
 
 const BUYER_PHONE = '+26878422613';
-const buyerAuth = () => ({ Authorization: `Bearer ${signBuyerToken(BUYER_PHONE)}` });
+const buyerAuth = async () => ({ Authorization: `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}` });
 
 describe('POST /api/public/events/:eventId/save', () => {
   beforeAll(connectTestDb);
@@ -46,14 +46,14 @@ describe('POST /api/public/events/:eventId/save', () => {
 
   it('404s an unknown event', async () => {
     const unknown = new mongoose.Types.ObjectId().toString();
-    const res = await request(app).post(`/api/public/events/${unknown}/save`).set(buyerAuth());
+    const res = await request(app).post(`/api/public/events/${unknown}/save`).set(await buyerAuth());
     expect(res.status).toBe(404);
   });
 
   it('creates a type:save reaction (not type:like) when toggled on for an authenticated buyer', async () => {
     const e = await seedEvent();
 
-    const on = await request(app).post(`/api/public/events/${e.id}/save`).set(buyerAuth());
+    const on = await request(app).post(`/api/public/events/${e.id}/save`).set(await buyerAuth());
     expect(on.status).toBe(200);
     expect(on.body.data.active).toBe(true);
 
@@ -65,8 +65,8 @@ describe('POST /api/public/events/:eventId/save', () => {
   it('toggles a save on then off, removing the type:save reaction', async () => {
     const e = await seedEvent();
 
-    await request(app).post(`/api/public/events/${e.id}/save`).set(buyerAuth());
-    const off = await request(app).post(`/api/public/events/${e.id}/save`).set(buyerAuth());
+    await request(app).post(`/api/public/events/${e.id}/save`).set(await buyerAuth());
+    const off = await request(app).post(`/api/public/events/${e.id}/save`).set(await buyerAuth());
     expect(off.body.data.active).toBe(false);
 
     const rows = await EventReaction.find({ eventId: e.id, type: 'save' });
@@ -78,7 +78,7 @@ describe('POST /api/public/events/:eventId/save', () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
     const res = await request(app)
       .post(`/api/public/events/${e.id}/save`)
-      .set({ Authorization: `Bearer ${signVendorToken(vendorId)}` });
+      .set({ Authorization: `Bearer ${await seedVendorSessionToken(vendorId)}` });
     expect(res.status).toBe(200);
     expect(res.body.data.active).toBe(true);
   });
@@ -86,7 +86,7 @@ describe('POST /api/public/events/:eventId/save', () => {
   it('liking an event does NOT create a save reaction — save and like are independent', async () => {
     const e = await seedEvent();
 
-    await request(app).post(`/api/public/events/${e.id}/like`).set(buyerAuth());
+    await request(app).post(`/api/public/events/${e.id}/like`).set(await buyerAuth());
 
     const saveRows = await EventReaction.find({ eventId: e.id, type: 'save' });
     expect(saveRows).toHaveLength(0);
@@ -97,7 +97,7 @@ describe('POST /api/public/events/:eventId/save', () => {
   it('saving an event does NOT create a like reaction or bump likeCount', async () => {
     const e = await seedEvent();
 
-    await request(app).post(`/api/public/events/${e.id}/save`).set(buyerAuth());
+    await request(app).post(`/api/public/events/${e.id}/save`).set(await buyerAuth());
 
     const likeRows = await EventReaction.find({ eventId: e.id, type: 'like' });
     expect(likeRows).toHaveLength(0);
