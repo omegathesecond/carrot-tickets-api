@@ -1,3 +1,8 @@
+import { Vendor } from '@models/vendor.model';
+import { VendorSubUser } from '@models/vendorSubUser.model';
+import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
+import { SubUserRole } from '@interfaces/subUser.interface';
+import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { Buyer } from '@models/buyer.model';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import jwt from 'jsonwebtoken';
@@ -50,4 +55,31 @@ export async function signBuyerSessionToken(phone: string): Promise<string> {
   const buyer = await Buyer.findOne({ phone });
   if (!buyer) throw new Error(`Missing buyer fixture: ${phone}`);
   return BuyerAuthService.signToken(buyer);
+}
+
+/** Sign an owner session against a persisted vendor, never trusting token permissions. */
+export async function signVendorSessionToken(vendorId: string): Promise<string> {
+  const vendor = await Vendor.findById(vendorId);
+  if (!vendor) throw new Error(`Missing vendor fixture: ${vendorId}`);
+  return jwt.sign({ app: 'tickets', userType: 'vendor', vendorId,
+    authVersion: vendor.authVersion }, JWT_SECRET);
+}
+
+/** Restricted sessions must have persisted staff access, just like real logins. */
+export async function signStaffSessionToken(vendorId: string, permissions: TicketsPermission[]): Promise<string> {
+  const vendor = await Vendor.findById(vendorId);
+  if (!vendor) throw new Error(`Missing vendor fixture: ${vendorId}`);
+  const staff = await VendorSubUser.create({ vendorId, fullName: 'Test staff',
+    password: 'secret123', role: SubUserRole.SCANNER });
+  await TicketsUserAccess.create({ vendorId, userId: staff._id,
+    role: TicketsRole.SCANNER, permissions });
+  return jwt.sign({ app: 'tickets', userType: 'sub-user', vendorId,
+    userId: String(staff._id), authVersion: staff.authVersion }, JWT_SECRET);
+}
+
+/** Create a platform administrator with a real account-backed owner session. */
+export async function signAdminSessionToken(): Promise<string> {
+  const admin = await Vendor.create({ businessName: 'Carrot admin',
+    password: 'secret123', isSuperAdmin: true });
+  return signVendorSessionToken(String(admin._id));
 }
