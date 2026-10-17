@@ -39,7 +39,7 @@ describe('POST /api/tickets/updates/:id/like|save (vendor)', () => {
   });
 
   it('401s a buyer token (no vendorId → not a vendor actor on this route)', async () => {
-    await Buyer.create({ phone: '+26878422613', password: 'secret123' });
+    await Buyer.create({ phone: '+26878422613', password: 'secret123', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const u = await seedReadyUpdate();
     await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
   });
