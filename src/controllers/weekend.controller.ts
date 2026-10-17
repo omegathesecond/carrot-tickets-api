@@ -30,6 +30,16 @@ function parseExcludeIds(raw: unknown): string[] {
 }
 
 export class WeekendController {
+  static async profilePlans(req: Request, res: Response): Promise<any> {
+    try {
+      const viewer = await resolveBuyerFromRequest(req);
+      const cards = await WeekendService.getProfilePlans(viewer, String(req.params['username'] || ''));
+      return ApiResponseUtil.success(res, { cards });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load weekend posts');
+    }
+  }
+
   /** GET /api/social/weekend/me */
   static async getMine(req: Request, res: Response): Promise<any> {
     try {

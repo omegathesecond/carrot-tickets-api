@@ -2,7 +2,12 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signPersistedBuyerToken } from '../../__tests__/helpers/auth';
+import { TicketsAuthService } from '@services/ticketsAuth.service';
+import { WeekendService } from '@services/weekend.service';
+import { Vendor } from '@models/vendor.model';
+import { OperatorType } from '@interfaces/vendor.interface';
+import { signVendorToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 
 const PHONE = '+26878422613';
@@ -15,6 +20,32 @@ describe('Weekend routes', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  it('serves public plans and profile media to regular, provider, organiser and admin accounts', async () => {
+    const buyer = await seedBuyer();
+    const previousBase = process.env['UPDATES_R2_PUBLIC_URL'];
+    process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com';
+    try {
+      const plan = await WeekendService.createPlan(buyer, { statusType: 'have_plans', media: [{ url: 'https://cdn.carrottickets.com/plan.jpg', type: 'image' }] });
+      const buyerToken = await signPersistedBuyerToken(PHONE);
+      const tokens = [buyerToken];
+      for (const [index, operatorType] of [OperatorType.SERVICES, OperatorType.EVENTS, OperatorType.EVENTS].entries()) {
+        const vendor = await Vendor.create({ email: `weekend${index}@example.com`, password: 'secret1', businessName: `Weekend ${index}`, operatorType, serviceCategories: ['photography'], isSuperAdmin: index === 2, apps: { tickets: { enabled: true } } });
+        tokens.push(signVendorToken(String(vendor._id), { authVersion: vendor.authVersion }));
+      }
+      for (const token of tokens) {
+        await TicketsAuthService.verifyAndResolveSession(token);
+        for (const endpoint of ['/feed', '/feed/all', `/users/${buyer.username}/plans`]) {
+          const res = await request(app).get(`/api/social/weekend${endpoint}`).set('Authorization', `Bearer ${token}`).expect(200);
+          expect(res.body.data.cards.map((card: any) => card.id)).toContain(plan.id);
+        }
+      }
+      await request(app).post('/api/social/weekend/plans').set('Authorization', `Bearer ${buyerToken}`).send({ statusType: 'have_plans', media: [] }).expect(400);
+    } finally {
+      if (previousBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL'];
+      else process.env['UPDATES_R2_PUBLIC_URL'] = previousBase;
+    }
+  });
 
   describe('auth guards', () => {
     it('401s GET /me when signed out', async () => {
@@ -85,7 +116,7 @@ describe('Weekend routes', () => {
   describe('authenticated round trip', () => {
     it('lets a signed-in buyer set, read back, and remove their own status', async () => {
       await seedBuyer();
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signPersistedBuyerToken(PHONE)}`;
 
       const put = await request(app)
         .put('/api/social/weekend/me')
@@ -114,7 +145,7 @@ describe('Weekend routes', () => {
       };
       try {
         await seedBuyer();
-        const auth = `Bearer ${signBuyerToken(PHONE)}`;
+        const auth = `Bearer ${await signPersistedBuyerToken(PHONE)}`;
 
         const rejected = await request(app)
           .post('/api/social/weekend/media')
@@ -144,7 +175,7 @@ describe('Weekend routes', () => {
 
     it('surfaces a just-created status as the first, isOwner card in the "Who Has Plans" feed and See All page', async () => {
       await seedBuyer();
-      const auth = `Bearer ${signBuyerToken(PHONE)}`;
+      const auth = `Bearer ${await signPersistedBuyerToken(PHONE)}`;
 
       await request(app)
         .put('/api/social/weekend/me')
