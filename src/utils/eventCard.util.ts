@@ -23,6 +23,7 @@ export function buildEventCardFields(event: any) {
   const tts: any[] = event.ticketTypes ?? [];
   const prices = tts.map((tt) => tt.price);
   return {
+    isCommunityListing: !!event.submittedByBuyerId,
     name: event.name,
     description: event.description,
     venue: event.venue,

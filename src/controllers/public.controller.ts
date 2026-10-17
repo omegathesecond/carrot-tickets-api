@@ -390,7 +390,7 @@ export class PublicController {
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
         Event.find(filter)
-          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category priceMin priceMax currency galleryImages')
+          .select('submittedByBuyerId name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category priceMin priceMax currency galleryImages')
           .sort({ eventDate: 1 })
           .skip(skip)
           .limit(limit)
