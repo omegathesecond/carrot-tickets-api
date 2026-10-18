@@ -1,4 +1,4 @@
-import request from 'supertest';
+import request, { Response } from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -27,6 +27,11 @@ describe('Weekend routes', () => {
     process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com';
     try {
       const plan = await WeekendService.createPlan(buyer, { statusType: 'have_plans', media: [{ url: 'https://cdn.carrottickets.com/plan.jpg', type: 'image' }] });
+      const otherBuyer = await seedBuyer('+26878422614', 'other_weekend_user');
+      const plans = [plan];
+      for (const statusType of ['custom', 'staying_in', 'bored', 'nothing_planned'] as const) {
+        plans.push(await WeekendService.createPlan(otherBuyer, { statusType, message: 'A posted plan', media: [{ url: 'https://cdn.carrottickets.com/plan.jpg', type: 'image' }] }));
+      }
       const buyerToken = await signPersistedBuyerToken(PHONE);
       const tokens = [buyerToken];
       for (const [index, operatorType] of [OperatorType.SERVICES, OperatorType.EVENTS, OperatorType.EVENTS].entries()) {
@@ -36,8 +41,18 @@ describe('Weekend routes', () => {
       for (const token of tokens) {
         await TicketsAuthService.verifyAndResolveSession(token);
         for (const endpoint of ['/feed', '/feed/all', `/users/${buyer.username}/plans`]) {
-          const res = await request(app).get(`/api/social/weekend${endpoint}`).set('Authorization', `Bearer ${token}`).expect(200);
-          expect(res.body.data.cards.map((card: any) => card.id)).toContain(plan.id);
+          const ids: string[] = [];
+          let cursor: string | null = null;
+          do {
+            const res: Response = await request(app).get(`/api/social/weekend${endpoint}`)
+              .query(endpoint === '/feed/all' ? { limit: 2, ...(cursor ? { cursor } : {}) } : {})
+              .set('Authorization', `Bearer ${token}`).expect(200);
+            ids.push(...res.body.data.cards.map((card: any) => card.id));
+            cursor = res.body.data.nextCursor ?? null;
+          } while (cursor);
+          const expected = endpoint.startsWith('/users/') ? [plan] : plans;
+          expect(ids).toEqual(expect.arrayContaining(expected.map((p) => p.id)));
+          expect(new Set(ids).size).toBe(ids.length);
         }
       }
       await request(app).post('/api/social/weekend/plans').set('Authorization', `Bearer ${buyerToken}`).send({ statusType: 'have_plans', media: [] }).expect(400);
