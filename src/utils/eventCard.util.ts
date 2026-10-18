@@ -77,6 +77,7 @@ export function buildEventCardFields(event: any) {
 export function toPublicEventCard(event: any, extras: PublicEventCardExtras = {}) {
   const card: Record<string, any> = {
     _id: event._id,
+    status: event.status,
     ...buildEventCardFields(event),
   };
   if ('organizer' in extras) card.organizer = extras.organizer ?? null;
