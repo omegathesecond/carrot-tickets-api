@@ -613,6 +613,14 @@ export class WeekendService {
     return or;
   }
 
+  private static feedStatusClause(statusTypes: WeekendStatusType[]) {
+    // Every composer post belongs in Who Has Plans, regardless of its label.
+    // Legacy profile statuses retain their existing grouping.
+    return statusTypes === HAS_PLANS_STATUS_TYPES
+      ? { $or: [{ source: 'plan_post' }, { statusType: { $in: statusTypes } }] }
+      : { statusType: { $in: statusTypes } };
+  }
+
   /**
    * Shared assembly for both Home-feed rails (spec §5-§8): "Who Has Plans
    * This Weekend" (`HAS_PLANS_STATUS_TYPES`) and "Looking for Plans"
@@ -642,7 +650,7 @@ export class WeekendService {
 
     const query: any = {
       activeUntil: { $gt: now },
-      statusType: { $in: statusTypes },
+      $and: [WeekendService.feedStatusClause(statusTypes)],
       $or: WeekendService.audienceOrClause(viewerId, followingIds.map(String)),
     };
     const excludeBuyerIds = [...(viewerId ? [viewerId] : []), ...excludedBlocked];
@@ -797,7 +805,7 @@ export class WeekendService {
 
     const query: any = {
       activeUntil: { $gt: now },
-      statusType: { $in: HAS_PLANS_STATUS_TYPES },
+      $and: [WeekendService.feedStatusClause(HAS_PLANS_STATUS_TYPES)],
       $or: WeekendService.audienceOrClause(viewerId, followingIds.map(String)),
     };
     const excludeBuyerIds = [...(viewerId ? [viewerId] : []), ...excludedBlocked];
@@ -805,7 +813,7 @@ export class WeekendService {
 
     const decoded = WeekendService.decodeSeeAllCursor(cursor);
     if (decoded) {
-      query.$and = [{ $or: [{ updatedAt: { $lt: decoded.updatedAt } }, { updatedAt: decoded.updatedAt, _id: { $lt: decoded.id } }] }];
+      query.$and.push({ $or: [{ updatedAt: { $lt: decoded.updatedAt } }, { updatedAt: decoded.updatedAt, _id: { $lt: decoded.id } }] });
     }
 
     const rows = await WeekendStatus.find(query)
