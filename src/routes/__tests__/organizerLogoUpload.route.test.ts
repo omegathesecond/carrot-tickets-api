@@ -1,5 +1,5 @@
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Vendor } from '@models/vendor.model';
@@ -21,12 +21,7 @@ import { R2Service } from '@utils/r2.service';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'test-secret-key';
 
-function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_BRAND]): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin: false, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
+const sessionToken = (vendorId: string, permissions: string[] = [TicketsPermission.EDIT_BRAND]) => seedVendorSessionToken(vendorId, { permissions });
 
 async function seedVendor() {
   return Vendor.create({
@@ -46,7 +41,7 @@ describe('POST /api/tickets/organizer/profile/logo', () => {
     const vendor = await seedVendor();
     const res = await request(app)
       .post('/api/tickets/organizer/profile/logo')
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`)
       .attach('logo', Buffer.from('fakeimage'), { filename: 'logo.png', contentType: 'image/png' });
 
     expect(res.status).toBe(200);
@@ -58,7 +53,7 @@ describe('POST /api/tickets/organizer/profile/logo', () => {
     const vendor = await seedVendor();
     const res = await request(app)
       .post('/api/tickets/organizer/profile/logo')
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`);
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`);
 
     expect(res.status).toBe(400);
   });
@@ -67,7 +62,7 @@ describe('POST /api/tickets/organizer/profile/logo', () => {
     const vendor = await seedVendor();
     const res = await request(app)
       .post('/api/tickets/organizer/profile/logo')
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [TicketsPermission.EDIT_EVENT])}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id), [TicketsPermission.EDIT_EVENT])}`)
       .attach('logo', Buffer.from('fakeimage'), { filename: 'logo.png', contentType: 'image/png' });
 
     expect(res.status).toBe(403);

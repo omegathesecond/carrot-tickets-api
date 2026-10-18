@@ -1,9 +1,10 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signPersistedBuyerToken, signVendorToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { Buyer } from '@models/buyer.model';
@@ -19,19 +20,8 @@ const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_ID = '64c000000000000000000a01';
 const BUYER_PHONE = '+26878422613';
 
-async function vendorToken(vendorId = VENDOR_ID) {
-  const vendor = await Vendor.findById(vendorId);
-  if (!vendor) throw new Error('Missing persisted organizer fixture');
-  return signVendorToken(vendorId, { authVersion: vendor.authVersion });
-}
-
-async function restrictedStaffToken() {
-  const staff = await VendorSubUser.create({ email: 'staff@example.com', password: 'secret123',
-    fullName: 'Restricted staff', vendorId: VENDOR_ID, role: SubUserRole.SCANNER });
-  await TicketsUserAccess.create({ userId: staff._id, vendorId: VENDOR_ID,
-    role: TicketsRole.SCANNER, permissions: [] });
-  return jwt.sign({ app: 'tickets', userType: 'sub-user', vendorId: VENDOR_ID,
-    userId: String(staff._id), authVersion: staff.authVersion }, JWT_SECRET);
+async function vendorToken(vendorId = VENDOR_ID, permissions = ['tickets:edit_event', 'tickets:view_stats', 'tickets:manage_access', 'tickets:export_reports']) {
+  return await seedVendorSessionToken(vendorId, { permissions: permissions });
 }
 
 async function makeEvent(vendorId = VENDOR_ID) {
@@ -118,20 +108,20 @@ describe('Share&Earn routes', () => {
     await makeBuyer(BUYER_PHONE);
     const joined = await request(app)
       .post(`/api/public/events/${event._id}/share-earn/join`)
-      .set('Authorization', `Bearer ${await signPersistedBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(201);
     expect(joined.body.data.referralCode).toBeTruthy();
 
     const again = await request(app)
       .post(`/api/public/events/${event._id}/share-earn/join`)
-      .set('Authorization', `Bearer ${await signPersistedBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(201);
     expect(again.body.data.referralCode).toBe(joined.body.data.referralCode);
 
     // Now visible to the authenticated viewer on the event page.
     const view = await request(app)
       .get(`/api/public/events/${event._id}/share-earn`)
-      .set('Authorization', `Bearer ${await signPersistedBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(200);
     expect(view.body.data.joined.referralCode).toBe(joined.body.data.referralCode);
   });
@@ -150,7 +140,7 @@ describe('Share&Earn routes', () => {
     await makeBuyer(BUYER_PHONE);
     const joined = await request(app)
       .post(`/api/public/events/${event._id}/share-earn/join`)
-      .set('Authorization', `Bearer ${await signPersistedBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(201);
 
     const resolved = await request(app).get(`/api/public/share-earn/resolve/${joined.body.data.referralCode}`).expect(200);
@@ -168,7 +158,7 @@ describe('Share&Earn routes', () => {
     await request(app).get(`/api/tickets/events/${event._id}/share-earn/dashboard`).expect(401);
     await request(app)
       .get(`/api/tickets/events/${event._id}/share-earn/dashboard`)
-      .set('Authorization', `Bearer ${await restrictedStaffToken()}`)
+      .set('Authorization', `Bearer ${await vendorToken(VENDOR_ID, [])}`)
       .expect(403);
     await request(app)
       .get(`/api/tickets/events/${event._id}/share-earn/dashboard`)

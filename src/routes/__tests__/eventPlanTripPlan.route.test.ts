@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signPersistedBuyerToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken } from '@/__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventPlan } from '@models/eventPlan.model';
@@ -18,7 +18,7 @@ jest.mock('@utils/updatesR2', () => ({
 }));
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn().mockResolvedValue(undefined) }));
 
-const auth = async (phone: string) => ({ Authorization: `Bearer ${await signPersistedBuyerToken(phone)}` });
+const auth = async (phone: string) => ({ Authorization: `Bearer ${await signBuyerSessionToken(phone)}` });
 const ADMIN = '+26878422613';
 const FRIEND = '+26878000001';
 const AVATAR = 'https://cdn.carrottickets.com/test/avatar.jpg';

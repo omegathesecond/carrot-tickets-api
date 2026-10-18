@@ -14,7 +14,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Merchant } from '@models/merchant.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
@@ -26,7 +26,7 @@ afterAll(disconnectTestDb);
 describe('GET /api/tickets/merchants', () => {
   it('a token with only MANAGE_STOCK reaches the stall list', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(vendorId, { permissions: [TicketsPermission.MANAGE_STOCK] });
+    const token = await seedVendorSessionToken(vendorId, { permissions: [TicketsPermission.MANAGE_STOCK] });
 
     const res = await request(app)
       .get(`/api/tickets/merchants?eventId=${eventId}`)
@@ -37,7 +37,7 @@ describe('GET /api/tickets/merchants', () => {
 
   it('a token with only MANAGE_ACCESS still reaches the stall list (no regression)', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(vendorId, { permissions: [TicketsPermission.MANAGE_ACCESS] });
+    const token = await seedVendorSessionToken(vendorId, { permissions: [TicketsPermission.MANAGE_ACCESS] });
 
     const res = await request(app)
       .get(`/api/tickets/merchants?eventId=${eventId}`)
@@ -48,7 +48,7 @@ describe('GET /api/tickets/merchants', () => {
 
   it('a token with neither permission is refused', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(vendorId, { permissions: [] });
+    const token = await seedVendorSessionToken(vendorId, { permissions: [] });
 
     const res = await request(app)
       .get(`/api/tickets/merchants?eventId=${eventId}`)
@@ -61,7 +61,7 @@ describe('GET /api/tickets/merchants', () => {
 describe('scope of the relaxation — MANAGE_STOCK alone does not become MANAGE_ACCESS', () => {
   it('POST /api/tickets/merchants still refuses a MANAGE_STOCK-only token', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
-    const token = signVendorToken(vendorId, { permissions: [TicketsPermission.MANAGE_STOCK] });
+    const token = await seedVendorSessionToken(vendorId, { permissions: [TicketsPermission.MANAGE_STOCK] });
 
     const res = await request(app)
       .post('/api/tickets/merchants')
@@ -74,7 +74,7 @@ describe('scope of the relaxation — MANAGE_STOCK alone does not become MANAGE_
   it('PATCH /api/tickets/merchants/:id still refuses a MANAGE_STOCK-only token', async () => {
     const { eventId, vendorId } = await seedPublishedEvent({});
     const merchant = await Merchant.create({ name: 'Existing Stall', eventId });
-    const token = signVendorToken(vendorId, { permissions: [TicketsPermission.MANAGE_STOCK] });
+    const token = await seedVendorSessionToken(vendorId, { permissions: [TicketsPermission.MANAGE_STOCK] });
 
     const res = await request(app)
       .patch(`/api/tickets/merchants/${merchant._id}`)

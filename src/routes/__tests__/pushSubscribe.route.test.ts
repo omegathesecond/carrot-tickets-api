@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { PushSubscription } from '@models/pushSubscription.model';
 
@@ -18,7 +18,7 @@ describe('push subscribe routes', () => {
 
   it('vapid key available; subscribe upserts; endpoint reassigns to current buyer; unsubscribe own only', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1' });
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const key = await request(app).get('/api/social/push/vapid-public-key').set('Authorization', auth).expect(200);
     expect(key.body.data.key).toBeTruthy();
@@ -28,7 +28,7 @@ describe('push subscribe routes', () => {
     expect(await PushSubscription.countDocuments({})).toBe(1);
 
     const other = await Buyer.create({ phone: '+26878000042', password: 'secret1' });
-    const otherAuth = `Bearer ${signBuyerToken('+26878000042')}`;
+    const otherAuth = `Bearer ${await signBuyerSessionToken('+26878000042')}`;
     await request(app).post('/api/social/push/subscribe').set('Authorization', otherAuth).send(SUB).expect(200);
     const row = await PushSubscription.findOne({ endpoint: SUB.endpoint });
     expect(String(row!.buyerId)).toBe(String(other._id));

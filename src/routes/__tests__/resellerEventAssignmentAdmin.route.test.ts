@@ -7,17 +7,17 @@ import request from 'supertest';
 import app from '@/app';
 import mongoose from 'mongoose';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
-import { signSuperAdminToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken } from '../../__tests__/helpers/auth';
 import { seedReseller, seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { Reseller } from '@models/reseller.model';
 
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 
-const patch = (resellerId: string, body: Record<string, unknown>) =>
+const patch = async (resellerId: string, body: Record<string, unknown>) =>
   request(app)
     .patch(`/api/admin/resellers/${resellerId}`)
-    .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+    .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
     .send(body);
 
 it('assigns events to a reseller and reads them back', async () => {

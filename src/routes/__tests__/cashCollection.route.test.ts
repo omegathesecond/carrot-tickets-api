@@ -3,6 +3,8 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
+import { signVendorSessionToken, signStaffSessionToken } from '@/__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
 import { Cashier } from '@models/cashier.model';
 import { Event } from '@models/event.model';
 import { WalletService } from '@services/wallet.service';
@@ -14,7 +16,6 @@ import { FloatTag } from '@interfaces/ledger.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { CASHIER_PERMISSIONS } from '@interfaces/cashier.interface';
 import { OperatorGrant } from '@interfaces/operatorGrant.interface';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 const secret = process.env.JWT_SECRET || 'your-secret-key';
 beforeAll(connectLedgerTestDb, 60000); afterEach(clearTestDb); afterAll(disconnectTestDb);
 function token(row: any) { return jwt.sign({ scope: 'cashier', userType: 'cashier', cashierId: String(row._id), permissions: CASHIER_PERMISSIONS, isSuperAdmin: row.scope === 'platform', vendorId: String(row.vendorId), eventId: String(row.eventId), fullName: row.fullName }, secret); }
@@ -83,11 +84,12 @@ it('idempotent collection retries validate the payload and oversized amounts ref
 });
 it('organiser report scopes events and shows both parties and all confirmed cash', async () => {
   const s = await seed(); const a = (await s.create()).body.data; await s.resolve(a._id).expect(200);
-  const vendorToken = (id: string, permissions = [TicketsPermission.VIEW_REVENUE]) => jwt.sign({ app: 'tickets', userType: 'vendor', vendorId: id, permissions }, secret);
+  await Vendor.create({ _id: s.vendorId, businessName: 'Owner', password: 'secret123' });
+  const other = await Vendor.create({ businessName: 'Other', password: 'secret123' });
   const report = (t: string) => request(app).get(`/api/tickets/events/${s.eventId}/cash-collections`).set('Authorization', `Bearer ${t}`);
-  await report(vendorToken(String(new mongoose.Types.ObjectId()))).expect(403);
-  await report(vendorToken(String(s.vendorId), [])).expect(403);
-  const data = (await report(vendorToken(String(s.vendorId))).expect(200)).body.data;
+  await report(await signVendorSessionToken(String(other._id))).expect(403);
+  await report(await signStaffSessionToken(String(s.vendorId), [])).expect(403);
+  const data = (await report(await signVendorSessionToken(String(s.vendorId))).expect(200)).body.data;
   expect(data).toMatchObject({ currency: 'SZL', cashTopups: 10000, cardTopups: 90000, cashiers: expect.arrayContaining([expect.objectContaining({ cashTopups: 10000, cardTopups: 90000, cashOnHand: 2000 })]), cashOnHand: 2000, collectorHeld: 8000, pendingCount: 0, collectors: [expect.objectContaining({ fullName: 'Collector One', held: 8000 })] });
   expect(data.collections[0]).toMatchObject({ cashierName: 'Cashier One', collectorName: 'Collector One', status: 'confirmed', resolvedBy: String(s.cashier._id) });
 });

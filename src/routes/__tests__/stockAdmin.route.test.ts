@@ -1,13 +1,13 @@
 // src/routes/__tests__/stockAdmin.route.test.ts
 // Harness copied verbatim from src/routes/__tests__/merchantCharge.route.test.ts:
 //   app from '@/app', connectLedgerTestDb (routes use transactions),
-//   signVendorToken(vendorId, { permissions }) and seedPublishedEvent() ->
+//   seedVendorSessionToken(vendorId, { permissions }) and seedPublishedEvent() ->
 //   { eventId, vendorId }. No new helpers are needed.
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
@@ -24,7 +24,7 @@ let __loginSeq = 900001;
 async function ownedCashlessEvent() {
   const { eventId, vendorId } = await seedPublishedEvent({});
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
-  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
+  const token = await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
   return { eventId: String(eventId), vendorId: String(vendorId), token };
 }
 
@@ -47,7 +47,7 @@ describe('stock admin routes', () => {
 
   it('rejects a caller without MANAGE_STOCK', async () => {
     const { eventId, vendorId } = await ownedCashlessEvent();
-    const token = signVendorToken(vendorId, { permissions: [] });
+    const token = await seedVendorSessionToken(vendorId, { permissions: [] });
     const res = await request(app)
       .post(`/api/tickets/events/${eventId}/products`)
       .set('Authorization', `Bearer ${token}`)

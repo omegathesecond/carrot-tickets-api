@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { BuyerPresence } from '@models/buyerPresence.model';
 import { PRESENCE_STALE_MS } from '@utils/buyerOnline.util';
@@ -39,7 +39,7 @@ describe('POST /api/social/presence', () => {
 
     const res = await request(app)
       .post('/api/social/presence')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ buyerIds: [String(online._id), String(stale._id), String(absent._id)] })
       .expect(200);
 
@@ -52,7 +52,7 @@ describe('POST /api/social/presence', () => {
 
     await request(app)
       .post('/api/social/presence')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ buyerIds: ids })
       .expect(400);
   });
@@ -62,7 +62,7 @@ describe('POST /api/social/presence', () => {
 
     await request(app)
       .post('/api/social/presence')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ buyerIds: [] })
       .expect(400);
   });

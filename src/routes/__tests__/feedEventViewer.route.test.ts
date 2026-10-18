@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { Buyer } from '@models/buyer.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -34,7 +34,7 @@ describe('GET /api/public/feed — event viewer reactions', () => {
 
     const res = await request(app)
       .get('/api/public/feed?tab=events')
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(200);
 
     const slide = res.body.data.items.find((i: any) => i.type === 'event' && i.id === e.id);
@@ -52,7 +52,7 @@ describe('GET /api/public/feed — event viewer reactions', () => {
 
     const res = await request(app)
       .get('/api/public/feed?tab=events')
-      .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
       .expect(200);
 
     expect(res.body.data.items.length).toBeGreaterThan(0);

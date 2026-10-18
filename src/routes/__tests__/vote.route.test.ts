@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -36,8 +36,8 @@ async function seedOpenVoteEvent(vendorId = new mongoose.Types.ObjectId()) {
   return { eventId: event._id.toString(), vendorId: vendorId.toString() };
 }
 
-function organizerAuth(vendorId: string, extraPermissions: TicketsPermission[] = []) {
-  return `Bearer ${signVendorToken(vendorId, { permissions: [TicketsPermission.VIEW_STATS, ...extraPermissions] })}`;
+async function organizerAuth(vendorId: string, extraPermissions: TicketsPermission[] = []) {
+  return `Bearer ${await seedVendorSessionToken(vendorId, { permissions: [TicketsPermission.VIEW_STATS, ...extraPermissions] })}`;
 }
 
 describe('Vote routes', () => {
@@ -59,19 +59,19 @@ describe('Vote routes', () => {
 
     await request(app)
       .get(`/api/tickets/events/${eventId}/vote/summary`)
-      .set('Authorization', organizerAuth(otherVendorId))
+      .set('Authorization', await organizerAuth(otherVendorId))
       .expect(403);
 
     await request(app)
       .get(`/api/tickets/events/${eventId}/vote/summary`)
-      .set('Authorization', organizerAuth(vendorId))
+      .set('Authorization', await organizerAuth(vendorId))
       .expect(200);
   });
 
   it('casts a vote then reads it back with updated results (round trip)', async () => {
     const { eventId } = await seedOpenVoteEvent();
     await seedBuyer();
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     // Materializes the event's Vote questions (lazy — first read wins).
     const before = await request(app).get(`/api/public/events/${eventId}/vote`).expect(200);

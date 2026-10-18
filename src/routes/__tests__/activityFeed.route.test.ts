@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
@@ -49,7 +49,7 @@ describe('GET /api/public/activity-feed', () => {
     const { buyer } = await seedLike();
     const res = await request(app)
       .get('/api/public/activity-feed?tab=following')
-      .set('Authorization', `Bearer ${signBuyerToken(buyer.phone!)}`);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(buyer.phone!)}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data.items)).toBe(true);
   });
@@ -64,7 +64,7 @@ describe('GET /api/public/activity-feed', () => {
     const vendor = await Vendor.create({ businessName: 'Follower Org', password: 'password123', slug: 'follower-org' });
     const res = await request(app)
       .get('/api/public/activity-feed?tab=following')
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data.items)).toBe(true);
     // Sanity: the event from seedLike exists so this isn't a vacuous 200.

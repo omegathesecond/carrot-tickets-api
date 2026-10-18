@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
-import { signSuperAdminToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { ServiceCategory } from '@models/serviceCategory.model';
 import { seedServiceCategories } from '../../scripts/seed-service-categories';
 
@@ -38,7 +38,7 @@ describe('GET /api/tickets/admin/service-categories', () => {
 
     const res = await request(app)
       .get('/api/tickets/admin/service-categories')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`);
     expect(res.status).toBe(200);
     expect(res.body.data.categories.map((c: any) => c.value).sort()).toEqual(['active_one', 'inactive_one']);
   });
@@ -46,7 +46,7 @@ describe('GET /api/tickets/admin/service-categories', () => {
   it('rejects a non-super-admin (403)', async () => {
     const res = await request(app)
       .get('/api/tickets/admin/service-categories')
-      .set('Authorization', `Bearer ${signVendorToken('000000000000000000000001')}`);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken('000000000000000000000001')}`);
     expect(res.status).toBe(403);
   });
 
@@ -60,7 +60,7 @@ describe('POST /api/tickets/admin/service-categories', () => {
   it('super-admin creates a category, normalizing value to lowercase', async () => {
     const res = await request(app)
       .post('/api/tickets/admin/service-categories')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ value: 'Bouncy_Castle', label: 'Bouncy castle', order: 5 });
     expect(res.status).toBe(201);
     expect(res.body.data.category).toMatchObject({ value: 'bouncy_castle', label: 'Bouncy castle', order: 5, isActive: true });
@@ -70,7 +70,7 @@ describe('POST /api/tickets/admin/service-categories', () => {
     await ServiceCategory.create({ value: 'sound_hire', label: 'Sound hire', order: 0 });
     const res = await request(app)
       .post('/api/tickets/admin/service-categories')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ value: 'sound_hire', label: 'Sound Hire Duplicate' });
     expect(res.status).toBe(409);
   });
@@ -78,7 +78,7 @@ describe('POST /api/tickets/admin/service-categories', () => {
   it('rejects a missing label (400)', async () => {
     const res = await request(app)
       .post('/api/tickets/admin/service-categories')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ value: 'no_label' });
     expect(res.status).toBe(400);
   });
@@ -86,7 +86,7 @@ describe('POST /api/tickets/admin/service-categories', () => {
   it('rejects a non-super-admin (403)', async () => {
     const res = await request(app)
       .post('/api/tickets/admin/service-categories')
-      .set('Authorization', `Bearer ${signVendorToken('000000000000000000000001')}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken('000000000000000000000001')}`)
       .send({ value: 'x', label: 'X' });
     expect(res.status).toBe(403);
   });
@@ -98,7 +98,7 @@ describe('PATCH /api/tickets/admin/service-categories/:id', () => {
 
     const res = await request(app)
       .patch(`/api/tickets/admin/service-categories/${created._id}`)
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ label: 'Sound Hire (Renamed)', isActive: false });
     expect(res.status).toBe(200);
     expect(res.body.data.category).toMatchObject({ value: 'sound_hire', label: 'Sound Hire (Renamed)', isActive: false });
@@ -107,7 +107,7 @@ describe('PATCH /api/tickets/admin/service-categories/:id', () => {
   it('404s for a missing id', async () => {
     const res = await request(app)
       .patch('/api/tickets/admin/service-categories/000000000000000000000000')
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`)
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
       .send({ label: 'X' });
     expect(res.status).toBe(404);
   });
@@ -116,7 +116,7 @@ describe('PATCH /api/tickets/admin/service-categories/:id', () => {
     const created = await ServiceCategory.create({ value: 'sound_hire', label: 'Sound hire', order: 0 });
     const res = await request(app)
       .patch(`/api/tickets/admin/service-categories/${created._id}`)
-      .set('Authorization', `Bearer ${signVendorToken('000000000000000000000001')}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken('000000000000000000000001')}`)
       .send({ label: 'X' });
     expect(res.status).toBe(403);
   });

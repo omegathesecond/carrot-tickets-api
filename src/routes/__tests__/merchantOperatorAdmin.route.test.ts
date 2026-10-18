@@ -1,6 +1,7 @@
 // api/src/routes/__tests__/merchantOperatorAdmin.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { signAdminSessionToken, signVendorSessionToken, signStaffSessionToken } from '@/__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -9,30 +10,13 @@ import { MerchantOperator } from '@models/merchantOperator.model';
 import { Event } from '@models/event.model';
 import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 
 const VENDOR_A = '64b000000000000000000a01';
 const VENDOR_B = '64b000000000000000000b02';
 
-function superAdminToken() {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:manage_access'], isSuperAdmin: true,
-  }, JWT_SECRET);
-}
-
-/** An ordinary organizer — MANAGE_ACCESS is on the OWNER role, not platform-staff-only. */
-function organizerToken(vendorId: string) {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:manage_access'], isSuperAdmin: false, vendorId,
-  }, JWT_SECRET);
-}
-
-/** A caller carrying no manage_access permission at all. */
-function unprivilegedToken() {
-  return jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [] }, JWT_SECRET);
-}
+const superAdminToken = signAdminSessionToken;
+const organizerToken = signVendorSessionToken;
+const unprivilegedToken = () => signStaffSessionToken(VENDOR_A, []);
 
 /** A real Event (not just a bare ObjectId) so ownership checks have something to load. */
 async function seedEvent(vendorId: string) {
@@ -53,13 +37,17 @@ async function seedMerchant(vendorId: string = VENDOR_A): Promise<{ merchantId: 
 }
 
 beforeAll(connectTestDb);
+beforeEach(async () => {
+  await Vendor.create([{ _id: VENDOR_A, businessName: 'A', password: 'secret123' },
+    { _id: VENDOR_B, businessName: 'B', password: 'secret123' }]);
+});
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 it('creating an operator returns the credentials exactly once, and the list never leaks the pin', async () => {
   const { merchantId } = await seedMerchant();
   const agent = request(app);
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
 
   const res = await agent.post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`)
@@ -80,7 +68,7 @@ it('creating an operator returns the credentials exactly once, and the list neve
 
 it('inherits eventId from the stall rather than the body', async () => {
   const { merchantId, eventId: stallEventId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
 
   const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`)
@@ -94,7 +82,7 @@ it('inherits eventId from the stall rather than the body', async () => {
 });
 
 it('404s for a stall that does not exist — never silently creates an orphan operator', async () => {
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
   const res = await request(app).post(`/api/tickets/merchants/${new mongoose.Types.ObjectId()}/operators`)
     .set('Authorization', `Bearer ${admin}`)
     .send({ fullName: 'Nobody' });
@@ -105,7 +93,7 @@ it('404s for a stall that does not exist — never silently creates an orphan op
 it('list is scoped to the stall — another stall\'s operators never leak in', async () => {
   const a = await seedMerchant();
   const b = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
 
   await request(app).post(`/api/tickets/merchants/${a.merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`).send({ fullName: 'A Operator' });
@@ -121,7 +109,7 @@ it('list is scoped to the stall — another stall\'s operators never leak in', a
 
 it('PATCH updates fullName and isActive', async () => {
   const { merchantId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
 
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Original Name' });
@@ -141,7 +129,7 @@ it('PATCH updates fullName and isActive', async () => {
 
 it('PATCH 400s a fullName that is not a non-empty string, leaving the name alone', async () => {
   const { merchantId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Thabo Dlamini' });
   const operatorId = created.body.data.operator._id;
@@ -163,7 +151,7 @@ it('PATCH 400s a fullName that is not a non-empty string, leaving the name alone
 });
 
 it('PATCH 404s for an operator that does not exist', async () => {
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
   const res = await request(app).patch(`/api/tickets/merchant-operators/${new mongoose.Types.ObjectId()}`)
     .set('Authorization', `Bearer ${admin}`)
     .send({ fullName: 'Ghost' });
@@ -172,7 +160,7 @@ it('PATCH 404s for an operator that does not exist', async () => {
 
 it('reset-pin issues a fresh pin that actually verifies, and clears lockout', async () => {
   const { merchantId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
 
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Reset Me' });
@@ -197,7 +185,7 @@ it('reset-pin issues a fresh pin that actually verifies, and clears lockout', as
 
 it('create accepts a caller-supplied valid pin verbatim, and rejects a malformed one', async () => {
   const { merchantId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
 
   const withValidPin = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`)
@@ -218,12 +206,12 @@ it('create accepts a caller-supplied valid pin verbatim, and rejects a malformed
 
 it('a caller without manage_access is forbidden (403) on list, create, PATCH and reset-pin', async () => {
   const { merchantId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`).send({ fullName: 'X' });
   const operatorId = created.body.data.operator._id;
 
-  const t = unprivilegedToken();
+  const t = await unprivilegedToken();
 
   const list = await request(app).get(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${t}`);
@@ -252,14 +240,14 @@ describe('cross-tenant IDOR — an organizer cannot touch another organizer\'s s
   it('list 403s for a stall owned by a different organizer', async () => {
     const b = await seedMerchant(VENDOR_B);
     const res = await request(app).get(`/api/tickets/merchants/${b.merchantId}/operators`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`);
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`);
     expect(res.status).toBe(403);
   });
 
   it('create 403s for a stall owned by a different organizer, and creates nothing', async () => {
     const b = await seedMerchant(VENDOR_B);
     const res = await request(app).post(`/api/tickets/merchants/${b.merchantId}/operators`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
       .send({ fullName: 'Attacker Plant' });
     expect(res.status).toBe(403);
     expect(await MerchantOperator.countDocuments({ merchantId: b.merchantId })).toBe(0);
@@ -268,12 +256,12 @@ describe('cross-tenant IDOR — an organizer cannot touch another organizer\'s s
   it('update 403s for an operator on a different organizer\'s stall, and leaves it unchanged', async () => {
     const b = await seedMerchant(VENDOR_B);
     const created = await request(app).post(`/api/tickets/merchants/${b.merchantId}/operators`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_B)}`)
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_B)}`)
       .send({ fullName: 'B\'s Own Operator' });
     const operatorId = created.body.data.operator._id;
 
     const res = await request(app).patch(`/api/tickets/merchant-operators/${operatorId}`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
       .send({ fullName: 'Hijacked Name', isActive: false });
     expect(res.status).toBe(403);
 
@@ -285,13 +273,13 @@ describe('cross-tenant IDOR — an organizer cannot touch another organizer\'s s
   it('reset-pin 403s for an operator on a different organizer\'s stall — the real pin still verifies (no takeover)', async () => {
     const b = await seedMerchant(VENDOR_B);
     const created = await request(app).post(`/api/tickets/merchants/${b.merchantId}/operators`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_B)}`)
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_B)}`)
       .send({ fullName: 'B\'s Till Person' });
     const operatorId = created.body.data.operator._id;
     const originalPin = created.body.data.pin;
 
     const res = await request(app).post(`/api/tickets/merchant-operators/${operatorId}/reset-pin`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
       .send({ pin: '999999' });
     expect(res.status).toBe(403);
 
@@ -304,14 +292,14 @@ describe('cross-tenant IDOR — an organizer cannot touch another organizer\'s s
   it('an organizer CAN manage their own stall\'s operators', async () => {
     const a = await seedMerchant(VENDOR_A);
     const res = await request(app).post(`/api/tickets/merchants/${a.merchantId}/operators`)
-      .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+      .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
       .send({ fullName: 'Owner Managed' });
     expect(res.status).toBe(201);
   });
 
   it('a super-admin reaches every route regardless of vendor — the fix does not over-restrict', async () => {
     const b = await seedMerchant(VENDOR_B);
-    const admin = superAdminToken();
+    const admin = await superAdminToken();
 
     const created = await request(app).post(`/api/tickets/merchants/${b.merchantId}/operators`)
       .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Admin Created' });
@@ -336,7 +324,7 @@ describe('cross-tenant IDOR — an organizer cannot touch another organizer\'s s
 // the value as text re-activated the person it was trying to switch off.
 it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', async () => {
   const { merchantId } = await seedMerchant();
-  const admin = superAdminToken();
+  const admin = await superAdminToken();
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', `Bearer ${admin}`).send({ fullName: 'Thabo Dlamini' });
   const operatorId = created.body.data.operator._id;
@@ -354,7 +342,7 @@ it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', asy
 it('creates a stall operator carrying the stock grant', async () => {
   const { merchantId } = await seedMerchant();
   const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
-    .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+    .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
     .send({ fullName: 'Sipho Mabuza', grants: [OperatorGrant.MANAGE_STOCK] });
 
   expect(res.status).toBe(201);
@@ -365,7 +353,7 @@ it('creates a stall operator carrying the stock grant', async () => {
 it('drops unknown grant values instead of storing them', async () => {
   const { merchantId } = await seedMerchant();
   const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
-    .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+    .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
     .send({ fullName: 'Sipho Mabuza', grants: ['manage_stock', 'root', 42] });
 
   expect(res.status).toBe(201);
@@ -376,7 +364,7 @@ it('drops unknown grant values instead of storing them', async () => {
 it('defaults to no grants when the field is absent', async () => {
   const { merchantId } = await seedMerchant();
   const res = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
-    .set('Authorization', `Bearer ${organizerToken(VENDOR_A)}`)
+    .set('Authorization', `Bearer ${await organizerToken(VENDOR_A)}`)
     .send({ fullName: 'Sipho Mabuza' });
 
   expect(res.status).toBe(201);
@@ -386,7 +374,7 @@ it('defaults to no grants when the field is absent', async () => {
 
 it('revokes a grant on patch', async () => {
   const { merchantId } = await seedMerchant();
-  const auth = `Bearer ${organizerToken(VENDOR_A)}`;
+  const auth = `Bearer ${await organizerToken(VENDOR_A)}`;
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', auth)
     .send({ fullName: 'Sipho Mabuza', grants: [OperatorGrant.MANAGE_STOCK] });
@@ -402,7 +390,7 @@ it('revokes a grant on patch', async () => {
 
 it('PATCH omitting grants leaves existing grants intact', async () => {
   const { merchantId } = await seedMerchant();
-  const auth = `Bearer ${organizerToken(VENDOR_A)}`;
+  const auth = `Bearer ${await organizerToken(VENDOR_A)}`;
   const created = await request(app).post(`/api/tickets/merchants/${merchantId}/operators`)
     .set('Authorization', auth)
     .send({ fullName: 'Original Name', grants: [OperatorGrant.MANAGE_STOCK] });

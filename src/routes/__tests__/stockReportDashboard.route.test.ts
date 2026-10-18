@@ -3,7 +3,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
@@ -20,7 +20,7 @@ let seq = 560000;
 it('returns the dashboard with the itemised split for the owner', async () => {
   const { eventId, vendorId } = await seedPublishedEvent({});
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
-  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+  const token = await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
   const bar = await Merchant.create({ name: 'Bar 1', eventId, loginCode: String(seq++), pin: '000000' } as any);
   const p = await Product.create({ eventId, name: 'Castle Lite', category: 'beer', price: 2500 } as any);
   await MerchantCharge.create({ merchantId: bar._id, merchantOperatorId: new mongoose.Types.ObjectId(), eventId, walletId: new mongoose.Types.ObjectId(), bandUid: 'b', amount: 5000, fee: 0, netAmount: 5000, clientTxnId: 't1', status: 'completed', staffName: 'Fixture Operator', items: [{ productId: p._id, name: 'Castle Lite', unitPrice: 2500, qty: 2, lineTotal: 5000 }] } as any);

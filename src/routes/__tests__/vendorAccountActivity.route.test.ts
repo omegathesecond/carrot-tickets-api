@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { AccountActivityService } from '@services/accountActivity.service';
@@ -37,7 +37,7 @@ describe('/api/tickets/social/me/account-activity (vendor)', () => {
     });
 
     const res = await request(app).get('/api/tickets/social/me/account-activity')
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`).expect(200);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`).expect(200);
     expect(res.body.data.items).toHaveLength(1);
     expect(res.body.data.items[0]).toMatchObject({ kind: 'profile_view', count: 1, unread: true });
     expect(res.body.data.unreadCount).toBe(1);
@@ -49,7 +49,7 @@ describe('/api/tickets/social/me/account-activity (vendor)', () => {
     await AccountActivityService.record({
       ownerId: String(vendor._id), actorType: 'buyer', actorId: String(actor._id), kind: 'profile_view',
     });
-    const token = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
 
     await request(app).post('/api/tickets/social/me/account-activity/read')
       .set('Authorization', token)
@@ -67,7 +67,8 @@ describe('/api/tickets/social/me/account-activity (vendor)', () => {
   });
 
   it('401s a buyer token (no vendorId)', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret123' });
     await request(app).get('/api/tickets/social/me/account-activity')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
   });
 });

@@ -36,7 +36,7 @@ jest.mock('@services/email.service', () => ({ EmailService: { sendOtp: jest.fn()
 
 let db: MongoMemoryReplSet;
 beforeAll(async () => {
-  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, binary: { systemBinary: '/Users/lasliegeorgesjr/.cache/mongodb-binaries/mongod-arm64-darwin-8.2.6' } });
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(db.getUri());
   await Promise.all([BuyerOtp.init(), Buyer.init(), HandoffToken.init(), Reseller.init(), ResellerOperator.init(), SecurityRateLimit.init()]);
 }, 60000);

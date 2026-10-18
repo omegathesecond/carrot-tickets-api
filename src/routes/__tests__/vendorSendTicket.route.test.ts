@@ -17,7 +17,7 @@ import { TicketPdfStatus } from '@interfaces/ticket.interface';
 import { SmsService } from '@services/sms.service';
 import { EmailService } from '@services/email.service';
 import { TicketPdfService } from '@services/ticketPdf.service';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import mongoose from 'mongoose';
 
 let token = ''; let vendorId = ''; let eventId: mongoose.Types.ObjectId;
@@ -31,7 +31,7 @@ beforeEach(async () => {
     password: 'Password1!', isActive: true, isVerified: true,
   });
   vendorId = v._id.toString();
-  token = signVendorToken(vendorId, { permissions: ['tickets:sell_tickets'] });
+  token = await seedVendorSessionToken(vendorId, { permissions: ['tickets:sell_tickets'] });
 
   const future = new Date(Date.now() + 7 * 86400000);
   const ev = await Event.create({

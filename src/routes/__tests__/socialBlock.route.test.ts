@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Block } from '@models/block.model';
 import { BlockService } from '@services/block.service';
@@ -20,7 +20,7 @@ describe('block routes', () => {
   async function seed() {
     const a = await Buyer.create({ phone: PHONE_A, password: 'secret1', name: 'Alpha' });
     const b = await Buyer.create({ phone: PHONE_B, password: 'secret1', name: 'Beta' });
-    return { a, b, authA: `Bearer ${signBuyerToken(PHONE_A)}` };
+    return { a, b, authA: `Bearer ${await signBuyerSessionToken(PHONE_A)}` };
   }
 
   it('block, list, unblock round-trip (idempotent)', async () => {

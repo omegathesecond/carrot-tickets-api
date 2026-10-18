@@ -1,6 +1,6 @@
 import { clearTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { Channel } from '@models/channel.model';
@@ -47,11 +47,11 @@ describe('cross-instance fan-out via mongo adapter', () => {
     await Membership.create({ buyerId: a._id, communityId: community._id });
     await Membership.create({ buyerId: b._id, communityId: community._id });
 
-    const clientA = await connectClient(rt1.port, signBuyerToken(PHONE_A));
+    const clientA = await connectClient(rt1.port, await signBuyerSessionToken(PHONE_A));
     clients.push(clientA);
     await new Promise((resolve) => clientA.emit('channel:join', { channelId: general }, resolve));
 
-    const clientB = await connectClient(rt2.port, signBuyerToken(PHONE_B));
+    const clientB = await connectClient(rt2.port, await signBuyerSessionToken(PHONE_B));
     clients.push(clientB);
 
     const [presenceOnA, joinAckB] = await Promise.all([

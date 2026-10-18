@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
@@ -42,7 +42,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
       const res = await request(app)
         .get('/api/tickets/social/suggestions/people')
-        .set('Authorization', `Bearer ${signVendorToken(String(brand._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(brand._id))}`)
         .expect(200);
       const usernames = res.body.data.map((p: any) => p.username);
       expect(usernames).toContain('sugg_b');
@@ -55,7 +55,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
       const res = await request(app)
         .get('/api/tickets/social/suggestions/people')
-        .set('Authorization', `Bearer ${signVendorToken(String(brand._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(brand._id))}`)
         .expect(200);
       const row = res.body.data.find((p: any) => p.username === 'other_a');
       expect(row).toBeTruthy();
@@ -66,7 +66,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
       await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me', username: 'me_one' });
       await request(app)
         .get('/api/tickets/social/suggestions/people')
-        .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`)
         .expect(401);
     });
 
@@ -84,7 +84,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
       const res = await request(app)
         .get('/api/tickets/social/suggestions/organizers')
-        .set('Authorization', `Bearer ${signVendorToken(String(me._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
         .expect(200);
       const ids = res.body.data.map((o: any) => o.id);
       expect(ids).toContain(String(other._id));
@@ -98,7 +98,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
       const res = await request(app)
         .get('/api/tickets/social/suggestions/organizers')
-        .set('Authorization', `Bearer ${signVendorToken(String(me._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
         .expect(200);
       const row = res.body.data.find((o: any) => o.id === String(other._id));
       expect(row.isFollowing).toBe(true);
@@ -113,7 +113,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
       const res = await request(app)
         .get('/api/tickets/social/recommendations')
-        .set('Authorization', `Bearer ${signVendorToken(String(me._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
         .expect(200);
       expect(res.body.data.basisEvent).toBeNull();
       const names = res.body.data.events.map((e: any) => e.name);
@@ -124,7 +124,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
   describe('nearby + location', () => {
     it('PATCH /me/location stores the brand location, DELETE clears it', async () => {
       const me = await makeVendor('Geo Brand');
-      const token = `Bearer ${signVendorToken(String(me._id))}`;
+      const token = `Bearer ${await seedVendorSessionToken(String(me._id))}`;
 
       await request(app).patch('/api/tickets/social/me/location').set('Authorization', token).send({ lat: 0, lng: 0 }).expect(200);
       const withLoc = await Vendor.findById(me._id);
@@ -145,7 +145,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
       const res = await request(app)
         .get('/api/tickets/social/nearby/people')
         .query({ lat: 0, lng: 0 })
-        .set('Authorization', `Bearer ${signVendorToken(String(me._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
         .expect(200);
       const usernames = res.body.data.people.map((p: any) => p.username);
       expect(usernames).toContain('close_a');
@@ -158,7 +158,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
       await request(app)
         .get('/api/tickets/social/nearby/people')
         .query({ lat: 200, lng: 0 })
-        .set('Authorization', `Bearer ${signVendorToken(String(me._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
         .expect(400);
     });
   });

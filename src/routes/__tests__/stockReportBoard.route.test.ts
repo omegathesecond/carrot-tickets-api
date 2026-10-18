@@ -2,7 +2,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
@@ -19,7 +19,7 @@ let seq = 540000;
 async function ownedCashlessEvent(perms = [TicketsPermission.VIEW_REVENUE]) {
   const { eventId, vendorId } = await seedPublishedEvent({});
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
-  const token = signVendorToken(String(vendorId), { permissions: perms });
+  const token = await seedVendorSessionToken(String(vendorId), { permissions: perms });
   return { eventId: String(eventId), vendorId: String(vendorId), token };
 }
 
@@ -38,21 +38,21 @@ describe('GET /api/tickets/events/:id/stock/board', () => {
 
   it('rejects a caller without VIEW_REVENUE', async () => {
     const { eventId } = await ownedCashlessEvent();
-    const token = signVendorToken('anyone', { permissions: [] });
+    const token = await seedVendorSessionToken('anyone', { permissions: [] });
     const res = await request(app).get(`/api/tickets/events/${eventId}/stock/board`).set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
   });
 
   it("forbids another vendor's event", async () => {
     const { eventId } = await ownedCashlessEvent();
-    const token = signVendorToken('someone-else', { permissions: [TicketsPermission.VIEW_REVENUE] });
+    const token = await seedVendorSessionToken('someone-else', { permissions: [TicketsPermission.VIEW_REVENUE] });
     const res = await request(app).get(`/api/tickets/events/${eventId}/stock/board`).set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
   });
 
   it('400s a non-cashless event', async () => {
     const { eventId: eid, vendorId } = await seedPublishedEvent({});   // cashless stays false
-    const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+    const token = await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
     const res = await request(app).get(`/api/tickets/events/${eid}/stock/board`).set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(400);
   });

@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { StoryPointsAward } from '@models/storyPointsAward.model';
 
@@ -30,7 +30,7 @@ describe('social profile routes', () => {
     await seedBuyer();
     const res = await request(app)
       .get('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     expect(res.body.data.username).toMatch(/^[a-z0-9_]{3,20}$/);
@@ -48,7 +48,7 @@ describe('social profile routes', () => {
     ]);
     const res = await request(app)
       .get('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
     expect(res.body.data.storyPoints).toBe(50);
   });
@@ -57,7 +57,7 @@ describe('social profile routes', () => {
     await seedBuyer();
     const res = await request(app)
       .patch('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ username: 'laslie_g', bio: 'festival fan', dmPrivacy: 'friends' })
       .expect(200);
 
@@ -70,7 +70,7 @@ describe('social profile routes', () => {
   it('rejects invalid, reserved and taken usernames', async () => {
     await seedBuyer();
     await seedBuyer('+26878000050', { username: 'taken_name' });
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     await request(app).patch('/api/social/me').set('Authorization', auth).send({ username: 'X' }).expect(400);
     await request(app).patch('/api/social/me').set('Authorization', auth).send({ username: 'admin' }).expect(409);
@@ -84,7 +84,7 @@ describe('social profile routes', () => {
     await seedBuyer();
     const res = await request(app)
       .patch('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ username: 'laslie.g_2' })
       .expect(200);
     expect(res.body.data.username).toBe('laslie.g_2');
@@ -94,7 +94,7 @@ describe('social profile routes', () => {
     await seedBuyer(PHONE, { name: 'Old Name' });
     const res = await request(app)
       .patch('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ name: 'New Name' })
       .expect(200);
 
@@ -106,12 +106,12 @@ describe('social profile routes', () => {
   it('blocks a second profile-name change within 30 days, keeps the existing name, and names the retry date', async () => {
     const buyer = await seedBuyer(PHONE, { name: 'Old Name' });
     buyer.name = 'First Change';
-    buyer.nameChangedAt = new Date('2026-08-20T00:00:00.000Z'); // 14 days before "now" in these tests
+    buyer.nameChangedAt = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
     await buyer.save();
 
     const res = await request(app)
       .patch('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ name: 'Second Change' })
       .expect(409);
 
@@ -128,7 +128,7 @@ describe('social profile routes', () => {
 
     const res = await request(app)
       .patch('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ name: 'Second Change' })
       .expect(200);
 
@@ -139,7 +139,7 @@ describe('social profile routes', () => {
     const buyer = await seedBuyer(PHONE, { name: 'Same Name' });
     const res = await request(app)
       .patch('/api/social/me')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ name: 'Same Name', bio: 'unrelated update' })
       .expect(200);
 
@@ -155,7 +155,7 @@ describe('social profile routes', () => {
     await seedBuyer('+26878000051'); // the viewer
     const res = await request(app)
       .get('/api/social/users/partygoer')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878000051')}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000051')}`)
       .expect(200);
 
     expect(res.body.data.username).toBe('partygoer');
@@ -168,13 +168,13 @@ describe('social profile routes', () => {
     await seedBuyer();
     await request(app)
       .get('/api/social/users/ghost_user')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(404);
   });
 
   it('username-available reflects reserved/taken/free', async () => {
     await seedBuyer(PHONE, { username: 'partygoer' });
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const taken = await request(app).get('/api/social/username-available?u=partygoer').set('Authorization', auth).expect(200);
     expect(taken.body.data.available).toBe(false);

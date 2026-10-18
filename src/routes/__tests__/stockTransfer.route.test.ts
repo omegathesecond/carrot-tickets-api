@@ -1,12 +1,12 @@
 // src/routes/__tests__/stockTransfer.route.test.ts
 // Harness mirrors stockAdmin.route.test.ts / stockThreshold.route.test.ts
-// (app, signVendorToken, seedPublishedEvent, connectLedgerTestDb — this route
+// (app, seedVendorSessionToken, seedPublishedEvent, connectLedgerTestDb — this route
 // runs a multi-document transaction, so it needs the replica-set harness).
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
@@ -27,7 +27,7 @@ let seq = 620001;
 async function owned() {
   const { eventId, vendorId } = await seedPublishedEvent({});
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
-  const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
+  const token = await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
   const barA = await Merchant.create({ name: 'Bar A', eventId, loginCode: String(seq++), pin: '000000' });
   const barB = await Merchant.create({ name: 'Bar B', eventId, loginCode: String(seq++), pin: '000000' });
   const product = await Product.create({ eventId, name: 'Beer', category: 'beer', price: 2500 });
@@ -87,7 +87,7 @@ describe('stock transfer route', () => {
 
   it('requires MANAGE_STOCK', async () => {
     const { eventId, barAId, barBId, productId } = await owned();
-    const token = signVendorToken(String(new mongoose.Types.ObjectId()), { permissions: [] });
+    const token = await seedVendorSessionToken(String(new mongoose.Types.ObjectId()), { permissions: [] });
     const res = await request(app)
       .post(`/api/tickets/events/${eventId}/stock/transfer`)
       .set('Authorization', `Bearer ${token}`)
