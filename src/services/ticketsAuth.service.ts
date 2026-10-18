@@ -937,6 +937,9 @@ export class TicketsAuthService {
    * Refresh access token using refresh token
    */
   static async refreshAccessToken(refreshTokenString: string): Promise<{ accessToken: string; refreshToken: string }> {
+    if (typeof refreshTokenString !== 'string' || !refreshTokenString) {
+      throw new HttpError(400, 'Refresh token must be a non-empty string.');
+    }
     let result!: { accessToken: string; refreshToken: string };
     await mongoose.connection.transaction(async (session) => {
       // Claim and rotate together; a dependency failure leaves the old token usable.

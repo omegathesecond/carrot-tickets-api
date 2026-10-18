@@ -249,6 +249,15 @@ describe('Security boundaries', () => {
     expect(response.body.error).toBe('SESSION_INVALID');
   });
 
+  it('rejects query operators as refresh credentials without consuming another session', async () => {
+    const owned = await ownedEvent();
+    const login = await TicketsAuthService.login(owned.vendor.email!, 'secure-test-password');
+    const response = await request(app).post('/api/tickets/auth/refresh').send({ refreshToken: { $ne: null } });
+    expect(response.status).toBe(400);
+    expect(response.body.data).toBeUndefined();
+    expect((await RefreshToken.findOne({ token: login.refreshToken }))?.isRevoked).toBe(false);
+  });
+
   it('reports a refresh dependency outage as 500 rather than invalid credentials', async () => {
     jest.spyOn(TicketsAuthService, 'refreshAccessToken').mockRejectedValueOnce(new Error('Database temporarily unavailable'));
     const response = await request(app).post('/api/tickets/auth/refresh').send({ refreshToken: 'test-only' });
