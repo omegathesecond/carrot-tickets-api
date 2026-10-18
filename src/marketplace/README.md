@@ -25,3 +25,23 @@ The service-login task includes the existing Marketplace feature commits as a
 dependency because Marketplace has not yet landed on production branches.
 
 Website: Services → Marketplace → **List Stall Opportunity** opens organiser drafts and management. Publish exposes a listing in the existing public marketplace; pause stops applications; close is permanent. Applications, private certificates, approval decisions and organiser-recorded stall-fee payment status stay attached to the opportunity.
+
+### Provider service advertisements
+
+Service listings are independent `MarketServiceListing` records; they never create
+profiles, opportunities, applications or payment obligations. Public browsing is
+`GET /api/marketplace/service-listings?category=<category-value>&page=1` (24 per
+page). Provider owners (`operatorType: services`) use `GET /my-service-listings`,
+`POST /service-listings` and `PUT /service-listings/:listingId`. Updates are scoped
+to the authenticated owner, including admin sessions. `draft` is private;
+`published` is public, and editing back to draft withdraws the advertisement.
+Categories use the existing active service-category catalogue.
+
+Advertisements contain a name, description, HTTPS photos (up to 12), service
+area, availability, pricing text (currency, units and sizes), delivery details
+and a public enquiry email. `POST /service-photos` uses the same validated 5 MB
+image upload and R2 storage helper as opportunity posters. Marketplace's
+**Enquire Now** opens an email addressed to that contact with the service name
+in its subject, for buyers and organisers alike; these enquiries are not stall
+applications or payment requests. The provider explicitly supplies the public
+contact email in the editor.

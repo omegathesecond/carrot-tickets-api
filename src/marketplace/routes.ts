@@ -16,6 +16,7 @@ import { ServiceCategoryService } from '@services/serviceCategory.service';
 import { ServiceCategory } from '@models/serviceCategory.model';
 import { NotificationService } from '@services/notification.service';
 import {
+  MarketServiceListing,
   MarketApplication,
   MarketCertificate,
   MarketOpportunity,
@@ -24,6 +25,7 @@ import {
   ensureMarketplaceIndexes,
 } from './models';
 import {
+  serviceListingSchema,
   AVAILABILITY,
   CERTIFICATE_TYPES,
   MARKET_TYPES,
@@ -100,15 +102,18 @@ async function transaction<T>(
     await session.endSession();
   }
 }
-router.get('/options', wrap(async (_req, res) =>
-  ok(res, {
-    categories: await ServiceCategoryService.listActive(),
-    marketTypes: MARKET_TYPES,
-    availability: AVAILABILITY,
-    certificateTypes: CERTIFICATE_TYPES,
-    regions: REGIONS,
-  }),
-));
+router.get(
+  '/options',
+  wrap(async (_req, res) =>
+    ok(res, {
+      categories: await ServiceCategoryService.listActive(),
+      marketTypes: MARKET_TYPES,
+      availability: AVAILABILITY,
+      certificateTypes: CERTIFICATE_TYPES,
+      regions: REGIONS,
+    }),
+  ),
+);
 const listOpportunities = wrap(async (req, res) => {
   const q = validate(
     Joi.object({
@@ -144,15 +149,26 @@ const listOpportunities = wrap(async (req, res) => {
     if (q[key]) filter[key] = q[key];
   if (q.category) filter.categories = q.category;
   if (req.path === '/matched-opportunities') {
-    const vendor = await Vendor.findById(actor(req)).select('serviceCategories').lean();
+    const vendor = await Vendor.findById(actor(req))
+      .select('serviceCategories')
+      .lean();
     if (!vendor) throw new HttpError(404, 'Provider not found');
     const selected = vendor.serviceCategories ?? [];
     // Marketplace accepts category names as well as stable service identifiers.
     // Resolve current labels from the same catalogue used during signup.
     const categories = await ServiceCategory.find({ value: { $in: selected } })
-      .select('label').lean();
-    const terms = [...new Set([...selected, ...categories.map((c) => c.label)])];
-    filter.$and = [{ categories: { $in: terms.map((term) => new RegExp('^' + literal(term) + '$', 'i')) } }];
+      .select('label')
+      .lean();
+    const terms = [
+      ...new Set([...selected, ...categories.map((c) => c.label)]),
+    ];
+    filter.$and = [
+      {
+        categories: {
+          $in: terms.map((term) => new RegExp('^' + literal(term) + '$', 'i')),
+        },
+      },
+    ];
   }
   if (q.maxFee !== undefined || q.minFee !== undefined) {
     if (!q.currency)
@@ -314,6 +330,27 @@ router.get(
     });
   }),
 );
+router.get(
+  '/service-listings',
+  wrap(async (req, res) => {
+    const q = validate(
+      Joi.object({
+        category: Joi.string().max(200).allow(''),
+        page: Joi.number().integer().min(1).max(10000).default(1),
+      }),
+      req.query,
+    );
+    const items = await MarketServiceListing.find({
+      status: 'published',
+      ...(q.category ? { category: q.category } : {}),
+    })
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((q.page - 1) * 24)
+      .limit(25)
+      .lean();
+    return ok(res, { items: items.slice(0, 24), hasMore: items.length > 24 });
+  }),
+);
 // All provider and organiser mutations require a live vendor-owner session.
 // Sales/scanner/sub-user tokens cannot access private applications or files.
 router.use(authenticateTickets, requireTicketsOwner);
@@ -323,6 +360,53 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   return next();
 });
 router.get('/matched-opportunities', listOpportunities);
+async function requireProvider(req: Request) {
+  const vendor = await Vendor.findById(actor(req))
+    .select('operatorType')
+    .lean();
+  if (!vendor || vendor.operatorType !== 'services')
+    throw new HttpError(403, 'A service provider business is required');
+}
+router.get(
+  '/my-service-listings',
+  wrap(async (req, res) => {
+    await requireProvider(req);
+    return ok(res, {
+      items: await MarketServiceListing.find({ ownerId: actor(req) })
+        .sort({ createdAt: -1 })
+        .lean(),
+    });
+  }),
+);
+const saveServiceListing = wrap(async (req, res) => {
+  await requireProvider(req);
+  const value = validate(serviceListingSchema, req.body);
+  if (
+    !(await ServiceCategory.exists({ value: value.category, isActive: true }))
+  )
+    throw new HttpError(400, 'Choose an active service category');
+  const listing = req.params['listingId']
+    ? await MarketServiceListing.findOneAndUpdate(
+        { _id: id(req.params['listingId']), ownerId: actor(req) },
+        { $set: value },
+        { new: true, runValidators: true },
+      )
+    : await MarketServiceListing.create({ ...value, ownerId: actor(req) });
+  if (!listing) throw new HttpError(404, 'Service listing not found');
+  return ok(res, listing);
+});
+router.post('/service-listings', saveServiceListing);
+router.put('/service-listings/:listingId', saveServiceListing);
+router.post(
+  '/service-photos',
+  posterUpload.single('poster'),
+  handleMulterError,
+  wrap(async (req, res) => {
+    await requireProvider(req);
+    return uploadMarketplacePhoto(req, res);
+  }),
+);
+
 router.get(
   '/profiles',
   wrap(async (req, res) => {
@@ -595,14 +679,14 @@ router.post(
   }),
 );
 // Resolve the current account, rather than trusting a client role or stale token.
-router.use("/manage", (req, res, next) =>
+router.use('/manage', (req, res, next) =>
   wrap(async () => {
-    const vendor = await Vendor.findById(actor(req)).select("operatorType");
-    if (!vendor) throw new HttpError(401, "Business account no longer exists");
-    if (!admin(req) && !["events", "both"].includes(vendor.operatorType))
+    const vendor = await Vendor.findById(actor(req)).select('operatorType');
+    if (!vendor) throw new HttpError(401, 'Business account no longer exists');
+    if (!admin(req) && !['events', 'both'].includes(vendor.operatorType))
       throw new HttpError(
         403,
-        "Only organisers can manage stall opportunities",
+        'Only organisers can manage stall opportunities',
       );
     // The wrapper handles failures using the normal API error response.
     return next();
@@ -610,16 +694,32 @@ router.use("/manage", (req, res, next) =>
 );
 // Publicly listed Carrot events may be linked without transferring ownership.
 async function validateLinkedEvent(value: { eventId?: string | null }) {
-  if (value.eventId && !await Event.exists({ _id: value.eventId, status: { $in: ['published', 'ongoing', 'completed'] } }))
+  if (
+    value.eventId &&
+    !(await Event.exists({
+      _id: value.eventId,
+      status: { $in: ['published', 'ongoing', 'completed'] },
+    }))
+  )
     throw new HttpError(400, 'Choose a published Carrot event');
 }
-router.post('/manage/poster', posterUpload.single('poster'), handleMulterError, wrap(async (req, res) => {
-  if (!req.file) throw new HttpError(400, 'Choose an event poster');
-  if (!process.env['R2_PUBLIC_URL']) throw new HttpError(503, 'Poster storage is not configured');
-  const key = R2Service.generateMediaKey(`marketplace/${actor(req)}/${new mongoose.Types.ObjectId()}`, req.file.originalname);
+async function uploadMarketplacePhoto(req: Request, res: Response) {
+  if (!req.file) throw new HttpError(400, 'Choose a photo');
+  if (!process.env['R2_PUBLIC_URL'])
+    throw new HttpError(503, 'Photo storage is not configured');
+  const key = R2Service.generateMediaKey(
+    `marketplace/${actor(req)}/${new mongoose.Types.ObjectId()}`,
+    req.file.originalname,
+  );
   await R2Service.uploadBufferToR2(key, req.file.buffer, req.file.mimetype);
   return ok(res, { posterUrl: R2Service.getPublicUrl(key) });
-}));
+}
+router.post(
+  '/manage/poster',
+  posterUpload.single('poster'),
+  handleMulterError,
+  wrap(uploadMarketplacePhoto),
+);
 router.get(
   '/manage/opportunities',
   wrap(async (req, res) => {
@@ -739,7 +839,9 @@ router.patch(
             Object.fromEntries(
               Object.keys(opportunitySchema.describe().keys!).map((key) => [
                 key,
-                key === 'eventId' ? fields.eventId?.toString() : (fields as any)[key],
+                key === 'eventId'
+                  ? fields.eventId?.toString()
+                  : (fields as any)[key],
               ]),
             ),
           );

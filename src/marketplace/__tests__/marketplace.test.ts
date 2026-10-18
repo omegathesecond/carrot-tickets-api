@@ -141,8 +141,18 @@ beforeEach(async () => {
       isSuperAdmin: token === String(stranger),
     }));
   await Vendor.collection.insertMany([
-    { _id: organiser, businessName: 'Market organiser', slug: 'organiser', operatorType: 'events' },
-    { _id: provider, businessName: 'Provider', slug: 'provider', operatorType: 'services' },
+    {
+      _id: organiser,
+      businessName: 'Market organiser',
+      slug: 'organiser',
+      operatorType: 'events',
+    },
+    {
+      _id: provider,
+      businessName: 'Provider',
+      slug: 'provider',
+      operatorType: 'services',
+    },
     { _id: stranger, businessName: 'Admin', slug: 'admin' },
   ]);
 });
@@ -192,13 +202,16 @@ it('keeps an opportunity available when a later trading date has capacity', asyn
     const application = await apply(marketId, profileId, date);
     expect(application.status).toBe(200);
     const reviewed = await auth(
-      request(app).patch(endpoint + '/manage/applications/' + application.body.data._id),
+      request(app).patch(
+        endpoint + '/manage/applications/' + application.body.data._id,
+      ),
       organiser,
     ).send({ status: 'approved' });
     expect(reviewed.status).toBe(200);
   };
   const available = async (date?: string) => {
-    const response = await request(app).get(endpoint + '/opportunities')
+    const response = await request(app)
+      .get(endpoint + '/opportunities')
       .query({ available: true, ...(date ? { date } : {}) });
     expect(response.status).toBe(200);
     return response.body.data.items;
@@ -206,7 +219,11 @@ it('keeps an opportunity available when a later trading date has capacity', asyn
   await approve('2099-11-18');
   const items = await available();
   expect(items.map((item: any) => item._id)).toEqual([marketId]);
-  expect(items[0]).toMatchObject({ nextTradingDate: '2099-11-18', approvedProviders: 1, remainingCapacity: 0 });
+  expect(items[0]).toMatchObject({
+    nextTradingDate: '2099-11-18',
+    approvedProviders: 1,
+    remainingCapacity: 0,
+  });
   expect(await available('2099-11-18')).toHaveLength(0);
   expect(await available('2099-11-25')).toHaveLength(1);
   await approve('2099-11-25');
@@ -367,7 +384,10 @@ it('prevents capacity oversubscription under concurrent approval and atomically 
   expect(detail.body.data.approvedByScope['2099-11-18']).toBe(1);
 });
 it('does not let foreign organisers review or change decisions, and allows reapplication after decline', async () => {
-  await Vendor.updateOne({ _id: provider }, { $set: { operatorType: 'events' } });
+  await Vendor.updateOne(
+    { _id: provider },
+    { $set: { operatorType: 'events' } },
+  );
   const marketId = await createOpportunity();
   const profileId = await createProfile();
   const applied = await apply(marketId, profileId);
@@ -538,51 +558,86 @@ it('rolls back an approval if its notification fails instead of reporting succes
 
 describe('signup service category matching', () => {
   it('matches opportunities from both saved categories and excludes unrelated opportunities', async () => {
-    await Vendor.updateOne({ _id: provider }, { $set: { serviceCategories: ['sound_hire', 'catering'] } });
+    await Vendor.updateOne(
+      { _id: provider },
+      { $set: { serviceCategories: ['sound_hire', 'catering'] } },
+    );
     await ServiceCategory.create([
       { value: 'sound_hire', label: 'Sound hire' },
       { value: 'catering', label: 'Catering' },
     ]);
-    const sound = await createOpportunity({ name: 'Sound needed', categories: ['Sound hire'] });
-    const food = await createOpportunity({ name: 'Caterers needed', categories: ['catering'] });
+    const sound = await createOpportunity({
+      name: 'Sound needed',
+      categories: ['Sound hire'],
+    });
+    const food = await createOpportunity({
+      name: 'Caterers needed',
+      categories: ['catering'],
+    });
     await createOpportunity({ name: 'Crafts only', categories: ['Crafts'] });
-    await createOpportunity({ name: 'Not an exact category', categories: ['Catering supplies'] });
-    const matches = await auth(request(app).get(endpoint + '/matched-opportunities'));
+    await createOpportunity({
+      name: 'Not an exact category',
+      categories: ['Catering supplies'],
+    });
+    const matches = await auth(
+      request(app).get(endpoint + '/matched-opportunities'),
+    );
     expect(matches.status).toBe(200);
-    expect(matches.body.data.items.map((item: any) => item._id).sort()).toEqual([sound, food].sort());
-    const filtered = await auth(request(app).get(endpoint + '/matched-opportunities?category=catering'));
-    expect(filtered.body.data.items.map((item: any) => item._id)).toEqual([food]);
+    expect(matches.body.data.items.map((item: any) => item._id).sort()).toEqual(
+      [sound, food].sort(),
+    );
+    const filtered = await auth(
+      request(app).get(endpoint + '/matched-opportunities?category=catering'),
+    );
+    expect(filtered.body.data.items.map((item: any) => item._id)).toEqual([
+      food,
+    ]);
     // Another account cannot inherit this provider's selections.
-    const other = await auth(request(app).get(endpoint + '/matched-opportunities'), organiser);
+    const other = await auth(
+      request(app).get(endpoint + '/matched-opportunities'),
+      organiser,
+    );
     expect(other.body.data.items).toEqual([]);
     const all = await request(app).get(endpoint + '/opportunities');
     expect(all.body.data.items).toHaveLength(4);
   });
 
   it('requires owner authentication and surfaces lookup failures', async () => {
-    expect((await request(app).get(endpoint + '/matched-opportunities')).status).toBe(401);
-    expect((await request(app).get(endpoint + '/matched-opportunities').set('Authorization', 'Bearer sub-user')).status).toBe(403);
-    jest.spyOn(Vendor, 'findById').mockImplementationOnce(() => { throw new Error('Database unavailable'); });
-    const failed = await auth(request(app).get(endpoint + '/matched-opportunities'));
+    expect(
+      (await request(app).get(endpoint + '/matched-opportunities')).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(app)
+          .get(endpoint + '/matched-opportunities')
+          .set('Authorization', 'Bearer sub-user')
+      ).status,
+    ).toBe(403);
+    jest.spyOn(Vendor, 'findById').mockImplementationOnce(() => {
+      throw new Error('Database unavailable');
+    });
+    const failed = await auth(
+      request(app).get(endpoint + '/matched-opportunities'),
+    );
     expect(failed.status).toBe(500);
   });
 });
 
-it("rejects service-provider creation and management while retaining provider applications", async () => {
+it('rejects service-provider creation and management while retaining provider applications', async () => {
   const marketId = await createOpportunity();
   for (const req of [
-    request(app).get(endpoint + "/manage/opportunities"),
+    request(app).get(endpoint + '/manage/opportunities'),
     request(app)
-      .post(endpoint + "/manage/opportunities")
+      .post(endpoint + '/manage/opportunities')
       .send(opportunity),
     request(app)
-      .put(endpoint + "/manage/opportunities/" + marketId)
+      .put(endpoint + '/manage/opportunities/' + marketId)
       .send(opportunity),
     request(app)
-      .patch(endpoint + "/manage/opportunities/" + marketId + "/status")
-      .send({ status: "paused" }),
+      .patch(endpoint + '/manage/opportunities/' + marketId + '/status')
+      .send({ status: 'paused' }),
     request(app).get(
-      endpoint + "/manage/opportunities/" + marketId + "/applications",
+      endpoint + '/manage/opportunities/' + marketId + '/applications',
     ),
   ])
     expect((await auth(req)).status).toBe(403);
@@ -592,15 +647,29 @@ it("rejects service-provider creation and management while retaining provider ap
 
 it('persists a real Carrot event link and poster, and rejects missing or private event links', async () => {
   const eventId = new mongoose.Types.ObjectId();
-  await Event.collection.insertOne({ _id: eventId, name: 'Carrot market', status: 'published' });
-  const marketId = await createOpportunity({ eventId: String(eventId), posterUrl: 'https://cdn.example.com/poster.png' });
-  const detail = await request(app).get(endpoint + '/opportunities/' + marketId);
+  await Event.collection.insertOne({
+    _id: eventId,
+    name: 'Carrot market',
+    status: 'published',
+  });
+  const marketId = await createOpportunity({
+    eventId: String(eventId),
+    posterUrl: 'https://cdn.example.com/poster.png',
+  });
+  const detail = await request(app).get(
+    endpoint + '/opportunities/' + marketId,
+  );
   expect(detail.body.data.eventId).toBe(String(eventId));
   expect(detail.body.data.posterUrl).toBe('https://cdn.example.com/poster.png');
-  await Event.collection.updateOne({ _id: eventId }, { $set: { status: 'draft' } });
+  await Event.collection.updateOne(
+    { _id: eventId },
+    { $set: { status: 'draft' } },
+  );
   for (const invalidId of [eventId, new mongoose.Types.ObjectId()]) {
-    const result = await auth(request(app).post(endpoint + '/manage/opportunities'), organiser)
-      .send({ ...opportunity, eventId: String(invalidId) });
+    const result = await auth(
+      request(app).post(endpoint + '/manage/opportunities'),
+      organiser,
+    ).send({ ...opportunity, eventId: String(invalidId) });
     expect(result.status).toBe(400);
   }
 });
@@ -608,12 +677,20 @@ it('uploads organiser posters through existing storage and surfaces storage fail
   const previous = process.env['R2_PUBLIC_URL'];
   process.env['R2_PUBLIC_URL'] = 'https://cdn.example.com';
   try {
-    const storage = jest.spyOn(R2Service, 'uploadBufferToR2').mockResolvedValue({});
-    const post = (who = organiser) => auth(request(app).post(endpoint + '/manage/poster'), who)
-      .attach('poster', Buffer.from('image'), { filename: 'poster.png', contentType: 'image/png' });
+    const storage = jest
+      .spyOn(R2Service, 'uploadBufferToR2')
+      .mockResolvedValue({});
+    const post = (who = organiser) =>
+      auth(request(app).post(endpoint + '/manage/poster'), who).attach(
+        'poster',
+        Buffer.from('image'),
+        { filename: 'poster.png', contentType: 'image/png' },
+      );
     const uploaded = await post();
     expect(uploaded.status).toBe(200);
-    expect(uploaded.body.data.posterUrl).toMatch(/^https:\/\/cdn.example.com\/marketplace\//);
+    expect(uploaded.body.data.posterUrl).toMatch(
+      /^https:\/\/cdn.example.com\/marketplace\//,
+    );
     expect(storage).toHaveBeenCalledTimes(1);
     expect((await post(provider)).status).toBe(403);
     storage.mockRejectedValueOnce(new Error('Storage unavailable'));
@@ -624,8 +701,126 @@ it('uploads organiser posters through existing storage and surfaces storage fail
   }
 });
 it('returns the active predefined service catalogue for Marketplace selectors', async () => {
-  await ServiceCategory.create([{ value: 'crafts', label: 'Crafts', isActive: true }, { value: 'retired', label: 'Retired', isActive: false }]);
+  await ServiceCategory.create([
+    { value: 'crafts', label: 'Crafts', isActive: true },
+    { value: 'retired', label: 'Retired', isActive: false },
+  ]);
   const result = await request(app).get(endpoint + '/options');
   expect(result.status).toBe(200);
-  expect(result.body.data.categories.map((c: any) => c.label)).toEqual(['Crafts']);
+  expect(result.body.data.categories.map((c: any) => c.label)).toEqual([
+    'Crafts',
+  ]);
+});
+
+const advertisedService = {
+  category: 'tent-hire',
+  name: 'Marquee rental',
+  description: '6 × 6 m and 12 × 12 m tents',
+  photos: ['https://example.com/tent.jpg'],
+  serviceArea: 'Manzini and Hhohho',
+  availability: 'Weekends, book two weeks ahead',
+  pricing: 'SZL 1,500 per weekend for 6 × 6 m',
+  deliveryDetails: 'Delivery within Manzini included',
+  contactEmail: 'tents@example.com',
+  status: 'draft',
+};
+it('advertises services independently of applications with private drafts, category filtering and owner-only edits', async () => {
+  await ServiceCategory.create({
+    value: 'tent-hire',
+    label: 'Tent hire',
+    isActive: true,
+  });
+  const created = await auth(
+    request(app).post(endpoint + '/service-listings'),
+  ).send(advertisedService);
+  expect(created.status).toBe(200);
+  const listingId = created.body.data._id;
+  expect(
+    (await request(app).get(endpoint + '/service-listings')).body.data.items,
+  ).toEqual([]);
+  expect(
+    (await auth(request(app).get(endpoint + '/my-service-listings'))).body.data
+      .items,
+  ).toHaveLength(1);
+  expect(await MarketApplication.countDocuments()).toBe(0);
+  expect(await MarketProfile.countDocuments()).toBe(0);
+  await Vendor.updateOne(
+    { _id: stranger },
+    { $set: { operatorType: 'services' } },
+  );
+  expect(
+    (
+      await auth(
+        request(app).put(endpoint + '/service-listings/' + listingId),
+        stranger,
+      ).send(advertisedService)
+    ).status,
+  ).toBe(404);
+  expect(
+    (
+      await auth(
+        request(app).post(endpoint + '/service-listings'),
+        organiser,
+      ).send(advertisedService)
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await request(app)
+        .post(endpoint + '/service-listings')
+        .send(advertisedService)
+    ).status,
+  ).toBe(401);
+  const published = await auth(
+    request(app).put(endpoint + '/service-listings/' + listingId),
+  ).send({ ...advertisedService, status: 'published' });
+  expect(published.status).toBe(200);
+  const publicList = await request(app)
+    .get(endpoint + '/service-listings')
+    .query({ category: 'tent-hire' });
+  expect(publicList.body.data.items[0]).toMatchObject({
+    name: 'Marquee rental',
+    pricing: advertisedService.pricing,
+    photos: advertisedService.photos,
+  });
+  expect(
+    (
+      await request(app)
+        .get(endpoint + '/service-listings')
+        .query({ category: 'catering' })
+    ).body.data.items,
+  ).toEqual([]);
+  expect(
+    (
+      await auth(
+        request(app).put(endpoint + '/service-listings/' + listingId),
+      ).send(advertisedService)
+    ).status,
+  ).toBe(200);
+  expect(
+    (await request(app).get(endpoint + '/service-listings')).body.data.items,
+  ).toEqual([]);
+});
+it('rejects invalid service categories, missing commercial details and unsafe photo URLs', async () => {
+  await ServiceCategory.create({
+    value: 'tent-hire',
+    label: 'Tent hire',
+    isActive: true,
+  });
+  for (const override of [
+    { category: 'missing' },
+    { pricing: '' },
+    { photos: ['javascript:alert(1)'] },
+    { contactEmail: 'invalid' },
+    { opportunityId: String(organiser) },
+  ]) {
+    expect(
+      (
+        await auth(request(app).post(endpoint + '/service-listings')).send({
+          ...advertisedService,
+          ...override,
+        })
+      ).status,
+    ).toBe(400);
+  }
 });
