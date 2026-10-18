@@ -1,8 +1,9 @@
+import { Buyer } from '@models/buyer.model';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Update } from '@models/update.model';
 
 const seedReadyUpdate = () => Update.create({
@@ -17,7 +18,7 @@ describe('POST /api/tickets/updates/:id/like|save (vendor)', () => {
 
   it('lets a vendor like and un-like an update', async () => {
     const u = await seedReadyUpdate();
-    const token = signVendorToken(new mongoose.Types.ObjectId().toString());
+    const token = await seedVendorSessionToken(new mongoose.Types.ObjectId().toString());
     const on = await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${token}`).expect(200);
     expect(on.body.data).toMatchObject({ active: true, likeCount: 1 });
     const off = await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${token}`).expect(200);
@@ -26,7 +27,7 @@ describe('POST /api/tickets/updates/:id/like|save (vendor)', () => {
 
   it('lets a vendor save an update', async () => {
     const u = await seedReadyUpdate();
-    const token = signVendorToken(new mongoose.Types.ObjectId().toString());
+    const token = await seedVendorSessionToken(new mongoose.Types.ObjectId().toString());
     const res = await request(app).post(`/api/tickets/updates/${u.id}/save`).set('Authorization', `Bearer ${token}`).expect(200);
     expect(res.body.data).toMatchObject({ active: true, saveCount: 1 });
   });
@@ -34,11 +35,12 @@ describe('POST /api/tickets/updates/:id/like|save (vendor)', () => {
   it('404s a removed update', async () => {
     const u = await seedReadyUpdate();
     u.status = 'removed'; await u.save();
-    await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${signVendorToken(new mongoose.Types.ObjectId().toString())}`).expect(404);
+    await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${await seedVendorSessionToken(new mongoose.Types.ObjectId().toString())}`).expect(404);
   });
 
   it('401s a buyer token (no vendorId → not a vendor actor on this route)', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret123', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const u = await seedReadyUpdate();
-    await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+    await request(app).post(`/api/tickets/updates/${u.id}/like`).set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
   });
 });

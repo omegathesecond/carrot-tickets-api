@@ -3,7 +3,7 @@ import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Ticket } from '@models/ticket.model';
 import { Vendor } from '@models/vendor.model';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import mongoose from 'mongoose';
 
 let token = ''; let vendorId = '';
@@ -15,7 +15,7 @@ beforeEach(async () => {
     password: 'Password1!', isActive: true, isVerified: true,
   });
   vendorId = v._id.toString();
-  token = signVendorToken(vendorId, { permissions: ['tickets:sell_tickets'] });
+  token = await seedVendorSessionToken(vendorId, { permissions: ['tickets:sell_tickets'] });
 });
 afterEach(async () => { await clearTestDb(); });
 afterAll(disconnectTestDb);

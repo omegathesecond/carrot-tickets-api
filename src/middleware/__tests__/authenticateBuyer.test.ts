@@ -1,5 +1,6 @@
 import { authenticateBuyer } from '@middleware/ticketsAuth.middleware';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { BuyerAuthService } from '@services/buyerAuth.service';
 import { Buyer } from '@models/buyer.model';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '@config/jwt.config';
@@ -12,23 +13,29 @@ const mockRes = () => {
   return res;
 };
 
+beforeAll(connectTestDb);
+afterEach(clearTestDb);
+afterAll(disconnectTestDb);
+
 describe('authenticateBuyer', () => {
   it('accepts a buyerId-only (email buyer) token', async () => {
-    const token = jwt.sign({ userType: 'buyer', app: 'tickets', buyerId: 'abc123', userEmail: 'e@x.com' }, JWT_SECRET);
+    const buyer = await Buyer.create({ email: 'e@x.com', password: 'secret123' });
+    const token = BuyerAuthService.signToken(buyer);
     const req: any = { headers: { authorization: `Bearer ${token}` } };
     const next = jest.fn();
     await authenticateBuyer(req, mockRes(), next);
     expect(next).toHaveBeenCalled();
-    expect(req.ticketsUser.buyerId).toBe('abc123');
+    expect(req.ticketsUser.buyerId).toBe(String(buyer._id));
   });
 
-  it('still accepts a userPhone-only (existing) token', async () => {
+  it('rejects an obsolete userPhone-only token without a persisted session version', async () => {
     const token = jwt.sign({ userType: 'buyer', app: 'tickets', userPhone: '+26878422613' }, JWT_SECRET);
     const req: any = { headers: { authorization: `Bearer ${token}` } };
     const next = jest.fn();
-    await authenticateBuyer(req, mockRes(), next);
-    expect(next).toHaveBeenCalled();
-    expect(req.ticketsUser.userPhone).toBe('+26878422613');
+    const res = mockRes();
+    await authenticateBuyer(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
   });
 
   it('rejects a buyer token carrying neither buyerId nor userPhone', async () => {
@@ -43,9 +50,6 @@ describe('authenticateBuyer', () => {
 });
 
 describe('resolveBuyerFromRequest', () => {
-  beforeAll(connectTestDb);
-  afterEach(clearTestDb);
-  afterAll(disconnectTestDb);
 
   it('resolves an email-only buyer by buyerId', async () => {
     const buyer = await Buyer.create({

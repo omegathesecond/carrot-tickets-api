@@ -9,7 +9,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
 import { WalletService } from '@services/wallet.service';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { GateOperator } from '@models/gateOperator.model';
 import mongoose from 'mongoose';
 
@@ -53,7 +53,7 @@ it('404s an unbound uid', async () => {
 it('403 without SCAN_TICKETS', async () => {
   const { eventId } = await seedPublishedEvent({});
   const res = await request(app).get(`/api/tickets/wallets/by-band/aaaaaaaaaaaaaa?eventId=${eventId}`)
-    .set('Authorization', `Bearer ${signVendorToken(String(new mongoose.Types.ObjectId()), { permissions: [TicketsPermission.VIEW_EVENTS] })}`);
+    .set('Authorization', `Bearer ${await seedVendorSessionToken(String(new mongoose.Types.ObjectId()), { permissions: [TicketsPermission.VIEW_EVENTS] })}`);
   expect(res.status).toBe(403);
 });
 

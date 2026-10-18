@@ -1,9 +1,9 @@
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Membership } from '@models/membership.model';
@@ -12,15 +12,9 @@ import { CommunityService } from '@services/community.service';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { resetBuckets } from '@utils/rateLimit.util';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const PHONE = '+26878422613';
 
-function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin: false, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
+const sessionToken = (vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]) => seedVendorSessionToken(vendorId, { permissions });
 
 async function seedWorld() {
   const vendor = await Vendor.create({
@@ -32,7 +26,7 @@ async function seedWorld() {
   const announcements = await Channel.findOne({ communityId: community._id, slug: 'announcements' });
   const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', username: 'listener_one' });
   await Membership.create({ buyerId: buyer._id, communityId: community._id });
-  return { vendor, seeded, community, announcements: announcements!, buyerAuth: `Bearer ${signBuyerToken(PHONE)}` };
+  return { vendor, seeded, community, announcements: announcements!, buyerAuth: `Bearer ${await signBuyerSessionToken(PHONE)}` };
 }
 
 describe('organizer announcements', () => {
@@ -46,7 +40,7 @@ describe('organizer announcements', () => {
 
     const posted = await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/announcements`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`)
       .send({ body: 'Gates open 18:00 — bring ID!' })
       .expect(201);
     expect(posted.body.data.senderType).toBe('organizer');
@@ -67,13 +61,13 @@ describe('organizer announcements', () => {
     const { vendor, seeded, announcements } = await seedWorld();
     await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/announcements`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`)
       .send({ body: 'Doors at 19:00' })
       .expect(201);
 
     // A second buyer with no Membership row at all for this community.
     await Buyer.create({ phone: '+26878422614', password: 'secret1', username: 'outsider_listener' });
-    const outsiderAuth = `Bearer ${signBuyerToken('+26878422614')}`;
+    const outsiderAuth = `Bearer ${await signBuyerSessionToken('+26878422614')}`;
 
     const res = await request(app)
       .get(`/api/community/channels/${String(announcements._id)}/messages`)
@@ -90,14 +84,14 @@ describe('organizer announcements', () => {
     });
     await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/announcements`)
-      .set('Authorization', `Bearer ${signVendorToken(String(other._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(other._id))}`)
       .send({ body: 'hijack' })
       .expect(403);
 
     const { vendor } = await (async () => ({ vendor: await Vendor.findOne({ businessName: 'Piano Republic Events' }) }))();
     await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/announcements`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor!._id), [])}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor!._id), [])}`)
       .send({ body: 'no perms' })
       .expect(403);
 
@@ -110,14 +104,14 @@ describe('organizer announcements', () => {
 
     await request(app)
       .post(`/api/tickets/events/aaaaaaaaaaaaaaaaaaaaaaaa/announcements`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor!._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor!._id))}`)
       .send({ body: 'ghost' })
       .expect(404);
   });
 
   it('validation 400 + vendor rate limit 429', async () => {
     const { vendor, seeded } = await seedWorld();
-    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const auth = `Bearer ${await sessionToken(String(vendor._id))}`;
 
     await request(app).post(`/api/tickets/events/${seeded.eventId}/announcements`)
       .set('Authorization', auth).send({ body: '' }).expect(400);

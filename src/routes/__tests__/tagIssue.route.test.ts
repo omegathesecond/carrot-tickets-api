@@ -4,8 +4,9 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
-import { signVendorToken, signSuperAdminToken } from '@/__tests__/helpers/auth';
+import { signVendorSessionToken, signAdminSessionToken, signStaffSessionToken } from '@/__tests__/helpers/auth';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
+import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
@@ -21,10 +22,11 @@ afterAll(disconnectTestDb);
 async function seedCashlessEvent() {
   const { eventId, vendorId } = await seedPublishedEvent({});
   await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
+  await Vendor.create({ _id: vendorId, businessName: 'Owner', password: 'secret123' });
   return {
     eventId: String(eventId),
     vendorId: String(vendorId),
-    organizerToken: signVendorToken(String(vendorId), { permissions: [TicketsPermission.ISSUE_TAGS] }),
+    organizerToken: await signVendorSessionToken(String(vendorId)),
   };
 }
 
@@ -105,7 +107,7 @@ describe('handing out a tag that carries no ticket', () => {
   it('refuses on an event that is not cashless', async () => {
     const { eventId } = await seedPublishedEvent({});
     const { vendorId } = await seedCashlessEvent();
-    const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.ISSUE_TAGS] });
+    const token = await signVendorSessionToken(String(vendorId));
     const res = await issue(String(eventId), token, { bandUid: '04a22b1c' });
     expect(res.status).not.toBe(201);
   });
@@ -114,14 +116,14 @@ describe('handing out a tag that carries no ticket', () => {
     const { eventId } = await seedCashlessEvent();
     await enrolTags(eventId, '04a22b1c');
 
-    const res = await issue(eventId, signSuperAdminToken(), { bandUid: '04a22b1c' });
+    const res = await issue(eventId, await signAdminSessionToken(), { bandUid: '04a22b1c' });
 
     expect(res.status).toBe(201);
   });
 
   it('403s an organizer who does not hold issue_tags', async () => {
     const { eventId, vendorId } = await seedCashlessEvent();
-    const res = await issue(eventId, signVendorToken(vendorId, { permissions: [] }), { bandUid: '04a22b1c' });
+    const res = await issue(eventId, await signStaffSessionToken(vendorId, []), { bandUid: '04a22b1c' });
     expect(res.status).toBe(403);
   });
 });
@@ -157,7 +159,7 @@ describe('a standalone tag is still fully accounted for', () => {
     await enrolTags(eventId, '04a22b1c');
     await issue(eventId, organizerToken, { bandUid: '04a22b1c' });
 
-    const scanner = signVendorToken(vendorId, { permissions: [TicketsPermission.SCAN_TICKETS] });
+    const scanner = await signStaffSessionToken(vendorId, [TicketsPermission.SCAN_TICKETS]);
     const res = await request(app)
       .post('/api/tickets/scans/check-in')
       .set('Authorization', `Bearer ${scanner}`)

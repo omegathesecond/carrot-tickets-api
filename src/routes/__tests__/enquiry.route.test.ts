@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
@@ -21,8 +21,8 @@ async function seedServicesVendor() {
   });
 }
 
-function inboxAuth(vendorId: string) {
-  return `Bearer ${signVendorToken(vendorId, { permissions: [TicketsPermission.MANAGE_ENQUIRIES] })}`;
+async function inboxAuth(vendorId: string) {
+  return `Bearer ${await seedVendorSessionToken(vendorId, { permissions: [TicketsPermission.MANAGE_ENQUIRIES] })}`;
 }
 
 describe('enquiry routes', () => {
@@ -33,7 +33,7 @@ describe('enquiry routes', () => {
   it('buyer creates an enquiry, business inbox lists + updates it, a buyer token 403s the inbox', async () => {
     const biz = await seedServicesVendor();
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Curious Buyer' });
-    const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
+    const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const created = await request(app)
       .post(`/api/public/services/${biz._id}/enquiries`)
@@ -47,7 +47,7 @@ describe('enquiry routes', () => {
     // Business (services vendor with MANAGE_ENQUIRIES) reads its inbox.
     const inbox = await request(app)
       .get('/api/tickets/services/enquiries')
-      .set('Authorization', inboxAuth(String(biz._id)))
+      .set('Authorization', await inboxAuth(String(biz._id)))
       .expect(200);
     expect(inbox.body.data).toHaveLength(1);
     expect(inbox.body.data[0].message).toBe('Do you do weddings?');
@@ -56,7 +56,7 @@ describe('enquiry routes', () => {
     // Business updates the enquiry status.
     const patched = await request(app)
       .patch(`/api/tickets/services/enquiries/${enquiryId}/status`)
-      .set('Authorization', inboxAuth(String(biz._id)))
+      .set('Authorization', await inboxAuth(String(biz._id)))
       .send({ status: 'read' })
       .expect(200);
     expect(patched.body.data.status).toBe('read');
@@ -71,7 +71,7 @@ describe('enquiry routes', () => {
   it('create requires buyer auth (401), a message (400), and a real business (404)', async () => {
     const biz = await seedServicesVendor();
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Curious Buyer' });
-    const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
+    const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     await request(app)
       .post(`/api/public/services/${biz._id}/enquiries`)
@@ -96,19 +96,19 @@ describe('enquiry routes', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Curious Buyer' });
     await request(app)
       .post('/api/public/services/not-an-id/enquiries')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ message: 'hi' })
       .expect(400);
 
     await request(app)
       .patch('/api/tickets/services/enquiries/not-an-id/status')
-      .set('Authorization', inboxAuth(String(biz._id)))
+      .set('Authorization', await inboxAuth(String(biz._id)))
       .send({ status: 'read' })
       .expect(400);
 
     await request(app)
       .patch(`/api/tickets/services/enquiries/0123456789abcdef01234567/status`)
-      .set('Authorization', inboxAuth(String(biz._id)))
+      .set('Authorization', await inboxAuth(String(biz._id)))
       .send({ status: 'read' })
       .expect(404);
   });

@@ -7,7 +7,7 @@ import { HEX24, failWithHttpError } from '@utils/controllerHelpers.util';
 import { HttpError } from '@utils/httpError.util';
 
 async function cashierEvent(req: Request) {
-  const eventId = String(req.body.eventId ?? req.query.eventId ?? '');
+  const eventId = String(req.body?.eventId ?? req.query.eventId ?? '');
   if (!HEX24.test(eventId)) throw new HttpError(400, 'A valid event ID is required');
   const event = await Event.findById(eventId).lean();
   if (!event) throw new HttpError(404, 'Event not found');

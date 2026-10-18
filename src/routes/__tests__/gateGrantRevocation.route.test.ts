@@ -9,9 +9,11 @@
 // re-resolved from the row on every gate request.
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '@config/jwt.config';
+import { signVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
 import mongoose from 'mongoose';
 import app from '@/app';
-import { JWT_SECRET } from '@config/jwt.config';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { GateOperator } from '@models/gateOperator.model';
 import { GateOperatorAuthService } from '@services/gateOperatorAuth.service';
@@ -21,16 +23,16 @@ const VENDOR = '64c000000000000000000a01';
 const PIN = '123456';
 
 beforeAll(connectTestDb);
+beforeEach(async () => {
+  await Vendor.create({ _id: VENDOR, businessName: 'Owner', password: 'secret123' });
+});
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 let __loginCodeSeq = 500;
 const nextLoginCode = () => `4KZ${__loginCodeSeq++}`;
 
-const organizerToken = () => jwt.sign({
-  app: 'tickets', userType: 'vendor', role: 'tickets_owner', vendorId: VENDOR,
-  permissions: ['tickets:manage_access'], isSuperAdmin: false,
-}, JWT_SECRET);
+const organizerToken = () => signVendorSessionToken(VENDOR);
 
 /** A real row → a real login → the token the POS actually holds. */
 async function loginWith(grants: string[]) {
@@ -60,7 +62,7 @@ it('removing the grant revokes the SAME token at once, without a re-login', asyn
   expect((await bindBand(accessToken)).status).not.toBe(403);
 
   const patch = await request(app).patch(`/api/tickets/gate-operators/${operator._id}`)
-    .set('Authorization', `Bearer ${organizerToken()}`)
+    .set('Authorization', `Bearer ${await organizerToken()}`)
     .send({ grants: [] });
   expect(patch.status).toBe(200);
 
@@ -195,10 +197,7 @@ it('an active ORGANIZER-scope operator is still refused super-admin routes — t
 });
 
 it('a dashboard super-admin (vendor token, no operator row) is untouched by the row check', async () => {
-  const dashboardAdmin = jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner', vendorId: VENDOR,
-    permissions: [], isSuperAdmin: true,
-  }, JWT_SECRET);
+  const dashboardAdmin = await signAdminSessionToken();
   expect((await adminFees(dashboardAdmin)).status).toBe(200);
   expect((await adminUsers(dashboardAdmin)).status).toBe(200);
 });

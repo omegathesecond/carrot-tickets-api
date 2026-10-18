@@ -1,9 +1,8 @@
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, signAdminSessionToken, signStaffSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Channel } from '@models/channel.model';
@@ -11,15 +10,6 @@ import { CommunityService } from '@services/community.service';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { Report } from '@models/report.model';
 import { resetBuckets } from '@utils/rateLimit.util';
-
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-
-function signVendorToken(vendorId: string, permissions: string[] = [], isSuperAdmin = false): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
 
 const PHONE = '+26878422613';
 
@@ -33,9 +23,9 @@ async function seedWorld() {
   const general = (await Channel.findOne({ communityId: community._id, slug: 'general' }))!;
 
   const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Reporter Buyer' });
-  const buyerAuth = `Bearer ${signBuyerToken(PHONE)}`;
-  const adminAuth = `Bearer ${signVendorToken('admin-1', [TicketsPermission.MODERATE_SOCIAL])}`;
-  const superAdminAuth = `Bearer ${signVendorToken('super-1', [], true)}`;
+  const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
+  const adminAuth = `Bearer ${await signStaffSessionToken(String(vendor._id), [TicketsPermission.MODERATE_SOCIAL])}`;
+  const superAdminAuth = `Bearer ${await signAdminSessionToken()}`;
 
   await request(app).post(`/api/community/${seeded.eventId}/join`).set('Authorization', buyerAuth).expect(200);
 
@@ -65,8 +55,8 @@ describe('report routes', () => {
   describe('POST /api/community/reports', () => {
     it('files a message report — 201 on first file, 200 on a duplicate open report', async () => {
       const { general, buyerAuth } = await seedWorld();
-      const reporterAuth = `Bearer ${signBuyerToken('+26878300001')}`;
       await Buyer.create({ phone: '+26878300001', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Rando' });
+      const reporterAuth = `Bearer ${await signBuyerSessionToken('+26878300001')}`;
 
       const sent = await request(app)
         .post(`/api/community/channels/${String(general._id)}/messages`)
@@ -138,7 +128,8 @@ describe('report routes', () => {
         .send({ targetType: 'buyer', targetBuyerId: String(target._id), reason: 'x' })
         .expect(201);
 
-      const noPerm = `Bearer ${signVendorToken('vendor-no-perm', [TicketsPermission.EDIT_EVENT])}`;
+      const restrictedVendor = await Vendor.create({ businessName: 'Restricted', password: 'secret123' });
+      const noPerm = `Bearer ${await signStaffSessionToken(String(restrictedVendor._id), [TicketsPermission.EDIT_EVENT])}`;
       await request(app).get('/api/tickets/reports').set('Authorization', noPerm).expect(403);
 
       const list = await request(app).get('/api/tickets/reports').set('Authorization', adminAuth).expect(200);
@@ -177,8 +168,8 @@ describe('report routes', () => {
 
     it('resolve: delete_message deletes a channel message cross-vendor and the admin view shows it deleted+unmasked', async () => {
       const { general, buyerAuth } = await seedWorld();
-      const reporterAuth = `Bearer ${signBuyerToken('+26878300012')}`;
       await Buyer.create({ phone: '+26878300012', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
+      const reporterAuth = `Bearer ${await signBuyerSessionToken('+26878300012')}`;
 
       const sent = await request(app)
         .post(`/api/community/channels/${String(general._id)}/messages`)
@@ -190,7 +181,7 @@ describe('report routes', () => {
       const rival = await Vendor.create({
         businessName: 'Rival Events', email: 'rival-report@example.com', password: 'secret123', phoneNumber: '+26878000098',
       });
-      const rivalAdminAuth = `Bearer ${signVendorToken(String(rival._id), [TicketsPermission.MODERATE_SOCIAL])}`;
+      const rivalAdminAuth = `Bearer ${await signStaffSessionToken(String(rival._id), [TicketsPermission.MODERATE_SOCIAL])}`;
 
       const row = await fileAndFetch(reporterAuth, rivalAdminAuth, {
         targetType: 'message',
@@ -220,7 +211,7 @@ describe('report routes', () => {
     it('resolve: suspend_buyer then unsuspend_buyer round-trips socialSuspendedAt, enforced end-to-end on a write path', async () => {
       const { buyerAuth, adminAuth } = await seedWorld();
       const target = await Buyer.create({ phone: '+26878300013', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Follow Target' });
-      const targetAuth = `Bearer ${signBuyerToken('+26878300013')}`;
+      const targetAuth = `Bearer ${await signBuyerSessionToken('+26878300013')}`;
       const someoneElse = await Buyer.create({ phone: '+26878300014', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
 
       const row = await fileAndFetch(buyerAuth, adminAuth, {

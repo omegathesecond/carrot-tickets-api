@@ -1,5 +1,5 @@
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
@@ -8,14 +8,8 @@ import { Channel } from '@models/channel.model';
 import { CommunityService } from '@services/community.service';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-
-function signVendorToken(vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin: false, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
+const sessionToken = (vendorId: string, permissions: string[] = [TicketsPermission.EDIT_EVENT]) =>
+  seedVendorSessionToken(vendorId, { permissions });
 
 async function seedWorld() {
   const vendor = await Vendor.create({
@@ -43,7 +37,7 @@ describe('organizer channel management routes', () => {
 
     const res = await request(app)
       .get(`/api/tickets/events/${seeded.eventId}/channels`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`)
       .expect(200);
 
     expect(res.body.data.communityId).toBe(String(community._id));
@@ -55,7 +49,7 @@ describe('organizer channel management routes', () => {
 
   it('creates a channel and rejects a duplicate slug with 409', async () => {
     const { vendor, seeded } = await seedWorld();
-    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const auth = `Bearer ${await sessionToken(String(vendor._id))}`;
 
     const created = await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/channels`)
@@ -75,7 +69,7 @@ describe('organizer channel management routes', () => {
 
   it('validation 400 for a missing/oversized name', async () => {
     const { vendor, seeded } = await seedWorld();
-    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const auth = `Bearer ${await sessionToken(String(vendor._id))}`;
 
     await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/channels`)
@@ -91,7 +85,7 @@ describe('organizer channel management routes', () => {
 
   it('patches a non-default channel (rename + gated + archived)', async () => {
     const { vendor, seeded } = await seedWorld();
-    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const auth = `Bearer ${await sessionToken(String(vendor._id))}`;
 
     const created = await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/channels`)
@@ -117,7 +111,7 @@ describe('organizer channel management routes', () => {
 
   it('rejects renaming/archiving a default channel with 400', async () => {
     const { vendor, general } = await seedWorld();
-    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const auth = `Bearer ${await sessionToken(String(vendor._id))}`;
 
     await request(app)
       .patch(`/api/tickets/channels/${String(general._id)}`)
@@ -140,7 +134,7 @@ describe('organizer channel management routes', () => {
 
   it('allows a dashboard resubmit of unchanged name+archived on a default channel (no-op, not a 400)', async () => {
     const { vendor, general } = await seedWorld();
-    const auth = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const auth = `Bearer ${await sessionToken(String(vendor._id))}`;
 
     // Simulates the dashboard edit form pre-filling with current values and
     // resubmitting the full channel state without actually changing anything.
@@ -163,31 +157,31 @@ describe('organizer channel management routes', () => {
     });
     await request(app)
       .get(`/api/tickets/events/${seeded.eventId}/channels`)
-      .set('Authorization', `Bearer ${signVendorToken(String(other._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(other._id))}`)
       .expect(403);
     await request(app)
       .post(`/api/tickets/events/${seeded.eventId}/channels`)
-      .set('Authorization', `Bearer ${signVendorToken(String(other._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(other._id))}`)
       .send({ name: 'Hijack' })
       .expect(403);
     await request(app)
       .patch(`/api/tickets/channels/${String(general._id)}`)
-      .set('Authorization', `Bearer ${signVendorToken(String(other._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(other._id))}`)
       .send({ gated: true })
       .expect(403);
 
     await request(app)
       .get(`/api/tickets/events/${seeded.eventId}/channels`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [])}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id), [])}`)
       .expect(403);
 
     await request(app)
       .get(`/api/tickets/events/aaaaaaaaaaaaaaaaaaaaaaaa/channels`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`)
       .expect(404);
     await request(app)
       .patch(`/api/tickets/channels/aaaaaaaaaaaaaaaaaaaaaaaa`)
-      .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+      .set('Authorization', `Bearer ${await sessionToken(String(vendor._id))}`)
       .send({ gated: true })
       .expect(404);
   });

@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { Update } from '@models/update.model';
@@ -22,7 +22,7 @@ describe('GET /api/social/me/saved', () => {
     const e = await Event.create({ vendorId: new mongoose.Types.ObjectId(), name: 'Saved Event', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
     await EventReaction.create({ eventId: e._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
-    const res = await request(app).get('/api/social/me/saved').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/me/saved').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.updates.map((s: any) => s.caption)).toEqual(['saved post']);
     expect(res.body.data.events.map((c: any) => c.name)).toEqual(['Saved Event']);
   });

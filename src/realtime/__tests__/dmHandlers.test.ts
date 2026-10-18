@@ -8,7 +8,7 @@ import {
   waitForEvent,
   TestRealtime,
 } from './helpers';
-import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Membership } from '@models/membership.model';
@@ -58,7 +58,7 @@ describe('dm handlers', () => {
   afterAll(disconnectAdapterTestDb);
 
   async function client(phone: string): Promise<ClientSocket> {
-    const c = await connectClient(rt.port, signBuyerToken(phone));
+    const c = await connectClient(rt.port, await signBuyerSessionToken(phone));
     clients.push(c);
     return c;
   }
@@ -94,7 +94,7 @@ describe('dm handlers', () => {
     const thread = await DmThreadService.openBrandToBrandThread(String(va._id), String(vb._id));
     const threadId = String(thread._id);
 
-    const bClient = await connectClient(rt.port, signVendorToken(String(vb._id)));
+    const bClient = await connectClient(rt.port, await seedVendorSessionToken(String(vb._id)));
     clients.push(bClient);
     expect(await joinDm(bClient, threadId)).toEqual({ ok: true });
 

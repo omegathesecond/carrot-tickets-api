@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -19,7 +19,7 @@ async function seedBuyers() {
   const a = await Buyer.create({ phone: PHONE_A, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Alpha', username: 'alpha_one' });
   const b = await Buyer.create({ phone: PHONE_B, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Beta', username: 'beta_two' });
   const c = await Buyer.create({ phone: PHONE_C, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Gamma', username: 'gamma_three' });
-  return { a, b, c, authA: `Bearer ${signBuyerToken(PHONE_A)}`, authB: `Bearer ${signBuyerToken(PHONE_B)}` };
+  return { a, b, c, authA: `Bearer ${await signBuyerSessionToken(PHONE_A)}`, authB: `Bearer ${await signBuyerSessionToken(PHONE_B)}` };
 }
 
 describe('social graph routes', () => {
@@ -146,7 +146,7 @@ describe('social graph routes', () => {
     await Buyer.create({ phone: '+26878000044', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const nonMember = await request(app)
       .get(`/api/community/${seeded.eventId}/members`)
-      .set('Authorization', `Bearer ${signBuyerToken('+26878000044')}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000044')}`)
       .expect(200);
     expect(nonMember.body.data.map((u: any) => u.username)).toEqual(['beta_two', 'alpha_one']);
 

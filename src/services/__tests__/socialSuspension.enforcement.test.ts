@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -113,7 +113,7 @@ describe('platform social suspension — enforcement', () => {
 
       const res = await request(app)
         .get('/api/public/my-tickets')
-        .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
         .expect(200);
       expect(res.body.data).toHaveLength(1);
     });

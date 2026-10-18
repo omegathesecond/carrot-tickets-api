@@ -8,7 +8,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
@@ -38,7 +38,7 @@ describe('services review routes', () => {
   it('403s without an enquiry, then buyer posts after enquiring, public reads it, a second post 409s', async () => {
     const biz = await seedServicesVendor();
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Curious Buyer', username: 'curious_buyer' });
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     await request(app)
       .post(`/api/public/services/${biz._id}/reviews`)
@@ -73,7 +73,7 @@ describe('services review routes', () => {
   it('write requires auth (401) and a valid rating (400); malformed businessId is a clean 400', async () => {
     const biz = await seedServicesVendor();
     await Buyer.create({ phone: PHONE, password: 'secret1' });
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     await request(app).post(`/api/public/services/${biz._id}/reviews`).send({ rating: 5 }).expect(401);
     await request(app)

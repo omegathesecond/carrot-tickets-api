@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 
@@ -11,9 +11,9 @@ describe('block enforcement on brand↔buyer DMs', () => {
   afterAll(disconnectTestDb);
 
   const seed = async () => {
-    const brand = await Vendor.create({ businessName: 'Blocky', email: 'blk@example.com', phoneNumber: '+26878005001', password: 'secret123' });
-    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'B', username: 'blk_buyer' });
-    return { brand, buyer, brandTok: `Bearer ${signVendorToken(String(brand._id))}`, buyerTok: `Bearer ${signBuyerToken('+26878422613')}` };
+    const brand = await Vendor.create({ businessName: 'Blocky', email: 'blk@example.com', phoneNumber: '+26878005001', password: 'secret123', logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg' });
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'B', username: 'blk_buyer' });
+    return { brand, buyer, brandTok: `Bearer ${await seedVendorSessionToken(String(brand._id))}`, buyerTok: `Bearer ${await signBuyerSessionToken('+26878422613')}` };
   };
 
   it('a buyer who blocks the brand stops the brand from messaging + opening', async () => {

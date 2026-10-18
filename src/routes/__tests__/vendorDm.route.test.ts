@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 
@@ -12,13 +12,13 @@ describe('/api/tickets/dm (brand ↔ buyer)', () => {
   afterAll(disconnectTestDb);
 
   const makeVendor = () =>
-    Vendor.create({ businessName: 'Bhora Fest', email: 'dm-brand@example.com', phoneNumber: '+26878004001', password: 'secret123' });
+    Vendor.create({ businessName: 'Bhora Fest', email: 'dm-brand@example.com', phoneNumber: '+26878004001', password: 'secret123', logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg' });
 
   it('brand opens a thread with a buyer, both sides exchange messages', async () => {
     const brand = await makeVendor();
     const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Attendee', username: 'attendee_one' });
-    const brandTok = `Bearer ${signVendorToken(String(brand._id))}`;
-    const buyerTok = `Bearer ${signBuyerToken('+26878422613')}`;
+    const brandTok = `Bearer ${await seedVendorSessionToken(String(brand._id))}`;
+    const buyerTok = `Bearer ${await signBuyerSessionToken('+26878422613')}`;
 
     // Brand opens a 1:1 with the buyer.
     const open = await request(app).post('/api/tickets/dm/threads').set('Authorization', brandTok)
@@ -54,9 +54,10 @@ describe('/api/tickets/dm (brand ↔ buyer)', () => {
   });
 
   it('401s a buyer token on the vendor DM route, 404s a foreign thread', async () => {
-    await request(app).get('/api/tickets/dm/threads').set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+    await Buyer.create({ phone: '+26878422613', password: 'secret123' });
+    await request(app).get('/api/tickets/dm/threads').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(401);
     const brand = await makeVendor();
     await request(app).get(`/api/tickets/dm/threads/${new mongoose.Types.ObjectId()}/messages`)
-      .set('Authorization', `Bearer ${signVendorToken(String(brand._id))}`).expect(404);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(brand._id))}`).expect(404);
   });
 });

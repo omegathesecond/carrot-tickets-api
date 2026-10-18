@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -42,7 +42,7 @@ describe('community routes', () => {
 
     const res = await request(app)
       .post(`/api/community/${eventId}/join`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const view = res.body.data;
@@ -69,7 +69,7 @@ describe('community routes', () => {
 
     const res = await request(app)
       .post(`/api/community/${eventId}/join`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     expect(res.body.data.membership.ticketVerified).toBe(true);
@@ -80,7 +80,7 @@ describe('community routes', () => {
   it('verify-ticket upgrades a member after a later purchase', async () => {
     const { eventId, vendorId } = await seedCommunityEvent();
     await seedBuyer();
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     await request(app).post(`/api/community/${eventId}/join`).set('Authorization', auth).expect(200);
 
@@ -102,7 +102,7 @@ describe('community routes', () => {
     const { eventId } = await seedPublishedEvent(); // NO ensureForEvent
     await request(app)
       .get(`/api/community/${eventId}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(404);
   });
 });

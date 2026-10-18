@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 // api/src/routes/__tests__/cashlessRequest.route.test.ts
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -11,12 +12,8 @@ const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR = '64c000000000000000000a01';
 const OTHER_VENDOR = '64c000000000000000000b02';
 
-function token(opts: { isSuperAdmin?: boolean; vendorId?: string } = {}) {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:view_events', 'tickets:edit_event'],
-    isSuperAdmin: !!opts.isSuperAdmin, vendorId: opts.vendorId ?? VENDOR,
-  }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; vendorId?: string } = {}) {
+  return (!!opts.isSuperAdmin ? await signAdminSessionToken() : await seedVendorSessionToken(opts.vendorId ?? VENDOR, { permissions: ['tickets:view_events', 'tickets:edit_event'] }));
 }
 
 async function makeEvent(vendorId = VENDOR) {
@@ -38,7 +35,7 @@ describe('PUT /api/tickets/events/:id — cashless is admin-only over HTTP', () 
 
     const res = await request(app)
       .put(`/api/tickets/events/${event._id}`)
-      .set('Authorization', `Bearer ${token()}`)
+      .set('Authorization', `Bearer ${await token()}`)
       .send({ cashless: true });
 
     expect(res.status).toBe(403);
@@ -50,7 +47,7 @@ describe('PUT /api/tickets/events/:id — cashless is admin-only over HTTP', () 
 
     const res = await request(app)
       .put(`/api/tickets/events/${event._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ cashless: true });
 
     expect(res.status).toBe(200);
@@ -64,7 +61,7 @@ describe('POST /api/tickets/events/:id/cashless-request', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/cashless-request`)
-      .set('Authorization', `Bearer ${token()}`)
+      .set('Authorization', `Bearer ${await token()}`)
       .send({ note: 'Two bars and a food court' });
 
     expect(res.status).toBe(200);
@@ -78,7 +75,7 @@ describe('POST /api/tickets/events/:id/cashless-request', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/cashless-request`)
-      .set('Authorization', `Bearer ${token()}`);
+      .set('Authorization', `Bearer ${await token()}`);
 
     expect(res.status).toBe(200);
   });
@@ -88,7 +85,7 @@ describe('POST /api/tickets/events/:id/cashless-request', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/cashless-request`)
-      .set('Authorization', `Bearer ${token()}`)
+      .set('Authorization', `Bearer ${await token()}`)
       .send({ note: 'Mine now' });
 
     expect(res.status).toBe(404);
@@ -99,7 +96,7 @@ describe('POST /api/tickets/events/:id/cashless-request', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/cashless-request`)
-      .set('Authorization', `Bearer ${token()}`)
+      .set('Authorization', `Bearer ${await token()}`)
       .send({ note: 'x'.repeat(301) });
 
     expect(res.status).toBe(400);

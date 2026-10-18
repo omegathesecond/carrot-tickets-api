@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb } from '../../__tests__/helpers/db';
-import { signSuperAdminToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken } from '../../__tests__/helpers/auth';
 import { seedReseller } from '../../__tests__/helpers/fixtures';
 import { ResellerOperator } from '@models/resellerOperator.model';
 
@@ -9,7 +9,7 @@ beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 
 it('super-admin creates a reseller → 201; no-token request → 401', async () => {
-  const admin = signSuperAdminToken();
+  const admin = await signAdminSessionToken();
 
   const created = await request(app)
     .post('/api/admin/resellers')
@@ -24,7 +24,7 @@ it('super-admin creates a reseller → 201; no-token request → 401', async () 
 });
 
 it('issues an operator with a login code + PIN', async () => {
-  const superAdminToken = signSuperAdminToken();
+  const superAdminToken = await signAdminSessionToken();
   const { hubId } = await seedReseller();
   const res = await request(app)
     .post(`/api/admin/hubs/${hubId}/operators`)
@@ -37,7 +37,7 @@ it('issues an operator with a login code + PIN', async () => {
 });
 
 it('resets an operator PIN', async () => {
-  const superAdminToken = signSuperAdminToken();
+  const superAdminToken = await signAdminSessionToken();
   const { hubId } = await seedReseller();
   const created = await request(app)
     .post(`/api/admin/hubs/${hubId}/operators`)
@@ -58,7 +58,7 @@ it('resets an operator PIN', async () => {
 
 it('super-admin gets a single hub and its analytics', async () => {
   const { hubId } = await seedReseller();
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
 
   const hub = await request(app).get(`/api/admin/hubs/${hubId}`).set('Authorization', `Bearer ${token}`);
   expect(hub.status).toBe(200);
@@ -71,7 +71,7 @@ it('super-admin gets a single hub and its analytics', async () => {
 });
 
 it('returns 404 for an unknown hub', async () => {
-  const token = signSuperAdminToken();
+  const token = await signAdminSessionToken();
   const missing = new (require('mongoose').Types.ObjectId)().toString();
   const res = await request(app).get(`/api/admin/hubs/${missing}`).set('Authorization', `Bearer ${token}`);
   expect(res.status).toBe(404);

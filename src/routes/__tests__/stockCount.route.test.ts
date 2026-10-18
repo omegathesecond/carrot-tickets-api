@@ -1,5 +1,5 @@
 // src/routes/__tests__/stockCount.route.test.ts
-// Organizer harness mirrors stockTransfer.route.test.ts (app, signVendorToken,
+// Organizer harness mirrors stockTransfer.route.test.ts (app, seedVendorSessionToken,
 // seedPublishedEvent, connectLedgerTestDb). POS harness mirrors
 // merchantChargeItems.route.test.ts (app, JWT token(), connectLedgerTestDb).
 import request from 'supertest';
@@ -8,7 +8,7 @@ import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { JWT_SECRET } from '@config/jwt.config';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signVendorToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
@@ -33,7 +33,7 @@ describe('organizer stock count route', () => {
   async function owned() {
     const { eventId, vendorId } = await seedPublishedEvent({});
     await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
-    const token = signVendorToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
+    const token = await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.MANAGE_STOCK] });
     const bar = await Merchant.create({ name: 'Bar A', eventId, loginCode: String(seq++), pin: '000000' });
     const product = await Product.create({ eventId, name: 'Beer', category: ProductCategory.BEER, price: 2500 });
     await StockService.applyMovement({
@@ -68,7 +68,7 @@ describe('organizer stock count route', () => {
 
   it('requires MANAGE_STOCK', async () => {
     const { eventId, barId, productId } = await owned();
-    const token = signVendorToken(String(new mongoose.Types.ObjectId()), { permissions: [] });
+    const token = await seedVendorSessionToken(String(new mongoose.Types.ObjectId()), { permissions: [] });
     const res = await request(app)
       .post(`/api/tickets/events/${eventId}/stock/count`)
       .set('Authorization', `Bearer ${token}`)

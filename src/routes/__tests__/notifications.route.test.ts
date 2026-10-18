@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { NotificationService } from '@services/notification.service';
 
@@ -14,7 +14,7 @@ describe('notification inbox', () => {
 
   async function seed() {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', username: 'inbox_user' });
-    return { buyer, auth: `Bearer ${signBuyerToken(PHONE)}` };
+    return { buyer, auth: `Bearer ${await signBuyerSessionToken(PHONE)}` };
   }
 
   it('lists newest first with unreadCount; marks selected and all read', async () => {

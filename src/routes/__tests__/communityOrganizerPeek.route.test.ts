@@ -3,7 +3,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { CommunityService } from '@services/community.service';
 import { Channel } from '@models/channel.model';
 import { Community } from '@models/community.model';
@@ -21,6 +21,7 @@ async function seedOwnedCommunity() {
     businessName: `Owner Brand ${++ownerSeq}`,
     email: `owner${ownerSeq}@example.com`,
     password: 'secret123',
+    logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg',
   });
   const seeded = await seedPublishedEvent({ vendorId: vendor._id });
   await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
@@ -37,7 +38,7 @@ describe('community organizer read-only peek', () => {
 
     const res = await request(app)
       .get(`/api/community/${eventId}`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .expect(200);
 
     const view = res.body.data;
@@ -56,7 +57,7 @@ describe('community organizer read-only peek', () => {
 
     const res = await request(app)
       .get(`/api/community/${eventId}`)
-      .set('Authorization', `Bearer ${signVendorToken(otherVendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(otherVendorId)}`)
       .expect(200);
 
     // Not the owner peek and not yet a member: a plain "can join" view.
@@ -71,12 +72,12 @@ describe('community organizer read-only peek', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Test Buyer' });
     await request(app)
       .post(`/api/community/${eventId}/join`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const res = await request(app)
       .get(`/api/community/${eventId}/members`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .expect(200);
 
     expect(Array.isArray(res.body.data)).toBe(true);
@@ -91,7 +92,7 @@ describe('community organizer read-only peek', () => {
 
     const res = await request(app)
       .get(`/api/community/channels/${general!._id}/messages`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .expect(200);
 
     expect(res.body.data.length).toBe(1);
@@ -102,7 +103,7 @@ describe('community organizer read-only peek', () => {
     const { eventId, vendorId } = await seedOwnedCommunity();
     const community = await Community.findOne({ eventId });
     const general = await Channel.findOne({ communityId: community!._id, slug: 'general' });
-    const token = `Bearer ${signVendorToken(vendorId)}`;
+    const token = `Bearer ${await seedVendorSessionToken(vendorId)}`;
 
     // Not a member yet → 403 "Join the community first" (no longer a blanket 401).
     await request(app)
@@ -127,7 +128,7 @@ describe('community organizer read-only peek', () => {
 
     const res = await request(app)
       .post(`/api/community/${eventId}/join`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .expect(200);
 
     // The owner joins as 'organizer' (every channel unlocked, may post in

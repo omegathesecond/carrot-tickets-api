@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { CommunityService } from '@services/community.service';
@@ -20,7 +20,7 @@ async function seedWorld() {
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   await Membership.create({ buyerId: a._id, communityId: community._id });
   await Membership.create({ buyerId: b._id, communityId: community._id });
-  return { a, b, authA: `Bearer ${signBuyerToken(PHONE_A)}`, authB: `Bearer ${signBuyerToken(PHONE_B)}` };
+  return { a, b, authA: `Bearer ${await signBuyerSessionToken(PHONE_A)}`, authB: `Bearer ${await signBuyerSessionToken(PHONE_B)}` };
 }
 
 async function openThread(auth: string, otherId: string): Promise<string> {
@@ -72,11 +72,11 @@ describe('dm routes', () => {
   it('privacy: a stranger CAN open a thread (no connection required); a block still refuses it and refuses sends after the fact', async () => {
     const { a, b, authA } = await seedWorld();
     const stranger = await Buyer.create({ phone: '+26878000099', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
-    await request(app).post('/api/dm/threads').set('Authorization', `Bearer ${signBuyerToken('+26878000099')}`)
+    await request(app).post('/api/dm/threads').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000099')}`)
       .send({ participantIds: [String(a._id)] }).expect(201);
 
     await BlockService.block(a, String(stranger._id));
-    await request(app).post('/api/dm/threads').set('Authorization', `Bearer ${signBuyerToken('+26878000099')}`)
+    await request(app).post('/api/dm/threads').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000099')}`)
       .send({ participantIds: [String(a._id)] }).expect(403);
 
     const threadId = await openThread(authA, String(b._id));
@@ -88,7 +88,7 @@ describe('dm routes', () => {
   it('non-participant gets 404 on messages/read; delete-own works and masks', async () => {
     const { b, authA, authB } = await seedWorld();
     const outsider = await Buyer.create({ phone: '+26878000098', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
-    const authO = `Bearer ${signBuyerToken('+26878000098')}`;
+    const authO = `Bearer ${await signBuyerSessionToken('+26878000098')}`;
     const threadId = await openThread(authA, String(b._id));
 
     await request(app).get(`/api/dm/threads/${threadId}/messages`).set('Authorization', authO).expect(404);

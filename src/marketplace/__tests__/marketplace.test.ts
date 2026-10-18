@@ -139,8 +139,8 @@ beforeEach(async () => {
       isSuperAdmin: token === String(stranger),
     }));
   await Vendor.collection.insertMany([
-    { _id: organiser, businessName: 'Market organiser', slug: 'organiser' },
-    { _id: provider, businessName: 'Provider', slug: 'provider' },
+    { _id: organiser, businessName: 'Market organiser', slug: 'organiser', operatorType: 'events' },
+    { _id: provider, businessName: 'Provider', slug: 'provider', operatorType: 'services' },
     { _id: stranger, businessName: 'Admin', slug: 'admin' },
   ]);
 });
@@ -365,6 +365,7 @@ it('prevents capacity oversubscription under concurrent approval and atomically 
   expect(detail.body.data.approvedByScope['2099-11-18']).toBe(1);
 });
 it('does not let foreign organisers review or change decisions, and allows reapplication after decline', async () => {
+  await Vendor.updateOne({ _id: provider }, { $set: { operatorType: 'events' } });
   const marketId = await createOpportunity();
   const profileId = await createProfile();
   const applied = await apply(marketId, profileId);
@@ -563,4 +564,26 @@ describe('signup service category matching', () => {
     const failed = await auth(request(app).get(endpoint + '/matched-opportunities'));
     expect(failed.status).toBe(500);
   });
+});
+
+it("rejects service-provider creation and management while retaining provider applications", async () => {
+  const marketId = await createOpportunity();
+  for (const req of [
+    request(app).get(endpoint + "/manage/opportunities"),
+    request(app)
+      .post(endpoint + "/manage/opportunities")
+      .send(opportunity),
+    request(app)
+      .put(endpoint + "/manage/opportunities/" + marketId)
+      .send(opportunity),
+    request(app)
+      .patch(endpoint + "/manage/opportunities/" + marketId + "/status")
+      .send({ status: "paused" }),
+    request(app).get(
+      endpoint + "/manage/opportunities/" + marketId + "/applications",
+    ),
+  ])
+    expect((await auth(req)).status).toBe(403);
+  const profileId = await createProfile();
+  expect((await apply(marketId, profileId)).status).toBe(200);
 });

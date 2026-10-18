@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Story } from '@models/story.model';
@@ -36,6 +36,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       email: `vendor${vseq}-${Date.now()}@example.com`,
       phoneNumber: `+2687${8100000 + vseq}`,
       password: 'secret123',
+      logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg',
     });
   };
 
@@ -52,7 +53,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       const vendor = await makeVendor('Bhora Fest');
       const res = await request(app)
         .post('/api/tickets/social/stories')
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(201);
 
@@ -67,7 +68,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
       await request(app)
         .post('/api/tickets/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
         .send({ kind: 'image', ext: 'jpg', contentType: 'image/jpeg' })
         .expect(401);
     });
@@ -80,7 +81,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       const vendor = await makeVendor();
       await request(app)
         .post('/api/tickets/social/stories')
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .send({ kind: 'image', ext: 'mp4', contentType: 'video/mp4' })
         .expect(400);
     });
@@ -89,7 +90,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
   describe('POST /api/tickets/social/stories/:id/finalize', () => {
     it('finalizes an image story the brand authored', async () => {
       const vendor = await makeVendor();
-      const token = `Bearer ${signVendorToken(String(vendor._id))}`;
+      const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
       const create = await request(app)
         .post('/api/tickets/social/stories')
         .set('Authorization', token)
@@ -109,7 +110,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       const story = await seedReadyStory('vendor', String(author._id));
       await request(app)
         .post(`/api/tickets/social/stories/${story.id}/finalize`)
-        .set('Authorization', `Bearer ${signVendorToken(String(stranger._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(stranger._id))}`)
         .expect(403);
     });
 
@@ -121,7 +122,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       const story = await seedReadyStory('buyer', String(vendor._id));
       await request(app)
         .post(`/api/tickets/social/stories/${story.id}/finalize`)
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .expect(403);
     });
   });
@@ -134,7 +135,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       const theirs = await seedReadyStory('buyer', String(author._id));
       await seedReadyStory('vendor', String(vendor._id));
 
-      const token = `Bearer ${signVendorToken(String(vendor._id))}`;
+      const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
       const first = await request(app).get('/api/tickets/social/stories').set('Authorization', token).expect(200);
       // Own group first, then the followed author's.
       expect(first.body.data.stories).toHaveLength(2);
@@ -158,7 +159,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
 
       const res = await request(app)
         .get('/api/tickets/social/stories')
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .expect(200);
       expect(res.body.data.stories).toHaveLength(1);
       expect(res.body.data.stories[0].author.id).toBe(String(stranger._id));
@@ -168,7 +169,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
       await request(app)
         .get('/api/tickets/social/stories')
-        .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
         .expect(401);
     });
   });
@@ -182,12 +183,12 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
 
       await request(app)
         .post(`/api/social/stories/${mine.id}/seen`)
-        .set('Authorization', `Bearer ${signBuyerToken('+26878400303')}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878400303')}`)
         .expect(200);
 
       const res = await request(app)
         .get(`/api/tickets/social/stories/${mine.id}/viewers`)
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .expect(200);
       expect(res.body.data.count).toBe(1);
       expect(res.body.data.viewers[0].id).toBe(String(viewer._id));
@@ -195,7 +196,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       const otherBrand = await makeVendor('Nosy Brand');
       await request(app)
         .get(`/api/tickets/social/stories/${mine.id}/viewers`)
-        .set('Authorization', `Bearer ${signVendorToken(String(otherBrand._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(otherBrand._id))}`)
         .expect(403);
     });
   });
@@ -208,26 +209,26 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
 
       await request(app)
         .post(`/api/social/stories/${mine.id}/like`)
-        .set('Authorization', `Bearer ${signBuyerToken('+26878400404')}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878400404')}`)
         .expect(200);
 
       const res = await request(app)
         .get(`/api/tickets/social/stories/${mine.id}/likers`)
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .expect(200);
       expect(res.body.data.count).toBe(1);
       expect(res.body.data.likers[0]).toMatchObject({ type: 'buyer', id: String(liker._id), username: 'liker1' });
 
       const asVendor = await request(app)
         .get('/api/tickets/social/stories')
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .expect(200);
       expect(asVendor.body.data.stories[0].items[0].likeCount).toBe(1);
 
       const otherBrand = await makeVendor('Nosy Brand');
       await request(app)
         .get(`/api/tickets/social/stories/${mine.id}/likers`)
-        .set('Authorization', `Bearer ${signVendorToken(String(otherBrand._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(otherBrand._id))}`)
         .expect(403);
     });
   });
@@ -239,7 +240,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
 
       await request(app)
         .delete(`/api/tickets/social/stories/${story.id}`)
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`)
         .expect(200);
 
       expect(await Story.findById(story.id)).toBeNull();
@@ -252,7 +253,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
 
       await request(app)
         .delete(`/api/tickets/social/stories/${story.id}`)
-        .set('Authorization', `Bearer ${signVendorToken(String(stranger._id))}`)
+        .set('Authorization', `Bearer ${await seedVendorSessionToken(String(stranger._id))}`)
         .expect(403);
       expect(await Story.findById(story.id)).not.toBeNull();
     });
@@ -261,7 +262,7 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
       await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
       await request(app)
         .delete('/api/tickets/social/stories/000000000000000000000000')
-        .set('Authorization', `Bearer ${signBuyerToken(BUYER_PHONE)}`)
+        .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)
         .expect(401);
     });
   });
