@@ -589,6 +589,20 @@ router.post(
     return ok(res, application);
   }),
 );
+// Resolve the current account, rather than trusting a client role or stale token.
+router.use("/manage", (req, res, next) =>
+  wrap(async () => {
+    const vendor = await Vendor.findById(actor(req)).select("operatorType");
+    if (!vendor) throw new HttpError(401, "Business account no longer exists");
+    if (!admin(req) && !["events", "both"].includes(vendor.operatorType))
+      throw new HttpError(
+        403,
+        "Only organisers can manage stall opportunities",
+      );
+    // The wrapper handles failures using the normal API error response.
+    return next();
+  })(req, res),
+);
 router.get(
   '/manage/opportunities',
   wrap(async (req, res) => {
