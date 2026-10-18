@@ -2,6 +2,8 @@ import express from 'express';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import router from '../routes';
+import { Event } from '@models/event.model';
+import { R2Service } from '@utils/r2.service';
 import {
   MarketApplication,
   MarketCertificate,
@@ -586,4 +588,44 @@ it("rejects service-provider creation and management while retaining provider ap
     expect((await auth(req)).status).toBe(403);
   const profileId = await createProfile();
   expect((await apply(marketId, profileId)).status).toBe(200);
+});
+
+it('persists a real Carrot event link and poster, and rejects missing or private event links', async () => {
+  const eventId = new mongoose.Types.ObjectId();
+  await Event.collection.insertOne({ _id: eventId, name: 'Carrot market', status: 'published' });
+  const marketId = await createOpportunity({ eventId: String(eventId), posterUrl: 'https://cdn.example.com/poster.png' });
+  const detail = await request(app).get(endpoint + '/opportunities/' + marketId);
+  expect(detail.body.data.eventId).toBe(String(eventId));
+  expect(detail.body.data.posterUrl).toBe('https://cdn.example.com/poster.png');
+  await Event.collection.updateOne({ _id: eventId }, { $set: { status: 'draft' } });
+  for (const invalidId of [eventId, new mongoose.Types.ObjectId()]) {
+    const result = await auth(request(app).post(endpoint + '/manage/opportunities'), organiser)
+      .send({ ...opportunity, eventId: String(invalidId) });
+    expect(result.status).toBe(400);
+  }
+});
+it('uploads organiser posters through existing storage and surfaces storage failure', async () => {
+  const previous = process.env['R2_PUBLIC_URL'];
+  process.env['R2_PUBLIC_URL'] = 'https://cdn.example.com';
+  try {
+    const storage = jest.spyOn(R2Service, 'uploadBufferToR2').mockResolvedValue({});
+    const post = (who = organiser) => auth(request(app).post(endpoint + '/manage/poster'), who)
+      .attach('poster', Buffer.from('image'), { filename: 'poster.png', contentType: 'image/png' });
+    const uploaded = await post();
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.body.data.posterUrl).toMatch(/^https:\/\/cdn.example.com\/marketplace\//);
+    expect(storage).toHaveBeenCalledTimes(1);
+    expect((await post(provider)).status).toBe(403);
+    storage.mockRejectedValueOnce(new Error('Storage unavailable'));
+    expect((await post()).status).toBe(500);
+  } finally {
+    if (previous === undefined) delete process.env['R2_PUBLIC_URL'];
+    else process.env['R2_PUBLIC_URL'] = previous;
+  }
+});
+it('returns the active predefined service catalogue for Marketplace selectors', async () => {
+  await ServiceCategory.create([{ value: 'crafts', label: 'Crafts', isActive: true }, { value: 'retired', label: 'Retired', isActive: false }]);
+  const result = await request(app).get(endpoint + '/options');
+  expect(result.status).toBe(200);
+  expect(result.body.data.categories.map((c: any) => c.label)).toEqual(['Crafts']);
 });
