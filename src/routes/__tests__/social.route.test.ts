@@ -106,7 +106,7 @@ describe('social profile routes', () => {
   it('blocks a second profile-name change within 30 days, keeps the existing name, and names the retry date', async () => {
     const buyer = await seedBuyer(PHONE, { name: 'Old Name' });
     buyer.name = 'First Change';
-    buyer.nameChangedAt = new Date('2026-08-20T00:00:00.000Z'); // 14 days before "now" in these tests
+    buyer.nameChangedAt = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
     await buyer.save();
 
     const res = await request(app)
