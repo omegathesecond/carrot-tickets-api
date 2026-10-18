@@ -90,7 +90,10 @@ const fee = Joi.object({
 });
 export const opportunitySchema = Joi.object({
   eventId: Joi.string().hex().length(24).allow(null),
-  posterUrl: Joi.string().uri({ scheme: ['https'] }).max(2000).allow(''),
+  posterUrl: Joi.string()
+    .uri({ scheme: ['https'] })
+    .max(2000)
+    .allow(''),
   name: text().required(),
   location: text(500).required(),
   country: Joi.string()
@@ -204,3 +207,23 @@ export function certificateProblems(
   }
   return problems;
 }
+
+export const serviceListingSchema = Joi.object({
+  category: text().required(),
+  name: text().required(),
+  description: text(6000).required(),
+  photos: Joi.array()
+    .items(
+      Joi.string()
+        .uri({ scheme: ['https'] })
+        .max(2000),
+    )
+    .max(12)
+    .default([]),
+  serviceArea: text(1000).required(),
+  availability: text(1000).required(),
+  pricing: text(2000).required(),
+  deliveryDetails: text(2000).allow('').default(''),
+  contactEmail: text().email().required(),
+  status: Joi.string().valid('draft', 'published').required(),
+});
