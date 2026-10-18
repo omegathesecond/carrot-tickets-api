@@ -10,8 +10,7 @@ afterAll(disconnectTestDb);
 afterEach(clearTestDb);
 let adminToken: string;
 beforeEach(async () => {
-  await Vendor.create({ businessName: 'Platform admin', email: 'admin@example.com', password: 'secret1', isSuperAdmin: true });
-  adminToken = (await TicketsAuthService.login('admin@example.com', 'secret1')).accessToken;
+  adminToken = await signAdminSessionToken();
 });
 
 describe('GET /api/tickets/admin/organizers — operatorType + serviceCategories', () => {

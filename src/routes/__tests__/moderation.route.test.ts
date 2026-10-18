@@ -1,5 +1,4 @@
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
@@ -9,21 +8,7 @@ import { Buyer } from '@models/buyer.model';
 import { Channel } from '@models/channel.model';
 import { Membership } from '@models/membership.model';
 import { CommunityService } from '@services/community.service';
-import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { resetBuckets } from '@utils/rateLimit.util';
-
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-
-function signVendorToken(
-  vendorId: string,
-  permissions: string[] = [TicketsPermission.EDIT_EVENT],
-  isSuperAdmin = false
-): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
 
 const PHONE = '+26878422613';
 
@@ -115,7 +100,7 @@ describe('organizer moderation routes', () => {
       });
       await request(app)
         .delete(`/api/tickets/messages/${sent.body.data.id}`)
-        .set('Authorization', `Bearer ${signVendorToken(String(rival._id))}`)
+        .set('Authorization', `Bearer ${await signVendorSessionToken(String(rival._id))}`)
         .expect(403);
     });
 
@@ -130,7 +115,7 @@ describe('organizer moderation routes', () => {
 
       await request(app)
         .delete(`/api/tickets/messages/${sent.body.data.id}`)
-        .set('Authorization', `Bearer ${signVendorToken('unrelated-vendor-id', [TicketsPermission.EDIT_EVENT], true)}`)
+        .set('Authorization', `Bearer ${await signAdminSessionToken()}`)
         .expect(200);
     });
 
@@ -157,7 +142,7 @@ describe('organizer moderation routes', () => {
 
       await request(app)
         .delete(`/api/tickets/messages/${sent.body.data.id}`)
-        .set('Authorization', `Bearer ${signVendorToken(String(vendor._id), [])}`)
+        .set('Authorization', `Bearer ${await signStaffSessionToken(String(vendor._id), [])}`)
         .expect(403);
     });
   });
@@ -263,7 +248,7 @@ describe('organizer moderation routes', () => {
       });
       await request(app)
         .post(`/api/tickets/communities/${String(community._id)}/members/${String(buyer._id)}/ban`)
-        .set('Authorization', `Bearer ${signVendorToken(String(rival._id))}`)
+        .set('Authorization', `Bearer ${await signVendorSessionToken(String(rival._id))}`)
         .expect(403);
     });
   });
