@@ -37,7 +37,7 @@ export const authenticateTickets = async (
 
     next();
   } catch (error: any) {
-    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    if (error instanceof SessionAuthError) ApiResponseUtil.error(res, error.message, 401, error.code);
     else next(error);
   }
 };
@@ -213,7 +213,7 @@ export const authenticateBuyer = async (
     (req as any).ticketsUser = decoded;
     next();
   } catch (error: any) {
-    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    if (error instanceof SessionAuthError) ApiResponseUtil.error(res, error.message, 401, error.code);
     else next(error);
   }
 };
@@ -259,7 +259,7 @@ export const authenticateCommunityViewer = async (
     (req as any).ticketsUser = decoded;
     next();
   } catch (error: any) {
-    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    if (error instanceof SessionAuthError) ApiResponseUtil.error(res, error.message, 401, error.code);
     else next(error);
   }
 };
@@ -299,7 +299,7 @@ export const authenticateBuyerOrOrganizer = async (
     (req as any).ticketsUser = decoded;
     next();
   } catch (error: any) {
-    if (error instanceof SessionAuthError) ApiResponseUtil.unauthorized(res, error.message);
+    if (error instanceof SessionAuthError) ApiResponseUtil.error(res, error.message, 401, error.code);
     else next(error);
   }
 };

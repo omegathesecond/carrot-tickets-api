@@ -1,6 +1,9 @@
 // Security regression suite: authorization and concurrency boundaries.
 // Uses disposable local MongoDB; storage and message delivery are mocked.
 import request from 'supertest';
+import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '@config/jwt.config';
+import { RefreshToken } from '@models/refreshToken.model';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
@@ -235,6 +238,44 @@ describe('Security boundaries', () => {
     const response = await request(app).get('/api/public/my-tickets')
       .set('Authorization', `Bearer ${oldToken}`);
     expect(response.status).toBe(401);
+    expect(response.body.error).toBe('SESSION_INVALID');
+  });
+
+  it('rejects a pre-security buyer token with a machine-readable session error', async () => {
+    const buyer = await Buyer.create({ phone: destination, password: 'original-password' });
+    const token = jwt.sign({ buyerId: String(buyer._id), app: 'tickets', userType: 'buyer' }, JWT_SECRET);
+    const response = await request(app).get('/api/public/my-tickets').set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe('SESSION_INVALID');
+  });
+
+  it('reports a refresh dependency outage as 500 rather than invalid credentials', async () => {
+    jest.spyOn(TicketsAuthService, 'refreshAccessToken').mockRejectedValueOnce(new Error('Database temporarily unavailable'));
+    const response = await request(app).post('/api/tickets/auth/refresh').send({ refreshToken: 'test-only' });
+    expect(response.status).toBe(500);
+    expect(response.body.error).not.toBe('SESSION_INVALID');
+  });
+
+  it('keeps a refresh token usable when replacement storage fails', async () => {
+    const owned = await ownedEvent();
+    const login = await TicketsAuthService.login(owned.vendor.email!, 'secure-test-password');
+    jest.spyOn(RefreshToken, 'create').mockRejectedValueOnce(new Error('Storage temporarily unavailable'));
+    await expect(TicketsAuthService.refreshAccessToken(login.refreshToken)).rejects.toThrow('Storage temporarily unavailable');
+    expect((await RefreshToken.findOne({ token: login.refreshToken }))?.isRevoked).toBe(false);
+    const refreshed = await TicketsAuthService.refreshAccessToken(login.refreshToken);
+    expect(refreshed.refreshToken).not.toBe(login.refreshToken);
+    await expect(TicketsAuthService.verifyAndResolveSession(refreshed.accessToken)).resolves.toMatchObject({ userType: 'vendor' });
+    await expect(TicketsAuthService.refreshAccessToken(login.refreshToken)).rejects.toThrow('Invalid or expired');
+  });
+
+  it('accepts a new signup token immediately and after a profile read', async () => {
+    await otp();
+    const registered = await request(app).post('/api/public/auth/register')
+      .send({ identifier: destination, code: '123456', password: 'signup-test-password', name: 'New buyer' });
+    expect(registered.status).toBe(200);
+    const token = registered.body.data.accessToken;
+    expect((await request(app).get('/api/social/me').set('Authorization', `Bearer ${token}`)).status).toBe(200);
+    expect((await request(app).get('/api/public/my-tickets').set('Authorization', `Bearer ${token}`)).status).toBe(200);
   });
 
   it('throttles repeated wrong-password buyer logins with a retry deadline', async () => {
