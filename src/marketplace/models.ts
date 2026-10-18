@@ -55,6 +55,8 @@ const opportunity = new Schema(
   {
     organiserId: ref,
     organiser: String,
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
+    posterUrl: String,
     name: String,
     location: String,
     country: String,

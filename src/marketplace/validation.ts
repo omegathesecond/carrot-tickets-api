@@ -89,6 +89,8 @@ const fee = Joi.object({
   amount: Joi.number().min(0).max(10000000).precision(2).required(),
 });
 export const opportunitySchema = Joi.object({
+  eventId: Joi.string().hex().length(24).allow(null),
+  posterUrl: Joi.string().uri({ scheme: ['https'] }).max(2000).allow(''),
   name: text().required(),
   location: text(500).required(),
   country: Joi.string()

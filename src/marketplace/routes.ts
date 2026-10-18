@@ -9,6 +9,10 @@ import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { HttpError } from '@utils/httpError.util';
 import { Vendor } from '@models/vendor.model';
+import { Event } from '@models/event.model';
+import { R2Service } from '@utils/r2.service';
+import { posterUpload, handleMulterError } from '@middleware/media.middleware';
+import { ServiceCategoryService } from '@services/serviceCategory.service';
 import { ServiceCategory } from '@models/serviceCategory.model';
 import { NotificationService } from '@services/notification.service';
 import {
@@ -96,14 +100,15 @@ async function transaction<T>(
     await session.endSession();
   }
 }
-router.get('/options', (_req, res) =>
+router.get('/options', wrap(async (_req, res) =>
   ok(res, {
+    categories: await ServiceCategoryService.listActive(),
     marketTypes: MARKET_TYPES,
     availability: AVAILABILITY,
     certificateTypes: CERTIFICATE_TYPES,
     regions: REGIONS,
   }),
-);
+));
 const listOpportunities = wrap(async (req, res) => {
   const q = validate(
     Joi.object({
@@ -603,6 +608,18 @@ router.use("/manage", (req, res, next) =>
     return next();
   })(req, res),
 );
+// Publicly listed Carrot events may be linked without transferring ownership.
+async function validateLinkedEvent(value: { eventId?: string | null }) {
+  if (value.eventId && !await Event.exists({ _id: value.eventId, status: { $in: ['published', 'ongoing', 'completed'] } }))
+    throw new HttpError(400, 'Choose a published Carrot event');
+}
+router.post('/manage/poster', posterUpload.single('poster'), handleMulterError, wrap(async (req, res) => {
+  if (!req.file) throw new HttpError(400, 'Choose an event poster');
+  if (!process.env['R2_PUBLIC_URL']) throw new HttpError(503, 'Poster storage is not configured');
+  const key = R2Service.generateMediaKey(`marketplace/${actor(req)}/${new mongoose.Types.ObjectId()}`, req.file.originalname);
+  await R2Service.uploadBufferToR2(key, req.file.buffer, req.file.mimetype);
+  return ok(res, { posterUrl: R2Service.getPublicUrl(key) });
+}));
 router.get(
   '/manage/opportunities',
   wrap(async (req, res) => {
@@ -618,6 +635,7 @@ router.post(
   '/manage/opportunities',
   wrap(async (req, res) => {
     const value = validateOpportunity(req.body);
+    await validateLinkedEvent(value);
     const vendor = await Vendor.findById(actor(req)).select('businessName');
     if (!vendor) throw new HttpError(401, 'Business account no longer exists');
     return ok(
@@ -634,6 +652,7 @@ router.put(
   '/manage/opportunities/:id',
   wrap(async (req, res) => {
     const value = validateOpportunity(req.body);
+    await validateLinkedEvent(value);
     return ok(
       res,
       await transaction(async (session) => {
@@ -650,6 +669,7 @@ router.put(
         // Accepted dates, scope and terms cannot be silently rewritten beneath applicants.
         if (existing) {
           for (const key of [
+            'eventId',
             'dates',
             'scope',
             'stallFee',
@@ -719,7 +739,7 @@ router.patch(
             Object.fromEntries(
               Object.keys(opportunitySchema.describe().keys!).map((key) => [
                 key,
-                (fields as any)[key],
+                key === 'eventId' ? fields.eventId?.toString() : (fields as any)[key],
               ]),
             ),
           );
