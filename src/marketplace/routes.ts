@@ -2,12 +2,14 @@ import { Router, Request, Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import Joi from 'joi';
 import {
-  authenticateTickets,
+  authenticateBuyerOrOrganizer,
   requireTicketsOwner,
 } from '@middleware/ticketsAuth.middleware';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { HttpError } from '@utils/httpError.util';
+import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { R2Service } from '@utils/r2.service';
@@ -62,7 +64,7 @@ const wrap =
       return failWithHttpError(res, e, 'Marketplace request failed');
     }
   };
-const actor = (req: Request) => String((req as any).ticketsUser.vendorId);
+const actor = (req: Request) => String((req as any).marketplaceOwnerId);
 const admin = (req: Request) => (req as any).ticketsUser.isSuperAdmin === true;
 const id = (value: unknown): string => validate(idSchema, value);
 const ok = (res: Response, data: unknown) =>
@@ -351,16 +353,26 @@ router.get(
     return ok(res, { items: items.slice(0, 24), hasMore: items.length > 24 });
   }),
 );
-// All provider and organiser mutations require a live vendor-owner session.
-// Sales/scanner/sub-user tokens cannot access private applications or files.
-router.use(authenticateTickets, requireTicketsOwner);
+// Buyers share the provider profile/application flow. Staff and scanner tokens
+// cannot access private marketplace data; business-only routes retain their gates.
+router.use(authenticateBuyerOrOrganizer);
 router.use((req: Request, res: Response, next: NextFunction) => {
-  if (!(req as any).ticketsUser.vendorId)
-    return ApiResponseUtil.unauthorized(res, 'A business session is required');
-  return next();
+  if ((req as any).ticketsUser.userType !== 'buyer') {
+    return requireTicketsOwner(req, res, () => {
+      (req as any).marketplaceOwnerId = (req as any).ticketsUser.vendorId;
+      next();
+    });
+  }
+  resolveBuyerFromRequest(req).then((buyer) => {
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Buyer account no longer exists');
+    (req as any).marketplaceOwnerId = String(buyer._id);
+    return next();
+  }).catch(next);
 });
 router.get('/matched-opportunities', listOpportunities);
 async function requireProvider(req: Request) {
+  if ((req as any).ticketsUser.userType !== 'vendor')
+    throw new HttpError(403, 'A service provider business is required');
   const vendor = await Vendor.findById(actor(req))
     .select('operatorType')
     .lean();
@@ -679,6 +691,7 @@ router.post(
   }),
 );
 // Resolve the current account, rather than trusting a client role or stale token.
+router.use('/manage', requireTicketsOwner);
 router.use('/manage', (req, res, next) =>
   wrap(async () => {
     const vendor = await Vendor.findById(actor(req)).select('operatorType');
@@ -946,7 +959,7 @@ router.patch(
       await app.save({ session });
       if (changed)
         await NotificationService.create(
-          'vendor',
+          await Buyer.exists({ _id: app.ownerId }).session(session) ? 'buyer' : 'vendor',
           String(app.ownerId),
           'market_application',
           'Market application updated',
