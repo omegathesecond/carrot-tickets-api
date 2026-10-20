@@ -29,6 +29,17 @@ describe('cross-instance fan-out via mongo adapter', () => {
     rt2 = await startTestRealtime(true);
   });
   afterEach(async () => {
+    // Both adapters must stay alive until room membership is cleared. Closing
+    // a client while it is still in a channel schedules a presence fetch on
+    // the next turn; closing the servers then strands that cross-instance
+    // request until the adapter timeout, after Jest has finished the suite.
+    for (const rt of [rt1, rt2]) {
+      for (const socket of rt.io.sockets.sockets.values()) {
+        for (const room of [...socket.rooms]) {
+          if (room.startsWith('channel:')) await socket.leave(room);
+        }
+      }
+    }
     for (const c of clients.splice(0)) c.close();
     await rt1.close();
     await rt2.close();
