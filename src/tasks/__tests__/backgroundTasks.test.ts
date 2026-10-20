@@ -5,6 +5,11 @@ import * as transcodeClient from '@services/transcode.client';
 import * as bookingSvc from '@services/transport/booking.service';
 import * as menuOrderSvc from '@services/menuOrder.service';
 import * as reconciliationSvc from '@services/reconciliation.service';
+import { AccountActivityDigestService } from '@services/accountActivityDigest.service';
+import { VoteNotificationService } from '@services/voteNotification.service';
+import { WeekendReminderService } from '@services/weekendReminder.service';
+import { WeekendService } from '@services/weekend.service';
+import { ShareEarnService } from '@services/shareEarn.service';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 
 /**
@@ -13,6 +18,17 @@ import { startBackgroundTasks } from '@/tasks/backgroundTasks';
  */
 function mockAllSweeps() {
   return {
+    deltapay: jest.spyOn(cardSvc.TicketService, 'reconcilePendingDeltapaySales').mockResolvedValue(undefined as any),
+    momo: jest.spyOn(cardSvc.TicketService, 'reconcilePendingMomoSales').mockResolvedValue(undefined as any),
+    yoco: jest.spyOn(cardSvc.TicketService, 'reportStuckYocoSales').mockResolvedValue(undefined as any),
+    yebopay: jest.spyOn(cardSvc.TicketService, 'reconcilePendingYeboPaySales').mockResolvedValue(undefined as any),
+    digest: jest.spyOn(AccountActivityDigestService, 'sweep').mockResolvedValue(undefined as any),
+    vote: jest.spyOn(VoteNotificationService, 'sweep').mockResolvedValue(undefined as any),
+    weekendReminder: jest.spyOn(WeekendReminderService, 'sweep').mockResolvedValue(undefined as any),
+    weekend: jest.spyOn(WeekendService, 'sweepCancelledEventLinks').mockResolvedValue(undefined as any),
+    shareClose: jest.spyOn(ShareEarnService, 'autoCloseExpiredCampaigns').mockResolvedValue(undefined as any),
+    shareNotify: jest.spyOn(ShareEarnService, 'notifyCampaignsClosingSoon').mockResolvedValue(undefined as any),
+
     cardReconcile: jest.spyOn(cardSvc.TicketService, 'reconcilePendingCardSales').mockResolvedValue(undefined as any),
     reservationSweep: jest.spyOn(reservationSvc.ReservationService, 'sweepExpired').mockResolvedValue(undefined as any),
     reminderSweep: jest.spyOn(reminderSvc.EventReminderService, 'sweep').mockResolvedValue(undefined as any),
@@ -32,12 +48,12 @@ describe('startBackgroundTasks', () => {
   beforeEach(() => { jest.useFakeTimers(); });
   afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
-  it('schedules the card-reconcile sweep on its 60s interval', () => {
+  it('schedules the card-reconcile sweep on its 60s interval', async () => {
     const spies = mockAllSweeps();
 
     const handles = startBackgroundTasks();
     expect(handles.length).toBeGreaterThanOrEqual(6);
-    jest.advanceTimersByTime(60_000);
+    await jest.advanceTimersByTimeAsync(60_000);
     expect(spies.cardReconcile).toHaveBeenCalledTimes(1);
     expect(spies.bookingCardReconcile).toHaveBeenCalledTimes(1);
     expect(spies.bookingSweep).toHaveBeenCalledTimes(1);
@@ -45,13 +61,13 @@ describe('startBackgroundTasks', () => {
     handles.forEach((h: NodeJS.Timeout) => clearInterval(h));
   });
 
-  it('schedules the cashless ledger reconciliation sweep on its 15-minute interval', () => {
+  it('schedules the cashless ledger reconciliation sweep on its 15-minute interval', async () => {
     const spies = mockAllSweeps();
 
     const handles = startBackgroundTasks();
-    jest.advanceTimersByTime(15 * 60_000 - 1);
+    await jest.advanceTimersByTimeAsync(15 * 60_000 - 1);
     expect(spies.cashlessReconcile).not.toHaveBeenCalled();
-    jest.advanceTimersByTime(1);
+    await jest.advanceTimersByTimeAsync(1);
     expect(spies.cashlessReconcile).toHaveBeenCalledTimes(1);
     handles.forEach((h: NodeJS.Timeout) => clearInterval(h));
   });

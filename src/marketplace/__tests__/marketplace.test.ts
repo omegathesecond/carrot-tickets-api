@@ -12,6 +12,7 @@ import {
 } from '../models';
 import { Notification } from '@models/notification.model';
 import { NotificationService } from '@services/notification.service';
+import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { ServiceCategory } from '@models/serviceCategory.model';
 import {
@@ -823,4 +824,34 @@ it('rejects invalid service categories, missing commercial details and unsafe ph
       ).status,
     ).toBe(400);
   }
+});
+
+it('lets buyers use private profiles, certificates and applications without granting business management', async () => {
+  const buyer = new mongoose.Types.ObjectId();
+  const otherBuyer = new mongoose.Types.ObjectId();
+  await Buyer.collection.insertMany([
+    { _id: buyer, email: 'applicant@example.com' },
+    { _id: otherBuyer, email: 'other@example.com' },
+  ]);
+  const existingAuth = jest.mocked(TicketsAuthService.verifyAndResolveSession).getMockImplementation()!;
+  jest.mocked(TicketsAuthService.verifyAndResolveSession).mockImplementation(async (token: string) => {
+    if ([String(buyer), String(otherBuyer)].includes(token))
+      return { userType: 'buyer', buyerId: token } as any;
+    return existingAuth(token);
+  });
+  const marketId = await createOpportunity();
+  const profileId = await createProfile(buyer);
+  const certificate = await upload(profileId, '2099-11-19', buyer);
+  expect(certificate.status).toBe(200);
+  expect((await auth(request(app).get(endpoint + '/profiles'), buyer)).body.data.items[0]._id).toBe(profileId);
+  expect((await apply(marketId, profileId, '2099-11-18', otherBuyer)).status).toBe(404);
+  const submitted = await apply(marketId, profileId, '2099-11-18', buyer);
+  expect(submitted.status).toBe(200);
+  expect((await auth(request(app).get(endpoint + '/applications'), buyer)).body.data.items).toHaveLength(1);
+  expect((await auth(request(app).get(endpoint + '/applications'), otherBuyer)).body.data.items).toHaveLength(0);
+  expect((await auth(request(app).get(endpoint + '/my-service-listings'), buyer)).status).toBe(403);
+  expect((await auth(request(app).get(endpoint + '/manage/opportunities'), buyer)).status).toBe(403);
+  const reviewed = await auth(request(app).patch(endpoint + '/manage/applications/' + submitted.body.data._id), organiser).send({ status: 'approved' });
+  expect(reviewed.status).toBe(200);
+  expect(await Notification.findOne({ recipientType: 'buyer', recipientId: String(buyer), type: 'market_application' })).not.toBeNull();
 });
