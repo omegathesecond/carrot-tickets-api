@@ -1,7 +1,7 @@
 import { CashierAuthService } from '@services/cashierAuth.service';
 import mongoose from 'mongoose';
 import { Cashier } from '@models/cashier.model';
-import { CashCollection, ICashCollection } from '@models/cashCollection.model';
+import { CashCollection, ICashCollection, CASH_COLLECTION_REQUEST_INDEX } from '@models/cashCollection.model';
 import { WalletTopup } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
 import { topupTotalsGroup, readTopupTotals, sumTopupTotals } from '@utils/topupTotals.util';
@@ -12,6 +12,8 @@ import { OperatorGrant } from '@interfaces/operatorGrant.interface';
 import { HttpError } from '@utils/httpError.util';
 import { HEX24 } from '@utils/controllerHelpers.util';
 import { MAX_TOPUP_CENTS } from '@services/wallet.service';
+
+let requestIndexReady: Promise<string> | undefined;
 
 export class CashCollectionService {
   static async actor(cashierId: string, event: any, collect = false) {
@@ -32,7 +34,12 @@ export class CashCollectionService {
       if (String(row.cashierId) !== cashierId.toLowerCase() || String(row.eventId) !== eventId || row.amount !== amount) throw new HttpError(409, 'This request ID was used for a different collection');
       return row;
     };
-    await CashCollection.init(); // The unique request index must exist before money requests are accepted.
+    // Model.init() caches its rejected promise after a transient startup error.
+    // Verify the required unique index directly, and let the next request retry
+    // if that verification fails. No collection is saved without the index.
+    requestIndexReady ??= CashCollection.collection.createIndex(CASH_COLLECTION_REQUEST_INDEX, { unique: true })
+      .catch((error) => { requestIndexReady = undefined; throw error; });
+    await requestIndexReady;
     const existing = await CashCollection.findOne({ collectorId, clientTxnId });
     if (existing) return matches(existing);
     const totals = await CashDeskService.totals(eventId, cashierId);
