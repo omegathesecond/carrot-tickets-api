@@ -15,6 +15,7 @@ export interface PosTile {
   productId: string;
   name: string;
   price: number;
+  bundlePrice: IProduct['bundlePrice'];
   barcode: string | null;
   category: ProductCategory;
   imageUrl: string | null;
@@ -29,7 +30,7 @@ export interface PosTile {
 /** The product fields a tile is built from. Structural rather than IProduct so
  *  a .lean() row satisfies it without a cast — nothing here needs a document. */
 type CatalogProduct = Pick<
-  IProduct, 'name' | 'price' | 'barcode' | 'category' | 'imageUrl' | 'unitLabel' | 'unitsPerPack' | 'packLabel'
+  IProduct, 'name' | 'price' | 'bundlePrice' | 'barcode' | 'category' | 'imageUrl' | 'unitLabel' | 'unitsPerPack' | 'packLabel'
 > & { _id: unknown };
 
 /** The stall's count for it. Same reasoning. */
@@ -70,6 +71,7 @@ export class PosCatalogService {
       productId: String(product._id),
       name: product.name,
       price: product.price,
+      bundlePrice: product.bundlePrice ?? null,
       barcode: product.barcode ?? null,
       category: product.category,
       imageUrl: product.imageUrl ?? null,
