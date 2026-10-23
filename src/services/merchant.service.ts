@@ -2,6 +2,7 @@ import { Event } from '@models/event.model';
 import { purchaseChargeAmount, PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 // api/src/services/merchant.service.ts
 import mongoose from 'mongoose';
+import { productLineTotal } from '@utils/productPrice.util';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
@@ -108,7 +109,9 @@ export class MerchantService {
       itemSnapshots = ids.map((pid) => {
         const p = byId.get(pid)!;
         const qty = merged.get(pid)!;
-        return { productId: p._id as mongoose.Types.ObjectId, name: p.name, unitPrice: p.price, qty, lineTotal: p.price * qty };
+        // unitPrice is the single-unit catalogue price; lineTotal includes any
+        // complete bundle discounts. qty always counts physical stock units.
+        return { productId: p._id as mongoose.Types.ObjectId, name: p.name, unitPrice: p.price, qty, lineTotal: productLineTotal(p, qty) };
       });
       amount = itemSnapshots.reduce((s, l) => s + l.lineTotal, 0);
     } else {

@@ -13,11 +13,16 @@ export const objectId = Joi.string().trim().regex(HEX24, 'object id');
 const MAX_PRICE_CENTS = 100_000_00; // R100,000/unit ceiling, defense-in-depth
 const MAX_QTY = 1_000_000;
 const MAX_UNITS_PER_PACK = 100_000; // defense-in-depth: quantity * unitsPerPack must stay well under MAX_SAFE_INTEGER
+const bundlePrice = Joi.object({
+  quantity: Joi.number().integer().min(2).max(1000).required(),
+  price: Joi.number().integer().min(1).max(MAX_PRICE_CENTS).required(),
+});
 
 export const createProductSchema = Joi.object({
   name: Joi.string().trim().min(1).required(),
   category: Joi.string().valid(...Object.values(ProductCategory)).required(),
   price: Joi.number().integer().min(0).max(MAX_PRICE_CENTS).required(),
+  bundlePrice: bundlePrice.optional(),
   barcode: Joi.string().trim().min(3).optional(),
   unitLabel: Joi.string().trim().optional(),
   unitsPerPack: Joi.number().integer().min(1).max(MAX_UNITS_PER_PACK).optional(),
@@ -29,6 +34,7 @@ export const updateProductSchema = Joi.object({
   name: Joi.string().trim().min(1),
   category: Joi.string().valid(...Object.values(ProductCategory)),
   price: Joi.number().integer().min(0).max(MAX_PRICE_CENTS),
+  bundlePrice: bundlePrice.allow(null),
   barcode: Joi.string().trim().min(3).allow(null),
   unitLabel: Joi.string().trim(),
   unitsPerPack: Joi.number().integer().min(1).max(MAX_UNITS_PER_PACK).allow(null),

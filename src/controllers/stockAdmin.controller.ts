@@ -42,6 +42,7 @@ export class StockAdminController {
         const product = await Product.create({ ...value, eventId: event._id });
         ApiResponseUtil.created(res, product);
       } catch (e: any) {
+        if (e?.name === 'ValidationError') { ApiResponseUtil.badRequest(res, e.message); return; }
         if (e?.code === 11000) { ApiResponseUtil.badRequest(res, 'A product with that barcode already exists at this event'); return; }
         throw e;
       }
@@ -71,6 +72,7 @@ export class StockAdminController {
       try {
         await product.save();
       } catch (e: any) {
+        if (e?.name === 'ValidationError') { ApiResponseUtil.badRequest(res, e.message); return; }
         if (e?.code === 11000) { ApiResponseUtil.badRequest(res, 'A product with that barcode already exists at this event'); return; }
         throw e;
       }

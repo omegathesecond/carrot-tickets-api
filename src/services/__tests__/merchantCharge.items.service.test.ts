@@ -13,6 +13,8 @@ import { MerchantCharge } from '@models/merchantCharge.model';
 import { StockMovement } from '@models/stockMovement.model';
 import { LedgerService } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
+import { MerchantReversalService } from '@services/merchantReversal.service';
+import { Event } from '@models/event.model';
 
 const eventId = new mongoose.Types.ObjectId();
 let __loginCodeSeq = 0;
@@ -43,6 +45,72 @@ describe('MerchantService.charge — itemised', () => {
   beforeAll(connectLedgerTestDb, 60000);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  it.each([[1, 3500], [5, 17500], [6, 19000], [7, 22500], [12, 38000], [13, 41500]])(
+    'charges %i base units at %i cents and deducts that exact stock quantity', async (qty, total) => {
+      const { merchant, operator, beer, wallet } = await seed();
+      beer.price = 3500;
+      beer.bundlePrice = { quantity: 6, price: 19000 };
+      await beer.save();
+      const items = [{ productId: String(beer._id), qty }];
+      const quote = await MerchantService.quote({ eventId: String(eventId), items });
+      expect(quote.subtotal).toBe(total);
+      const args = chargeArgs(merchant, wallet, { items, quotedTotal: quote.total }, operator);
+      const first = await MerchantService.charge(args);
+      const replay = await MerchantService.charge(args);
+      expect(String(replay.charge._id)).toBe(String(first.charge._id));
+      expect(first.charge.items![0]).toMatchObject({ qty, unitPrice: 3500, lineTotal: total });
+      expect(first.wallet.balance).toBe(100000 - total);
+      expect((await ProductStock.findOne({ merchantId: merchant._id, productId: beer._id }))!.onHand).toBe(100 - qty);
+      expect(await LedgerService.totalOwed(String(eventId), LedgerAccountType.MERCHANT)).toBe(total);
+    },
+  );
+
+  it('combines duplicate lines before applying the six-unit price', async () => {
+    const { beer } = await seed();
+    beer.bundlePrice = { quantity: 6, price: 14000 };
+    await beer.save();
+    const quote = await MerchantService.quote({ eventId: String(eventId), items: [
+      { productId: String(beer._id), qty: 3 }, { productId: String(beer._id), qty: 3 },
+    ] });
+    expect(quote.subtotal).toBe(14000);
+  });
+
+  it('keeps the listed single price for six units of a product without a lower price line', async () => {
+    const { water } = await seed();
+    const quote = await MerchantService.quote({ eventId: String(eventId), items: [{ productId: String(water._id), qty: 6 }] });
+    expect(quote.subtotal).toBe(9000);
+  });
+
+  it('rejects a six-unit sale when only five remain, rolling money and stock back', async () => {
+    const { merchant, operator, beer, wallet } = await seed({ beerStock: 5 });
+    beer.bundlePrice = { quantity: 6, price: 14000 };
+    await beer.save();
+    await expect(MerchantService.charge(chargeArgs(merchant, wallet, {
+      items: [{ productId: String(beer._id), qty: 6 }], quotedTotal: 14000,
+    }, operator))).rejects.toBeInstanceOf(StockDeclinedError);
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(100000);
+    expect((await ProductStock.findOne({ merchantId: merchant._id, productId: beer._id }))!.onHand).toBe(5);
+    expect(await MerchantCharge.countDocuments()).toBe(0);
+  });
+
+  it('refunds the stored discounted amount and returns six units once after catalogue repricing', async () => {
+    const { merchant, operator, beer, wallet } = await seed();
+    await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
+    beer.bundlePrice = { quantity: 6, price: 14000 };
+    await beer.save();
+    const { charge } = await MerchantService.charge(chargeArgs(merchant, wallet, {
+      items: [{ productId: String(beer._id), qty: 6 }], quotedTotal: 14000,
+    }, operator));
+    beer.bundlePrice = { quantity: 6, price: 13000 };
+    await beer.save();
+    const args = { chargeId: String(charge._id), eventId: String(eventId), merchantId: String(merchant._id),
+      merchantOperatorId: String(operator._id), bandUid: wallet.bandUid!, pin: '111111', reason: 'Customer return', restock: true };
+    await MerchantReversalService.reverse(args);
+    await MerchantReversalService.reverse(args);
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(100000);
+    expect((await ProductStock.findOne({ merchantId: merchant._id, productId: beer._id }))!.onHand).toBe(100);
+  });
 
   it('prices from the catalogue, debits once, and decrements each product', async () => {
     const { merchant, operator, beer, water, wallet } = await seed();
