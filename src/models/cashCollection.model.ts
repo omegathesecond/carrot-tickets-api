@@ -16,7 +16,8 @@ const schema = new Schema<ICashCollection>({
   status: { type: String, enum: ['pending', 'confirmed', 'rejected', 'cancelled'], required: true },
   resolvedAt: Date, resolvedBy: Schema.Types.ObjectId, ledgerTxnId: String,
 }, { timestamps: { createdAt: true, updatedAt: false } });
-schema.index({ collectorId: 1, clientTxnId: 1 }, { unique: true });
+export const CASH_COLLECTION_REQUEST_INDEX = { collectorId: 1, clientTxnId: 1 } as const;
+schema.index(CASH_COLLECTION_REQUEST_INDEX, { unique: true });
 schema.index({ eventId: 1, cashierId: 1, status: 1 });
 schema.index({ eventId: 1, collectorId: 1, status: 1 });
 schema.index({ eventId: 1, createdAt: -1 });

@@ -33,6 +33,26 @@ async function seed() {
   const desk = (t = cashierToken) => request(app).get(`/api/cashier/cash-desk?eventId=${eventId}`).set('Authorization', `Bearer ${t}`);
   return { vendorId, event, eventId, cashier, collector, wallet, cashierToken, collectorToken, create, resolve, desk };
 }
+it('recovers from index initialization failure without accepting an unprotected collection', async () => {
+  const s = await seed();
+  const init = jest.spyOn(CashCollection, 'init').mockRejectedValue(new Error('Cached startup pool failure'));
+  const createIndex = jest.spyOn(CashCollection.collection, 'createIndex');
+  createIndex.mockRejectedValueOnce(new Error('Temporary index connection failure'));
+  try {
+    await s.create().expect(500);
+    expect(await CashCollection.countDocuments()).toBe(0);
+    const results = await Promise.all([s.create(), s.create()]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect(results[0].body.data._id).toBe(results[1].body.data._id);
+    expect(createIndex).toHaveBeenCalledTimes(2);
+    expect(init).not.toHaveBeenCalled();
+    expect((await s.desk().expect(200)).body.data.pending).toHaveLength(1);
+    expect(await LedgerEntry.countDocuments({ refType: 'cash_collection' })).toBe(0);
+  } finally {
+    createIndex.mockRestore();
+    init.mockRestore();
+  }
+});
 it('only the cashier confirms, custody transfers once and card money is excluded', async () => {
   const s = await seed(); const pickup = (await s.create().expect(200)).body.data;
   expect((await s.desk().expect(200)).body.data).toMatchObject({ cashTopups: 10000, cardTopups: 90000, cashOnHand: 10000, collected: 0, collectorHeld: 0, pending: [expect.objectContaining({ collectorName: 'Collector One', amount: 8000 })] });
