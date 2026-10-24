@@ -1,6 +1,7 @@
 // api/src/services/stockReconciliationPdf.service.ts
 import PDFDocument from 'pdfkit';
 import { EVENT_TIMEZONE } from '@utils/eventTime.util';
+import { SalesPricingAudit } from '@interfaces/stock.interface';
 
 /**
  * StockReconciliationPdfService — renders the organiser's stock reconciliation
@@ -18,7 +19,7 @@ import { EVENT_TIMEZONE } from '@utils/eventTime.util';
  */
 
 /** One reconciliation row for a single product at a single stall. */
-export interface ReconciliationRow {
+export interface ReconciliationRow extends SalesPricingAudit {
   merchantId: string;
   merchantName: string;
   productId: string;
@@ -52,6 +53,7 @@ export interface ReconciliationData {
 export interface ReconciliationPdfEvent {
   name: string;
   venue?: string | undefined;
+  currency: 'SZL' | 'ZAR';
 }
 
 /**
@@ -71,6 +73,18 @@ export const RECON_COLUMNS = [
   { key: 'physicalCount', label: 'Physical' },
   { key: 'variance', label: 'Variance' },
 ] as const satisfies readonly { key: keyof ReconciliationTotal; label: string }[];
+
+type ReportColumn = { key: keyof ReconciliationTotal; label: string; money?: boolean };
+export const PRICING_COLUMNS = [
+  { key: 'regularUnits', label: 'Regular units' },
+  { key: 'specialUnits', label: 'Special units' },
+  { key: 'specialBundles', label: 'Bundles' },
+  { key: 'unclassifiedUnits', label: 'Unclassified' },
+  { key: 'refundedNotRestockedUnits', label: 'Refund kept' },
+  { key: 'regularValue', label: 'List value', money: true },
+  { key: 'discountAmount', label: 'Discount', money: true },
+  { key: 'salesRevenue', label: 'Net sales', money: true },
+] as const satisfies readonly ReportColumn[];
 
 /** Carrot's official orange (landing/src/index.css --primary: 16 100% 60%). */
 const BRAND = '#FF6B35';
@@ -201,6 +215,22 @@ export class StockReconciliationPdfService {
       totalRow: data.total,
     });
 
+    if (doc.y + 100 > doc.page.height - PAGE_MARGIN - ROW_HEIGHT) doc.addPage();
+    else doc.moveDown(1);
+    doc.fillColor(INK).fontSize(10).font('Helvetica').text(
+      `Sales pricing audit (${event.currency}). Net of refunds; excludes purchase surcharges and commission.`, PAGE_MARGIN, doc.y);
+    doc.moveDown(0.3);
+    doc.fontSize(8).fillColor(MUTED).text(
+      'Regular + Special + Unclassified + Refund kept = stock sold. Refund kept means refunded units not returned to stock. Unclassified sales have no saved price split. List value - Discount = Net sales.',
+      PAGE_MARGIN, doc.y, { width: doc.page.width - PAGE_MARGIN * 2 });
+    for (const stall of stalls) {
+      this.drawTable(doc, { title: `${stall.merchantName} - Sales pricing`, nameHeader: 'Product',
+        rows: stall.rows.map(r => ({ name: r.productName, values: r })), columns: PRICING_COLUMNS, currency: event.currency });
+    }
+    this.drawTable(doc, { title: 'All stalls - Sales pricing', nameHeader: 'Product',
+      rows: data.byProduct.map(r => ({ name: r.productName, values: r })), totalRow: data.total,
+      columns: PRICING_COLUMNS, currency: event.currency });
+
     this.drawFooter(doc);
   }
 
@@ -273,13 +303,13 @@ export class StockReconciliationPdfService {
   }
 
   /** x offset + width of each column, name column first. */
-  private static layout(doc: PDFKit.PDFDocument): { nameX: number; nameW: number; colX: number[]; colW: number } {
+  private static layout(doc: PDFKit.PDFDocument, columns: readonly ReportColumn[]): { nameX: number; nameW: number; colX: number[]; colW: number } {
     const usable = doc.page.width - PAGE_MARGIN * 2;
-    const colW = (usable - NAME_COL_WIDTH) / RECON_COLUMNS.length;
+    const colW = (usable - NAME_COL_WIDTH) / columns.length;
     return {
       nameX: PAGE_MARGIN,
       nameW: NAME_COL_WIDTH,
-      colX: RECON_COLUMNS.map((_, i) => PAGE_MARGIN + NAME_COL_WIDTH + i * colW),
+      colX: columns.map((_, i) => PAGE_MARGIN + NAME_COL_WIDTH + i * colW),
       colW,
     };
   }
@@ -291,9 +321,12 @@ export class StockReconciliationPdfService {
       nameHeader: string;
       rows: { name: string; values: ReconciliationTotal }[];
       totalRow?: ReconciliationTotal;
+      columns?: readonly ReportColumn[];
+      currency?: 'SZL' | 'ZAR';
     },
   ): void {
-    const { nameX, nameW, colX, colW } = this.layout(doc);
+    const columns: readonly ReportColumn[] = table.columns ?? RECON_COLUMNS;
+    const { nameX, nameW, colX, colW } = this.layout(doc, columns);
     const bottom = doc.page.height - PAGE_MARGIN - ROW_HEIGHT;
 
     const needRoom = (needed: number) => {
@@ -315,7 +348,7 @@ export class StockReconciliationPdfService {
       const y = doc.y;
       doc.fillColor(MUTED).fontSize(7.5).font('Helvetica-Bold');
       doc.text(table.nameHeader.toUpperCase(), nameX, y + 5, { width: nameW, ellipsis: true });
-      RECON_COLUMNS.forEach((col, i) => {
+      columns.forEach((col, i) => {
         doc.text(col.label.toUpperCase(), colX[i]!, y + 5, { width: colW, align: 'right' });
       });
       doc.y = y + HEADER_ROW_HEIGHT;
@@ -325,26 +358,28 @@ export class StockReconciliationPdfService {
     drawHeadings();
 
     const drawRow = (name: string, values: ReconciliationTotal, opts: { bold?: boolean; zebra?: boolean } = {}) => {
+      const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
+      doc.font(font).fontSize(8.5);
+      const rowHeight = Math.max(ROW_HEIGHT, Math.ceil(doc.heightOfString(name, { width: nameW - 4 })) + 8);
       // A table that silently stopped at the page break would under-report the
       // stall, so every row re-checks the remaining room and carries its
       // headings onto the next page.
-      if (needRoom(ROW_HEIGHT)) drawHeadings();
+      if (needRoom(rowHeight)) drawHeadings();
       const y = doc.y;
       if (opts.zebra) {
-        doc.rect(nameX, y, doc.page.width - PAGE_MARGIN * 2, ROW_HEIGHT).fillColor(ZEBRA).fill();
+        doc.rect(nameX, y, doc.page.width - PAGE_MARGIN * 2, rowHeight).fillColor(ZEBRA).fill();
       }
-      const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
       doc.fillColor(INK).fontSize(8.5).font(font)
-        .text(name, nameX + 2, y + 4, { width: nameW - 4, ellipsis: true, lineBreak: false });
-      RECON_COLUMNS.forEach((col, i) => {
+        .text(name, nameX + 2, y + 4, { width: nameW - 4 });
+      columns.forEach((col, i) => {
         const value = values[col.key];
         // Shrinkage is the one figure an organiser is scanning for.
         const negative = typeof value === 'number' && value < 0 && col.key === 'variance';
         doc.fillColor(negative ? NEGATIVE : INK)
           .font(negative || opts.bold ? 'Helvetica-Bold' : 'Helvetica')
-          .text(fmtQty(value), colX[i]!, y + 4, { width: colW - 4, align: 'right', lineBreak: false });
+          .text(col.money ? `${table.currency === 'ZAR' ? 'R' : 'E'}${(value! / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : fmtQty(value), colX[i]!, y + 4, { width: colW - 4, align: 'right', lineBreak: false });
       });
-      doc.y = y + ROW_HEIGHT;
+      doc.y = y + rowHeight;
     };
 
     table.rows.forEach((r, i) => drawRow(r.name, r.values, { zebra: i % 2 === 1 }));

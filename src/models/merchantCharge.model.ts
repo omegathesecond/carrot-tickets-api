@@ -1,5 +1,6 @@
 // api/src/models/merchantCharge.model.ts
 import { Schema, model, Document, Types } from 'mongoose';
+import { SalePricing } from '@interfaces/stock.interface';
 
 /**
  * One completed tap-to-pay charge (cashless spec) — the durable record of a
@@ -37,7 +38,7 @@ export interface IMerchantCharge extends Document {
   /** Exact cash-funded portion consumed by this debit. Never inferred for older sales. */
   cashFundedAmount?: number;
   reversal?: { by: Types.ObjectId; staffName: string; reason: string; at: Date; restocked: boolean; ledgerTxnId: string };
-  items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }>;
+  items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number; pricing?: SalePricing }>;
   /**
    * Snapshot of the human who took this charge at sale time — the operator's
    * name for a till charge, the waiter's name for a table charge — so
@@ -79,6 +80,14 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
       unitPrice: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'unitPrice must be integer cents' } },
       qty: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'qty must be a whole number' } },
       lineTotal: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'lineTotal must be integer cents' } },
+      pricing: { type: new Schema({
+        regularUnits: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+        specialUnits: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+        specialBundles: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+        bundleQuantity: { type: Number, min: 2, validate: Number.isSafeInteger },
+        bundlePrice: { type: Number, min: 1, validate: Number.isSafeInteger },
+        discountAmount: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+      }, { _id: false }), default: undefined },
     }, { _id: false })],
     required: false,
     default: undefined,

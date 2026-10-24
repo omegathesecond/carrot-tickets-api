@@ -8,7 +8,7 @@ import { StockCount } from '@models/stockCount.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { Waiter } from '@models/waiter.model';
-import { StockMovementReason } from '@interfaces/stock.interface';
+import { StockMovementReason, SALES_PRICING_FIELDS } from '@interfaces/stock.interface';
 import { HEX24 } from '@utils/controllerHelpers.util';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
@@ -154,7 +154,17 @@ export class StockReportService {
       ],
     };
 
-    const [byReason, receiveSplit, stockRows, products, merchants] = await Promise.all([
+    // Reversals are separate signed entries at their own timestamp, so an
+    // opening count between a sale and its refund does not erase the refund.
+    const pricingScope = openings.length === 0 ? {} : {
+      $or: [
+        ...openings.map((c: any) => ({ merchantId: c._id.merchantId, productId: c._id.productId, at: { $gte: c.at } })),
+        { $nor: openings.map((c: any) => ({ merchantId: c._id.merchantId, productId: c._id.productId })) },
+      ],
+    };
+    const knownPricing = { $eq: [{ $type: '$item.pricing' }, 'object'] };
+    const signed = (value: any) => ({ $multiply: ['$entries.sign', value] });
+    const [byReason, receiveSplit, stockRows, products, merchants, pricingAudit] = await Promise.all([
       StockMovement.aggregate([
         { $match: { eventId: eid, ...scope } },
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId', reason: '$reason' }, qty: { $sum: '$delta' } } },
@@ -166,6 +176,30 @@ export class StockReportService {
       ProductStock.find({ eventId: eid }).lean(),
       Product.find({ eventId: eid }).select('name').lean(),
       Merchant.find({ eventId: eid }).select('name').lean(),
+      MerchantCharge.aggregate([
+        { $match: { eventId: eid, status: { $in: ['completed', 'reversed'] } } },
+        { $unwind: '$items' },
+        { $project: { merchantId: 1, productId: '$items.productId', item: '$items', entries: { $concatArrays: [
+          [{ at: '$createdAt', sign: 1, unrestocked: 0 }],
+          { $cond: [{ $eq: ['$status', 'reversed'] }, [{ at: '$reversal.at', sign: -1,
+            unrestocked: { $cond: [{ $eq: ['$reversal.restocked', false] }, 1, 0] } }], []] },
+        ] } } },
+        { $unwind: '$entries' },
+        { $set: { at: '$entries.at' } },
+        { $match: pricingScope },
+        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' },
+          regularUnits: { $sum: signed({ $cond: [knownPricing, '$item.pricing.regularUnits', 0] }) },
+          specialUnits: { $sum: signed({ $cond: [knownPricing, '$item.pricing.specialUnits', 0] }) },
+          specialBundles: { $sum: signed({ $cond: [knownPricing, '$item.pricing.specialBundles', 0] }) },
+          unclassifiedUnits: { $sum: signed({ $cond: [knownPricing, 0, '$item.qty'] }) },
+          refundedNotRestockedUnits: { $sum: { $cond: [{ $eq: ['$entries.unrestocked', 1] }, '$item.qty', 0] } },
+          regularValue: { $sum: signed({ $multiply: ['$item.unitPrice', '$item.qty'] }) },
+          // Older charges still have exact single price, quantity and charged
+          // total. Their discount amount is known; their special-unit split is not.
+          discountAmount: { $sum: signed({ $subtract: [{ $multiply: ['$item.unitPrice', '$item.qty'] }, '$item.lineTotal'] }) },
+          salesRevenue: { $sum: signed('$item.lineTotal') },
+        } },
+      ]),
     ]);
 
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
@@ -181,12 +215,17 @@ export class StockReportService {
           productId, productName: productName.get(productId) || 'Unknown product',
           opening: 0, added: 0, transferIn: 0, transferOut: 0, sold: 0, countAdjust: 0, spoilage: 0, manual: 0,
           expectedClosing: 0, physicalCount: null, variance: null,
+          ...Object.fromEntries(SALES_PRICING_FIELDS.map(k => [k, 0])),
         };
         rowByKey.set(k, r);
       }
       return r;
     };
     for (const s of stockRows) { const r = ensure(String(s.merchantId), String(s.productId)); r.expectedClosing = s.onHand; }
+    for (const audit of pricingAudit) {
+      const r = ensure(String(audit._id.merchantId), String(audit._id.productId));
+      for (const field of SALES_PRICING_FIELDS) r[field] = audit[field];
+    }
 
     // Fold movement sums by reason (transfer_out/sale/spoilage deltas are negative -> report as positive magnitudes).
     for (const g of byReason) {
@@ -218,7 +257,7 @@ export class StockReportService {
 
     const perBar = [...rowByKey.values()].sort((a, b) => a.productName.localeCompare(b.productName) || a.merchantName.localeCompare(b.merchantName));
 
-    const NUM = ['opening', 'added', 'transferIn', 'transferOut', 'sold', 'countAdjust', 'spoilage', 'manual', 'expectedClosing'] as const;
+    const NUM = ['opening', 'added', 'transferIn', 'transferOut', 'sold', 'countAdjust', 'spoilage', 'manual', 'expectedClosing', ...SALES_PRICING_FIELDS] as const;
     const blank = () => Object.fromEntries(NUM.map((k) => [k, 0])) as Record<typeof NUM[number], number>;
     // physicalCount/variance stay null in a rollup until at least one contributing
     // bar has a CLOSING count — a rollup of "0" would read as "counted zero units"
