@@ -119,7 +119,7 @@ describe('the waiter product grid', () => {
     const res = await get(token);
 
     expect(res.body.data.products[0]).toEqual({
-      productId: beer, name: 'Castle Lite 330ml', price: 2500,
+      productId: beer, name: 'Castle Lite 330ml', price: 2500, bundlePrice: null,
       barcode: '6001234567890', category: ProductCategory.BEER,
       imageUrl: 'https://cdn/castle.png', unitLabel: 'bottle',
       unitsPerPack: 24, packLabel: 'case',
@@ -140,6 +140,18 @@ describe('the waiter product grid', () => {
     expect(tile).toMatchObject({
       barcode: null, imageUrl: null, unitsPerPack: null,
       packLabel: null, lowStockThreshold: null, unitLabel: 'unit',
+    });
+  });
+
+  it('includes the configured six-unit special in the waiter catalogue', async () => {
+    const { eventId, token } = await seedFloor();
+    const bar = await seedStall(eventId, 'Main Bar');
+    const productId = await seedProduct(eventId, 'Black label cans', {
+      price: 3500, bundlePrice: { quantity: 6, price: 19000 },
+    });
+    await allocate(eventId, bar, productId, 100);
+    expect((await get(token)).body.data.products[0]).toMatchObject({
+      productId, price: 3500, bundlePrice: { quantity: 6, price: 19000 },
     });
   });
 

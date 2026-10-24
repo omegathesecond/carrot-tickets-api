@@ -11,6 +11,10 @@ const tableLineSchema = new Schema({
   productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
   name: { type: String, required: true, trim: true },
   unitPrice: { type: Number, required: true, min: 0, validate: integerCents },
+  bundlePrice: { type: new Schema({
+    quantity: { type: Number, required: true, min: 2, validate: { validator: Number.isSafeInteger } },
+    price: { type: Number, required: true, min: 1, validate: integerCents },
+  }, { _id: false }), default: null },
   qty: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'qty must be a whole number' } },
   addedBy: { type: String, required: true },
   addedAt: { type: Date, default: Date.now },
