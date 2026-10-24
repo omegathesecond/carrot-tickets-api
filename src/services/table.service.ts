@@ -1,6 +1,7 @@
 import { Event } from '@models/event.model';
 import { purchaseChargeAmount, PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import mongoose from 'mongoose';
+import { priceProductLine } from '@utils/productPrice.util';
 import { Table } from '@models/table.model';
 import {
   ITable, ITableLine, TableStatus, ITableFulfilment, TableFulfilmentStatus,
@@ -839,7 +840,7 @@ export class TableService {
             clientTxnId: `${clientTxnId}:${s.merchantId}`, status: 'completed',
             items: s.lines.map((l) => ({
               productId: l.productId, name: l.name, unitPrice: l.unitPrice,
-              qty: l.qty, lineTotal: l.unitPrice * l.qty,
+              qty: l.qty, ...priceProductLine({ price: l.unitPrice }, l.qty),
             })),
             // A table has no till operator — the waiter collected from several
             // stalls and settled them together (see IMerchantCharge).

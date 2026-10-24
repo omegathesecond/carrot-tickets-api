@@ -45,7 +45,7 @@ export class StockReportController {
       const event = await loadOwnedCashlessEvent(req, res, eventId);
       if (!event) return;
       const data = await StockReportService.reconciliation(eventId, event.startTime);
-      return ApiResponseUtil.success(res, { event: { id: String(event._id), name: event.name }, ...data });
+      return ApiResponseUtil.success(res, { event: { id: String(event._id), name: event.name, currency: event.currency }, ...data });
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load reconciliation', 500);
     }
@@ -66,7 +66,7 @@ export class StockReportController {
 
       const data = await StockReportService.reconciliation(eventId, event.startTime);
       const buffer = await StockReconciliationPdfService.buildPdfBuffer(
-        { name: event.name, venue: (event as any).venue },
+        { name: event.name, venue: (event as any).venue, currency: event.currency },
         data,
       );
 
