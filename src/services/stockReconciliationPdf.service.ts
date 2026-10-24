@@ -358,17 +358,19 @@ export class StockReconciliationPdfService {
     drawHeadings();
 
     const drawRow = (name: string, values: ReconciliationTotal, opts: { bold?: boolean; zebra?: boolean } = {}) => {
+      const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
+      doc.font(font).fontSize(8.5);
+      const rowHeight = Math.max(ROW_HEIGHT, Math.ceil(doc.heightOfString(name, { width: nameW - 4 })) + 8);
       // A table that silently stopped at the page break would under-report the
       // stall, so every row re-checks the remaining room and carries its
       // headings onto the next page.
-      if (needRoom(ROW_HEIGHT)) drawHeadings();
+      if (needRoom(rowHeight)) drawHeadings();
       const y = doc.y;
       if (opts.zebra) {
-        doc.rect(nameX, y, doc.page.width - PAGE_MARGIN * 2, ROW_HEIGHT).fillColor(ZEBRA).fill();
+        doc.rect(nameX, y, doc.page.width - PAGE_MARGIN * 2, rowHeight).fillColor(ZEBRA).fill();
       }
-      const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
       doc.fillColor(INK).fontSize(8.5).font(font)
-        .text(name, nameX + 2, y + 4, { width: nameW - 4, ellipsis: true, lineBreak: false });
+        .text(name, nameX + 2, y + 4, { width: nameW - 4 });
       columns.forEach((col, i) => {
         const value = values[col.key];
         // Shrinkage is the one figure an organiser is scanning for.
@@ -377,7 +379,7 @@ export class StockReconciliationPdfService {
           .font(negative || opts.bold ? 'Helvetica-Bold' : 'Helvetica')
           .text(col.money ? `${table.currency === 'ZAR' ? 'R' : 'E'}${(value! / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : fmtQty(value), colX[i]!, y + 4, { width: colW - 4, align: 'right', lineBreak: false });
       });
-      doc.y = y + ROW_HEIGHT;
+      doc.y = y + rowHeight;
     };
 
     table.rows.forEach((r, i) => drawRow(r.name, r.values, { zebra: i % 2 === 1 }));
