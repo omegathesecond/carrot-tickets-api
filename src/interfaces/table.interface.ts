@@ -36,7 +36,7 @@ export interface ITableFulfilment {
 }
 
 /**
- * One line on a table. Name and unitPrice are SNAPSHOTTED at add time, the way
+ * One line on a table. Name, unitPrice and bundlePrice are SNAPSHOTTED at add time, the way
  * MerchantCharge.items already does: a price change at the stall must never
  * reprice a drink somebody already drank.
  */
@@ -46,6 +46,8 @@ export interface ITableLine {
   productId: Types.ObjectId;
   name: string;
   unitPrice: number;
+  /** Offer at order time; quantities combine across rounds with the same snapshot. */
+  bundlePrice?: { quantity: number; price: number } | null;
   qty: number;
   addedBy: string;
   addedAt: Date;

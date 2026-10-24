@@ -1,7 +1,7 @@
 import { Event } from '@models/event.model';
 import { purchaseChargeAmount, PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import mongoose from 'mongoose';
-import { priceProductLine } from '@utils/productPrice.util';
+import { priceTableLines } from '@utils/tablePrice.util';
 import { Table } from '@models/table.model';
 import {
   ITable, ITableLine, TableStatus, ITableFulfilment, TableFulfilmentStatus,
@@ -158,7 +158,7 @@ export class TableFulfilmentStateError extends Error {
 /** What one stall is owed off a table, and the lines it is owed for. */
 interface StallShare {
   merchantId: string;
-  lines: ITableLine[];
+  lines: ReturnType<typeof priceTableLines>['items'];
   /** What the guest is charged for this stall's lines, cents. */
   gross: number;
   /** Platform commission at THIS stall's rate, cents. */
@@ -439,7 +439,7 @@ export class TableService {
         label: t.label,
         status: t.status,
         items: mine,
-        subtotal: mine.reduce((s, i) => s + i.unitPrice * i.qty, 0),
+        subtotal: priceTableLines(mine).subtotal,
         fulfilment: row,
         settledAt: t.settledAt,
         createdAt: t.createdAt,
@@ -504,7 +504,7 @@ export class TableService {
     const [table, merchants, products, stocks] = await Promise.all([
       Table.findOne(scope).select('status').lean(),
       Merchant.find({ _id: { $in: merchantIds }, eventId: eventObjId }).select('status').lean(),
-      Product.find({ _id: { $in: productIds }, eventId: eventObjId, active: true }).select('name price').lean(),
+      Product.find({ _id: { $in: productIds }, eventId: eventObjId, active: true }).select('name price bundlePrice').lean(),
       ProductStock.find({ eventId: eventObjId, merchantId: { $in: merchantIds }, productId: { $in: productIds } }).select('merchantId productId').lean(),
     ]);
     if (!table) throw new Error('table not found');
@@ -520,17 +520,21 @@ export class TableService {
       if (!product) throw new Error('product not found for this event');
       if (!stocked.has(`${item.merchantId}:${item.productId}`)) throw new Error('product not sold at that stall');
       return { merchantId: new mongoose.Types.ObjectId(item.merchantId), productId: new mongoose.Types.ObjectId(item.productId),
-        name: product.name, unitPrice: product.price, qty: item.qty, addedBy, addedAt: new Date() };
+        name: product.name, unitPrice: product.price, bundlePrice: product.bundlePrice ?? null,
+        qty: item.qty, addedBy, addedAt: new Date() };
     });
-    const subtotal = lines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
-    if (!Number.isSafeInteger(subtotal)) throw new Error('order total is too large');
     const session = await mongoose.startSession();
     try {
       let result!: ITable;
       await session.withTransaction(async () => {
+        const current = await Table.findOne({ ...scope, status: 'open' }).session(session);
+        if (!current) throw new Error('table is not open');
+        const items = [...current.toObject().items,
+          ...lines.map(line => ({ ...line, _id: new mongoose.Types.ObjectId() }))] as ITableLine[];
+        const { subtotal } = priceTableLines(items);
         const updated = await Table.findOneAndUpdate(
-          { ...scope, status: 'open' },
-          { $push: { items: { $each: lines } }, $inc: { subtotal, revision: 1 } },
+          { ...scope, status: 'open', revision: current.revision },
+          { $set: { items, subtotal }, $inc: { revision: 1 } },
           { new: true, session },
         );
         if (!updated) {
@@ -554,7 +558,7 @@ export class TableService {
   /**
    * Remove a mis-punched line. This is the "never left the counter" case —
    * the bottle goes back on the shelf, so the stall's stock must go back up.
-   * Line-pull + subtotal-decrement + stock-return all happen in ONE
+   * Line removal + complete-table repricing + stock-return all happen in ONE
    * transaction, same idiom as addItem: a stock return that lands while the
    * line removal fails would credit the stall with a bottle it still doesn't
    * have back.
@@ -578,21 +582,26 @@ export class TableService {
     const line = table.items.find((i) => String(i._id) === lineId);
     if (!line) throw new Error('line not found on this table');
     if (table.status !== 'open') throw new Error(`table is not open (status: ${table.status})`);
-    const lineTotal = line.unitPrice * line.qty;
 
     const session = await mongoose.startSession();
     try {
       let result!: ITable;
       await session.withTransaction(async () => {
-        // Single guarded update: $pull the line and $inc the subtotal down in
-        // the SAME atomic op, with status:'open', eventId, AND the line's own
+        const current = await Table.findOne({ _id: tableObjId, eventId: eventObjId, ...ownership }).session(session);
+        if (!current) throw new Error('table not found');
+        if (current.status !== 'open') throw new Error(`table is not open (status: ${current.status})`);
+        if (!current.items.some(item => String(item._id) === lineId)) throw new Error('line not found on this table');
+        const items = (current.toObject().items as ITableLine[]).filter(item => String(item._id) !== lineId);
+        const { subtotal } = priceTableLines(items);
+        // Single guarded update: replace the remaining lines and their repriced
+        // subtotal in the SAME atomic op, with status:'open', eventId, AND the line's own
         // _id in the FILTER — so a concurrent settle/void, a concurrent
         // removal of the same line, or (as above) a cross-event id simply
         // fails to match rather than double-applying or leaking existence.
         const updated = await Table.findOneAndUpdate(
-          { _id: tableObjId, eventId: eventObjId, ...ownership, status: 'open', 'items._id': lineObjId },
-          // revision rides along in the SAME $inc, as in addItem.
-          { $pull: { items: { _id: lineObjId } }, $inc: { subtotal: -lineTotal, revision: 1 } },
+          { _id: tableObjId, eventId: eventObjId, ...ownership, status: 'open', 'items._id': lineObjId, revision: current.revision },
+          // Removing units can lose a bundle; subtracting the old row total is incorrect.
+          { $set: { items, subtotal }, $inc: { revision: 1 } },
           { new: true, session },
         );
         if (!updated) {
@@ -840,7 +849,7 @@ export class TableService {
             clientTxnId: `${clientTxnId}:${s.merchantId}`, status: 'completed',
             items: s.lines.map((l) => ({
               productId: l.productId, name: l.name, unitPrice: l.unitPrice,
-              qty: l.qty, ...priceProductLine({ price: l.unitPrice }, l.qty),
+              qty: l.qty, lineTotal: l.lineTotal, pricing: l.pricing,
             })),
             // A table has no till operator — the waiter collected from several
             // stalls and settled them together (see IMerchantCharge).
@@ -902,7 +911,8 @@ export class TableService {
       // to charge at. Guessing one would misallocate real money, so refuse the
       // whole settle rather than pay part of the table.
       if (rate == null) throw new Error('a stall on this table was not found for this event');
-      const gross = lines.reduce((t, l) => t + l.unitPrice * l.qty, 0);
+      const priced = priceTableLines(lines);
+      const gross = priced.subtotal;
       // Floor, matching MerchantService.charge: deterministic, and the platform
       // never rounds a cent it is not owed out of the stall's share. `net` is
       // then a SUBTRACTION from the same gross, which is what keeps
@@ -912,7 +922,7 @@ export class TableService {
       // at 1 cent) and no zero-delta ledger legs. Not a silent drop — there is
       // no money to move.
       if (gross <= 0) continue;
-      shares.push({ merchantId, lines, gross, fee, net: gross - fee });
+      shares.push({ merchantId, lines: priced.items, gross, fee, net: gross - fee });
     }
     return shares;
   }
