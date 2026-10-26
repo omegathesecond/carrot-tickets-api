@@ -213,6 +213,13 @@ describe('funded circulation', () => {
     await fund(0, 'completed', 'two');
     await fund(1, 'pending', 'pending');
     await fund(2, 'failed', 'failed');
+    // A completed row for another event must never fund this event's tag.
+    await WalletTopup.collection.insertOne({
+      eventId: new mongoose.Types.ObjectId(otherEventId), walletId: wallets[3]!._id,
+      amount: 100, method: 'card', status: 'completed', clientTxnId: 'other-event',
+    });
+    // Spending the confirmed credit does not take the physical tag out of circulation.
+    await Wallet.updateOne({ _id: wallets[0]!._id }, { $set: { balance: 0 } });
     const view = () => EventTagService.list(eventId, { status: 'active' });
     let result = await view();
     expect(result.tags.map(t => t.bandUid)).toEqual([uids[0]]);
@@ -225,6 +232,9 @@ describe('funded circulation', () => {
     await Wallet.updateOne({ _id: wallets[0]!._id }, { $set: { bandUid: null } });
     result = await view();
     expect(result.tags.map(t => t.bandUid)).toEqual([uids[1]]);
+    await Wallet.updateOne({ _id: wallets[1]!._id }, { $set: { status: 'closed' } });
+    expect((await view()).total).toBe(0);
+    await Wallet.updateOne({ _id: wallets[1]!._id }, { $set: { status: 'active' } });
     await EventTagService.retireTag({ eventId, bandUid: uids[1]! });
     expect((await view()).total).toBe(0);
     expect((await view()).counts.active).toBe(0);
