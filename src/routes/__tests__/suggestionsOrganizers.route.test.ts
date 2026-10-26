@@ -90,7 +90,9 @@ describe('GET /api/social/suggestions/organizers', () => {
     // eventless organizer sorted purely by eventCount/followerCount, so the
     // brand-new one is guaranteed to fall outside the established pool.
     for (let i = 0; i < 60; i++) {
-      const established = await Vendor.create({ businessName: `Established Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+      // These are ranking fixtures, never password-authenticated. insertMany
+      // retains schema validation/defaults without 60 expensive password hashes.
+      const established = (await Vendor.insertMany([{ businessName: `Established Org ${i}`, slug: `established-org-${i}`, password: 'unused-ranking-fixture', isActive: true, verificationStatus: VerificationStatus.VERIFIED }]))[0]!;
       await Event.create({ vendorId: established._id, name: `Show ${i}`, venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
     }
     const brandNew = await Vendor.create({ businessName: 'Brand New Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
