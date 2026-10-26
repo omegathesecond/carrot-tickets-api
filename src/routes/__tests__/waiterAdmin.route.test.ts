@@ -76,10 +76,22 @@ describe('POST /api/tickets/waiters', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.data.waiter.eventId).toBe(myEventId);
+    expect(res.body.data.waiter.grants).toEqual(['settle_tables']);
+    expect((await Waiter.findById(res.body.data.waiter._id))!.grants).toEqual(['settle_tables']);
     expect(res.body.data.loginCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/);
     expect(res.body.data.pin).toMatch(/^\d{6}$/);
     // The pin is returned once at the top level and never serialized on the row.
     expect(res.body.data.waiter.pin).toBeUndefined();
+  });
+
+  it('honours an explicit settling-off choice at creation', async () => {
+    const res = await request(app).post('/api/tickets/waiters')
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
+      .send({ fullName: 'Thabo', eventId: myEventId, grants: [] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.waiter.grants).toEqual([]);
+    expect((await Waiter.findById(res.body.data.waiter._id))!.grants).toEqual([]);
   });
 
   it('requires an eventId for an organizer waiter', async () => {
@@ -256,17 +268,17 @@ describe('PATCH /api/tickets/waiters/:id', () => {
     expect(reloaded!.eventId!.toString()).toBe(myEventId);
   });
 
-  it('turns settling on for somebody already hired', async () => {
+  it('lets an admin turn default settling off for somebody already hired', async () => {
     const hired = await hire('Thabo', myEventId);
-    expect(hired.grants ?? []).toEqual([]);
+    expect(hired.grants).toEqual(['settle_tables']);
 
     const res = await request(app).patch(`/api/tickets/waiters/${hired._id}`)
       .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
-      .send({ grants: ['settle_tables'] });
+      .send({ grants: [] });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.grants).toEqual(['settle_tables']);
-    expect((await Waiter.findById(hired._id))!.grants).toEqual(['settle_tables']);
+    expect(res.body.data.grants).toEqual([]);
+    expect((await Waiter.findById(hired._id))!.grants).toEqual([]);
   });
 
   it('drops a grant that is not a real capability rather than storing it', async () => {
