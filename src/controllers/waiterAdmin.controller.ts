@@ -6,7 +6,7 @@ import { Event } from '@models/event.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
 import { validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
+import { OperatorGrant, sanitizeGrants } from '@interfaces/operatorGrant.interface';
 
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
@@ -103,7 +103,11 @@ export class WaiterAdminController {
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
-      const waiter = await Waiter.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventId, loginCode, pin, grants: sanitizeGrants(req.body.grants) });
+      // New waiters can settle unless the creator explicitly chooses their grants.
+      const grants = req.body.grants === undefined
+        ? [OperatorGrant.SETTLE_TABLES]
+        : sanitizeGrants(req.body.grants);
+      const waiter = await Waiter.create({ fullName: req.body.fullName, phoneNumber: req.body.phoneNumber, scope, vendorId, eventId, loginCode, pin, grants });
       // loginCode + pin are returned ONCE here (the pin is never serialized again).
       ApiResponseUtil.created(res, { waiter, loginCode, pin });
     } catch (err) { next(err); }
