@@ -1,3 +1,4 @@
+import { EventApprovalEmailService } from './eventApprovalEmail.service';
 import { purchaseChargeSchema } from '@utils/purchaseCharge.util';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
@@ -684,6 +685,8 @@ export class EventService {
         throw new Error('Event not found');
       }
 
+      const previousStatus = event.status;
+
       // The admin "Approve" button sends the status it last saw
       // (pending_approval) — if the event has moved on since (e.g. the
       // organizer withdrew it) this stops a stale click from silently
@@ -737,8 +740,20 @@ export class EventService {
         event.status = EventStatus.PENDING_APPROVAL;
       }
 
-      await event.save();
-      return event;
+      // Claim the transition atomically: only one concurrent request may notify.
+      const committed = await Event.findOneAndUpdate(
+        { _id: event._id, status: previousStatus, __v: (event as any).__v },
+        { $set: { status: event.status, publishedAt: event.publishedAt }, $inc: { __v: 1 } },
+        { new: true, runValidators: true }
+      );
+      if (!committed) throw new Error('Event changed. Please refresh and try again.');
+      try {
+        await EventApprovalEmailService.send(committed, isSuperAdmin);
+      } catch (error) {
+        console.error('Event approval email failed:', error);
+        throw new Error(`Event ${isSuperAdmin ? 'approved and published' : 'submitted for approval'}, but the notification email could not be delivered. Please contact Carrot support. Do not submit again.`);
+      }
+      return committed;
     } catch (error: any) {
       console.error('Publish event error:', error);
       throw new Error(error.message || 'Failed to publish event');

@@ -1,3 +1,5 @@
+import { EventApprovalEmailService } from '../eventApprovalEmail.service';
+jest.mock('../eventApprovalEmail.service', () => ({ EventApprovalEmailService: { send: jest.fn().mockResolvedValue(undefined) } }));
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { EventService } from '@services/event.service';
 import { Event } from '@models/event.model';
@@ -111,4 +113,46 @@ describe('EventService.publishEvent — requires at least one ticket type', () =
     expect(reloaded!.status).toBe(EventStatus.PUBLISHED);
     expect(reloaded!.ticketTypes.length).toBe(0);
   });
+  it('claims concurrent submissions once and permits a new submission after withdrawal', async () => {
+    const vendor = await makeActiveVendor();
+    const event = await makeDraftEventWithoutTickets(String(vendor._id));
+    await EventService.addTicketType(String(event._id), String(vendor._id), { name: 'General', price: 50, quantity: 100 });
+    const send = jest.mocked(EventApprovalEmailService.send);
+    send.mockClear();
+    const submit = () => EventService.publishEvent(String(event._id), String(vendor._id), false);
+    const results = await Promise.allSettled([submit(), submit()]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    await EventService.withdrawEvent(String(event._id), String(vendor._id));
+    await submit();
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+  it('preserves submission and surfaces email failure without resending on retry', async () => {
+    const vendor = await makeActiveVendor();
+    const event = await makeDraftEventWithoutTickets(String(vendor._id));
+    await EventService.addTicketType(String(event._id), String(vendor._id), { name: 'General', price: 50, quantity: 100 });
+    const send = jest.mocked(EventApprovalEmailService.send);
+    send.mockClear();
+    send.mockRejectedValueOnce(new Error('offline'));
+    const submit = () => EventService.publishEvent(String(event._id), String(vendor._id), false);
+    await expect(submit()).rejects.toThrow('submitted for approval, but');
+    expect((await Event.findById(event._id))!.status).toBe(EventStatus.PENDING_APPROVAL);
+    await expect(submit()).rejects.toThrow('already been submitted');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims concurrent admin approvals once', async () => {
+    const vendor = await makeActiveVendor();
+    const event = await makeDraftEventWithoutTickets(String(vendor._id));
+    await EventService.addTicketType(String(event._id), String(vendor._id), { name: 'General', price: 50, quantity: 100 });
+    await EventService.publishEvent(String(event._id), String(vendor._id), false);
+    const send = jest.mocked(EventApprovalEmailService.send);
+    send.mockClear();
+    const approve = () => EventService.publishEvent(String(event._id), String(vendor._id), true, EventStatus.PENDING_APPROVAL);
+    const results = await Promise.allSettled([approve(), approve()]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ status: EventStatus.PUBLISHED }), true);
+  });
+
 });
