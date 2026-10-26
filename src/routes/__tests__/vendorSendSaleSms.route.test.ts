@@ -14,7 +14,7 @@ import { PaymentConfigService } from '@services/paymentConfig.service';
 import { SmsService } from '@services/sms.service';
 import { EmailService } from '@services/email.service';
 import { Vendor } from '@models/vendor.model';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import mongoose from 'mongoose';
 
 let token = '';
@@ -32,7 +32,7 @@ beforeEach(async () => {
     password: 'Password1!', isActive: true, isVerified: true,
   });
   vendorId = vendor._id.toString();
-  token = signVendorToken(vendorId, { permissions: ['tickets:sell_tickets'] });
+  token = await seedVendorSessionToken(vendorId, { permissions: ['tickets:sell_tickets'] });
 });
 afterEach(async () => { await clearTestDb(); jest.restoreAllMocks(); });
 afterAll(disconnectTestDb);
@@ -88,7 +88,7 @@ describe('POST /api/tickets/sales/:saleId/send-sms', () => {
       businessName: 'Rival Co', email: 'rival@example.com',
       password: 'Password1!', isActive: true, isVerified: true,
     });
-    const otherToken = signVendorToken(other._id.toString(), {
+    const otherToken = await seedVendorSessionToken(other._id.toString(), {
       permissions: ['tickets:sell_tickets'],
     });
     const saleId = await sellSale(otherToken, other._id.toString());

@@ -19,6 +19,7 @@ const vendorSchema = new Schema<IVendor>({
     sparse: true,
     trim: true
   },
+  authVersion: { type: Number, default: 0, required: true },
   password: {
     type: String,
     required: [true, 'Password is required'],
@@ -70,9 +71,14 @@ const vendorSchema = new Schema<IVendor>({
   // values can change without a code deploy. Membership in the active category
   // set is checked at signup by ServiceCategoryService.isValidActive
   // (TicketsAuthService.registerBusiness), not enforced here at the schema level.
-  serviceCategory: {
-    type: String,
-    trim: true,
+  serviceCategories: {
+    type: [{ type: String, trim: true }],
+    validate: {
+      validator: function (this: IVendor, values: string[]) {
+        return this.operatorType !== OperatorType.SERVICES || values.length > 0;
+      },
+      message: "Choose at least one service category",
+    },
     required: [
       function (this: IVendor) { return this.operatorType === OperatorType.SERVICES; },
       'A service category is required for service businesses',
@@ -233,6 +239,7 @@ vendorSchema.pre('save', async function(next) {
 
     // Hash password if modified
     if (this.isModified('password')) {
+      this.authVersion += 1;
       const salt = await bcrypt.genSalt(12);
       this.password = await bcrypt.hash(this.password, salt);
     }

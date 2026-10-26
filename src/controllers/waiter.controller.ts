@@ -1,3 +1,5 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
+import { PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Event } from '@models/event.model';
@@ -81,6 +83,16 @@ async function waiterMayWorkTable(
 }
 
 export class WaiterController {
+  static async quoteTable(req: Request, res: Response): Promise<any> {
+    try {
+      const event = await loadWaiterEvent(req, res);
+      if (!event) return;
+      if (!HEX24.test(String(req.params.id))) return ApiResponseUtil.badRequest(res, 'Invalid table id');
+      if (!(await waiterMayWorkTable(req, res, String(req.params.id), String(event._id)))) return;
+      return ApiResponseUtil.success(res, await TableService.quote(String(req.params.id), String(event._id)));
+    } catch (e: any) { return ApiResponseUtil.error(res, e.message || 'Could not price table', 500); }
+  }
+
   /** GET /api/waiter/events — the one event this waiter works. */
   static async getEvents(req: Request, res: Response): Promise<any> {
     const event = await loadWaiterEvent(req, res);
@@ -203,8 +215,8 @@ export class WaiterController {
     const event = await loadWaiterEvent(req, res);
     if (!event) return;
     const waiter = (req as any).waiter as WaiterToken;
-    const tableId = String(req.params['id']);
-    const merchantId = String(req.params['merchantId']);
+    const tableId = String(requireRouteParam(req, 'id'));
+    const merchantId = String(requireRouteParam(req, 'merchantId'));
     // Shape-checked before either is cast: an unguarded ObjectId cast throws a
     // CastError out of a handler Express 4 does not await, so the request
     // hangs instead of answering — the same trap loadWaiterEvent documents.
@@ -224,18 +236,20 @@ export class WaiterController {
     }
   }
 
-  /** POST /api/waiter/tables/:id/items — add an item from a stall, moving its stock. */
-  static async addItem(req: Request, res: Response): Promise<any> {
-    const event = await loadWaiterEvent(req, res);
-    if (!event) return;
-    const waiter = (req as any).waiter as WaiterToken;
-    const { merchantId, productId, qty } = req.body || {};
-    if (!merchantId || !productId) return ApiResponseUtil.badRequest(res, 'merchantId and productId are required');
-    if (!Number.isInteger(qty) || qty <= 0) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
+  /** POST /api/waiter/tables/:id/items — add a basket, moving its stock atomically. */
+  static async addItems(req: Request, res: Response): Promise<any> {
     try {
-      const table = await TableService.addItem({
-        tableId: req.params['id']!, eventId: String(event._id), merchantId, productId, qty, addedBy: waiter.waiterId,
+      const event = await loadWaiterEvent(req, res);
+      if (!event) return;
+      const waiter = (req as any).waiter as WaiterToken;
+      const { items } = req.body || {};
+      if (!HEX24.test(String(req.params.id))) return ApiResponseUtil.badRequest(res, 'Invalid table id');
+      if (!Array.isArray(items) || items.length === 0 || items.length > 100) return ApiResponseUtil.badRequest(res, 'items must contain between 1 and 100 products');
+      if (items.some(i => !i || !HEX24.test(String(i.merchantId)) || !HEX24.test(String(i.productId)))) return ApiResponseUtil.badRequest(res, 'Valid merchantId and productId are required');
+      if (items.some(i => !Number.isSafeInteger(i.qty) || i.qty <= 0)) return ApiResponseUtil.badRequest(res, 'qty must be a positive whole number');
+      const openedBy = waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ? undefined : waiter.waiterId;
+      const table = await TableService.addItems({
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), items, addedBy: waiter.waiterId, openedBy,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -251,20 +265,21 @@ export class WaiterController {
       // the request itself named a stall that cannot take new items right
       // now, same class of problem as "not sold at that stall"/"not found".
       const status = /not open/i.test(msg) ? 409
-        : /not sold at that stall|not found|stall is closed/i.test(msg) ? 400 : 500;
+        : /table not found/i.test(msg) ? 404 : /not sold at that stall|not found|stall is closed/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);
     }
   }
 
   /** DELETE /api/waiter/tables/:id/items/:lineId — remove a mis-punched line, returning its stock. */
   static async removeItem(req: Request, res: Response): Promise<any> {
-    const event = await loadWaiterEvent(req, res);
-    if (!event) return;
-    const waiter = (req as any).waiter as WaiterToken;
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
     try {
+      const event = await loadWaiterEvent(req, res);
+      if (!event) return;
+      const waiter = (req as any).waiter as WaiterToken;
+      const openedBy = waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ? undefined : waiter.waiterId;
+      if (!HEX24.test(String(req.params.id)) || !HEX24.test(String(req.params.lineId))) return ApiResponseUtil.badRequest(res, 'Invalid table or line id');
       const table = await TableService.removeItem({
-        tableId: req.params['id']!, eventId: String(event._id), lineId: req.params['lineId']!, removedBy: waiter.waiterId,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), lineId: requireRouteParam(req, 'lineId'), removedBy: waiter.waiterId, openedBy,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -283,10 +298,10 @@ export class WaiterController {
     if (!event) return;
     const waiter = (req as any).waiter as WaiterToken;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : '';
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
+    if (!(await waiterMayWorkTable(req, res, requireRouteParam(req, 'id'), String(event._id)))) return;
     try {
       const table = await TableService.voidTable({
-        tableId: req.params['id']!, eventId: String(event._id), reason, voidedBy: waiter.waiterId,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), reason, voidedBy: waiter.waiterId,
       });
       return ApiResponseUtil.success(res, table);
     } catch (e) {
@@ -322,15 +337,18 @@ export class WaiterController {
     // handheld. One generated server-side would be new on every attempt and
     // every retry would be a second bill.
     if (!clientTxnId) return ApiResponseUtil.badRequest(res, 'clientTxnId is required');
-    if (!(await waiterMayWorkTable(req, res, req.params['id']!, String(event._id)))) return;
+    if (!(await waiterMayWorkTable(req, res, requireRouteParam(req, 'id'), String(event._id)))) return;
 
     try {
+      if (!Number.isSafeInteger(req.body.quotedTotal) || req.body.quotedTotal <= 0) return ApiResponseUtil.badRequest(res, 'quotedTotal is required');
       const settlement = await TableService.settle({
-        tableId: req.params['id']!, eventId: String(event._id), bandUid,
+        quotedTotal: req.body.quotedTotal,
+        tableId: requireRouteParam(req, 'id'), eventId: String(event._id), bandUid,
         settledBy: waiter.waiterId, staffName: waiter.fullName, clientTxnId,
       });
       return ApiResponseUtil.success(res, settlement);
     } catch (e) {
+      if (e instanceof PurchaseTotalChangedError) return ApiResponseUtil.error(res, e.message, 409, { reason: 'table_changed' });
       // 402, with the shortfall in the payload so the handheld can tell the
       // guest what to add at the desk rather than just "declined".
       if (e instanceof TableShortfallError) {

@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { NextFunction, Request, Response } from 'express';
 import { ResellerHub } from '@models/resellerHub.model';
 import { HubAnalyticsService } from '@services/hubAnalytics.service';
@@ -38,7 +39,7 @@ export class ResellerHubAdminController {
 
   static async get(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hub = await findScopedHub((req as any).reseller, req.params['hubId']!);
+      const hub = await findScopedHub((req as any).reseller, requireRouteParam(req, 'hubId'));
       if (!hub) {
         ApiResponseUtil.notFound(res, 'Hub not found');
         return;
@@ -51,7 +52,7 @@ export class ResellerHubAdminController {
 
   static async analytics(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const hub = await findScopedHub((req as any).reseller, req.params['hubId']!);
+      const hub = await findScopedHub((req as any).reseller, requireRouteParam(req, 'hubId'));
       if (!hub) {
         ApiResponseUtil.notFound(res, 'Hub not found');
         return;
@@ -65,7 +66,7 @@ export class ResellerHubAdminController {
         if (!t) return;
         from = f; to = t;
       }
-      const analytics = await HubAnalyticsService.getHubAnalytics(req.params['hubId']!, from, to);
+      const analytics = await HubAnalyticsService.getHubAnalytics(requireRouteParam(req, 'hubId'), from, to);
       ApiResponseUtil.success(res, analytics);
     } catch (err: any) {
       next(err);

@@ -4,7 +4,8 @@ import { Event } from '@models/event.model';
 import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus, SalesChannel, TicketPdfStatus } from '@interfaces/ticket.interface';
 import { EventStatus, type ITicketType } from '@interfaces/event.interface';
 import { resolveCart, assertSingleAttribution } from '@services/cart.service';
-import type { CartLine } from '@interfaces/cart.interface';
+import { EventCouponService } from '@services/eventCoupon.service';
+import type { ResolvedCart, CartLine } from '@interfaces/cart.interface';
 import { EventService } from '@services/event.service';
 import { getProcessor } from '@services/payments';
 import { SmsService } from '@services/sms.service';
@@ -270,6 +271,92 @@ export class TicketService {
    * Sell tickets (both cash and wallet payment)
    */
 
+  private static async failCheckoutInitiation(sale: ITicketSale, cart: ResolvedCart, error: unknown): Promise<never> {
+    if (cart.coupon) {
+      // A thrown request is not proof the provider rejected it. Never unlock
+      // a voucher while an external checkout may still collect payment.
+      console.error('[coupon checkout] payment initiation uncertain', { saleId: String(sale._id), error });
+      throw new Error('Payment could not be confirmed. Your coupon remains reserved. Contact support before retrying.');
+    }
+    await ReservationService.release(String(sale._id));
+    sale.paymentStatus = PaymentStatus.FAILED;
+    await sale.save();
+    throw error;
+  }
+
+  private static async prepareCheckout(sale: ITicketSale, cart: ResolvedCart, ttlMs: number) {
+    if (cart.coupon && cart.amountCharged === 0 && sale.paymentMethod !== PaymentMethod.CASH) {
+      throw new Error('This coupon makes your ticket free. Use the free-ticket claim.');
+    }
+    await EventCouponService.saveCheckout(sale, cart.coupon);
+    try {
+      await ShareEarnService.registerPendingReferral(sale);
+      const reservation = await ReservationService.reserve({
+        eventId: String(sale.eventId),
+        lines: cart.lines.map(l => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
+        saleId: String(sale._id), ttlMs,
+      });
+      sale.reservationExpiresAt = reservation.expiresAt;
+      await sale.save();
+      return reservation;
+    } catch (error) {
+      // No provider call has happened yet, so this attempt is definitely failed.
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      await ReservationService.release(String(sale._id));
+      throw error;
+    }
+  }
+
+  private static async purchaseCouponCart(cart: ResolvedCart, p: {
+    customerName?: string; customerPhone?: string; customerEmail?: string; buyerId?: string;
+    keshlessCardNumber?: string; keshlessPin?: string; referralCode?: string;
+  }, method: PaymentMethod) {
+    const event = cart.event;
+    const customerPhone = p.customerPhone ? normalizePhone(p.customerPhone) : undefined;
+    const customerName = p.customerName?.trim() || customerPhone || p.customerEmail || 'Guest';
+    const econ = await this.buildSaleSnapshot({ totalAmount: cart.faceTotal, paymentMethod: method,
+      mappedSoldByType: 'Vendor', displayCurrency: event.currency ?? 'SZL',
+      absorbedServiceFeeAmount: cart.absorbedServiceFeeAmount });
+    const sale = new TicketSale({
+      eventId: event._id, vendorId: event.vendorId, ticketIds: [], quantity: cart.totalQuantity,
+      lines: cart.lines.map(l => ({ ticketTypeId: l.ticketTypeId, ticketTypeName: l.ticketType.name, unitPrice: l.unitPrice, quantity: l.quantity })),
+      customerName, customerPhone, customerEmail: p.customerEmail, buyerId: p.buyerId,
+      totalAmount: cart.faceTotal, paymentMethod: method, paymentStatus: PaymentStatus.PENDING,
+      soldBy: event.vendorId, soldByType: 'Vendor', channel: SalesChannel.ONLINE, ...econ,
+      serviceFeeAmount: cart.serviceFeeAmount, amountCharged: cart.amountCharged,
+      ...(p.referralCode && cart.faceTotal > 0 ? { shareEarnReferralCode: p.referralCode } : {}),
+    });
+    await this.prepareCheckout(sale, cart, this.MOMO_TTL_MS);
+    // Keep coupon wallet attempts out of the generic expiry auto-fail: a
+    // network error during a debit is uncertain, never permission to reuse.
+    let charge;
+    try {
+      charge = await getProcessor(method).charge({ method, amount: cart.amountCharged,
+        description: `Carrot Tickets - ${event.name}`, keshlessCardNumber: p.keshlessCardNumber, keshlessPin: p.keshlessPin });
+    } catch (error) {
+      console.error('[coupon checkout] wallet payment uncertain', { saleId: String(sale._id), error });
+      throw new Error('Payment could not be confirmed. Please contact support before retrying; your coupon remains reserved.');
+    }
+    if (charge.status === 'failed') {
+      sale.paymentStatus = PaymentStatus.FAILED;
+      await sale.save();
+      await ReservationService.release(String(sale._id));
+      throw new Error(charge.message || 'Payment failed');
+    }
+    if (charge.status !== 'completed') throw new Error('Your payment is still pending; your coupon remains reserved.');
+    sale.walletTransactionId = charge.providerRef;
+    sale.paymentStatus = PaymentStatus.COMPLETED;
+    await sale.save();
+    const tickets = await this.fulfilClaimedSale(sale, sale);
+    await this.autoFollowOrganizerForSale(sale);
+    this.sendTicketConfirmations(event, tickets, customerPhone, p.customerEmail);
+    return { tickets: tickets.map(t => ({ ticketId: t.ticketId, eventName: event.name,
+      ticketType: t.ticketType, eventDate: event.eventDate, startTime: event.startTime, venue: event.venue })),
+      transactionId: sale.walletTransactionId, totalAmount: cart.faceTotal, quantity: cart.totalQuantity,
+      event: { name: event.name, date: event.eventDate, venue: event.venue } };
+  }
+
   /**
    * Mints an async rail's tickets once its payment has settled, from the
    * composition snapshotted on the sale at checkout.
@@ -367,6 +454,7 @@ export class TicketService {
     try {
       const tickets: ITicket[] = await this.mintSettledSaleTickets(sale);
 
+      if (claimed.coupon && !claimed.coupon.redeemedAt) claimed.coupon.redeemedAt = new Date();
       claimed.ticketIds = tickets.map(t => t._id as mongoose.Types.ObjectId);
       await claimed.save();
 
@@ -1203,6 +1291,7 @@ export class TicketService {
    * price x quantity — there is no separate add-on fee.
    */
   static async purchaseForCustomer(params: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. A single-tier purchase is a one-element array. */
     items: CartLine[];
@@ -1251,6 +1340,7 @@ export class TicketService {
     // none of them can drift from another.
     const cart = await resolveCart({
       eventId,
+      couponCode: params.couponCode,
       items,
       method: PaymentMethod.KESHLESS_WALLET,
       buyerId,
@@ -1264,6 +1354,10 @@ export class TicketService {
     // the PIN rule). Buyer-paid service fee is added on top of face.
     if (totalAmount >= 50 && !keshlessPin) {
       throw new Error('PIN required for purchases of E50 or more');
+    }
+
+    if (cart.coupon) {
+      return this.purchaseCouponCart(cart, params, PaymentMethod.KESHLESS_WALLET);
     }
 
     // sellTickets debits the wallet (face + service fee) and mints tickets.
@@ -1349,6 +1443,7 @@ export class TicketService {
    * for free.
    */
   static async claimFreeTicket(params: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. Every line must be genuinely free. */
     items: CartLine[];
@@ -1380,6 +1475,7 @@ export class TicketService {
 
     const cart = await resolveCart({
       eventId,
+      couponCode: params.couponCode,
       items,
       method: PaymentMethod.CASH,
       buyerId,
@@ -1395,6 +1491,10 @@ export class TicketService {
     const paidLine = cart.lines.find((l) => l.unitPrice > 0);
     if (paidLine) {
       throw new Error(`${paidLine.ticketType.name} is not free — please choose a payment method`);
+    }
+
+    if (cart.coupon) {
+      return this.purchaseCouponCart(cart, params, PaymentMethod.CASH);
     }
 
     // sellTickets mints via the CashProcessor (no money moves) at face 0.
@@ -1538,6 +1638,7 @@ export class TicketService {
    * 3) Call requestToPay on MTN — on failure, release reservation + fail sale + rethrow.
    */
   static async initiateMomoPurchase(p: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. A single-tier purchase is a one-element array. */
     items: CartLine[];
@@ -1578,6 +1679,7 @@ export class TicketService {
     // used to carry itself — and adds the per-account cap across the cart.
     const cart = await resolveCart({
       eventId: p.eventId,
+      couponCode: p.couponCode,
       items: p.items,
       method: PaymentMethod.MTN_MOMO,
       buyerId: p.buyerId,
@@ -1655,17 +1757,7 @@ export class TicketService {
       ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
-    await sale.save();
-    await ShareEarnService.registerPendingReferral(sale);
-
-    // 2) Reserve inventory
-    const { expiresAt } = await ReservationService.reserve({
-      eventId: p.eventId,
-      lines: cart.lines.map((l) => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
-      saleId: sale._id.toString(),
-      ttlMs: this.MOMO_TTL_MS,
-    });
-    sale.reservationExpiresAt = expiresAt;
+    const { expiresAt } = await this.prepareCheckout(sale, cart, this.MOMO_TTL_MS);
 
     // 3) Request to pay (currency from env; sandbox uses EUR)
     try {
@@ -1686,11 +1778,7 @@ export class TicketService {
       await sale.save();
       return { referenceId, saleId: sale._id.toString(), expiresAt };
     } catch (err) {
-      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
-      await ReservationService.release(sale._id.toString());
-      sale.paymentStatus = PaymentStatus.FAILED;
-      await sale.save();
-      throw err;
+      return this.failCheckoutInitiation(sale, cart, err);
     }
   }
 
@@ -1722,6 +1810,7 @@ export class TicketService {
    * paymentMethod = PaymentMethod.PEACH_CARD, provider call is peachClient.createPayment.
    */
   static async initiateCardPurchase(p: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. A single-tier purchase is a one-element array. */
     items: CartLine[];
@@ -1741,6 +1830,7 @@ export class TicketService {
     referralCode?: string;
   }): Promise<{ paymentId: string; redirect: any; saleId: string; expiresAt: Date }> {
     if (!this.peachClient.isConfigured()) throw new Error('Card payments are not available');
+    if (!process.env['CARD_RESULT_URL']) throw new Error('CARD_RESULT_URL is not configured');
 
     const cardCfg = await PaymentConfigService.get();
     if (!cardCfg.peachCardEnabled) throw new Error('Card payments are not available');
@@ -1757,6 +1847,7 @@ export class TicketService {
     // used to carry itself — and adds the per-account cap across the cart.
     const cart = await resolveCart({
       eventId: p.eventId,
+      couponCode: p.couponCode,
       items: p.items,
       method: PaymentMethod.PEACH_CARD,
       buyerId: p.buyerId,
@@ -1830,20 +1921,9 @@ export class TicketService {
       ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
-    await sale.save();
-    await ShareEarnService.registerPendingReferral(sale);
-
-    // 2) Reserve inventory
-    const { expiresAt } = await ReservationService.reserve({
-      eventId: p.eventId,
-      lines: cart.lines.map((l) => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
-      saleId: sale._id.toString(),
-      ttlMs: this.CARD_TTL_MS,
-    });
-    sale.reservationExpiresAt = expiresAt;
+    const { expiresAt } = await this.prepareCheckout(sale, cart, this.CARD_TTL_MS);
 
     // 3) Create Peach payment; on failure release + fail + rethrow (no silent fallback)
-    if (!process.env['CARD_RESULT_URL']) throw new Error('CARD_RESULT_URL is not configured');
     try {
       const nonce = sale.saleId + '-' + sale._id.toString();
       const { id, redirect } = await this.peachClient.createPayment({
@@ -1857,11 +1937,7 @@ export class TicketService {
       await sale.save();
       return { paymentId: id, redirect, saleId: sale._id.toString(), expiresAt };
     } catch (err) {
-      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
-      await ReservationService.release(sale._id.toString());
-      sale.paymentStatus = PaymentStatus.FAILED;
-      await sale.save();
-      throw err;
+      return this.failCheckoutInitiation(sale, cart, err);
     }
   }
 
@@ -1885,6 +1961,7 @@ export class TicketService {
    * offered upfront as the payer identifier to skip a step on DeltaPay's page.
    */
   static async initiateDeltapayPurchase(p: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. A single-tier purchase is a one-element array. */
     items: CartLine[];
@@ -1925,6 +2002,7 @@ export class TicketService {
     // used to carry itself — and adds the per-account cap across the cart.
     const cart = await resolveCart({
       eventId: p.eventId,
+      couponCode: p.couponCode,
       items: p.items,
       method: PaymentMethod.DELTAPAY,
       buyerId: p.buyerId,
@@ -1997,17 +2075,7 @@ export class TicketService {
       ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
-    await sale.save();
-    await ShareEarnService.registerPendingReferral(sale);
-
-    // 2) Reserve inventory
-    const { expiresAt } = await ReservationService.reserve({
-      eventId: p.eventId,
-      lines: cart.lines.map((l) => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
-      saleId: sale._id.toString(),
-      ttlMs: this.DELTAPAY_TTL_MS,
-    });
-    sale.reservationExpiresAt = expiresAt;
+    const { expiresAt } = await this.prepareCheckout(sale, cart, this.DELTAPAY_TTL_MS);
 
     // 3) Create the hosted-checkout session; on failure release + fail + rethrow
     try {
@@ -2051,11 +2119,7 @@ export class TicketService {
         expiresAt,
       };
     } catch (err) {
-      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
-      await ReservationService.release(sale._id.toString());
-      sale.paymentStatus = PaymentStatus.FAILED;
-      await sale.save();
-      throw err;
+      return this.failCheckoutInitiation(sale, cart, err);
     }
   }
 
@@ -2254,6 +2318,7 @@ export class TicketService {
         expected: { amount: expectedAmount, currency: expectedCurrency },
         confirmed: { amount: raw?.amount, currency: raw?.currency },
       });
+      if (sale.coupon) throw new Error('Payment amount could not be verified. Your coupon remains reserved. Contact support.');
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
       sale.momoFailureReason = 'AMOUNT_MISMATCH';
@@ -2369,6 +2434,7 @@ export class TicketService {
         expected: { amount: expectedAmount, currency: expectedCurrency },
         confirmed: { amount, currency },
       });
+      if (sale.coupon) throw new Error('Payment amount could not be verified. Your coupon remains reserved. Contact support.');
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
       await sale.save();
@@ -2490,7 +2556,7 @@ export class TicketService {
         if (r.status !== 'pending') { finalized++; continue; }
 
         const ageMs = Date.now() - new Date((sale as any).createdAt).getTime();
-        if (ageMs > maxPendingMs) {
+        if (ageMs > maxPendingMs && !sale.coupon) {
           console.warn('[momo-reconcile] abandoned past max pending window — failing', {
             saleId: sale.saleId,
             referenceId: sale.momoReferenceId,
@@ -2498,7 +2564,7 @@ export class TicketService {
           });
           await ReservationService.release(sale._id.toString());
           await TicketSale.updateOne(
-            { _id: sale._id, paymentStatus: PaymentStatus.PENDING },
+            { _id: sale._id, paymentStatus: PaymentStatus.PENDING, coupon: { $exists: false } },
             { $set: { paymentStatus: PaymentStatus.FAILED, momoFailureReason: 'RECONCILE_TIMEOUT' } },
           );
         }
@@ -2562,6 +2628,7 @@ export class TicketService {
         expected: expectedAmount,
         confirmed: verified.amount,
       });
+      if (sale.coupon) throw new Error('Payment amount could not be verified. Your coupon remains reserved. Contact support.');
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
       await sale.save();
@@ -2651,6 +2718,7 @@ export class TicketService {
    * return URLs (success / cancel / failure) rather than one.
    */
   static async initiateYocoPurchase(p: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. A single-tier purchase is a one-element array. */
     items: CartLine[];
@@ -2691,6 +2759,7 @@ export class TicketService {
     // used to carry itself — and adds the per-account cap across the cart.
     const cart = await resolveCart({
       eventId: p.eventId,
+      couponCode: p.couponCode,
       items: p.items,
       method: PaymentMethod.YOCO,
       buyerId: p.buyerId,
@@ -2760,17 +2829,7 @@ export class TicketService {
       ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
-    await sale.save();
-    await ShareEarnService.registerPendingReferral(sale);
-
-    // 2) Reserve inventory
-    const { expiresAt } = await ReservationService.reserve({
-      eventId: p.eventId,
-      lines: cart.lines.map((l) => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
-      saleId: sale._id.toString(),
-      ttlMs: this.YOCO_TTL_MS,
-    });
-    sale.reservationExpiresAt = expiresAt;
+    const { expiresAt } = await this.prepareCheckout(sale, cart, this.YOCO_TTL_MS);
 
     // 3) Create the Yoco checkout; on failure release + fail + rethrow
     try {
@@ -2812,11 +2871,7 @@ export class TicketService {
         expiresAt,
       };
     } catch (err) {
-      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
-      await ReservationService.release(sale._id.toString());
-      sale.paymentStatus = PaymentStatus.FAILED;
-      await sale.save();
-      throw err;
+      return this.failCheckoutInitiation(sale, cart, err);
     }
   }
 
@@ -2895,6 +2950,7 @@ export class TicketService {
         expected: { amountCents: expectedCents, currency: expectedCurrency },
         confirmed: { amountCents: event.amountCents, currency: event.currency },
       });
+      if (sale.coupon) throw new Error('Payment amount could not be verified. Your coupon remains reserved. Contact support.');
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
       await sale.save();
@@ -2991,6 +3047,7 @@ export class TicketService {
    * return URLs (success / cancel / failure) rather than one.
    */
   static async initiateYeboPayPurchase(p: {
+    couponCode?: string;
     eventId: string;
     /** One entry per tier. A single-tier purchase is a one-element array. */
     items: CartLine[];
@@ -3031,6 +3088,7 @@ export class TicketService {
     // used to carry itself — and adds the per-account cap across the cart.
     const cart = await resolveCart({
       eventId: p.eventId,
+      couponCode: p.couponCode,
       items: p.items,
       method: PaymentMethod.YEBOPAY,
       buyerId: p.buyerId,
@@ -3100,17 +3158,7 @@ export class TicketService {
       ...(p.referralCode ? { shareEarnReferralCode: p.referralCode } : {}),
       soldAt: new Date(),
     });
-    await sale.save();
-    await ShareEarnService.registerPendingReferral(sale);
-
-    // 2) Reserve inventory
-    const { expiresAt } = await ReservationService.reserve({
-      eventId: p.eventId,
-      lines: cart.lines.map((l) => ({ ticketTypeId: l.ticketTypeId, quantity: l.quantity })),
-      saleId: sale._id.toString(),
-      ttlMs: this.YEBOPAY_TTL_MS,
-    });
-    sale.reservationExpiresAt = expiresAt;
+    const { expiresAt } = await this.prepareCheckout(sale, cart, this.YEBOPAY_TTL_MS);
 
     // 3) Create the YeboPay checkout; on failure release + fail + rethrow
     try {
@@ -3156,11 +3204,7 @@ export class TicketService {
         expiresAt,
       };
     } catch (err) {
-      // Surface failure loudly: release the hold + fail the sale (no silent fallback)
-      await ReservationService.release(sale._id.toString());
-      sale.paymentStatus = PaymentStatus.FAILED;
-      await sale.save();
-      throw err;
+      return this.failCheckoutInitiation(sale, cart, err);
     }
   }
 
@@ -3244,6 +3288,7 @@ export class TicketService {
         expected: { amountCents: expectedCents, currency: expectedCurrency },
         confirmed: { amount: event.amount, currency: event.currency },
       });
+      if (sale.coupon) throw new Error('Payment amount could not be verified. Your coupon remains reserved. Contact support.');
       await ReservationService.release(sale._id.toString());
       sale.paymentStatus = PaymentStatus.FAILED;
       await sale.save();

@@ -1,12 +1,14 @@
 // api/src/services/cashier.service.ts
 import mongoose from 'mongoose';
-import { WalletTopup } from '@models/walletTopup.model';
+import { WalletTopup, TopupMethod } from '@models/walletTopup.model';
 import { WalletWithdrawal } from '@models/walletWithdrawal.model';
 import { Wallet } from '@models/wallet.model';
+import { TopupTotals, totalRecordedTopups } from '@utils/topupTotals.util';
 
 export interface CashierTxn {
   id: string;
   type: 'topup' | 'withdrawal';
+  method: string;
   amount: number;
   status: 'completed';
   at: Date;
@@ -27,16 +29,18 @@ export class CashierService {
     cashierId: string;
     eventId?: string;
     limit?: number;
+    /** Only the released POS history endpoint restricts its understood methods. */
+    methods?: readonly TopupMethod[];
   }): Promise<{
     transactions: CashierTxn[];
-    summary: { toppedUp: number; withdrawn: number; net: number; count: number };
+    summary: TopupTotals & { toppedUp: number; withdrawn: number; net: number; count: number };
   }> {
-    const { cashierId, eventId, limit = 50 } = params;
+    const { cashierId, eventId, limit = 50, methods } = params;
     const scope: Record<string, unknown> = { recordedBy: cashierId };
     if (eventId) scope['eventId'] = new mongoose.Types.ObjectId(eventId);
 
     const [topups, withdrawals] = await Promise.all([
-      WalletTopup.find(scope).sort({ createdAt: -1 }).limit(limit).lean(),
+      WalletTopup.find({ ...scope, ...(methods ? { method: { $in: methods } } : {}) }).sort({ createdAt: -1 }).limit(limit).lean(),
       WalletWithdrawal.find(scope).sort({ createdAt: -1 }).limit(limit).lean(),
     ]);
 
@@ -51,18 +55,19 @@ export class CashierService {
     const bandByWallet = new Map(wallets.map((w) => [String(w._id), w.bandUid ?? null]));
 
     const transactions: CashierTxn[] = [
-      ...topups.map((t) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, status: t.status, at: t.createdAt, bandUid: bandByWallet.get(String(t.walletId)) ?? null })),
-      ...withdrawals.map((w) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, status: w.status, at: w.createdAt, bandUid: bandByWallet.get(String(w.walletId)) ?? null })),
+      ...topups.map((t) => ({ id: String(t._id), type: 'topup' as const, method: t.method, amount: t.amount, status: t.status, at: t.createdAt, bandUid: bandByWallet.get(String(t.walletId)) ?? null })),
+      ...withdrawals.map((w) => ({ id: String(w._id), type: 'withdrawal' as const, method: w.method, amount: w.amount, status: w.status, at: w.createdAt, bandUid: bandByWallet.get(String(w.walletId)) ?? null })),
     ]
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, limit);
 
+    const totals = totalRecordedTopups(topups);
     const toppedUp = topups.reduce((s, t) => s + t.amount, 0);
     const withdrawn = withdrawals.reduce((s, w) => s + w.amount, 0);
 
     return {
       transactions,
-      summary: { toppedUp, withdrawn, net: toppedUp - withdrawn, count: topups.length + withdrawals.length },
+      summary: { ...totals, toppedUp, withdrawn, net: toppedUp - withdrawn, count: topups.length + withdrawals.length },
     };
   }
 }

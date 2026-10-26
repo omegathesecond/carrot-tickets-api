@@ -1,3 +1,4 @@
+import { purchaseChargeSchema } from '@utils/purchaseCharge.util';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
 import { EventStatus, IEvent, ITicketType } from '@interfaces/event.interface';
@@ -42,6 +43,7 @@ export interface CreateEventParams {
 }
 
 export interface UpdateEventParams {
+  purchaseCharge?: import('@utils/purchaseCharge.util').PurchaseCharge | null;
   name?: string;
   description?: string;
   venue?: string;
@@ -434,6 +436,13 @@ export class EventService {
             'Cashless cannot be switched off — money has already moved on this event',
           );
         }
+      }
+
+      if (updates.purchaseCharge !== undefined) {
+        const { error } = purchaseChargeSchema.validate(updates.purchaseCharge, { convert: false });
+        if (error) throw new HttpError(400, error.message);
+        if (!event.cashless) throw new HttpError(400, 'Purchase charges require a cashless event');
+        event.purchaseCharge = updates.purchaseCharge;
       }
 
       // Update fields

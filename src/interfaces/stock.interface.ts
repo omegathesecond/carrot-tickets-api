@@ -20,6 +20,7 @@ export enum ProductCategory {
 export enum StockMovementReason {
   RECEIVE = 'receive',
   SALE = 'sale',
+  SALE_REVERSAL = 'sale_reversal',
   TRANSFER_IN = 'transfer_in',
   TRANSFER_OUT = 'transfer_out',
   COUNT_ADJUST = 'count_adjust',
@@ -34,3 +35,29 @@ export enum StockMovementReason {
  * misreport who actually took the stock.
  */
 export type StockMovementByType = 'Organizer' | 'Merchant' | 'Platform' | 'Waiter';
+
+/** Immutable pricing facts for one itemised sale line, in physical units and cents. */
+export interface SalePricing {
+  regularUnits: number;
+  specialUnits: number;
+  specialBundles: number;
+  bundleQuantity?: number;
+  bundlePrice?: number;
+  discountAmount: number;
+}
+
+export interface SalesPricingAudit {
+  regularUnits: number;
+  specialUnits: number;
+  specialBundles: number;
+  unclassifiedUnits: number;
+  refundedNotRestockedUnits: number;
+  regularValue: number;
+  discountAmount: number;
+  salesRevenue: number;
+}
+
+export const SALES_PRICING_FIELDS = [
+  'regularUnits', 'specialUnits', 'specialBundles', 'unclassifiedUnits',
+  'refundedNotRestockedUnits', 'regularValue', 'discountAmount', 'salesRevenue',
+] as const satisfies readonly (keyof SalesPricingAudit)[];

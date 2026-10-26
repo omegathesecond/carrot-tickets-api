@@ -1,3 +1,4 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
@@ -32,7 +33,7 @@ export class MenuPublicController {
    */
   static async getEventMenu(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const event = await Event.findOne({ _id: eventId, status: EventStatus.PUBLISHED }).lean();
       if (!event) return ApiResponseUtil.notFound(res, 'Event not found or not available');
 
@@ -70,7 +71,7 @@ export class MenuPublicController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to preorder');
 
-      const eventId = req.params['eventId']!;
+      const eventId = requireRouteParam(req, 'eventId');
       const buyerName = (value.buyerName as string | undefined)?.trim() || buyer.name || buyer.phone || buyer.email || 'Guest';
 
       if (value.paymentMethod === PaymentMethod.KESHLESS_WALLET) {
@@ -118,7 +119,7 @@ export class MenuPublicController {
       const buyer = await resolveBuyerFromRequest(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
 
-      const referenceId = req.params['referenceId']!;
+      const referenceId = requireRouteParam(req, 'referenceId');
       const order = await MenuOrderService.getMomoOrderByReference(referenceId);
       if (!order || String(order.buyerId) !== String(buyer._id)) {
         return ApiResponseUtil.notFound(res, 'Order not found');

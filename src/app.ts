@@ -19,12 +19,14 @@ import * as Sentry from '@sentry/node';
 
 import { getDatabaseURI, logDatabaseConfig, validateEnvironment } from '@config/database.config';
 import { buildCorsOrigin } from '@utils/corsOrigins.util';
+import { requireTextQuery } from '@middleware/queryParams.middleware';
 
 // Background sweeps (reservation expiry, card-sale reconciliation, event
 // reminders, stuck-update reconciliation) — consolidated in src/tasks.
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
+import { migrateServiceCategories } from '@/scripts/migrateServiceCategories';
 import { migrateLegacyEventCategories } from '@/scripts/migrateLegacyEventCategories';
 import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 
@@ -32,6 +34,7 @@ import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 import ticketsRoutes from '@routes/tickets.route';
 import mediaRoutes from '@routes/media.route';
 import publicRoutes from '@routes/public.route';
+import marketplaceRoutes from './marketplace/routes';
 import momoRoutes from '@routes/momo.route';
 import cardRoutes from '@routes/card.route';
 import deltapayRoutes from '@routes/deltapay.route';
@@ -83,6 +86,9 @@ handleUnhandledRejection();
 
 // Initialize Express app
 const app: Application = express();
+// Keep structured query input visible to the shape gate rather than silently
+// treating nested filters as unknown string keys.
+app.set('query parser', 'extended');
 
 // Middleware
 app.use(requestIdMiddleware); // Add request ID for tracking
@@ -101,6 +107,7 @@ app.use(cors({
   // instead of the client guessing, or re-parsing the message copy.
   exposedHeaders: ['Retry-After']
 }));
+app.use(requireTextQuery);
 
 // Parse JSON bodies with a size limit.
 //
@@ -171,6 +178,7 @@ app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored update
 app.use('/api/tickets/transport', transportRoutes);    // Vendor bus/shuttle inventory - before the broad /api/tickets
 app.use('/api/tickets/social', vendorSocialRoutes);   // Vendor (brand) social graph — before the broad /api/tickets
 app.use('/api/tickets/dm', vendorDmRoutes);           // Vendor (brand) DMs — before the broad /api/tickets
+app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller/transport', transportPosRoutes); // POS bus selling + boarding - before the broad /api/reseller
 app.use('/api/reseller', resellerRoutes);
@@ -199,13 +207,7 @@ app.use(notFoundHandler);
 
 // Sentry error handler - must be before custom error handler
 if (isSentryInitialised()) {
-  Sentry.setupExpressErrorHandler(app, {
-    shouldHandleError(error: any) {
-      // Report all errors with status >= 500 to Sentry
-      // Don't report client errors (4xx)
-      return !error.statusCode || error.statusCode >= 500;
-    },
-  });
+  Sentry.setupExpressErrorHandler(app);
 }
 
 // Global error handler - must be last
@@ -229,7 +231,8 @@ if (process.env['NODE_ENV'] !== 'test') {
  * only then calls app.listen() — see src/boot.ts for why that order matters
  * on Cloud Run.
  */
-function initAfterConnect(): void {
+async function initAfterConnect(): Promise<void> {
+  await migrateServiceCategories();
   console.log(`📦 Database: ${mongoose.connection.name}`);
   // Log detailed database configuration
   logDatabaseConfig();

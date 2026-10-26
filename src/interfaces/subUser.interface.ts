@@ -35,6 +35,7 @@ export enum Permission {
 }
 
 export interface IVendorSubUser extends Document {
+  authVersion: number;
   _id: Types.ObjectId;
 
   // Authentication

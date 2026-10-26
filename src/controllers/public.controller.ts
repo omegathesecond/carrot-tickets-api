@@ -1,3 +1,5 @@
+import { cartItemsSchema, couponCodeSchema } from '@validators/checkout.validator';
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Joi from 'joi';
@@ -27,7 +29,7 @@ import { toPublicEventCard } from '@/utils/eventCard.util';
 import { Community } from '@models/community.model';
 import { Membership } from '@models/membership.model';
 import { Update } from '@models/update.model';
-import { failWithHttpError, failOtpRequest } from '@utils/controllerHelpers.util';
+import { failWithHttpError, failOtpRequest, failAuthRequest } from '@utils/controllerHelpers.util';
 import { MAX_TICKETS_PER_ORDER } from '@utils/serviceFee.util';
 import { normalizeHashtag } from '@utils/hashtags.util';
 import { UpdateController } from '@controllers/update.controller';
@@ -126,32 +128,6 @@ const contactMessageSchema = Joi.object({
   message: Joi.string().trim().min(1).max(5000).required(),
 });
 
-// Validation schema for Peach card purchase initiation
-/**
- * The cart a buyer is checking out: one entry per tier, 1..20 lines.
- *
- * MAX_TICKETS_PER_ORDER caps the WHOLE cart, not each line — otherwise the
- * order limit could be exceeded by splitting across tiers, the same hole the
- * per-account cap has (see resolveCart). Shared by every purchase rail so no
- * two of them can disagree about what a valid cart is.
- */
-const cartItemsSchema = Joi.array()
-  .items(Joi.object({
-    ticketTypeId: Joi.string().hex().length(24).required(),
-    quantity: Joi.number().integer().min(1).max(MAX_TICKETS_PER_ORDER).required(),
-  }))
-  .min(1)
-  .max(20)
-  .custom((value: Array<{ quantity: number }>, helpers) => {
-    const total = value.reduce((sum, l) => sum + l.quantity, 0);
-    if (total > MAX_TICKETS_PER_ORDER) {
-      return helpers.message({ custom: `You can buy at most ${MAX_TICKETS_PER_ORDER} tickets per order` } as never);
-    }
-    return value;
-  })
-  .optional();
-
-
 /**
  * TEMPORARY — multi-tier cutover compatibility. REMOVE once no traffic sends
  * the legacy shape (watch for `[cart-compat]` in the logs).
@@ -180,6 +156,7 @@ const legacyTierFields = {
 // checkout schema below; see ShareEarnService.registerPendingReferral.
 const shareEarnFields = {
   referralCode: Joi.string().trim().max(40).optional(),
+  couponCode: couponCodeSchema.optional(),
 };
 
 /**
@@ -252,6 +229,7 @@ const momoInitiateSchema = Joi.object({
 // TicketService.claimFreeTicket, never from this body; the quantity cap here
 // is just defence-in-depth parity with the paid paths.
 const freeClaimSchema = Joi.object({
+  couponCode: couponCodeSchema.optional(),
   eventId: Joi.string().hex().length(24).required(),
   items: cartItemsSchema,
   ...legacyTierFields,
@@ -302,6 +280,8 @@ const publicPurchaseSchema = Joi.object({
   keshlessCardNumber: Joi.string().required().length(8).alphanum().uppercase(),
   keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/)
 }).or('items', 'ticketTypeId');
+
+const PUBLIC_EVENT_STATUSES = [EventStatus.PUBLISHED, EventStatus.ONGOING, EventStatus.COMPLETED, EventStatus.CANCELLED];
 
 export class PublicController {
   /**
@@ -376,9 +356,10 @@ export class PublicController {
 
       const { page, limit, search, startDate, endDate, category } = value;
 
-      // Build query - only published events
+      const searchTerm = search?.trim();
+      // Search includes the public archive; drafts and pending approvals stay private.
       const filter: any = {
-        status: EventStatus.PUBLISHED
+        status: searchTerm ? { $in: PUBLIC_EVENT_STATUSES } : EventStatus.PUBLISHED
       };
 
       // Category chip filter (Home/Discover). 'All' or absent means
@@ -392,27 +373,26 @@ export class PublicController {
         filter.eventDate = {};
         if (startDate) filter.eventDate.$gte = new Date(startDate);
         if (endDate) filter.eventDate.$lte = new Date(endDate);
-      } else {
+      } else if (!searchTerm) {
         // Default: show every event that hasn't ended yet, so an in-progress
         // event (e.g. a late-night show) stays discoverable and buyable until
         // its endTime — not just until its start instant. See notEndedFilter.
         Object.assign(filter, notEndedFilter());
       }
 
-      // Search by name, venue, or description
-      if (search) {
-        filter.$or = [
-          { name: { $regex: search, $options: 'i' } },
-          { venue: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } }
-        ];
+      if (searchTerm) {
+        // Treat input as literal text and ignore extra whitespace in either name.
+        const pattern = searchTerm.split(/\s+/)
+          .map((word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('\\s+');
+        filter.name = { $regex: pattern, $options: 'i' };
       }
 
       // Execute query with pagination
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
         Event.find(filter)
-          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category priceMin priceMax currency galleryImages')
+          .select('status submittedByBuyerId name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category priceMin priceMax currency galleryImages')
           .sort({ eventDate: 1 })
           .skip(skip)
           .limit(limit)
@@ -489,10 +469,7 @@ export class PublicController {
         }
       }
 
-      // Transform events for public display. `filter` above already scopes
-      // this whole query to status: EventStatus.PUBLISHED, so every event here
-      // is already published/active — safe to apply the synthetic+real blend
-      // (item #19) to all of them.
+      // Transform public events for display.
       const publicEvents = events.map((event: any) => toPublicEventCard(event, {
         recentSales: blendedRecentSales(recentMap.get(String(event._id)) || 0, String(event._id)),
         trending: trendingIds.has(String(event._id)),
@@ -754,7 +731,7 @@ export class PublicController {
    */
   static async getTopicPosts(req: Request, res: Response): Promise<any> {
     try {
-      const tag = normalizeHashtag(req.params['tag']);
+      const tag = normalizeHashtag(requireRouteParam(req, 'tag'));
       if (!tag) {
         return ApiResponseUtil.validationError(res, 'Invalid tag');
       }
@@ -794,7 +771,7 @@ export class PublicController {
    */
   static async getPublicEvent(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
 
       // Validate eventId format
       if (!eventId || !eventId.match(/^[0-9a-fA-F]{24}$/)) {
@@ -803,7 +780,7 @@ export class PublicController {
 
       const event = await Event.findOne({
         _id: eventId,
-        status: EventStatus.PUBLISHED
+        status: { $in: PUBLIC_EVENT_STATUSES }
       }).lean();
 
       if (!event) {
@@ -870,12 +847,13 @@ export class PublicController {
         keshlessCardNumber,
         keshlessPin,
         referralCode: typeof value.referralCode === 'string' ? value.referralCode : undefined,
+        couponCode: value.couponCode,
       });
 
       return ApiResponseUtil.created(res, result, 'Tickets purchased successfully!');
     } catch (error: any) {
       console.error('Purchase tickets error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to purchase tickets');
+      return failWithHttpError(res, error, 'Failed to purchase tickets');
     }
   }
 
@@ -901,6 +879,7 @@ export class PublicController {
       }
 
       const result = await TicketService.claimFreeTicket({
+        couponCode: value.couponCode,
         eventId: value.eventId,
         items: cartItemsFrom(value),
         customerPhone: buyer.phone,
@@ -912,7 +891,7 @@ export class PublicController {
       return ApiResponseUtil.created(res, result, 'Your free ticket is confirmed!');
     } catch (error: any) {
       console.error('Claim free ticket error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to get your ticket');
+      return failWithHttpError(res, error, 'Failed to get your ticket');
     }
   }
 
@@ -942,7 +921,7 @@ export class PublicController {
       return ApiResponseUtil.success(res, result, 'Signed in successfully');
     } catch (error: any) {
       console.error('Buyer login error:', error);
-      return ApiResponseUtil.error(res, error.message || 'Failed to sign in', 401);
+      return failAuthRequest(res, error, 'Failed to sign in');
     }
   }
 
@@ -1111,7 +1090,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const referenceId = req.params['referenceId']!;
+      const referenceId = requireRouteParam(req, 'referenceId');
       const sale = await TicketService.getMomoSaleByReference(referenceId);
 
       const owns =
@@ -1172,7 +1151,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const paymentId = req.params['paymentId']!;
+      const paymentId = requireRouteParam(req, 'paymentId');
       const sale = await TicketService.getCardSaleByPaymentId(paymentId);
 
       const owns =
@@ -1262,7 +1241,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const checkoutId = req.params['checkoutId']!;
+      const checkoutId = requireRouteParam(req, 'checkoutId');
       const sale = await TicketService.getYocoSaleByCheckoutId(checkoutId);
 
       const owns =
@@ -1339,7 +1318,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const ref = String(req.params['ref'] || '');
+      const ref = String(requireRouteParam(req, 'ref') || '');
       if (!ref) return ApiResponseUtil.success(res, { status: 'none' });
 
       const sale = await TicketService.getYeboPaySaleByRefForBuyer(ref, buyer);
@@ -1431,7 +1410,7 @@ export class PublicController {
         return ApiResponseUtil.unauthorized(res, 'Please sign in to check payment status');
       }
 
-      const sessionId = req.params['sessionId']!;
+      const sessionId = requireRouteParam(req, 'sessionId');
       const sale = await TicketService.getDeltapaySaleBySessionId(sessionId);
 
       const owns =

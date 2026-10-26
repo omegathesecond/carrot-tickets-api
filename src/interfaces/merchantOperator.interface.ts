@@ -10,13 +10,13 @@ import { OperatorGrant } from '@interfaces/operatorGrant.interface';
  * the whole stall's PIN.
  */
 export interface IMerchantOperator extends Document {
+  deletedAt?: Date;
   fullName: string;
   phoneNumber?: string;
   /** The stall this person works. Immutable — move = new operator. */
   merchantId: Types.ObjectId;
-  /** Denormalized from the stall so token minting needs no join. Exactly one of eventId / venueId is set (applyTradingScope). */
-  eventId?: Types.ObjectId;
-  venueId?: Types.ObjectId;
+  /** Denormalized from the stall so token minting needs no join. */
+  eventId: Types.ObjectId;
   loginCode: string;
   pin: string;
   isActive: boolean;

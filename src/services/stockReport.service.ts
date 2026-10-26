@@ -8,9 +8,8 @@ import { StockCount } from '@models/stockCount.model';
 import { MerchantCharge } from '@models/merchantCharge.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { Waiter } from '@models/waiter.model';
-import { StockMovementReason } from '@interfaces/stock.interface';
+import { StockMovementReason, SALES_PRICING_FIELDS } from '@interfaces/stock.interface';
 import { HEX24 } from '@utils/controllerHelpers.util';
-import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
 
@@ -27,32 +26,26 @@ function statusOf(onHand: number, threshold: number | null): StockStatus {
   return 'IN_STOCK';
 }
 
-/** What a reconciliation covers: an event from its doors, a venue over a time range. */
-export type ReconWindow = { doorsAt: Date } | { from: Date; to: Date };
-
-const reconKey = (m: unknown, p: unknown) => `${m}|${p}`;
-
 /**
- * The organiser's stock read-model (design 2026-08-13, Slice 4) — for an event
- * or, since venue trading Phase 2, a venue (`ScopeIds`). Every figure is a
- * read-time aggregation over the Slice 1-3 records — no writes, no new
- * bookkeeping. The caller has already resolved + ownership-checked the scope.
+ * The organiser's stock read-model (design 2026-08-13, Slice 4). Every figure
+ * is a read-time aggregation over the Slice 1-3 records — no writes, no new
+ * bookkeeping. The caller has already loaded + ownership-checked the event.
  */
 export class StockReportService {
   /** Live stock board — per bar-product status + per-product aggregate. */
-  static async board(ids: ScopeIds) {
-    const match = scopeMatch(ids);
+  static async board(eventId: string) {
+    const eid = oid(eventId);
     const [rows, products, merchants, sales] = await Promise.all([
-      ProductStock.find(match).lean(),
-      Product.find(match).select('name category').lean(),
-      Merchant.find(match).select('name').lean(),
+      ProductStock.find({ eventId: eid }).lean(),
+      Product.find({ eventId: eid }).select('name category').lean(),
+      Merchant.find({ eventId: eid }).select('name').lean(),
       // What actually left the shelf and what it brought in, from the CHARGES
       // rather than the stock journal: the journal knows units, only the charge
       // knows the money. Un-itemised charges carry no product lines and so
       // contribute to neither — see `itemisedSplit` on the dashboard for how
       // much revenue that is.
       MerchantCharge.aggregate([
-        { $match: match },
+        { $match: { eventId: eid, status: 'completed' } },
         { $unwind: '$items' },
         {
           $group: {
@@ -122,19 +115,8 @@ export class StockReportService {
   }
 
   /**
-   * Opening → Added → Transfers → Sold → Expected → Physical → Variance per
-   * bar-product, rolled up per product + a grand total. An EVENT reconciles
-   * from its doors (`doorsAt`); a VENUE over a time range — see
-   * rangeReconciliation for why the opening differs.
-   */
-  static async reconciliation(ids: ScopeIds, window: ReconWindow) {
-    return 'doorsAt' in window
-      ? StockReportService.doorsReconciliation(ids, window.doorsAt)
-      : StockReportService.rangeReconciliation(ids, window.from, window.to);
-  }
-
-  /**
-   * An event's reconciliation from its doors. `opening` = an explicit
+   * Opening → Added → Transfers → Sold → Expected → Physical → Variance, per
+   * bar-product, rolled up per product + a grand total. `opening` = an explicit
    * opening-count if present else pre-doors receives; `added` = post-doors
    * receives; `expectedClosing` = the authoritative onHand; physical + variance
    * come from the latest CLOSING count. Derived from the journal by reason.
@@ -146,119 +128,23 @@ export class StockReportService {
    * apply those units twice (phantom shrinkage on a bar that is exactly
    * right). Receives after the count are `added` even when pre-doors.
    */
-  private static async doorsReconciliation(ids: ScopeIds, startTime: Date) {
-    const match = scopeMatch(ids);
+  static async reconciliation(eventId: string, startTime: Date) {
+    const eid = oid(eventId);
+    const key = (m: any, p: any) => `${m}|${p}`;
 
-    // Fetched FIRST: the opening counts decide what the movement aggregations may count.
-    const { counts, openingKeys, scope } = await StockReportService.latestCounts(match);
-
-    const [byReason, receiveSplit, stockRows, products, merchants] = await Promise.all([
-      StockMovement.aggregate([
-        { $match: { ...match, ...scope } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId', reason: '$reason' }, qty: { $sum: '$delta' } } },
-      ]),
-      StockMovement.aggregate([
-        { $match: { ...match, reason: StockMovementReason.RECEIVE, ...scope } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId', pre: { $lt: ['$at', startTime] } }, qty: { $sum: '$delta' } } },
-      ]),
-      ProductStock.find(match).lean(),
-      Product.find(match).select('name').lean(),
-      Merchant.find(match).select('name').lean(),
-    ]);
-
-    const { rows, ensure } = StockReportService.reconRows(products, merchants);
-    for (const s of stockRows) { const r = ensure(String(s.merchantId), String(s.productId)); r.expectedClosing = s.onHand; }
-
-    StockReportService.foldByReason(byReason, ensure);
-    // Opening (pre-doors receive) vs Added (post-doors receive) — unless an
-    // opening COUNT is the baseline, in which case any receive that survived
-    // the scope above came after the count and is an addition to it.
-    for (const g of receiveSplit) {
-      const r = ensure(String(g._id.merchantId), String(g._id.productId));
-      if (g._id.pre && !openingKeys.has(reconKey(g._id.merchantId, g._id.productId))) r.opening += g.qty; else r.added += g.qty;
-    }
-    StockReportService.applyCounts(counts, ensure);
-    return StockReportService.rollup(rows);
-  }
-
-  /**
-   * A venue's reconciliation over [from, to). A venue trades every day, so a
-   * range starts with stock already on the shelf: without an opening count,
-   * `opening` is each bar-product's balance at `from` (balanceAfter of its last
-   * movement before `from`), and `expectedClosing` is its balance at `to` — not
-   * the live onHand, which would count anything after the range. Movements and
-   * counts inside the range fold exactly as an event's do, including the
-   * opening-count baseline rule.
-   */
-  private static async rangeReconciliation(ids: ScopeIds, from: Date, to: Date) {
-    const match = scopeMatch(ids);
-    const inRange = { at: { $gte: from, $lt: to } };
-
-    const { counts, openingKeys, scope } = await StockReportService.latestCounts({ ...match, ...inRange });
-
-    // Latest movement per bar-product before `t`. The sort follows the
-    // { venueId, merchantId, productId, at: -1, _id: -1 } index after the
-    // venueId equality, so it streams from the index — no blocking SORT.
-    const balanceBefore = (t: Date) => StockMovement.aggregate([
-      { $match: { ...match, at: { $lt: t } } },
-      { $sort: { merchantId: 1, productId: 1, at: -1, _id: -1 } },
-      { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, balance: { $first: '$balanceAfter' } } },
-    ]);
-
-    const [byReason, receives, atFrom, atTo, stockRows, products, merchants] = await Promise.all([
-      StockMovement.aggregate([
-        { $match: { ...match, ...inRange, ...scope } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId', reason: '$reason' }, qty: { $sum: '$delta' } } },
-      ]),
-      StockMovement.aggregate([
-        { $match: { ...match, ...inRange, reason: StockMovementReason.RECEIVE, ...scope } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, qty: { $sum: '$delta' } } },
-      ]),
-      balanceBefore(from),
-      balanceBefore(to),
-      ProductStock.find(match).lean(),
-      Product.find(match).select('name').lean(),
-      Merchant.find(match).select('name').lean(),
-    ]);
-
-    const { rows, ensure } = StockReportService.reconRows(products, merchants);
-    // Every stocked bar-product appears, even with no movement in the range.
-    for (const s of stockRows) ensure(String(s.merchantId), String(s.productId));
-    for (const b of atFrom) {
-      if (!openingKeys.has(reconKey(b._id.merchantId, b._id.productId))) {
-        ensure(String(b._id.merchantId), String(b._id.productId)).opening = b.balance;
-      }
-    }
-    for (const b of atTo) ensure(String(b._id.merchantId), String(b._id.productId)).expectedClosing = b.balance;
-    StockReportService.foldByReason(byReason, ensure);
-    for (const g of receives) ensure(String(g._id.merchantId), String(g._id.productId)).added += g.qty;
-    StockReportService.applyCounts(counts, ensure);
-    return StockReportService.rollup(rows);
-  }
-
-  /**
-   * The latest opening + closing count per (merchant, product) among the
-   * counts `match` selects, the bar-products whose baseline is an opening
-   * count, and the movement scope that baseline implies (openingScope).
-   */
-  private static async latestCounts(match: Record<string, unknown>) {
+    // Latest opening + closing count per (merchant, product). Fetched FIRST:
+    // the opening counts decide what the movement aggregations may count.
     const counts = await StockCount.aggregate([
-      { $match: { ...match, phase: { $in: ['opening', 'closing'] } } },
+      { $match: { eventId: eid, phase: { $in: ['opening', 'closing'] } } },
       { $sort: { at: -1 } },
       { $group: { _id: { merchantId: '$merchantId', productId: '$productId', phase: '$phase' }, countId: { $first: '$_id' }, at: { $first: '$at' }, countedOnHand: { $first: '$countedOnHand' }, variance: { $first: '$variance' } } },
     ]);
     const openings = counts.filter((c: any) => c._id.phase === 'opening');
-    const openingKeys = new Set(openings.map((c: any) => reconKey(c._id.merchantId, c._id.productId)));
-    return { counts, openingKeys, scope: StockReportService.openingScope(openings) };
-  }
-
-  /**
-   * Movement scope: a bar-product WITH an opening count contributes only the
-   * movements at/after it, minus the count's own adjustment (which shares
-   * its timestamp); every other bar-product contributes its whole journal.
-   */
-  private static openingScope(openings: any[]) {
-    return openings.length === 0 ? {} : {
+    const openingKeys = new Set(openings.map((c: any) => key(c._id.merchantId, c._id.productId)));
+    // Movement scope: a bar-product WITH an opening count contributes only the
+    // movements at/after it, minus the count's own adjustment (which shares
+    // its timestamp); every other bar-product contributes its whole journal.
+    const scope = openings.length === 0 ? {} : {
       $or: [
         ...openings.map((c: any) => ({
           merchantId: c._id.merchantId, productId: c._id.productId,
@@ -267,16 +153,61 @@ export class StockReportService {
         { $nor: openings.map((c: any) => ({ merchantId: c._id.merchantId, productId: c._id.productId })) },
       ],
     };
-  }
 
-  /** One blank reconciliation row per bar-product, created on first touch. */
-  private static reconRows(products: any[], merchants: any[]) {
+    // Reversals are separate signed entries at their own timestamp, so an
+    // opening count between a sale and its refund does not erase the refund.
+    const pricingScope = openings.length === 0 ? {} : {
+      $or: [
+        ...openings.map((c: any) => ({ merchantId: c._id.merchantId, productId: c._id.productId, at: { $gte: c.at } })),
+        { $nor: openings.map((c: any) => ({ merchantId: c._id.merchantId, productId: c._id.productId })) },
+      ],
+    };
+    const knownPricing = { $eq: [{ $type: '$item.pricing' }, 'object'] };
+    const signed = (value: any) => ({ $multiply: ['$entries.sign', value] });
+    const [byReason, receiveSplit, stockRows, products, merchants, pricingAudit] = await Promise.all([
+      StockMovement.aggregate([
+        { $match: { eventId: eid, ...scope } },
+        { $group: { _id: { merchantId: '$merchantId', productId: '$productId', reason: '$reason' }, qty: { $sum: '$delta' } } },
+      ]),
+      StockMovement.aggregate([
+        { $match: { eventId: eid, reason: StockMovementReason.RECEIVE, ...scope } },
+        { $group: { _id: { merchantId: '$merchantId', productId: '$productId', pre: { $lt: ['$at', startTime] } }, qty: { $sum: '$delta' } } },
+      ]),
+      ProductStock.find({ eventId: eid }).lean(),
+      Product.find({ eventId: eid }).select('name').lean(),
+      Merchant.find({ eventId: eid }).select('name').lean(),
+      MerchantCharge.aggregate([
+        { $match: { eventId: eid, status: { $in: ['completed', 'reversed'] } } },
+        { $unwind: '$items' },
+        { $project: { merchantId: 1, productId: '$items.productId', item: '$items', entries: { $concatArrays: [
+          [{ at: '$createdAt', sign: 1, unrestocked: 0 }],
+          { $cond: [{ $eq: ['$status', 'reversed'] }, [{ at: '$reversal.at', sign: -1,
+            unrestocked: { $cond: [{ $eq: ['$reversal.restocked', false] }, 1, 0] } }], []] },
+        ] } } },
+        { $unwind: '$entries' },
+        { $set: { at: '$entries.at' } },
+        { $match: pricingScope },
+        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' },
+          regularUnits: { $sum: signed({ $cond: [knownPricing, '$item.pricing.regularUnits', 0] }) },
+          specialUnits: { $sum: signed({ $cond: [knownPricing, '$item.pricing.specialUnits', 0] }) },
+          specialBundles: { $sum: signed({ $cond: [knownPricing, '$item.pricing.specialBundles', 0] }) },
+          unclassifiedUnits: { $sum: signed({ $cond: [knownPricing, 0, '$item.qty'] }) },
+          refundedNotRestockedUnits: { $sum: { $cond: [{ $eq: ['$entries.unrestocked', 1] }, '$item.qty', 0] } },
+          regularValue: { $sum: signed({ $multiply: ['$item.unitPrice', '$item.qty'] }) },
+          // Older charges still have exact single price, quantity and charged
+          // total. Their discount amount is known; their special-unit split is not.
+          discountAmount: { $sum: signed({ $subtract: [{ $multiply: ['$item.unitPrice', '$item.qty'] }, '$item.lineTotal'] }) },
+          salesRevenue: { $sum: signed('$item.lineTotal') },
+        } },
+      ]),
+    ]);
+
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name]));
 
     const rowByKey = new Map<string, any>();
     const ensure = (merchantId: string, productId: string) => {
-      const k = reconKey(merchantId, productId);
+      const k = key(merchantId, productId);
       let r = rowByKey.get(k);
       if (!r) {
         r = {
@@ -284,21 +215,25 @@ export class StockReportService {
           productId, productName: productName.get(productId) || 'Unknown product',
           opening: 0, added: 0, transferIn: 0, transferOut: 0, sold: 0, countAdjust: 0, spoilage: 0, manual: 0,
           expectedClosing: 0, physicalCount: null, variance: null,
+          ...Object.fromEntries(SALES_PRICING_FIELDS.map(k => [k, 0])),
         };
         rowByKey.set(k, r);
       }
       return r;
     };
-    return { rows: rowByKey, ensure };
-  }
+    for (const s of stockRows) { const r = ensure(String(s.merchantId), String(s.productId)); r.expectedClosing = s.onHand; }
+    for (const audit of pricingAudit) {
+      const r = ensure(String(audit._id.merchantId), String(audit._id.productId));
+      for (const field of SALES_PRICING_FIELDS) r[field] = audit[field];
+    }
 
-  /** Fold movement sums by reason (transfer_out/sale/spoilage deltas are negative -> report as positive magnitudes). */
-  private static foldByReason(byReason: any[], ensure: (merchantId: string, productId: string) => any) {
+    // Fold movement sums by reason (transfer_out/sale/spoilage deltas are negative -> report as positive magnitudes).
     for (const g of byReason) {
       const r = ensure(String(g._id.merchantId), String(g._id.productId));
       switch (g._id.reason) {
         case StockMovementReason.TRANSFER_IN: r.transferIn += g.qty; break;
         case StockMovementReason.TRANSFER_OUT: r.transferOut += -g.qty; break;
+        case StockMovementReason.SALE_REVERSAL:
         case StockMovementReason.SALE: r.sold += -g.qty; break;
         case StockMovementReason.COUNT_ADJUST: r.countAdjust += g.qty; break;
         case StockMovementReason.SPOILAGE: r.spoilage += -g.qty; break;
@@ -306,22 +241,23 @@ export class StockReportService {
         default: break; // receive handled by the split below
       }
     }
-  }
-
-  /** An explicit opening count overrides the pre-doors-receive baseline; closing supplies physical + variance. */
-  private static applyCounts(counts: any[], ensure: (merchantId: string, productId: string) => any) {
+    // Opening (pre-doors receive) vs Added (post-doors receive) — unless an
+    // opening COUNT is the baseline, in which case any receive that survived
+    // the scope above came after the count and is an addition to it.
+    for (const g of receiveSplit) {
+      const r = ensure(String(g._id.merchantId), String(g._id.productId));
+      if (g._id.pre && !openingKeys.has(key(g._id.merchantId, g._id.productId))) r.opening += g.qty; else r.added += g.qty;
+    }
+    // An explicit opening count overrides the pre-doors-receive baseline; closing supplies physical + variance.
     for (const c of counts) {
       const r = ensure(String(c._id.merchantId), String(c._id.productId));
       if (c._id.phase === 'opening') r.opening = c.countedOnHand;
       else { r.physicalCount = c.countedOnHand; r.variance = c.variance; }
     }
-  }
 
-  /** The rows sorted for display, rolled up per product and into a grand total. */
-  private static rollup(rows: Map<string, any>) {
-    const perBar = [...rows.values()].sort((a, b) => a.productName.localeCompare(b.productName) || a.merchantName.localeCompare(b.merchantName));
+    const perBar = [...rowByKey.values()].sort((a, b) => a.productName.localeCompare(b.productName) || a.merchantName.localeCompare(b.merchantName));
 
-    const NUM = ['opening', 'added', 'transferIn', 'transferOut', 'sold', 'countAdjust', 'spoilage', 'manual', 'expectedClosing'] as const;
+    const NUM = ['opening', 'added', 'transferIn', 'transferOut', 'sold', 'countAdjust', 'spoilage', 'manual', 'expectedClosing', ...SALES_PRICING_FIELDS] as const;
     const blank = () => Object.fromEntries(NUM.map((k) => [k, 0])) as Record<typeof NUM[number], number>;
     // physicalCount/variance stay null in a rollup until at least one contributing
     // bar has a CLOSING count — a rollup of "0" would read as "counted zero units"
@@ -342,43 +278,43 @@ export class StockReportService {
   /** Event Stock Dashboard — revenue by product, best-sellers, sales by bar +
    *  employee, itemised split, peak times, variances, predicted stock-out.
    *  All read-time; predicted stock-out is computed against "now", never stored. */
-  static async dashboard(ids: ScopeIds) {
-    const match = scopeMatch(ids);
+  static async dashboard(eventId: string) {
+    const eid = oid(eventId);
     const now = new Date();
     const windowStart = new Date(now.getTime() - PREDICT_WINDOW_MIN * 60_000);
 
     const [productRevenue, byBar, byEmployee, split, peak, closingCounts, stockRows, saleWindow, products, merchants] = await Promise.all([
       MerchantCharge.aggregate([
-        { $match: match }, { $unwind: '$items' },
+        { $match: { eventId: eid, status: 'completed' } }, { $unwind: '$items' },
         { $group: { _id: '$items.productId', revenue: { $sum: '$items.lineTotal' }, units: { $sum: '$items.qty' } } },
       ]),
       MerchantCharge.aggregate([
-        { $match: match },
-        { $group: { _id: '$merchantId', gross: { $sum: '$amount' }, fee: { $sum: '$fee' }, net: { $sum: '$netAmount' }, count: { $sum: 1 } } },
+        { $match: { eventId: eid, status: 'completed' } },
+        { $group: { _id: '$merchantId', gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, fee: { $sum: '$fee' }, net: { $sum: '$netAmount' }, count: { $sum: 1 } } },
       ]),
       MerchantCharge.aggregate([
-        { $match: match },
-        { $group: { _id: { $ifNull: ['$staffName', null] }, gross: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $match: { eventId: eid, status: 'completed' } },
+        { $group: { _id: { $ifNull: ['$staffName', null] }, gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, count: { $sum: 1 } } },
       ]),
       MerchantCharge.aggregate([
-        { $match: match },
-        { $group: { _id: { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] }, gross: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $match: { eventId: eid, status: 'completed' } },
+        { $group: { _id: { $gt: [{ $size: { $ifNull: ['$items', []] } }, 0] }, gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, count: { $sum: 1 } } },
       ]),
       StockMovement.aggregate([
-        { $match: { ...match, reason: StockMovementReason.SALE } },
-        { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: { $abs: '$delta' } } } },
+        { $match: { eventId: eid, reason: { $in: [StockMovementReason.SALE, StockMovementReason.SALE_REVERSAL] } } },
+        { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: { $multiply: ['$delta', -1] } } } },
       ]),
       StockCount.aggregate([
-        { $match: { ...match, phase: 'closing' } }, { $sort: { at: -1 } },
+        { $match: { eventId: eid, phase: 'closing' } }, { $sort: { at: -1 } },
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, variance: { $first: '$variance' } } },
       ]),
-      ProductStock.find(match).lean(),
+      ProductStock.find({ eventId: eid }).lean(),
       StockMovement.aggregate([
-        { $match: { ...match, reason: StockMovementReason.SALE, at: { $gte: windowStart } } },
-        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, units: { $sum: { $abs: '$delta' } } } },
+        { $match: { eventId: eid, reason: { $in: [StockMovementReason.SALE, StockMovementReason.SALE_REVERSAL] }, at: { $gte: windowStart } } },
+        { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, units: { $sum: { $multiply: ['$delta', -1] } } } },
       ]),
-      Product.find(match).select('name').lean(),
-      Merchant.find(match).select('name').lean(),
+      Product.find({ eventId: eid }).select('name').lean(),
+      Merchant.find({ eventId: eid }).select('name').lean(),
     ]);
 
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
@@ -437,16 +373,16 @@ export class StockReportService {
     return { revenueByProduct, bestSellers, salesByBar, salesByEmployee, itemisedSplit, peakTimes, variances, totalShrinkageUnits, predictedStockOut, noRecentSales };
   }
 
-  /** The append-only stock journal for the event or venue, newest first, cursor-paged on
+  /** The append-only stock journal for the event, newest first, cursor-paged on
    *  _id (movements are insert-ordered by the sole writer). Optional product/bar
    *  filters. Product + bar names joined per page. */
-  static async movements(params: ScopeIds & { productId?: string; merchantId?: string; cursor?: string; limit?: number }) {
-    const { productId, merchantId, cursor } = params;
+  static async movements(params: { eventId: string; productId?: string; merchantId?: string; cursor?: string; limit?: number }) {
+    const { eventId, productId, merchantId, cursor } = params;
     const hex24 = /^[0-9a-fA-F]{24}$/;
     // NaN (from a non-numeric ?limit) is not caught by ?? — guard it explicitly so
     // a malformed param defaults cleanly instead of reaching .limit(NaN).
     const limit = Math.min(Math.max(Number.isFinite(params.limit as number) ? (params.limit as number) : 50, 1), 200);
-    const q: any = { ...scopeMatch(params) };
+    const q: any = { eventId: oid(eventId) };
     // Ignore malformed id filters rather than letting oid() throw a 500 (defensive;
     // the controller also rejects them with a 400).
     if (productId && hex24.test(productId)) q.productId = oid(productId);

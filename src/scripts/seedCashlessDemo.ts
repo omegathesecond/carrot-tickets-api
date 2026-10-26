@@ -144,7 +144,7 @@ export async function seedStock(event: any, opts: { vendorId: string | null; cas
   } else {
     for (const w of wallets) {
       try {
-        await WalletService.topUpCash({ walletId: String(w._id), eventId, amount: 50000, recordedBy: opts.cashierId, recordedByType: 'Cashier', clientTxnId: `seed-topup-${w._id}` });
+        await WalletService.topUpAtDesk({ method: 'cash', walletId: String(w._id), eventId, amount: 50000, recordedBy: opts.cashierId, recordedByType: 'Cashier', clientTxnId: `seed-topup-${w._id}` });
       } catch (e: any) { console.warn(`   top-up skipped for band ${w.bandUid}: ${e.message}`); }
     }
     const w0 = wallets[0]!;

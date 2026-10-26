@@ -28,7 +28,7 @@ export class CashierAdminController {
       // super-admin platform page passes no eventId and still sees the
       // unscoped list.
       const eventId = req.query['eventId'] ? String(req.query['eventId']) : undefined;
-      const filter = { ...scopeFilter(req), ...(eventId ? { eventId } : {}) };
+      const filter = { deletedAt: null, ...scopeFilter(req), ...(eventId ? { eventId } : {}) };
       const cashiers = await Cashier.find(filter).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, cashiers);
     } catch (err) { next(err); }
@@ -111,7 +111,7 @@ export class CashierAdminController {
 
   static async resetPin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const cashier = await Cashier.findOne({ _id: req.params['id'], ...scopeFilter(req) }).select('+pin');
+      const cashier = await Cashier.findOne({ _id: req.params['id'], deletedAt: null, ...scopeFilter(req) }).select('+pin');
       if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
       if ('grants' in req.body) (cashier as any).grants = sanitizeGrants(req.body.grants);
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
@@ -127,7 +127,7 @@ export class CashierAdminController {
 
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const cashier = await Cashier.findOne({ _id: req.params['id'], ...scopeFilter(req) });
+      const cashier = await Cashier.findOne({ _id: req.params['id'], deletedAt: null, ...scopeFilter(req) });
       if (!cashier) { ApiResponseUtil.notFound(res, 'Cashier not found'); return; }
       if ('fullName' in req.body) {
         // Unvalidated, this assignment took whatever arrived: a number renamed
@@ -138,6 +138,12 @@ export class CashierAdminController {
           ApiResponseUtil.badRequest(res, 'fullName must be a non-empty string'); return;
         }
         cashier.fullName = req.body.fullName;
+      }
+      if ('phoneNumber' in req.body) {
+        if (typeof req.body.phoneNumber !== 'string') {
+          ApiResponseUtil.badRequest(res, 'phoneNumber must be a string'); return;
+        }
+        cashier.phoneNumber = req.body.phoneNumber.trim() || undefined;
       }
       if ('isActive' in req.body) {
         // `!!` read the STRING "false" as true — a client sending the flag as

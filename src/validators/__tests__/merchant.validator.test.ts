@@ -1,6 +1,6 @@
 import { chargeSchema } from '@validators/merchant.validator';
 
-const base = { bandUid: '04aabbccddee', clientTxnId: 'c1' };
+const base = { quotedTotal: 300, bandUid: '04aabbccddee', clientTxnId: 'c1' };
 const PID = '64b7f0c2e4a1b2c3d4e5f6a7'; // a well-formed ObjectId
 
 describe('chargeSchema amount|items xor', () => {

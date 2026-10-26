@@ -12,9 +12,10 @@ import { Document, Types } from 'mongoose';
 export type CashierScope = 'platform' | 'organizer';
 
 export interface ICashier extends Document {
+  deletedAt?: Date;
   /**
-   * Per-person capability grants on top of CASHIER_PERMISSIONS — today just the
-   * tag desk (issue_tags). Stored by the shared applyOperatorCredentials mixin,
+   * Per-person money and tag-desk capabilities on top of the read-only role.
+   * Stored by the shared applyOperatorCredentials mixin,
    * which is why this was reached through `as any` before being declared here.
    */
   grants?: OperatorGrant[];
@@ -41,18 +42,20 @@ export interface ICashier extends Document {
  */
 export enum CashierPermission {
   CASH_TOPUP = 'cashier:cash_topup',
+  CARD_TOPUP = 'cashier:card_topup',
+  DELTAPAY_TOPUP = 'cashier:deltapay_topup',
+  MOBILE_MONEY_TOPUP = 'cashier:mobile_money_topup',
   CASH_WITHDRAW = 'cashier:cash_withdraw',
   VIEW_EVENTS = 'cashier:view_events',
   VIEW_OWN_TRANSACTIONS = 'cashier:view_own_transactions',
   /** Tag desk — granted per cashier, so it is absent from CASHIER_PERMISSIONS. */
   ISSUE_TAGS = 'cashier:issue_tags',
+  COLLECT_CASH = 'cashier:collect_cash',
 }
 
-/** Every permission a cashier holds — top up, cash out, list events, see own desk. */
+/** Read-only role permissions. Every money operation requires an admin grant. */
 export const CASHIER_PERMISSIONS: CashierPermission[] = [
   CashierPermission.VIEW_EVENTS,
-  CashierPermission.CASH_TOPUP,
-  CashierPermission.CASH_WITHDRAW,
   CashierPermission.VIEW_OWN_TRANSACTIONS,
 ];
 

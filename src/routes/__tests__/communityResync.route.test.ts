@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Channel } from '@models/channel.model';
 import { CommunityService } from '@services/community.service';
@@ -15,7 +15,7 @@ async function seedWorld() {
   const channels = await Channel.find({ communityId: community._id });
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
   await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Resync Buyer' });
-  const auth = `Bearer ${signBuyerToken(PHONE)}`;
+  const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
   return { seeded, community, bySlug, auth };
 }
 
@@ -90,7 +90,7 @@ describe('resync, read-state and unread badges', () => {
 
   it('read endpoint enforces channel access (non-member 403)', async () => {
     const { bySlug } = await seedWorld(); // buyer never joins
-    const auth = `Bearer ${signBuyerToken(PHONE)}`;
+    const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     await request(app)
       .post(`/api/community/channels/${String(bySlug['general']!._id)}/read`)
       .set('Authorization', auth)

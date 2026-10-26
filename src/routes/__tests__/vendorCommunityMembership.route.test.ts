@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { CommunityService } from '@services/community.service';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
@@ -21,7 +21,7 @@ describe('vendor community membership (non-owner brand)', () => {
 
   let seq = 0;
   async function makeBrand(name: string) {
-    return Vendor.create({ businessName: name, email: `brand${++seq}@example.com`, password: 'secret123' });
+    return Vendor.create({ logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', businessName: name, email: `brand${++seq}@example.com`, password: 'secret123' });
   }
 
   async function seedForeignCommunity() {
@@ -34,7 +34,7 @@ describe('vendor community membership (non-owner brand)', () => {
   it('a non-owner brand joins as a plain member and can post as the brand', async () => {
     const eventId = await seedForeignCommunity();
     const guest = await makeBrand('Guest Brand');
-    const token = `Bearer ${signVendorToken(String(guest._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(guest._id))}`;
 
     const joined = await request(app).post(`/api/community/${eventId}/join`).set('Authorization', token).expect(200);
     expect(joined.body.data.membership.role).toBe('member');
@@ -55,8 +55,8 @@ describe('vendor community membership (non-owner brand)', () => {
     const guest = await makeBrand('Roster Brand');
     await Buyer.create({ phone: '+26878422613', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'A Buyer', username: 'a_buyer' });
 
-    await request(app).post(`/api/community/${eventId}/join`).set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(200);
-    await request(app).post(`/api/community/${eventId}/join`).set('Authorization', `Bearer ${signVendorToken(String(guest._id))}`).expect(200);
+    await request(app).post(`/api/community/${eventId}/join`).set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
+    await request(app).post(`/api/community/${eventId}/join`).set('Authorization', `Bearer ${await seedVendorSessionToken(String(guest._id))}`).expect(200);
 
     const res = await request(app).get(`/api/community/${eventId}/members`).expect(200);
     const rows = res.body.data;
@@ -73,7 +73,7 @@ describe('vendor community membership (non-owner brand)', () => {
   it('a non-owner brand cannot post in a gated (ticket-holder) channel', async () => {
     const eventId = await seedForeignCommunity();
     const guest = await makeBrand('Gate Brand');
-    const token = `Bearer ${signVendorToken(String(guest._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(guest._id))}`;
     await request(app).post(`/api/community/${eventId}/join`).set('Authorization', token).expect(200);
 
     const community = await Community.findOne({ eventId });
@@ -88,7 +88,7 @@ describe('vendor community membership (non-owner brand)', () => {
   it('the brand member reads channel history via the member path (not the owner peek)', async () => {
     const eventId = await seedForeignCommunity();
     const guest = await makeBrand('Reader Brand');
-    const token = `Bearer ${signVendorToken(String(guest._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(guest._id))}`;
     await request(app).post(`/api/community/${eventId}/join`).set('Authorization', token).expect(200);
 
     const community = await Community.findOne({ eventId });

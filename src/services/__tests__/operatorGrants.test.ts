@@ -67,3 +67,9 @@ describe('operator grants', () => {
     });
   });
 });
+
+it('cash collection is opt-in only for cashier staff', () => {
+  expect(grantedCashierPermissions([OperatorGrant.COLLECT_CASH])).toEqual([CashierPermission.COLLECT_CASH]);
+  expect(grantedTicketsPermissions([OperatorGrant.COLLECT_CASH])).toEqual([]);
+  expect(CASHIER_PERMISSIONS).not.toContain(CashierPermission.COLLECT_CASH);
+});

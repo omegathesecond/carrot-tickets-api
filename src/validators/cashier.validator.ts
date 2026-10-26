@@ -3,7 +3,7 @@ import { MAX_TOPUP_CENTS } from '@services/wallet.service';
 
 // The cashier top-up is identical in shape to the reseller desk top-up, so the
 // canonical schema is reused directly by the controller (see reseller.validator
-// cashTopupSchema) — no duplicate definition.
+// deskTopupSchema) — no duplicate definition.
 
 const uid = Joi.string().trim().lowercase().pattern(/^[0-9a-f]{8,}$/);
 

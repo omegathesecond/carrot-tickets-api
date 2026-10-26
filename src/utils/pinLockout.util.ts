@@ -1,3 +1,4 @@
+import { HttpError } from '@utils/httpError.util';
 // api/src/utils/pinLockout.util.ts
 import { Model, Types } from 'mongoose';
 
@@ -23,7 +24,7 @@ export interface PinLockoutState {
 }
 
 /**
- * Count one wrong PIN against `id` and lock the row once the count reaches the
+ * Reserve one PIN proof against `id` and lock the row once the count reaches the
  * threshold. Returns the state AFTER this attempt.
  *
  * The counter is kept at the threshold while a lock is live rather than reset
@@ -32,7 +33,7 @@ export interface PinLockoutState {
  * out the lock gets their attempts back instead of being re-locked on the
  * first typo.
  */
-export async function recordFailedPinAttempt(
+async function reservePinAttempt(
   model: Model<any>,
   id: Types.ObjectId | string,
 ): Promise<PinLockoutState> {
@@ -46,7 +47,7 @@ export async function recordFailedPinAttempt(
   };
 
   const updated = await model.findOneAndUpdate(
-    { _id: id },
+    { _id: id, isActive: true, $or: [{ lockedUntil: null }, { lockedUntil: { $lte: now } }] },
     [
       {
         $set: {
@@ -71,7 +72,7 @@ export async function recordFailedPinAttempt(
   // The row was just loaded by the caller; nothing here means it vanished
   // between the read and this write. Surface that rather than pretend the
   // attempt was counted.
-  if (!updated) throw new Error('Operator not found');
+  if (!updated) throw new HttpError(429, 'Account locked. Try again later.');
   return { failedPinAttempts: updated.failedPinAttempts ?? 0, lockedUntil: updated.lockedUntil ?? null };
 }
 
@@ -81,4 +82,13 @@ export async function clearPinLockout(model: Model<any>, id: Types.ObjectId | st
     { _id: id },
     { $set: { failedPinAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } },
   );
+}
+
+/** Shared PIN proof for login and cash handover; failed guesses use the same
+ * atomic counter so confirmation cannot become an unthrottled PIN oracle. */
+export async function verifyOperatorPin(model: Model<any>, operator: { _id: any; comparePin(pin: string): Promise<boolean> }, pin: string): Promise<void> {
+  // Reserve BEFORE bcrypt: requests already in flight cannot bypass the cap.
+  await reservePinAttempt(model, operator._id);
+  if (!(await operator.comparePin(pin))) throw new HttpError(401, 'Invalid credentials');
+  await clearPinLockout(model, operator._id);
 }

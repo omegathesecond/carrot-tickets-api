@@ -1,6 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
-import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * One append-only leg of the stock journal (design §4/§5). Written ONLY by
@@ -10,9 +9,7 @@ import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema
  * onHand == Σ delta (the invariant, property-tested).
  */
 export interface IStockMovement extends Document {
-  /** Exactly one of eventId / venueId is set (applyTradingScope). */
-  eventId?: mongoose.Types.ObjectId;
-  venueId?: mongoose.Types.ObjectId;
+  eventId: mongoose.Types.ObjectId;
   merchantId: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId;
   delta: number; // signed integer base units; non-zero enforced by StockService.applyMovement (sole writer), not this schema
@@ -28,7 +25,7 @@ export interface IStockMovement extends Document {
 
 const stockMovementSchema = new Schema<IStockMovement>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true },
     productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
     delta: {
@@ -50,17 +47,10 @@ const stockMovementSchema = new Schema<IStockMovement>(
   { timestamps: false },
 );
 
-applyTradingScope(stockMovementSchema);
-
 // Per bar-product journal, newest first (statement view + Σ delta invariant).
 stockMovementSchema.index({ merchantId: 1, productId: 1, at: -1 });
 // Reporting: sales over time / peak hours (Slice 4).
 stockMovementSchema.index({ eventId: 1, reason: 1, at: -1 });
-stockMovementSchema.index({ venueId: 1, reason: 1, at: -1 }, VENUE_ONLY_INDEX);
-// A venue's balance at an instant: the latest movement per bar-product before
-// it (StockReportService.rangeReconciliation's balanceBefore). Equality on
-// venueId, then the sort the $group/$first reads — no blocking SORT stage.
-stockMovementSchema.index({ venueId: 1, merchantId: 1, productId: 1, at: -1, _id: -1 }, VENUE_ONLY_INDEX);
 // Provenance ("the movement for this charge/transfer/count").
 stockMovementSchema.index({ refType: 1, refId: 1 });
 

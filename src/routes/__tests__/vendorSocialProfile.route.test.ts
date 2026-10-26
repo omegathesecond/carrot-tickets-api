@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken, signBuyerToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
@@ -14,6 +14,7 @@ const makeVendor = (name?: string) => {
     email: `vendor-profile-${vseq}@example.com`,
     phoneNumber: `+2687${8000100 + vseq}`,
     password: 'secret123',
+    logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg',
   });
 };
 
@@ -28,7 +29,7 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
   it('200s with the buyer public profile for a vendor token', async () => {
     const vendor = await makeVendor('Bhora Fest');
     const buyer = await Buyer.create({ phone: '+26878000301', name: 'Bo', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'bhora_bo' });
-    const token = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
 
     const res = await request(app).get('/api/tickets/social/users/bhora_bo')
       .set('Authorization', token).expect(200);
@@ -54,7 +55,7 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
 
   it('404s an unknown username', async () => {
     const vendor = await makeVendor();
-    const token = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
     await request(app).get('/api/tickets/social/users/nobody_here')
       .set('Authorization', token).expect(404);
   });
@@ -62,13 +63,13 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
   it('401s a buyer token (no vendorId)', async () => {
     await Buyer.create({ phone: '+26878000302', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'plain_buyer' });
     await request(app).get('/api/tickets/social/users/plain_buyer')
-      .set('Authorization', `Bearer ${signBuyerToken('+26878422613')}`).expect(401);
+      .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000302')}`).expect(401);
   });
 
   it('isFollowing is true once this vendor follows the buyer, false after unfollow', async () => {
     const vendor = await makeVendor();
     const buyer = await Buyer.create({ phone: '+26878000303', name: 'Cee', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'cee_buyer' });
-    const token = `Bearer ${signVendorToken(String(vendor._id))}`;
+    const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
 
     const before = await request(app).get('/api/tickets/social/users/cee_buyer')
       .set('Authorization', token).expect(200);
@@ -91,8 +92,8 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
   it('isFollowedBy + isFriend reflect the buyer following the vendor brand back', async () => {
     const vendor = await makeVendor('Followed Brand');
     const buyer = await Buyer.create({ phone: '+26878000304', name: 'Dee', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'dee_buyer' });
-    const vendorToken = `Bearer ${signVendorToken(String(vendor._id))}`;
-    const buyerToken = `Bearer ${signBuyerToken('+26878000304')}`;
+    const vendorToken = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
+    const buyerToken = `Bearer ${await signBuyerSessionToken('+26878000304')}`;
 
     // Vendor follows the buyer.
     await request(app).post('/api/tickets/social/follow').set('Authorization', vendorToken)

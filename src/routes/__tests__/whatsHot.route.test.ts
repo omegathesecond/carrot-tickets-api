@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Update } from '@models/update.model';
 
@@ -25,7 +25,7 @@ describe('POST /api/public/updates — What\'s Hot fields', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Poster' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({
         kind: 'image', caption: 'Big weekend party', items: [{ ext: 'jpg', contentType: 'image/jpeg' }],
         feature: 'whats-hot', hotCategory: 'Nightlife', venue: 'The Venue', activityDate: '2026-09-12T18:00:00.000Z',
@@ -42,7 +42,7 @@ describe('POST /api/public/updates — What\'s Hot fields', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', items: [{ ext: 'jpg', contentType: 'image/jpeg' }], feature: 'whats-hot', hotCategory: 'NotACategory' })
       .expect(400);
   });
@@ -51,7 +51,7 @@ describe('POST /api/public/updates — What\'s Hot fields', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', items: [{ ext: 'jpg', contentType: 'image/jpeg' }], feature: 'trending' })
       .expect(400);
   });
@@ -60,7 +60,7 @@ describe('POST /api/public/updates — What\'s Hot fields', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
     const res = await request(app)
       .post('/api/public/updates')
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ kind: 'image', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(201);
     const saved = await Update.findById(res.body.data.updateId);
@@ -81,7 +81,7 @@ describe('PATCH /api/public/updates/:id', () => {
     });
     const res = await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ caption: 'new caption' })
       .expect(200);
     expect(res.body.data.caption).toBe('new caption');
@@ -99,7 +99,7 @@ describe('PATCH /api/public/updates/:id', () => {
     });
     const res = await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .send({ venue: 'New Venue', hotCategory: 'Food' })
       .expect(200);
     expect(res.body.data.venue).toBe('New Venue');
@@ -116,7 +116,7 @@ describe('PATCH /api/public/updates/:id', () => {
     });
     await request(app)
       .patch(`/api/public/updates/${update.id}`)
-      .set('Authorization', `Bearer ${signBuyerToken(OTHER_PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(OTHER_PHONE)}`)
       .send({ caption: 'hijacked' })
       .expect(403);
   });

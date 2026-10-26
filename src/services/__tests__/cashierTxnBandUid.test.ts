@@ -84,3 +84,16 @@ it('maps each row to its own band when a cashier served several', async () => {
   expect(byAmount.get(1000)).toBe('AAAA1111');
   expect(byAmount.get(2000)).toBe('BBBB2222');
 });
+
+it('splits desk history totals into cash and card', async () => {
+  const { eventId } = await seedPublishedEvent({});
+  const walletId = await bandWallet(String(eventId), '04AABBCC');
+  for (const [method, amount] of [['cash', 500], ['card', 700]] as const) {
+    await WalletTopup.create({ walletId, eventId, amount, method, recordedBy: CASHIER, recordedByType: 'Cashier', clientTxnId: method });
+  }
+  const { summary, transactions } = await CashierService.listTransactions({ cashierId: CASHIER, eventId: String(eventId) });
+  expect(summary.cashTopups).toBe(500);
+  expect(summary.cardTopups).toBe(700);
+  expect(summary.toppedUp).toBe(1200);
+  expect(new Set(transactions.map(t => t.method))).toEqual(new Set(['cash', 'card']));
+});

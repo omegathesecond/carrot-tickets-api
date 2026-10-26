@@ -1,6 +1,7 @@
 // api/src/routes/__tests__/cashierAdmin.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { signAdminSessionToken, signVendorSessionToken } from '@/__tests__/helpers/auth';
+import { Vendor } from '@models/vendor.model';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -24,15 +25,11 @@ const FOREIGN_EVENT_MESSAGE = 'One or more events do not exist or belong to a di
 // organizer to hire for.
 const NO_ORGANIZER_MESSAGE = 'That event has no organizer to hire a cashier for';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64c000000000000000000a01';
 const VENDOR_B = '64c000000000000000000b02';
 
-function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:manage_access'], isSuperAdmin: !!opts.isSuperAdmin, vendorId: opts.vendorId,
-  }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
+  return opts.isSuperAdmin ? signAdminSessionToken() : signVendorSessionToken(opts.vendorId!);
 }
 
 async function eventFor(vendorId: string, name: string) {
@@ -62,6 +59,9 @@ let mySecondEventId: string;
 let otherVendorEventId: string;
 
 beforeEach(async () => {
+  await Vendor.create([{ _id: VENDOR_A, businessName: 'A', password: 'secret123' },
+    { _id: VENDOR_B, businessName: 'B', password: 'secret123' }]);
+
   myEventId = await eventFor(VENDOR_A, 'My Show');
   mySecondEventId = await eventFor(VENDOR_A, 'My Other Show');
   otherVendorEventId = await eventFor(VENDOR_B, 'Someone Elses Show');
@@ -70,7 +70,7 @@ beforeEach(async () => {
 describe('POST /api/tickets/cashiers', () => {
   it('hires a cashier onto one of my events', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
 
     expect(res.status).toBe(201);
@@ -83,7 +83,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it('requires an eventId for an organizer cashier', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa' });
 
     expect(res.status).toBe(400);
@@ -97,7 +97,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it("rejects an event belonging to another organizer", async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: otherVendorEventId });
 
     expect(res.status).toBe(400);
@@ -111,7 +111,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it('rejects an event id that does not exist', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: new mongoose.Types.ObjectId().toString() });
 
     expect(res.status).toBe(400);
@@ -121,12 +121,12 @@ describe('POST /api/tickets/cashiers', () => {
 
   it("checks a super-admin's eventId against the ORGANIZER being hired for, not the caller", async () => {
     const ok = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Nomsa', scope: 'organizer', vendorId: VENDOR_B, eventId: otherVendorEventId });
     expect(ok.status).toBe(201);
 
     const mismatched = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Sipho', scope: 'organizer', vendorId: VENDOR_A, eventId: otherVendorEventId });
     expect(mismatched.status).toBe(400);
   });
@@ -136,7 +136,7 @@ describe('POST /api/tickets/cashiers', () => {
   // MerchantAdminController, which already derives the vendor from the event.
   it('derives the organizer from the event when a super-admin sends no vendorId', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
 
     expect(res.status).toBe(201);
@@ -150,7 +150,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it('does NOT become permissive when a super-admin passes a vendorId that does not own the event', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Nomsa', scope: 'organizer', vendorId: VENDOR_B, eventId: myEventId });
 
     expect(res.status).toBe(400);
@@ -169,7 +169,7 @@ describe('POST /api/tickets/cashiers', () => {
     });
 
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Nomsa', eventId: (community._id as any).toString() });
 
     expect(res.status).toBe(400);
@@ -184,7 +184,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it('refuses an event that does not exist when deriving', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Nomsa', eventId: new mongoose.Types.ObjectId().toString() });
 
     expect(res.status).toBe(400);
@@ -196,7 +196,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it('an ordinary organizer still takes the vendor from their TOKEN, not the event', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId, vendorId: VENDOR_B });
 
     expect(res.status).toBe(201);
@@ -208,7 +208,7 @@ describe('POST /api/tickets/cashiers', () => {
 
   it('lets a platform cashier be created with no event at all', async () => {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Carrot Staff', scope: 'platform' });
 
     expect(res.status).toBe(201);
@@ -219,12 +219,12 @@ describe('POST /api/tickets/cashiers', () => {
 describe('PATCH /api/tickets/cashiers/:id', () => {
   it('ignores eventIds on update', async () => {
     const created = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
     const id = created.body.data.cashier._id;
 
     const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ eventIds: [otherVendorEventId] });
     expect(res.status).toBe(200);
 
@@ -236,12 +236,12 @@ describe('PATCH /api/tickets/cashiers/:id', () => {
 
   it('ignores a singular eventId on update too (the field is immutable)', async () => {
     const created = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
     const id = created.body.data.cashier._id;
 
     const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ eventId: mySecondEventId });
     expect(res.status).toBe(200);
 
@@ -251,13 +251,13 @@ describe('PATCH /api/tickets/cashiers/:id', () => {
 
   it('400s a fullName that is not a non-empty string, rather than renaming her to it', async () => {
     const created = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
     const id = created.body.data.cashier._id;
 
     for (const fullName of [123, null, '', '   ']) {
       const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
-        .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+        .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
         .send({ fullName });
 
       // 400 — not the 200 that used to rename her to the string "123", and
@@ -273,12 +273,12 @@ describe('PATCH /api/tickets/cashiers/:id', () => {
 
   it('still updates the fields that ARE mutable', async () => {
     const created = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
     const id = created.body.data.cashier._id;
 
     const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa Dlamini', isActive: false });
 
     expect(res.status).toBe(200);
@@ -299,7 +299,7 @@ describe('GET /api/tickets/cashiers', () => {
 
   it('filters the list to one event', async () => {
     const res = await request(app).get(`/api/tickets/cashiers?eventId=${myEventId}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -308,7 +308,7 @@ describe('GET /api/tickets/cashiers', () => {
 
   it('returns every cashier when no event is named (the platform page)', async () => {
     const res = await request(app).get('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.map((c: { fullName: string }) => c.fullName).sort()).toEqual(['Nomsa', 'Sipho']);
@@ -321,7 +321,7 @@ describe('GET /api/tickets/cashiers', () => {
     });
 
     const res = await request(app).get(`/api/tickets/cashiers?eventId=${otherVendorEventId}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(0);
@@ -334,13 +334,13 @@ describe('GET /api/tickets/cashiers', () => {
 describe('PATCH /api/tickets/cashiers/:id isActive', () => {
   it('400s a non-boolean isActive rather than coercing "false" to true', async () => {
     const created = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
       .send({ fullName: 'Nomsa', eventId: myEventId });
     const id = created.body.data.cashier._id;
 
     for (const isActive of ['false', 'true', 0, 1, null]) {
       const res = await request(app).patch(`/api/tickets/cashiers/${id}`)
-        .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+        .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
         .send({ isActive });
       expect(res.status).toBe(400);
       expect(res.body.message).toBe('isActive must be a boolean');
@@ -357,7 +357,7 @@ describe('granting an existing cashier the tag desk', () => {
   // it was deleting the person and hiring them again.
   async function hire(fullName: string, eventId: string) {
     const res = await request(app).post('/api/tickets/cashiers')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName, eventId });
     return res.body.data.cashier;
   }
@@ -367,7 +367,7 @@ describe('granting an existing cashier the tag desk', () => {
     expect(cashier.grants ?? []).toEqual([]);
 
     const res = await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['issue_tags'] });
 
     expect(res.status).toBe(200);
@@ -378,11 +378,11 @@ describe('granting an existing cashier the tag desk', () => {
   it('takes it away again', async () => {
     const cashier = await hire('Nandi', myEventId);
     await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['issue_tags'] });
 
     const res = await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: [] });
 
     expect(res.status).toBe(200);
@@ -393,7 +393,7 @@ describe('granting an existing cashier the tag desk', () => {
     const cashier = await hire('Nandi', myEventId);
 
     const res = await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['issue_tags', 'tickets:manage_stock'] });
 
     expect(res.status).toBe(200);
@@ -403,11 +403,11 @@ describe('granting an existing cashier the tag desk', () => {
   it('leaves grants alone when the body does not mention them', async () => {
     const cashier = await hire('Nandi', myEventId);
     await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ grants: ['issue_tags'] });
 
     await request(app).patch(`/api/tickets/cashiers/${cashier._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Nandi M' });
 
     const after = await Cashier.findById(cashier._id);

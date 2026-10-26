@@ -1,6 +1,6 @@
 // api/src/routes/__tests__/tagAdmin.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -10,11 +10,9 @@ import { BandBinding } from '@models/bandBinding.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { enrolTags } from '@/__tests__/helpers/eventTags';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR = '64c000000000000000000a01';
 
-const token = (perms: string[]) =>
-  jwt.sign({ app: 'tickets', userType: 'vendor', role: 'tickets_owner', permissions: perms, isSuperAdmin: false, vendorId: VENDOR }, JWT_SECRET);
+const token = (perms: string[]) => seedVendorSessionToken(VENDOR, { permissions: perms });
 
 const ADMIN = () => token(['tickets:manage_access']);
 
@@ -49,7 +47,7 @@ describe('deactivate', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/deactivate`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ reason: 'lost at the bar' });
 
     expect(res.status).toBe(200);
@@ -66,7 +64,7 @@ describe('deactivate', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/deactivate`)
-      .set('Authorization', `Bearer ${token(['tickets:view_revenue'])}`)
+      .set('Authorization', `Bearer ${await token(['tickets:view_revenue'])}`)
       .send({ reason: 'nope' });
 
     expect(res.status).toBe(403);
@@ -77,7 +75,7 @@ describe('deactivate', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/deactivate`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({});
 
     expect(res.status).toBe(400);
@@ -89,12 +87,12 @@ describe('reissue', () => {
     const { event, wallet } = await setup();
     await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/deactivate`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ reason: 'lost' });
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: 'f0e50001' });
 
     expect(res.status).toBe(200);
@@ -110,7 +108,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: 'f0e50002' });
 
     expect(res.status).toBe(200);
@@ -132,7 +130,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: '7a0e0001' });
 
     expect(res.status).toBe(409);
@@ -148,7 +146,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${otherWallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: 'f0e50003' });
 
     expect(res.status).toBe(404);
@@ -162,7 +160,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: 'F0:E5:00:01' });
 
     expect(res.status).toBe(200);
@@ -180,7 +178,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: '7A:0E:00:01' });
 
     expect(res.status).toBe(409);
@@ -192,7 +190,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: 'not-hex!' });
 
     expect(res.status).toBe(400);
@@ -208,7 +206,7 @@ describe('reissue', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/reissue`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ bandUid: 'deadbeef' });
 
     expect(res.status).toBe(400);
@@ -230,7 +228,7 @@ describe('office refund', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
-      .set('Authorization', `Bearer ${ADMIN()}`)
+      .set('Authorization', `Bearer ${await ADMIN()}`)
       .send({ amount: 1000, clientTxnId: 'r1' });
 
     expect(res.status).toBe(403);
@@ -241,7 +239,7 @@ describe('office refund', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
-      .set('Authorization', `Bearer ${REFUNDER()}`)
+      .set('Authorization', `Bearer ${await REFUNDER()}`)
       .send({ amount: 12.5, clientTxnId: 'r2' });
 
     expect(res.status).toBe(400);
@@ -252,7 +250,7 @@ describe('office refund', () => {
 
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
-      .set('Authorization', `Bearer ${REFUNDER()}`)
+      .set('Authorization', `Bearer ${await REFUNDER()}`)
       .send({ amount: 1000 });
 
     expect(res.status).toBe(400);
@@ -262,17 +260,17 @@ describe('office refund', () => {
     const { event, wallet } = await setup();
     const url = `/api/tickets/events/${event._id}/tags/${wallet._id}/refund`;
 
-    const first = await request(app).post(url).set('Authorization', `Bearer ${REFUNDER()}`)
+    const first = await request(app).post(url).set('Authorization', `Bearer ${await REFUNDER()}`)
       .send({ amount: 1000, clientTxnId: 'r-dup' });
     expect(first.status).toBe(200);
     expect(first.body.data.balance).toBe(8000);
 
-    const mismatch = await request(app).post(url).set('Authorization', `Bearer ${REFUNDER()}`)
+    const mismatch = await request(app).post(url).set('Authorization', `Bearer ${await REFUNDER()}`)
       .send({ amount: 2000, clientTxnId: 'r-dup' });
     expect(mismatch.status).toBe(409);
     expect(mismatch.body.message).toMatch(/clientTxnId already used with a different amount/);
 
-    const replay = await request(app).post(url).set('Authorization', `Bearer ${REFUNDER()}`)
+    const replay = await request(app).post(url).set('Authorization', `Bearer ${await REFUNDER()}`)
       .send({ amount: 1000, clientTxnId: 'r-dup' });
     expect(replay.status).toBe(200);
     expect(replay.body.data.withdrawalId).toBe(first.body.data.withdrawalId);

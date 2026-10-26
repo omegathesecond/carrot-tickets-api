@@ -1,11 +1,11 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken } from '@/__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { MeetupRequest } from '@models/meetupRequest.model';
 
-const auth = (phone: string) => ({ Authorization: `Bearer ${signBuyerToken(phone)}` });
+const auth = async (phone: string) => ({ Authorization: `Bearer ${await signBuyerSessionToken(phone)}` });
 const ME = '+26878422613';
 
 describe('GET /api/social/nearby/people meetup status', () => {
@@ -30,7 +30,7 @@ describe('GET /api/social/nearby/people meetup status', () => {
 
     const res = await request(app)
       .get('/api/social/nearby/people?lat=-26.31&lng=31.13&radiusKm=25')
-      .set(auth(ME))
+      .set(await auth(ME))
       .expect(200);
     const row = res.body.data.people.find((p: any) => p.username === 'near_a');
     expect(row.meetupStatus).toBe('pending');

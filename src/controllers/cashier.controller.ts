@@ -11,7 +11,8 @@ import { WalletDeclinedError } from '@services/merchant.service';
 import { CashierService } from '@services/cashier.service';
 import { EventTagService } from '@services/eventTag.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
-import { cashTopupSchema } from '@validators/reseller.validator';
+import { TopupMethod } from '@models/walletTopup.model';
+import { deskTopupSchema } from '@validators/reseller.validator';
 import { cashierWithdrawSchema } from '@validators/cashier.validator';
 import { CashierToken, CashierPermission } from '@interfaces/cashier.interface';
 import { resolveOperatorEventScope, operatorMayActOnEvent } from '@services/operatorEventScope.service';
@@ -25,7 +26,7 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
 
 /**
  * Load a cashless, PUBLISHED event or send the right 4xx. Mirrors the lifecycle
- * guards in ResellerController.cashTopup / MerchantController.charge — a cashier
+ * guards in ResellerController.topup / MerchantController.charge — a cashier
  * token must not move money at a non-cashless, cancelled, or not-yet-live event.
  *
  * Also the single chokepoint for the cashier's event assignment: every money
@@ -105,6 +106,7 @@ export class CashierController {
         .limit(100)
         .lean();
       return ApiResponseUtil.success(res, {
+        permissions: cashier.permissions,
         events: events.map((e: any) => ({ id: String(e._id), name: e.name, venue: e.venue, eventDate: e.eventDate })),
       });
     } catch (e: any) {
@@ -114,13 +116,24 @@ export class CashierController {
 
   /**
    * POST /api/cashier/topup — load cash onto a band's wallet. Same money move as
-   * the reseller desk (WalletService.topUpCash), tagged recordedByType 'Cashier'
+   * the reseller desk (WalletService.topUpAtDesk), tagged recordedByType 'Cashier'
    * so it attributes to this cashier in reports and her own transactions.
    */
   static async topup(req: Request, res: Response): Promise<any> {
     try {
-      const { error, value } = cashTopupSchema.validate(req.body);
+      const { error, value } = deskTopupSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
+
+      const permissions: Record<TopupMethod, CashierPermission> = {
+        cash: CashierPermission.CASH_TOPUP,
+        card: CashierPermission.CARD_TOPUP,
+        deltapay: CashierPermission.DELTAPAY_TOPUP,
+        mobile_money: CashierPermission.MOBILE_MONEY_TOPUP,
+      };
+      const permission = permissions[value.method as TopupMethod];
+      if (!(req as any).cashier.permissions.includes(permission)) {
+        return ApiResponseUtil.forbidden(res, `This cashier is not allowed to reload by ${value.method}`);
+      }
 
       const event = await loadCashlessEvent(req, res, value.eventId);
       if (!event) return;
@@ -174,10 +187,10 @@ export class CashierController {
 
       if (!wallet) return ApiResponseUtil.error(res, 'No wallet for that band/ticket', 404);
 
-      const result = await WalletService.topUpCash({
+      const result = await WalletService.topUpAtDesk({
         walletId: String(wallet._id),
         eventId: value.eventId,
-        amount: value.amount,
+        amount: value.amount, method: value.method,
         recordedBy: cashier.cashierId,
         recordedByType: 'Cashier',
         clientTxnId: value.clientTxnId,
@@ -185,6 +198,7 @@ export class CashierController {
       return ApiResponseUtil.success(res, {
         newBalance: result.wallet.balance,
         amount: result.topup.amount,
+        method: result.topup.method,
       });
     } catch (e: any) {
       if (e instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, e.message, 409);
@@ -265,12 +279,21 @@ export class CashierController {
    * param, so a cashier can never see another cashier's desk.
    */
   static async transactions(req: Request, res: Response): Promise<any> {
+    return CashierController.transactionHistory(req, res, false);
+  }
+
+  /** Extended history for clients that understand all four deposit methods. */
+  static async transactionsAllMethods(req: Request, res: Response): Promise<any> {
+    return CashierController.transactionHistory(req, res, true);
+  }
+
+  private static async transactionHistory(req: Request, res: Response, allMethods: boolean): Promise<any> {
     try {
       const cashier = (req as any).cashier as CashierToken;
       const rawLimit = Number(req.query.limit);
       const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 50;
       const eventId = req.query.eventId ? String(req.query.eventId) : undefined;
-      const result = await CashierService.listTransactions({ cashierId: cashier.cashierId, eventId, limit });
+      const result = await CashierService.listTransactions({ cashierId: cashier.cashierId, eventId, limit, ...(allMethods ? {} : { methods: ['cash', 'card'] as const }) });
       return ApiResponseUtil.success(res, result);
     } catch (e: any) {
       return ApiResponseUtil.error(res, e?.message || 'Failed to load transactions', 500);

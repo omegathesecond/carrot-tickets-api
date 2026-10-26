@@ -28,15 +28,15 @@ async function twoStallTable(): Promise<{ table: ITable; bar: string; kitchen: s
     openedBy: String(WAITER), items: [], subtotal: 0,
   });
   const args = { tableId: String(opened._id), eventId: String(EVENT), qty: 1, addedBy: String(WAITER) };
-  await TableService.addItem({ ...args, merchantId: bar.merchantId, productId: bar.productId });
-  const table = await TableService.addItem({ ...args, merchantId: kitchen.merchantId, productId: kitchen.productId });
+  await TableService.addItems({ ...args, items: [{ merchantId: bar.merchantId, productId: bar.productId, qty: args.qty }] });
+  const table = await TableService.addItems({ ...args, items: [{ merchantId: kitchen.merchantId, productId: kitchen.productId, qty: args.qty }] });
   return { table, bar: bar.merchantId, kitchen: kitchen.merchantId };
 }
 
 async function fundedTag(amount: number, bandUid: string) {
   await enrolTags(EVENT, bandUid);
   const { wallet } = await WalletService.ensureStandaloneWalletForBand({ eventId: String(EVENT), bandUid });
-  await WalletService.topUpCash({
+  await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(wallet._id), eventId: String(EVENT), amount,
     recordedBy: 'fixture-desk', recordedByType: 'Cashier', clientTxnId: `fund-${wallet._id}`,
   });

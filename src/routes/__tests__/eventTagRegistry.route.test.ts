@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
-import { signVendorToken, signSuperAdminToken } from '@/__tests__/helpers/auth';
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { Ticket } from '@models/ticket.model';
 import { TicketStatus } from '@interfaces/ticket.interface';
@@ -29,7 +29,7 @@ async function seedCashlessEvent() {
     vendorId: String(vendorId),
     // The organizer holds ISSUE_TAGS through the OWNER role, which is what lets
     // them register a whole tag order without hiring a desk first.
-    organizerToken: signVendorToken(String(vendorId), { permissions: [TicketsPermission.ISSUE_TAGS] }),
+    organizerToken: await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.ISSUE_TAGS] }),
   };
 }
 
@@ -245,7 +245,7 @@ describe('Carrot staff working the register on an organizer\'s behalf', () => {
 
     const res = await request(app)
       .get(`/api/tickets/events/${eventId}/tags/registry`)
-      .set('Authorization', `Bearer ${signSuperAdminToken()}`);
+      .set('Authorization', `Bearer ${await signAdminSessionToken()}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.counts).toEqual({ active: 0, retired: 0, total: 0 });
@@ -253,7 +253,7 @@ describe('Carrot staff working the register on an organizer\'s behalf', () => {
 
   it('enrols a tag order and retires a tag on that event', async () => {
     const { eventId } = await seedCashlessEvent();
-    const admin = signSuperAdminToken();
+    const admin = await signAdminSessionToken();
 
     const registered = await request(app)
       .post(`/api/tickets/events/${eventId}/tags/registry`)
@@ -277,7 +277,7 @@ describe('Carrot staff working the register on an organizer\'s behalf', () => {
 
     const res = await request(app)
       .get(`/api/tickets/events/${eventId}/tags/registry`)
-      .set('Authorization', `Bearer ${signVendorToken(vendorId, { permissions: [] })}`);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId, { permissions: [] })}`);
 
     expect(res.status).toBe(403);
   });

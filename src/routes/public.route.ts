@@ -1,3 +1,4 @@
+import { EventCouponController } from '@controllers/eventCoupon.controller';
 import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
 import { BuyerProfileController } from '@controllers/buyerProfile.controller';
@@ -12,7 +13,7 @@ import { UpdateController } from '@controllers/update.controller';
 import { EventQuestionController } from '@controllers/eventQuestion.controller';
 import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import { MenuPublicController } from '@controllers/menuPublic.controller';
-import { authenticateBuyer, authenticateBuyerOrOrganizer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { authenticatePlanParticipant, authenticateBuyer, authenticateBuyerOrOrganizer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { avatarUpload, communityEventUpload, handleMulterError, validateFileUpload } from '@middleware/media.middleware';
 import { CommunityEventSubmitController } from '@controllers/communityEventSubmit.controller';
@@ -195,16 +196,16 @@ router.delete('/vote-comments/:commentId', authenticateBuyerOrOrganizer, VoteCon
  * Share&Earn — event-detail info/join (spec §2/§3, visible logged out),
  * link-click tracking + code resolution (§4/§5, public), My Share&Earn (§9)
  * and reward redemption/leaderboard opt-out (§8/§14) require a signed-in
- * buyer. Fixed-segment routes registered before '/events/:eventId/...' where
+ * buyer or services-brand participant. Fixed-segment routes registered before '/events/:eventId/...' where
  * they'd otherwise collide — same convention as eventPlan.route.ts.
  */
-router.get('/my-share-earn', authenticateBuyer, ShareEarnController.mine);
+router.get('/my-share-earn', authenticatePlanParticipant, ShareEarnController.mine);
 router.post('/share-earn/track-click', ShareEarnController.trackClick);
 router.get('/share-earn/resolve/:referralCode', ShareEarnController.resolveCode);
-router.patch('/share-earn/promoters/:promoterId/leaderboard-opt-out', authenticateBuyer, ShareEarnController.setLeaderboardOptOut);
-router.post('/share-earn/rewards/:rewardId/redeem', authenticateBuyer, ShareEarnController.redeemReward);
+router.patch('/share-earn/promoters/:promoterId/leaderboard-opt-out', authenticatePlanParticipant, ShareEarnController.setLeaderboardOptOut);
+router.post('/share-earn/rewards/:rewardId/redeem', authenticatePlanParticipant, ShareEarnController.redeemReward);
 router.get('/events/:eventId/share-earn', optionalTicketsAuth, ShareEarnController.getEventCampaign);
-router.post('/events/:eventId/share-earn/join', authenticateBuyer, ShareEarnController.join);
+router.post('/events/:eventId/share-earn/join', authenticatePlanParticipant, ShareEarnController.join);
 router.get('/events/:eventId/share-earn/leaderboard', ShareEarnController.leaderboard);
 
 /**
@@ -377,6 +378,8 @@ router.post('/services/:businessId/reviews', authenticateBuyerOrOrganizer, Servi
  * @access  Buyer (Bearer buyer token). Keshless card number + PIN for >= E50.
  * @body    eventId, ticketTypeId, quantity, customerName?, keshlessCardNumber, keshlessPin?
  */
+router.post('/coupons/quote', authenticateBuyer, EventCouponController.quote);
+
 router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
 
 /**

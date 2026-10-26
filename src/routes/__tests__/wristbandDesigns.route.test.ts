@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
@@ -8,10 +9,8 @@ import { WristbandDesign } from '@models/wristbandDesign.model';
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const EVENT_A = new mongoose.Types.ObjectId().toHexString();
 
-function token(opts: { isSuperAdmin?: boolean; permissions?: string[] } = {}) {
-  return jwt.sign({ app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: opts.permissions ?? [], isSuperAdmin: !!opts.isSuperAdmin,
-    vendorId: new mongoose.Types.ObjectId().toHexString() }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; permissions?: string[] } = {}) {
+  return (!!opts.isSuperAdmin ? await signAdminSessionToken() : await seedVendorSessionToken(new mongoose.Types.ObjectId().toHexString(), { permissions: opts.permissions ?? [] }));
 }
 
 const TEMPLATE = { key: 'a4-10up-25mm', pageWidthMm: 210, pageHeightMm: 297, bandWidthMm: 254, bandHeightMm: 25.4, marginTopMm: 12, marginLeftMm: 8, gapYMm: 2, bandsPerSheet: 10, tabZoneMm: 20 };
@@ -21,7 +20,7 @@ afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 it('super-admin creates, lists, updates, deletes a design', async () => {
-  const auth = { Authorization: `Bearer ${token({ isSuperAdmin: true })}` };
+  const auth = { Authorization: `Bearer ${await token({ isSuperAdmin: true })}` };
 
   const created = await request(app).post('/api/tickets/wristband-designs').set(auth)
     .send({ eventId: EVENT_A, name: 'VIP', sheetTemplate: TEMPLATE, designJson: { background: '#fff', elements: [] } });
@@ -44,26 +43,26 @@ it('super-admin creates, lists, updates, deletes a design', async () => {
 
 it('team member with tickets:print_wristbands passes', async () => {
   const res = await request(app).get(`/api/tickets/wristband-designs?eventId=${EVENT_A}`)
-    .set('Authorization', `Bearer ${token({ permissions: ['tickets:print_wristbands'] })}`);
+    .set('Authorization', `Bearer ${await token({ permissions: ['tickets:print_wristbands'] })}`);
   expect(res.status).toBe(200);
 });
 
 it('organizer without the permission is forbidden (403)', async () => {
   const res = await request(app).get(`/api/tickets/wristband-designs?eventId=${EVENT_A}`)
-    .set('Authorization', `Bearer ${token()}`);
+    .set('Authorization', `Bearer ${await token()}`);
   expect(res.status).toBe(403);
 });
 
 it('create rejects a missing eventId (400)', async () => {
   const res = await request(app).post('/api/tickets/wristband-designs')
-    .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+    .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
     .send({ name: 'x', sheetTemplate: TEMPLATE, designJson: {} });
   expect(res.status).toBe(400);
 });
 
 it('update of an unknown id 404s', async () => {
   const res = await request(app).put(`/api/tickets/wristband-designs/${new mongoose.Types.ObjectId()}`)
-    .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+    .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
     .send({ name: 'x' });
   expect(res.status).toBe(404);
 });

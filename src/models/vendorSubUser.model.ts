@@ -18,6 +18,7 @@ const vendorSubUserSchema = new Schema<IVendorSubUser>({
     sparse: true,
     trim: true
   },
+  authVersion: { type: Number, default: 0, required: true },
   password: {
     type: String,
     required: [true, 'Password is required'],
@@ -96,6 +97,7 @@ vendorSubUserSchema.pre('save', async function(next) {
   try {
     // Hash password if modified
     if (this.isModified('password')) {
+      this.authVersion += 1;
       const salt = await bcrypt.genSalt(12);
       this.password = await bcrypt.hash(this.password, salt);
     }

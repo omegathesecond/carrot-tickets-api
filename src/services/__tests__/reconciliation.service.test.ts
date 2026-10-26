@@ -14,7 +14,7 @@ describe('ReconciliationService', () => {
 
   it('reports a zero-drift invariant on an empty event', async () => {
     const r = await ReconciliationService.checkInvariant(eventId);
-    expect(r).toEqual({ ok: true, float: 0, walletsOwed: 0, merchantsOwed: 0, feesEarned: 0, drift: 0 });
+    expect(r).toEqual({ ok: true, float: 0, walletsOwed: 0, merchantsOwed: 0, feesEarned: 0, organizerOwed: 0, drift: 0 });
   });
 
   it('holds the identity after top-up then spend', async () => {

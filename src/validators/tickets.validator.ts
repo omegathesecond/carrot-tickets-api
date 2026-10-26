@@ -1,3 +1,4 @@
+import { purchaseChargeSchema } from '@utils/purchaseCharge.util';
 import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
@@ -92,7 +93,7 @@ export const registerSchema = Joi.object({
 /**
  * Self-service SERVICES (event supplier) business signup. Mirrors registerSchema's
  * OTP-gated shape but replaces businessType/primaryContact with the services
- * fields (serviceCategory required, startingPrice/city optional).
+ * fields (serviceCategories required, startingPrice/city optional).
  */
 export const businessRegisterSchema = Joi.object({
   businessName: Joi.string().required().trim().max(100).messages({
@@ -103,10 +104,7 @@ export const businessRegisterSchema = Joi.object({
   // enum) — checked by ServiceCategoryService.isValidActive in
   // TicketsAuthService.registerBusiness, which throws the same
   // 'Choose a valid service category' message this validator used to.
-  serviceCategory: Joi.string().trim().required().messages({
-    'string.empty': 'Choose a service category',
-    'any.required': 'Choose a service category',
-  }),
+  serviceCategories: Joi.array().items(Joi.string().trim().required()).min(1).unique().required(),
   email: Joi.string().email().trim().lowercase().optional(),
   phoneNumber: Joi.string().trim().max(20).optional(),
   password: Joi.string().required().min(6),
@@ -339,6 +337,7 @@ export const createEventSchema = Joi.object({
 }).custom(priceRangeCheck);
 
 export const updateEventSchema = Joi.object({
+  purchaseCharge: purchaseChargeSchema,
   name: Joi.string().trim().max(200).optional(),
   description: Joi.string().max(2000).optional(),
   venue: Joi.string().trim().max(200).optional(),

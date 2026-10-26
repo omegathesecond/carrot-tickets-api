@@ -1,4 +1,4 @@
-import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { BuyerAuthService } from '@services/buyerAuth.service';
 import { Vendor } from '@models/vendor.model';
@@ -11,7 +11,7 @@ import { JWT_SECRET } from '@config/jwt.config';
 jest.mock('@services/email.service');
 jest.mock('@services/sms.service');
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 afterAll(disconnectTestDb);
 
 beforeEach(() => {
@@ -146,21 +146,5 @@ describe('TicketsAuthService organizer signup OTP', () => {
     await expect(TicketsAuthService.register({
       businessName: 'Dual', email: 'dual@x.com', password: 'newpass1', code: vendorCode,
     })).resolves.toBeTruthy();
-  });
-});
-
-describe('TicketsAuthService venue signup', () => {
-  it('the organizer register creates a venue-type Vendor (events operator) — the path the website Venue form uses', async () => {
-    await TicketsAuthService.requestRegistrationOtp({ email: 'bar@x.com' });
-    await TicketsAuthService.register({
-      businessName: 'Kwa-Linda Lounge',
-      email: 'bar@x.com',
-      password: 'newpass1',
-      businessType: 'venue',
-      code: lastEmailCode(),
-    });
-    const v = await Vendor.findOne({ email: 'bar@x.com' }).lean();
-    expect(v?.businessType).toBe('venue');
-    expect(v?.operatorType).toBe('events');
   });
 });

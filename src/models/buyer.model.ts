@@ -1,10 +1,15 @@
-import { Schema, model, Document } from 'mongoose';
+import { Schema, model, Document, Types } from 'mongoose';
 import bcrypt from 'bcrypt';
 
 /** Canonical username shape. Lives on the model so the schema validator and
  *  the generator in @utils/username.util share one definition (the util
  *  imports from here — the reverse would be a circular import). */
 export const USERNAME_REGEX = /^[a-z0-9_.]{3,20}$/;
+
+/** One non-login participant profile per services brand. */
+export const PROVIDER_PARTICIPANT_INDEX_OPTIONS = {
+  unique: true, partialFilterExpression: { sourceVendorId: { $type: 'objectId' } },
+};
 
 /** How often a buyer may change their profile `name` — see `nameChangedAt`. */
 export const NAME_CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
@@ -33,6 +38,9 @@ export interface IBuyerLocation {
  * Passwords are bcrypt-hashed via the pre-save hook and are never returned by default (`select: false`).
  */
 export interface IBuyer extends Document {
+  /** Internal participant profile for a services brand; has no buyer login. */
+  sourceVendorId?: Types.ObjectId;
+  authVersion: number;
   phone?: string; // normalised, e.g. +26878422613 (optional — email-only buyers have none)
   email?: string; // lowercased, unique among buyers with an email
   emailVerifiedAt?: Date;
@@ -86,6 +94,7 @@ const buyerSchema = new Schema<IBuyer>(
     // legacy non-sparse phone_1 rejecting every email-only buyer after the first
     // with `E11000 { phone: null }`. The partial `$type: 'string'` filter indexes
     // only real string values, ignoring null/absent entirely.
+    sourceVendorId: { type: Schema.Types.ObjectId, ref: 'Vendor' },
     phone: { type: String, trim: true },
     email: {
       type: String,
@@ -95,9 +104,10 @@ const buyerSchema = new Schema<IBuyer>(
     },
     emailVerifiedAt: { type: Date },
     phoneVerifiedAt: { type: Date },
+    authVersion: { type: Number, default: 0, required: true },
     password: {
       type: String,
-      required: [true, 'Password is required'],
+      required: function () { return !this.sourceVendorId; },
       minlength: [6, 'Password must be at least 6 characters long'],
       select: false
     },
@@ -172,11 +182,13 @@ buyerSchema.index({ location: '2dsphere' });
 // queries { createdAt: { $lt } } sorted newest-first. Must match the live DB
 // (autoIndex) — see the partial-index note above.
 buyerSchema.index({ createdAt: -1 });
+buyerSchema.index({ sourceVendorId: 1 }, PROVIDER_PARTICIPANT_INDEX_OPTIONS);
 
 // At least one contact handle must exist — phone and email are peers, but a
-// buyer with neither has no identity to key tickets / tokens off.
+// buyer with neither has no identity to key tickets / tokens off. Internal
+// services-brand participants authenticate exclusively through their Vendor.
 buyerSchema.pre('validate', function (next) {
-  if (!this.phone && !this.email) {
+  if (!this.sourceVendorId && !this.phone && !this.email) {
     next(new Error('A buyer needs a phone or email'));
     return;
   }
@@ -186,6 +198,7 @@ buyerSchema.pre('validate', function (next) {
 // Hash the password whenever it is set/changed.
 buyerSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
+  this.authVersion += 1;
   try {
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);

@@ -1,3 +1,4 @@
+import mongoose, { ClientSession } from 'mongoose';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 import { Vendor } from '@models/vendor.model';
@@ -13,6 +14,14 @@ import { classifyIdentifier, Identifier } from '@utils/identifier.util';
 import { OtpService } from '@services/otp.service';
 import { ServiceCategoryService } from '@services/serviceCategory.service';
 import { JWT_SECRET } from '@config/jwt.config';
+import { Buyer } from '@models/buyer.model';
+import { SecurityRateLimitService } from '@services/securityRateLimit.service';
+import { HttpError } from '@utils/httpError.util';
+
+export class SessionAuthError extends HttpError {
+  readonly code = 'SESSION_INVALID';
+  constructor(message = 'Session revoked. Please sign in again.') { super(401, message); }
+}
 
 const JWT_EXPIRY: string = process.env['JWT_EXPIRY'] || '15m';
 // Refresh tokens are opaque random strings stored in the RefreshToken collection
@@ -29,6 +38,39 @@ console.log('[TicketsAuth] JWT Configuration:', {
 });
 
 export class TicketsAuthService {
+  /** Re-resolve identity and capabilities from current rows. Credential
+   * versions are mandatory: pre-security tokens require a fresh sign-in. */
+  static async validateSession(decoded: any): Promise<any> {
+    if (decoded.userType === 'gate-operator') return decoded;
+    if (!Number.isInteger(decoded.authVersion)) throw new SessionAuthError();
+    if (decoded.userType === 'buyer') {
+      if (!decoded.buyerId) throw new SessionAuthError();
+      const buyer = await Buyer.findById(decoded.buyerId).select('authVersion phone email');
+      if (!buyer || buyer.authVersion !== decoded.authVersion) throw new SessionAuthError();
+      return { ...decoded, userPhone: buyer.phone, userEmail: buyer.email };
+    }
+    if (decoded.userType !== 'vendor' && decoded.userType !== 'sub-user') throw new SessionAuthError();
+    const vendor = await Vendor.findById(decoded.vendorId).select('authVersion isActive apps operatorType isSuperAdmin');
+    if (!vendor?.isActive || !vendor.apps?.tickets?.enabled) throw new SessionAuthError();
+    if (decoded.userType === 'vendor') {
+      if (vendor.authVersion !== decoded.authVersion) throw new SessionAuthError();
+      return { ...decoded, isSuperAdmin: !!vendor.isSuperAdmin, role: TicketsRole.OWNER,
+        permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType) };
+    }
+    const subUser = await VendorSubUser.findById(decoded.userId).select('authVersion vendorId isActive');
+    if (!subUser?.isActive || String(subUser.vendorId) !== String(vendor._id) || subUser.authVersion !== decoded.authVersion) throw new SessionAuthError();
+    const access = await TicketsUserAccess.findOne({ userId: subUser._id, isActive: true });
+    if (!access) throw new SessionAuthError();
+    return { ...decoded, isSuperAdmin: false, role: access.role,
+      permissions: scopePermissionsToType(access.permissions as any, vendor.operatorType) };
+  }
+
+  static async verifyAndResolveSession(token: string): Promise<any> {
+    let decoded;
+    try { decoded = this.verifyToken(token); }
+    catch (error: any) { throw new SessionAuthError(error.message); }
+    return this.validateSession(decoded);
+  }
   /**
    * The single contact channel an organizer verifies at signup. Email wins when
    * both are supplied — the other (if given) is still stored, just unverified.
@@ -111,7 +153,7 @@ export class TicketsAuthService {
     // consume the code once the save has landed. If save throws (a duplicate-key
     // race), the code stays valid so the organizer can retry the SAME code
     // rather than being told it "expired" (see OtpService.withVerified).
-    const vendor = await OtpService.withVerified('vendor', id, code, async () => {
+    const vendor = await OtpService.withVerified('vendor', id, code, async (session) => {
       const v = new Vendor({
         businessName,
         email,
@@ -122,12 +164,13 @@ export class TicketsAuthService {
         // verificationStatus, isActive, isVerified and apps.tickets.enabled all
         // fall back to the model defaults (PENDING / true / false / true).
       });
-      await v.save();
+      await v.save({ session });
       return v;
     });
 
     const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
     const payload = {
+      authVersion: vendor.authVersion,
       vendorId: vendor._id.toString(),
       userType: 'vendor',
       app: 'tickets',
@@ -137,7 +180,7 @@ export class TicketsAuthService {
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
     const refreshToken = this.generateRefreshToken();
-    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor', vendor.authVersion);
 
     return {
       accessToken,
@@ -174,12 +217,12 @@ export class TicketsAuthService {
     email?: string;
     phoneNumber?: string;
     password: string;
-    serviceCategory: string;
+    serviceCategories: string[];
     startingPrice?: { amountCents: number; unit?: 'day' | 'event' | 'hour' };
     city?: string;
     code: string;
   }) {
-    const { businessName, email, phoneNumber, password, serviceCategory, startingPrice, city, code } = params;
+    const { businessName, email, phoneNumber, password, serviceCategories, startingPrice, city, code } = params;
 
     const id = this.signupIdentifier(email, phoneNumber);
     if (!password || password.length < 6) {
@@ -197,29 +240,31 @@ export class TicketsAuthService {
     // Categories are DB-driven now (ServiceCategoryService), not a hardcoded
     // enum — check BEFORE burning the OTP code, so an invalid category never
     // consumes it (same reasoning as the duplicate-account guards above).
-    if (!(await ServiceCategoryService.isValidActive(serviceCategory))) {
+    if (!Array.isArray(serviceCategories) || !serviceCategories.length ||
+      !(await Promise.all(serviceCategories.map((category) => ServiceCategoryService.isValidActive(category)))).every(Boolean)) {
       throw new Error('Choose a valid service category');
     }
 
-    const vendor = await OtpService.withVerified('vendor', id, code, async () => {
+    const vendor = await OtpService.withVerified('vendor', id, code, async (session) => {
       const v = new Vendor({
         businessName,
         email,
         phoneNumber,
         password,
         operatorType: OperatorType.SERVICES,
-        serviceCategory,
+        serviceCategories,
         ...(startingPrice ? { startingPrice: { amountCents: startingPrice.amountCents, unit: startingPrice.unit ?? 'day' } } : {}),
         ...(city ? { address: { city } } : {}),
         // verificationStatus, isActive, isVerified and apps.tickets.enabled all
         // fall back to the model defaults (PENDING / true / false / true).
       });
-      await v.save();
+      await v.save({ session });
       return v;
     });
 
     const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
     const payload = {
+      authVersion: vendor.authVersion,
       vendorId: vendor._id.toString(),
       userType: 'vendor',
       app: 'tickets',
@@ -229,7 +274,7 @@ export class TicketsAuthService {
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
     const refreshToken = this.generateRefreshToken();
-    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor', vendor.authVersion);
 
     return {
       accessToken,
@@ -322,9 +367,9 @@ export class TicketsAuthService {
     // Verify first, apply the new password inside the guarded action, and only
     // consume the code once the save has landed. If the save throws, the code
     // stays valid so the organizer can retry the same code (see OtpService).
-    await OtpService.withVerified('vendor', id, code, async () => {
+    await OtpService.withVerified('vendor', id, code, async (session) => {
       vendor.password = newPassword;
-      await vendor.save();
+      await vendor.save({ session });
     });
 
     // A password reset invalidates other sessions: revoke existing refresh
@@ -333,6 +378,7 @@ export class TicketsAuthService {
 
     const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
     const payload = {
+      authVersion: vendor.authVersion,
       vendorId: vendor._id.toString(),
       userType: 'vendor',
       app: 'tickets',
@@ -342,7 +388,7 @@ export class TicketsAuthService {
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
     const refreshToken = this.generateRefreshToken();
-    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+    await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor', vendor.authVersion);
 
     return {
       accessToken,
@@ -398,6 +444,8 @@ export class TicketsAuthService {
    * Automatically detects user type (Vendor or SubUser) and authenticates accordingly
    */
   static async login(identifier: string, password: string) {
+    const loginIdentity = phoneLoginCandidates(identifier)[0] || identifier;
+    await SecurityRateLimitService.consume('vendor-login', loginIdentity, 10, 15 * 60 * 1000);
     // Try Vendor (email or phone). Email casing/whitespace is handled by the
     // schema's lowercase+trim setters (applied to query filters too). Phone
     // numbers are stored verbatim, so match every equivalent format the number
@@ -412,6 +460,7 @@ export class TicketsAuthService {
     }).select('+password');
 
     if (vendor && await vendor.comparePassword(password)) {
+      await SecurityRateLimitService.clear('vendor-login', loginIdentity);
       if (!vendor.isActive) {
         throw new Error('Vendor account is inactive');
       }
@@ -423,6 +472,7 @@ export class TicketsAuthService {
       // Generate tokens for vendor
       const ownerPerms = scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType);
       const payload = {
+        authVersion: vendor.authVersion,
         vendorId: vendor._id.toString(),
         userType: 'vendor',
         app: 'tickets',
@@ -434,7 +484,7 @@ export class TicketsAuthService {
       const refreshToken = this.generateRefreshToken();
 
       // Store refresh token
-      await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor');
+      await this.storeRefreshToken(refreshToken, undefined, vendor._id.toString(), 'vendor', vendor.authVersion);
 
       return {
         accessToken,
@@ -459,6 +509,7 @@ export class TicketsAuthService {
     // Try SubUser (username-based)
     const subUser = await VendorSubUser.findOne({ username: identifier }).select('+password');
     if (subUser && await subUser.comparePassword(password)) {
+      await SecurityRateLimitService.clear('vendor-login', loginIdentity);
       if (!subUser.isActive) {
         throw new Error('User account is inactive');
       }
@@ -494,6 +545,7 @@ export class TicketsAuthService {
       // Generate tokens for sub-user
       const subUserPerms = scopePermissionsToType(ticketsAccess.permissions as any, vendorForSubUser.operatorType);
       const payload = {
+        authVersion: subUser.authVersion,
         userId: subUser._id.toString(),
         vendorId: subUser.vendorId.toString(),
         userType: 'sub-user',
@@ -505,7 +557,7 @@ export class TicketsAuthService {
       const refreshToken = this.generateRefreshToken();
 
       // Store refresh token
-      await this.storeRefreshToken(refreshToken, subUser._id.toString(), subUser.vendorId.toString(), 'sub-user');
+      await this.storeRefreshToken(refreshToken, subUser._id.toString(), subUser.vendorId.toString(), 'sub-user', subUser.authVersion);
 
       return {
         accessToken,
@@ -536,7 +588,7 @@ export class TicketsAuthService {
       const decoded = jwt.verify(token, JWT_SECRET);
 
       // Verify it's a Tickets token
-      if ((decoded as any).app !== 'tickets') {
+      if ((decoded as any).app !== 'tickets' || (decoded as any).purpose) {
         console.error('[TicketsAuth] Token verification failed: Missing or invalid app claim');
         throw new Error('Invalid token for Carrot Tickets');
       }
@@ -570,6 +622,7 @@ export class TicketsAuthService {
   private static identityClaims(src: any) {
     return {
       app: 'tickets' as const,
+      authVersion: src.authVersion,
       userId: src.userId,
       vendorId: src.vendorId,
       userType: src.userType ?? 'vendor',
@@ -626,7 +679,8 @@ export class TicketsAuthService {
     // token and a persisted refresh token, so an SSO-handoff session can renew
     // itself the same way a password login can (previously it got a bare 15m
     // access token with no way to refresh — it hard-expired and stalled).
-    const claims = TicketsAuthService.identityClaims(decoded);
+    const current = await this.validateSession(decoded);
+    const claims = TicketsAuthService.identityClaims(current);
     const accessToken = jwt.sign(claims, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
     const refreshToken = this.generateRefreshToken();
     const isSubUser = claims.userType === 'sub-user';
@@ -635,6 +689,7 @@ export class TicketsAuthService {
       isSubUser ? claims.userId : undefined,
       claims.vendorId,
       isSubUser ? 'sub-user' : 'vendor',
+      claims.authVersion,
     );
     return { accessToken, refreshToken };
   }
@@ -679,7 +734,8 @@ export class TicketsAuthService {
       }
 
       const vendorForSubUser = await Vendor.findById(subUser.vendorId);
-      const subType = vendorForSubUser?.operatorType ?? OperatorType.EVENTS;
+      if (!vendorForSubUser?.isActive || !vendorForSubUser.apps?.tickets?.enabled) throw new SessionAuthError();
+      const subType = vendorForSubUser.operatorType;
 
       return {
         _id: subUser._id,
@@ -859,103 +915,135 @@ export class TicketsAuthService {
     userId: string | undefined,
     vendorId: string | undefined,
     userType: 'vendor' | 'sub-user',
-    deviceInfo?: string
+    authVersion: number,
+    deviceInfo?: string,
+    session?: ClientSession
   ): Promise<void> {
     const expiresAt = this.calculateExpiryDate(JWT_REFRESH_EXPIRY);
 
-    await RefreshToken.create({
+    await RefreshToken.create([{
       token: refreshToken,
+      authVersion,
       userId,
       vendorId,
       userType,
       expiresAt,
       deviceInfo,
       isRevoked: false
-    });
+    }], { session });
   }
 
   /**
    * Refresh access token using refresh token
    */
   static async refreshAccessToken(refreshTokenString: string): Promise<{ accessToken: string; refreshToken: string }> {
-    // Find refresh token in database
-    const refreshTokenDoc = await RefreshToken.findOne({
-      token: refreshTokenString,
-      isRevoked: false,
-      expiresAt: { $gt: new Date() }
+    if (typeof refreshTokenString !== 'string' || !refreshTokenString) {
+      throw new HttpError(400, 'Refresh token must be a non-empty string.');
+    }
+    let result!: { accessToken: string; refreshToken: string };
+    await mongoose.connection.transaction(async (session) => {
+      // Claim and rotate together; a dependency failure leaves the old token usable.
+      const refreshTokenDoc = await RefreshToken.findOneAndUpdate({
+        token: refreshTokenString,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() }
+      }, { $set: { isRevoked: true } }, { new: true, session });
+
+      if (!refreshTokenDoc || !Number.isInteger(refreshTokenDoc.authVersion)) {
+        throw new SessionAuthError('Invalid or expired refresh token');
+      }
+
+      // Get user data based on user type
+      let payload: any;
+
+      if (refreshTokenDoc.userType === 'vendor') {
+        const vendor = await Vendor.findById(refreshTokenDoc.vendorId).session(session);
+        if (!vendor || !vendor.isActive || !vendor.apps?.tickets?.enabled || vendor.authVersion !== refreshTokenDoc.authVersion) {
+          throw new SessionAuthError('Vendor account not found or inactive');
+        }
+
+        payload = {
+          authVersion: vendor.authVersion,
+          vendorId: vendor._id.toString(),
+          userType: 'vendor',
+          app: 'tickets',
+          role: TicketsRole.OWNER,
+          permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType),
+          isSuperAdmin: vendor.isSuperAdmin || false
+        };
+      } else {
+        const subUser = await VendorSubUser.findById(refreshTokenDoc.userId).session(session);
+        if (!subUser || !subUser.isActive || subUser.authVersion !== refreshTokenDoc.authVersion) {
+          throw new SessionAuthError('User account not found or inactive');
+        }
+
+        const ticketsAccess = await TicketsUserAccess.findOne({
+          userId: subUser._id,
+          isActive: true
+        }).session(session);
+
+        if (!ticketsAccess) {
+          throw new SessionAuthError('Carrot Tickets access not found');
+        }
+
+        const vendorForSubUser = await Vendor.findById(subUser.vendorId).session(session);
+        if (!vendorForSubUser?.isActive || !vendorForSubUser.apps?.tickets?.enabled) throw new SessionAuthError();
+        const subType = vendorForSubUser.operatorType;
+
+        payload = {
+          authVersion: subUser.authVersion,
+          userId: subUser._id.toString(),
+          vendorId: subUser.vendorId.toString(),
+          userType: 'sub-user',
+          app: 'tickets',
+          role: ticketsAccess.role,
+          permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType)
+        };
+      }
+
+      // Generate new access token
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
+
+      // Generate new refresh token (rotation)
+      const newRefreshToken = this.generateRefreshToken();
+
+      // The old token was claimed atomically above; concurrent replay fails.
+
+      // Store new refresh token
+      await this.storeRefreshToken(
+        newRefreshToken,
+        refreshTokenDoc.userId,
+        refreshTokenDoc.vendorId,
+        refreshTokenDoc.userType,
+        refreshTokenDoc.authVersion,
+        undefined,
+        session,
+      );
+
+      result = { accessToken, refreshToken: newRefreshToken };
     });
+    return result;
+  }
 
-    if (!refreshTokenDoc) {
-      throw new Error('Invalid or expired refresh token');
+  /** Organizer logout also invalidates the separate public-site SSO session.
+   * A single atomic version change revokes access, refresh and handoff tokens
+   * across organizer devices. Other account types retain refresh-only logout. */
+  static async logout(accessToken?: string, refreshToken?: string): Promise<void> {
+    if (refreshToken !== undefined && (typeof refreshToken !== 'string' || !refreshToken)) {
+      throw new HttpError(400, 'Refresh token must be a non-empty string.');
     }
-
-    // Get user data based on user type
-    let payload: any;
-
-    if (refreshTokenDoc.userType === 'vendor') {
-      const vendor = await Vendor.findById(refreshTokenDoc.vendorId);
-      if (!vendor || !vendor.isActive) {
-        throw new Error('Vendor account not found or inactive');
-      }
-
-      payload = {
-        vendorId: vendor._id.toString(),
-        userType: 'vendor',
-        app: 'tickets',
-        role: TicketsRole.OWNER,
-        permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType),
-        isSuperAdmin: vendor.isSuperAdmin || false
-      };
-    } else {
-      const subUser = await VendorSubUser.findById(refreshTokenDoc.userId);
-      if (!subUser || !subUser.isActive) {
-        throw new Error('User account not found or inactive');
-      }
-
-      const ticketsAccess = await TicketsUserAccess.findOne({
-        userId: subUser._id,
-        isActive: true
-      });
-
-      if (!ticketsAccess) {
-        throw new Error('Carrot Tickets access not found');
-      }
-
-      const vendorForSubUser = await Vendor.findById(subUser.vendorId);
-      const subType = vendorForSubUser?.operatorType ?? OperatorType.EVENTS;
-
-      payload = {
-        userId: subUser._id.toString(),
-        vendorId: subUser.vendorId.toString(),
-        userType: 'sub-user',
-        app: 'tickets',
-        role: ticketsAccess.role,
-        permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType)
-      };
+    // Refresh credentials also permit logout after the access token expires.
+    const stored = refreshToken ? await RefreshToken.findOne({ token: refreshToken, isRevoked: false, expiresAt: { $gt: new Date() } }) : null;
+    const identity = stored || (accessToken ? await this.verifyAndResolveSession(accessToken) : null);
+    if (!identity) throw new SessionAuthError('A valid session is required to log out.');
+    if (identity.userType === 'vendor') {
+      await Vendor.updateOne(
+        { _id: identity.vendorId, authVersion: identity.authVersion },
+        { $inc: { authVersion: 1 } },
+      );
+    } else if (refreshToken) {
+      await this.revokeRefreshToken(refreshToken);
     }
-
-    // Generate new access token
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
-
-    // Generate new refresh token (rotation)
-    const newRefreshToken = this.generateRefreshToken();
-
-    // Revoke old refresh token
-    refreshTokenDoc.isRevoked = true;
-    await refreshTokenDoc.save();
-
-    // Store new refresh token
-    await this.storeRefreshToken(
-      newRefreshToken,
-      refreshTokenDoc.userId,
-      refreshTokenDoc.vendorId,
-      refreshTokenDoc.userType
-    );
-
-    return {
-      accessToken,
-      refreshToken: newRefreshToken
-    };
   }
 
   /**

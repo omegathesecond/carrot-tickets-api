@@ -1,4 +1,5 @@
 import type { IEvent, ITicketType } from '@interfaces/event.interface';
+import type { CouponSnapshot } from '@interfaces/eventCoupon.interface';
 
 /**
  * One tier plus how many of it — the wire shape a client sends. A single-tier
@@ -28,6 +29,7 @@ export interface ResolvedLine {
  * covers instead of the buyer (netted out of their proceeds, never charged).
  */
 export interface ResolvedCart {
+  coupon?: CouponSnapshot;
   event: IEvent;
   lines: ResolvedLine[];
   totalQuantity: number;

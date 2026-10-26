@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
@@ -18,7 +18,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data[0]).toMatchObject({ businessName: 'MTN Bushfire', followerCount: 0, eventCount: 0, isFollowing: false });
   });
 
@@ -29,7 +29,7 @@ describe('GET /api/social/suggestions/organizers', () => {
       logoUrl: 'https://cdn.example.com/logo.png', address: { city: 'Manzini' },
     });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data[0]).toEqual({
       id: String(vendor._id),
       businessName: 'MTN Bushfire',
@@ -45,7 +45,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
     await Vendor.create({ businessName: 'No Address Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data[0].location).toBeNull();
   });
 
@@ -55,7 +55,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     await Event.create({ vendorId: vendor._id, name: 'Published Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
     await Event.create({ vendorId: vendor._id, name: 'Draft Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.DRAFT, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const row = res.body.data.find((o: any) => o.id === String(vendor._id));
     expect(row.eventCount).toBe(1);
   });
@@ -65,7 +65,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     const followed = await Vendor.create({ businessName: 'Followed Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'organizer', targetId: followed._id });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const row = res.body.data.find((o: any) => o.id === String(followed._id));
     expect(row).toBeTruthy();
     expect(row.isFollowing).toBe(true);
@@ -78,7 +78,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     await Event.create({ vendorId: followed._id, name: 'Big Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
     await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'organizer', targetId: followed._id });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const order = res.body.data.map((o: any) => o.id);
     expect(order.indexOf(String(notFollowed._id))).toBeLessThan(order.indexOf(String(followed._id)));
   });
@@ -90,7 +90,9 @@ describe('GET /api/social/suggestions/organizers', () => {
     // eventless organizer sorted purely by eventCount/followerCount, so the
     // brand-new one is guaranteed to fall outside the established pool.
     for (let i = 0; i < 60; i++) {
-      const established = await Vendor.create({ businessName: `Established Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
+      // These are ranking fixtures, never password-authenticated. insertMany
+      // retains schema validation/defaults without 60 expensive password hashes.
+      const established = (await Vendor.insertMany([{ businessName: `Established Org ${i}`, slug: `established-org-${i}`, password: 'unused-ranking-fixture', isActive: true, verificationStatus: VerificationStatus.VERIFIED }]))[0]!;
       await Event.create({ vendorId: established._id, name: `Show ${i}`, venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
     }
     const brandNew = await Vendor.create({ businessName: 'Brand New Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
@@ -101,7 +103,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     // top-up path at all. Collecting the union across pages (rather than
     // asserting on one page) keeps the test independent of exactly where the
     // seeded shuffle happens to place it.
-    const token = signBuyerToken(PHONE);
+    const token = await signBuyerSessionToken(PHONE);
     const seen = new Set<string>();
     for (let page = 1; page <= 4; page++) {
       const res = await request(app)
@@ -122,7 +124,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     await Follow.create({ followerType: 'buyer', followerId: fan1._id, targetType: 'organizer', targetId: popular._id });
     await Follow.create({ followerType: 'buyer', followerId: fan2._id, targetType: 'organizer', targetId: popular._id });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const popularIndex = res.body.data.findIndex((o: any) => o.id === String(popular._id));
     const quietIndex = res.body.data.findIndex((o: any) => o.id === String(quiet._id));
     expect(res.body.data[popularIndex].followerCount).toBe(2);
@@ -147,7 +149,7 @@ describe('GET /api/social/suggestions/organizers', () => {
       }
     }
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const byId = (id: string) => res.body.data.find((o: any) => o.id === id);
     const topRow = byId(String(top._id));
     const midRow = byId(String(mid._id));
@@ -170,7 +172,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     const newActive = await Vendor.create({ businessName: 'New Active Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
     await Event.create({ vendorId: newActive._id, name: 'Fresh Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const order = res.body.data.map((o: any) => o.id);
     expect(order.indexOf(String(newActive._id))).toBeLessThan(order.indexOf(String(oldDormant._id)));
   });
@@ -189,7 +191,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     }
     await Event.create({ vendorId: newOrganizer._id, name: 'First Show', venue: 'V', eventDate: new Date(), startTime: new Date(), endTime: new Date(), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10, available: 10 }] });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const order = res.body.data.map((o: any) => o.id);
     expect(order.indexOf(String(newOrganizer._id))).toBeLessThan(order.indexOf(String(dormantWithFollowers._id)));
   });
@@ -200,7 +202,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     await Vendor.create({ businessName: 'Pending Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.PENDING });
     await Vendor.create({ businessName: 'Rejected Org', password: 'secret1', isActive: true, verificationStatus: VerificationStatus.REJECTED });
 
-    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const res = await request(app).get('/api/social/suggestions/organizers').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     const names = res.body.data.map((o: any) => o.businessName);
     expect(names).not.toContain('Inactive Org');
     expect(names).not.toContain('Pending Org');
@@ -217,8 +219,8 @@ describe('GET /api/social/suggestions/organizers', () => {
       await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
     }
 
-    const page1 = await request(app).get('/api/social/suggestions/organizers?limit=2&page=1').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
-    const page2 = await request(app).get('/api/social/suggestions/organizers?limit=2&page=2').set('Authorization', `Bearer ${signBuyerToken(PHONE)}`).expect(200);
+    const page1 = await request(app).get('/api/social/suggestions/organizers?limit=2&page=1').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
+    const page2 = await request(app).get('/api/social/suggestions/organizers?limit=2&page=2').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
 
     expect(page1.body.data).toHaveLength(2);
     expect(page2.body.data).toHaveLength(2);
@@ -232,7 +234,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     for (let i = 0; i < 6; i++) {
       await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
     }
-    const token = signBuyerToken(PHONE);
+    const token = await signBuyerSessionToken(PHONE);
     const a = await request(app).get('/api/social/suggestions/organizers?seed=12345').set('Authorization', `Bearer ${token}`).expect(200);
     const b = await request(app).get('/api/social/suggestions/organizers?seed=12345').set('Authorization', `Bearer ${token}`).expect(200);
     expect(a.body.data.map((o: any) => o.id)).toEqual(b.body.data.map((o: any) => o.id));
@@ -243,7 +245,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     for (let i = 0; i < 10; i++) {
       await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
     }
-    const token = signBuyerToken(PHONE);
+    const token = await signBuyerSessionToken(PHONE);
     const a = await request(app).get('/api/social/suggestions/organizers?seed=1').set('Authorization', `Bearer ${token}`).expect(200);
     const b = await request(app).get('/api/social/suggestions/organizers?seed=2').set('Authorization', `Bearer ${token}`).expect(200);
     // 10! permutations — a collision between two seeds is astronomically unlikely.
@@ -255,7 +257,7 @@ describe('GET /api/social/suggestions/organizers', () => {
     for (let i = 0; i < 6; i++) {
       await Vendor.create({ businessName: `Org ${i}`, password: 'secret1', isActive: true, verificationStatus: VerificationStatus.VERIFIED });
     }
-    const token = signBuyerToken(PHONE);
+    const token = await signBuyerSessionToken(PHONE);
     const p1 = await request(app).get('/api/social/suggestions/organizers?seed=42&limit=2&page=1').set('Authorization', `Bearer ${token}`).expect(200);
     const p2 = await request(app).get('/api/social/suggestions/organizers?seed=42&limit=2&page=2').set('Authorization', `Bearer ${token}`).expect(200);
     const ids1 = p1.body.data.map((o: any) => o.id);

@@ -2,6 +2,7 @@
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '@/app';
+import { seedOperator } from '@/__tests__/helpers/fixtures';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { ResellerPermission, ResellerRole } from '@interfaces/resellerPermission.interface';
 
@@ -11,10 +12,11 @@ beforeAll(connectTestDb);
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
-const resellerToken = () => jwt.sign({
-  scope: 'reseller', resellerId: 'r1', hubId: 'h1', operatorId: 'o1',
-  role: ResellerRole.ADMIN, permissions: Object.values(ResellerPermission),
-}, JWT_SECRET);
+async function resellerToken() {
+  const { resellerId, operator } = await seedOperator({ role: 'reseller_admin' });
+  return jwt.sign({ scope: 'reseller', resellerId, operatorId: String(operator._id),
+    role: ResellerRole.ADMIN, permissions: Object.values(ResellerPermission) }, JWT_SECRET);
+}
 
 /**
  * A reseller is an EXTERNAL ticket outlet. The organizer's tags are the
@@ -27,7 +29,7 @@ describe('a reseller can no longer register tags', () => {
   it('404s the old sell-band route even for a fully-permissioned reseller', async () => {
     const res = await request(app)
       .post('/api/reseller/sales/sell-band')
-      .set('Authorization', `Bearer ${resellerToken()}`)
+      .set('Authorization', `Bearer ${await resellerToken()}`)
       .send({
         eventId: '64c000000000000000000e01', ticketTypeId: '64c000000000000000000t01',
         bandUid: '04a22b1c', cashAmount: 0, clientTxnId: 'x1',
@@ -41,7 +43,7 @@ describe('a reseller can no longer register tags', () => {
     // being missing — removing the band sale must not have taken sales with it.
     const res = await request(app)
       .post('/api/reseller/sales')
-      .set('Authorization', `Bearer ${resellerToken()}`)
+      .set('Authorization', `Bearer ${await resellerToken()}`)
       .send({ eventId: '64c000000000000000000e01', ticketTypeId: '64c000000000000000000t01', quantity: 1, paymentMethod: 'cash' });
 
     expect(res.status).not.toBe(404);

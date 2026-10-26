@@ -8,6 +8,8 @@ export enum LedgerAccountType {
   MERCHANT = 'merchant',
   /** Revenue: Carrot service/commission income. Credit-normal (negative = earned). */
   FEES = 'fees',
+  /** Liability: customer purchase charges owed to this event's organizer. */
+  ORGANIZER = 'organizer',
 }
 
 /** Where float money physically sits. Only meaningful on FLOAT postings. */
@@ -16,6 +18,14 @@ export enum FloatTag {
   KESHLESS = 'keshless',
   /** Physical cash collected at a cash desk, not yet banked. */
   CASH_DESK = 'cash_desk',
+  /** Card payments approved on the organizer's separate card machine. */
+  CARD_DESK = 'card_desk',
+  /** DeltaPay receipts confirmed on a separate device. */
+  DELTAPAY_DESK = 'deltapay_desk',
+  /** Mobile Money receipts confirmed on a separate device. */
+  MOBILE_MONEY_DESK = 'mobile_money_desk',
+  /** Physical cash handed to a collector with both parties' confirmation. */
+  COLLECTOR_CASH = 'collector_cash',
   /**
    * Cash handed back to an attendee at the office after the event. Distinct
    * from CASH_DESK on purpose: tagging an office refund as cash-desk would

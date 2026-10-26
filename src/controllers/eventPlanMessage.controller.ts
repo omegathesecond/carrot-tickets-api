@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { resolvePlanParticipant } from '@utils/planParticipant.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { EventPlanMessageService } from '@services/eventPlanMessage.service';
 
@@ -8,7 +8,7 @@ export class EventPlanMessageController {
   /** GET /api/social/plans/:id/messages?before=&limit= */
   static async list(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       const before = req.query['before'] ? String(req.query['before']) : undefined;
       const limit = req.query['limit'] ? Number(req.query['limit']) : undefined;
       const messages = await EventPlanMessageService.list(
@@ -26,7 +26,7 @@ export class EventPlanMessageController {
   /** POST /api/social/plans/:id/messages { body, replyTo? } */
   static async send(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const message = await EventPlanMessageService.send(
         buyer,
@@ -45,7 +45,7 @@ export class EventPlanMessageController {
    *  then calls finalize. */
   static async createPost(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const { kind, body, replyTo, items, clientToken } = req.body || {};
       const result = await EventPlanMessageService.createPost(buyer, String(req.params['id'] || ''), {
@@ -64,7 +64,7 @@ export class EventPlanMessageController {
   /** POST /api/social/plans/:id/posts/:messageId/finalize */
   static async finalizePost(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const message = await EventPlanMessageService.finalizePost(buyer, String(req.params['id'] || ''), String(req.params['messageId'] || ''));
       return ApiResponseUtil.success(res, { message });
@@ -76,7 +76,7 @@ export class EventPlanMessageController {
   /** PATCH /api/social/plans/:id/messages/:messageId { body } */
   static async editCaption(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const message = await EventPlanMessageService.editCaption(
         buyer,
@@ -93,7 +93,7 @@ export class EventPlanMessageController {
   /** DELETE /api/social/plans/:id/messages/:messageId */
   static async remove(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanMessageService.deletePost(buyer, String(req.params['id'] || ''), String(req.params['messageId'] || ''));
       return ApiResponseUtil.success(res, { ok: true });
@@ -105,7 +105,7 @@ export class EventPlanMessageController {
   /** POST /api/social/plans/:id/read */
   static async markRead(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanMessageService.markRead(buyer, String(req.params['id'] || ''));
       return ApiResponseUtil.success(res, { ok: true });
@@ -117,7 +117,7 @@ export class EventPlanMessageController {
   /** POST /api/social/plans/:id/messages/:messageId/react { emoji } */
   static async react(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanMessageService.react(
         buyer,
@@ -134,7 +134,7 @@ export class EventPlanMessageController {
   /** DELETE /api/social/plans/:id/messages/:messageId/react */
   static async unreact(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await EventPlanMessageService.unreact(buyer, String(req.params['id'] || ''), String(req.params['messageId'] || ''));
       return ApiResponseUtil.success(res, { ok: true });

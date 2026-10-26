@@ -1,6 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export type NotificationType =
+  | 'market_application'
   | 'announcement'
   | 'dm'
   | 'mention'
@@ -82,6 +83,7 @@ const notificationSchema = new Schema<INotification>(
     type: {
       type: String,
       enum: [
+        'market_application',
         'announcement',
         'dm',
         'mention',

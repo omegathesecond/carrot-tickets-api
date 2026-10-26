@@ -3,13 +3,11 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
 import { Event } from '@models/event.model';
-import { Venue } from '@models/venue.model';
 import { MerchantToken } from '@interfaces/merchant.interface';
 import { deriveMerchantPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
 import { normalizeLoginCode } from '@utils/operatorCredentials.util';
-import { recordFailedPinAttempt, clearPinLockout } from '@utils/pinLockout.util';
-import { requireScopeOf } from '@utils/tradingScope.util';
+import { verifyOperatorPin } from '@utils/pinLockout.util';
 
 const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
 
@@ -20,7 +18,7 @@ const JWT_EXPIRY = process.env['JWT_EXPIRY'] || '7d';
  * (MerchantOperator); the STALL (Merchant) they work is read from that
  * document, never chosen by the device. The token therefore names both: the
  * stall money is owed to, and the human each charge is attributed to. It is
- * scoped to ONE event or ONE venue (the stall's owner) and carries the base permission (merchant:charge) plus
+ * scoped to ONE event and carries the base permission (merchant:charge) plus
  * whatever grants the operator holds, translated into the merchant namespace.
  * Authorization is NOT based on this token — the permissions field is only the
  * POS's rendering copy; the gate is in authenticateMerchant, which re-derives
@@ -38,38 +36,17 @@ export class MerchantAuthService {
       .select('+pin');
     if (!operator) throw new Error('Invalid credentials');
 
-    if (operator.lockedUntil && operator.lockedUntil.getTime() > Date.now()) {
-      throw new Error('Account locked. Try again later.');
-    }
-
-    const ok = await operator.comparePin(pin);
-    if (!ok) {
-      // Counted on the server, not on this loaded document — N guesses in
-      // flight together must reach N and lock, not all write 1.
-      await recordFailedPinAttempt(MerchantOperator, operator._id as any);
-      throw new Error('Invalid credentials');
-    }
-
     // The stall must still be active — suspending a stall must not leave its
     // people able to charge against it.
     const merchant = await Merchant.findOne({ _id: operator.merchantId, status: 'active' });
     if (!merchant) throw new Error('Invalid credentials');
-    // The stall's owner decides what the till shows and may do.
-    const scope = requireScopeOf(merchant);
-    let owner: { eventId: string; eventName?: string } | { venueId: string; venueName: string };
-    if (scope.kind === 'venue') {
-      const venue = await Venue.findById(scope.venueId).select('name status').lean();
-      // A suspended venue's people are signed out with it — refused loudly.
-      if (!venue || venue.status !== 'active') throw new Error('Venue trading is suspended');
-      owner = { venueId: scope.venueId, venueName: venue.name };
-    } else {
-      // Best effort: a missing/deleted event must not block login, it just
-      // means eventName comes back undefined and the UI falls back to the id.
-      const event = await Event.findById(scope.eventId).select('name').lean();
-      owner = { eventId: scope.eventId, ...(event?.name ? { eventName: event.name } : {}) };
-    }
 
-    await clearPinLockout(MerchantOperator, operator._id as any);
+    await verifyOperatorPin(MerchantOperator, operator, pin);
+
+    // The app's vendor header shows this instead of a raw eventId — best
+    // effort: a missing/deleted event must not block login, it just means
+    // eventName comes back undefined and the UI falls back to the id.
+    const event = await Event.findById(merchant.eventId).select('name').lean();
 
     // The role is the floor (every person on a till can charge); grants are
     // the per-person extras. Re-derived from the row on every request too —
@@ -83,8 +60,9 @@ export class MerchantAuthService {
       merchantId: (merchant._id as any).toString(),
       merchantOperatorId: (operator._id as any).toString(),
       operatorName: operator.fullName,
+      eventId: merchant.eventId.toString(),
       name: merchant.name,
-      ...owner,
+      ...(event?.name ? { eventName: event.name } : {}),
       permissions,
     };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
@@ -96,7 +74,8 @@ export class MerchantAuthService {
         merchantOperatorId: payload.merchantOperatorId,
         operatorName: operator.fullName,
         name: merchant.name,
-        ...owner,
+        eventId: payload.eventId,
+        eventName: event?.name,
         // The POS renders from this (which tabs and actions to show). It is NOT
         // authorization — authenticateMerchant re-derives the same set from the
         // operator row on every request, and that is the only thing the server

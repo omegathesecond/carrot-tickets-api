@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 // api/src/routes/__tests__/gateEventReads.route.test.ts
 //
 // A gate operator's token carries VIEW_EVENTS so the POS can list events and
@@ -36,10 +37,7 @@ async function seed() {
   await GateOperator.create({ fullName: 'Gate', loginCode, pin: '123456', scope: 'organizer', vendorId });
   const { accessToken: gateToken } = await GateOperatorAuthService.login(loginCode, '123456');
 
-  const organizerToken = jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner', vendorId: String(vendorId),
-    permissions: [TicketsPermission.VIEW_EVENTS], isSuperAdmin: false,
-  }, JWT_SECRET);
+  const organizerToken = (false ? await signAdminSessionToken() : await seedVendorSessionToken(String(vendorId), { permissions: [TicketsPermission.VIEW_EVENTS] }));
 
   return { eventId, vendorId: String(vendorId), gateToken, organizerToken };
 }

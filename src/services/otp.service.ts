@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import mongoose, { ClientSession } from 'mongoose';
+import { SecurityRateLimitService, SecurityRateLimitError } from '@services/securityRateLimit.service';
 import { BuyerOtp, OtpAudience } from '@models/buyerOtp.model';
 import { SmsService } from '@services/sms.service';
 import { EmailService } from '@services/email.service';
@@ -44,17 +46,11 @@ export class OtpService {
    * if the send gateway rejects the send (`sendFailMsg` — no silent fallback).
    */
   static async issue(audience: OtpAudience, id: Identifier, sendFailMsg: string): Promise<void> {
-    // Cooldown gate: reject if a code was sent to this destination very
-    // recently. Keyed on (audience, destination) and the newest row regardless
-    // of consumed state, so an attacker requesting codes without ever consuming
-    // them is still throttled.
-    const recent = await BuyerOtp.findOne({ audience, destination: id.value }).sort({ createdAt: -1 });
-    if (recent) {
-      const elapsedMs = Date.now() - recent.createdAt.getTime();
-      if (elapsedMs < OTP_RESEND_COOLDOWN_MS) {
-        const wait = Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsedMs) / 1000);
-        throw new OtpCooldownError(wait);
-      }
+    try {
+      await SecurityRateLimitService.consume(`otp:${audience}`, id.value, 1, OTP_RESEND_COOLDOWN_MS);
+    } catch (error) {
+      if (error instanceof SecurityRateLimitError) throw new OtpCooldownError(error.retryAfterSeconds);
+      throw error;
     }
 
     // Invalidate any outstanding codes for this identifier so only the newest works.
@@ -79,23 +75,13 @@ export class OtpService {
     }
   }
 
-  /**
-   * Verify the newest unconsumed code for (audience, identifier), run the
-   * caller's side-effect (`action`), and only THEN mark the code consumed.
-   * Throws a user-facing Error on any verification failure (expired, too many
-   * attempts, mismatch); wrong guesses still burn an attempt.
-   *
-   * The action runs AFTER verification but BEFORE the code is consumed on
-   * purpose: if the action throws (a duplicate-key race, a failed password
-   * save), the code is left valid so the caller can retry the SAME code —
-   * instead of being stranded on a bogus "that code has expired". No token is
-   * minted here — the caller decides what proving ownership grants.
-   */
+  /** Atomically reserve a guess, then claim the code and account mutation in
+   * one transaction. Only one concurrent valid proof can commit. */
   static async withVerified<T>(
     audience: OtpAudience,
     id: Identifier,
     code: string,
-    action: () => Promise<T>
+    action: (session: ClientSession) => Promise<T>
   ): Promise<T> {
     if (!code || !/^\d{6}$/.test(code)) {
       throw new Error('Enter the 6-digit code we sent you');
@@ -113,27 +99,36 @@ export class OtpService {
       throw new Error('That code has expired. Request a new one.');
     }
 
-    if (otp.attempts >= MAX_ATTEMPTS) {
-      otp.consumed = true;
-      await otp.save();
-      throw new Error('Too many attempts. Request a new code.');
-    }
+    // Reserve a guess atomically before comparing: parallel requests cannot
+    // all read the same attempt count and overwrite one another's increment.
+    const reserved = await BuyerOtp.findOneAndUpdate({
+      _id: otp._id, consumed: false, expiresAt: { $gt: new Date() },
+      attempts: { $lt: MAX_ATTEMPTS },
+    }, { $inc: { attempts: 1 } }, { new: true });
+    if (!reserved) throw new Error('Too many attempts or code already used. Request a new code.');
 
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     // Constant-time compare to avoid leaking match progress via timing.
-    const matches = otp.codeHash.length === codeHash.length &&
-      crypto.timingSafeEqual(Buffer.from(otp.codeHash), Buffer.from(codeHash));
+    const matches = reserved.codeHash.length === codeHash.length &&
+      crypto.timingSafeEqual(Buffer.from(reserved.codeHash), Buffer.from(codeHash));
 
-    if (!matches) {
-      otp.attempts += 1;
-      await otp.save();
-      throw new Error('That code is incorrect. Please try again.');
+    if (!matches) throw new Error('That code is incorrect. Please try again.');
+
+    // Claim and account mutation commit together. A failed save rolls back
+    // the claim; simultaneous valid requests cannot both run the action.
+    const session = await mongoose.startSession();
+    try {
+      let result!: T;
+      await session.withTransaction(async () => {
+        const claimed = await BuyerOtp.findOneAndUpdate({
+          _id: reserved._id, consumed: false, expiresAt: { $gt: new Date() }, codeHash,
+        }, { $set: { consumed: true } }, { new: true, session });
+        if (!claimed) throw new Error('That code has expired or was already used. Request a new one.');
+        result = await action(session);
+      });
+      return result;
+    } finally {
+      await session.endSession();
     }
-
-    const result = await action();
-
-    otp.consumed = true;
-    await otp.save();
-    return result;
   }
 }

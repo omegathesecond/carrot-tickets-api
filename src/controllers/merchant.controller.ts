@@ -1,4 +1,5 @@
 // api/src/controllers/merchant.controller.ts
+import { PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 import { Request, Response } from 'express';
 import Joi from 'joi';
 import mongoose from 'mongoose';
@@ -15,7 +16,8 @@ import { StockAlertService } from '@services/stockAlert.service';
 import { StockTransferService } from '@services/stockTransfer.service';
 import { PosCatalogService } from '@services/posCatalog.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
-import { chargeSchema } from '@validators/merchant.validator';
+import { chargeSchema, chargeQuoteSchema, merchantBalanceSchema, merchantReversalSchema } from '@validators/merchant.validator';
+import { MerchantReversalService } from '@services/merchantReversal.service';
 import { posCountSchema, posStockAdjustSchema, posTransferSchema } from '@validators/stock.validator';
 import { toBaseUnits } from '@utils/stockUnits.util';
 import { StockMovementReason } from '@interfaces/stock.interface';
@@ -23,8 +25,8 @@ import {
   TableService, TableFulfilmentNotFoundError, TableFulfilmentStateError,
 } from '@services/table.service';
 import { TableFulfilmentStatus } from '@interfaces/table.interface';
-import { HEX24 } from '@utils/controllerHelpers.util';
-import { belongsToScope, ownerWord, requireScopeOf, scopeIds, scopeMatch } from '@utils/tradingScope.util';
+import { HEX24, failWithHttpError } from '@utils/controllerHelpers.util';
+import { HttpError } from '@utils/httpError.util';
 
 /** The statuses a stall may filter its table feed by — see MerchantController.tables. */
 const FULFILMENT_STATUSES: TableFulfilmentStatus[] = ['paid', 'handed_out', 'collected'];
@@ -37,22 +39,40 @@ const DECLINE_MESSAGE: Record<WalletDeclinedError['reason'], string> = {
   wallet_not_found: 'Wallet not found',
 };
 
-const NO_TAGS_AT_VENUES = "Tag payments aren't used at venues";
-const NO_VENUE_TABLES = 'Venue table service is not available yet';
-
-/**
- * The till's event, or null after a 403 for a VENUE till. Tag charges and
- * table service are event features in venue Phase 2; refusing explicitly
- * beats letting a venue token reach event-only queries with no event.
- */
-function eventTill(req: Request, res: Response, refusal: string): string | null {
-  const { eventId } = (req as any).merchant as MerchantToken;
-  if (eventId) return eventId;
-  ApiResponseUtil.forbidden(res, refusal);
-  return null;
-}
-
 export class MerchantController {
+  static async balance(req: Request, res: Response): Promise<any> {
+    try {
+      const { error, value } = merchantBalanceSchema.validate(req.query);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const { eventId } = (req as any).merchant as MerchantToken;
+      const event = await Event.findById(eventId).select('cashless').lean();
+      if (!event?.cashless) return ApiResponseUtil.badRequest(res, 'Event is not cashless');
+      const wallet = await Wallet.findOne({ eventId, bandUid: normalizeBandUid(value.bandUid) }).select('balance status bandUid').lean();
+      if (!wallet) return ApiResponseUtil.notFound(res, 'No wallet for that band at this event');
+      return ApiResponseUtil.success(res, { balance: wallet.balance, status: wallet.status, bandUid: wallet.bandUid });
+    } catch (e) { return failWithHttpError(res, e, 'Could not check band balance'); }
+  }
+
+  static async reverse(req: Request, res: Response): Promise<any> {
+    try {
+      if (!HEX24.test(String(req.params.id))) return ApiResponseUtil.badRequest(res, 'Invalid sale ID');
+      const { error, value } = merchantReversalSchema.validate(req.body);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const result = await MerchantReversalService.reverse({ ...(req as any).merchant, ...value, chargeId: String(req.params.id) });
+      return ApiResponseUtil.success(res, { amount: result.charge.amount, newBalance: result.wallet.balance, status: result.charge.status, reversal: result.charge.reversal });
+    } catch (e) { return failWithHttpError(res, e, 'Could not reverse sale'); }
+  }
+  static async quote(req: Request, res: Response): Promise<any> {
+    try {
+      const { eventId } = (req as any).merchant as MerchantToken;
+      const { error, value } = chargeQuoteSchema.validate(req.body);
+      if (error) return ApiResponseUtil.badRequest(res, error.message);
+      const event = await Event.findById(eventId).lean();
+      if (!event || !event.cashless || event.status !== EventStatus.PUBLISHED) return ApiResponseUtil.badRequest(res, 'Event is not available for cashless purchases');
+      return ApiResponseUtil.success(res, await MerchantService.quote({ eventId, ...value }));
+    } catch (e: any) { return ApiResponseUtil.error(res, e.message || 'Could not price purchase', 500); }
+  }
+
   /**
    * POST /api/merchant/charge — tap-to-pay: debit the tapped band's wallet
    * and credit this merchant + the platform fee (cashless spec).
@@ -62,19 +82,16 @@ export class MerchantController {
    */
   static async charge(req: Request, res: Response): Promise<any> {
     try {
-      const eventId = eventTill(req, res, NO_TAGS_AT_VENUES);
-      if (!eventId) return;
-
       const { error, value } = chargeSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
 
       const merchant = (req as any).merchant as MerchantToken;
-      const { merchantId, merchantOperatorId, operatorName } = merchant;
+      const { merchantId, eventId, merchantOperatorId, operatorName } = merchant;
 
       const event = await Event.findById(eventId).lean();
       if (!event) return ApiResponseUtil.error(res, 'Event not found', 404);
       if (!event.cashless) return ApiResponseUtil.error(res, 'Event is not cashless', 400);
-      // Lifecycle guard, mirroring ResellerController.cashTopup: a merchant
+      // Lifecycle guard, mirroring ResellerController.topup: a merchant
       // token must not be able to drain wallets at a cancelled or
       // not-yet-live event.
       if (event.status !== EventStatus.PUBLISHED) {
@@ -88,6 +105,7 @@ export class MerchantController {
       const result = await MerchantService.charge({
         merchantId, eventId, walletId: String(wallet._id), bandUid,
         clientTxnId: value.clientTxnId,
+        quotedTotal: value.quotedTotal,
         ...(value.amount != null ? { amount: value.amount } : {}),
         ...(value.items ? { items: value.items } : {}),
         // The PERSON who rang this up comes ONLY from the verified JWT. A
@@ -107,6 +125,7 @@ export class MerchantController {
       return ApiResponseUtil.success(res, {
         newBalance: result.wallet.balance,
         amount: result.charge.amount,
+        purchaseChargeAmount: result.charge.purchaseChargeAmount,
         fee: result.charge.fee,
         merchantNet: result.charge.netAmount,
         ...(result.charge.items ? { items: result.charge.items } : {}),
@@ -117,6 +136,7 @@ export class MerchantController {
       // customer's card is fine, we're out of this product" apart from "the
       // customer can't pay." Checked before WalletDeclinedError only for
       // readability — the two error classes never overlap on one throw.
+      if (e instanceof PurchaseTotalChangedError) return ApiResponseUtil.error(res, e.message, 409);
       if (e instanceof StockDeclinedError) {
         return ApiResponseUtil.error(res, `Out of stock`, 409, {
           reason: e.reason, productId: e.productId, available: e.available,
@@ -142,6 +162,7 @@ export class MerchantController {
           reason: e.reason, clientTxnId: e.clientTxnId,
         });
       }
+      if (e instanceof HttpError) return failWithHttpError(res, e, 'Charge failed');
       const msg = e?.message || 'Charge failed';
       const status = /not found|cashless|amount|not active|exactly one|products? not found|positive integer/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);
@@ -172,13 +193,12 @@ export class MerchantController {
   /** GET /api/merchant/stock — this bar's products + onHand for the stock-take screen. */
   static async stock(req: Request, res: Response): Promise<any> {
     try {
-      const m = (req as any).merchant as MerchantToken;
-      const { merchantId } = m;
+      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
       // Through PosCatalogService so this grid and the waiter's event-wide one
       // answer "which stall carries this product" the same way — one stock row
       // per stall-product, exactly what StockService.applyMovement's CAS and
       // TableService.addItem enforce on the write side.
-      const stock = await PosCatalogService.forMerchant(merchantId, scopeIds(requireScopeOf(m)));
+      const stock = await PosCatalogService.forMerchant(merchantId, eventId);
       return ApiResponseUtil.success(res, { stock });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Failed to load stock', 500); }
   }
@@ -197,9 +217,7 @@ export class MerchantController {
    */
   static async tables(req: Request, res: Response): Promise<any> {
     try {
-      const eventId = eventTill(req, res, NO_VENUE_TABLES);
-      if (!eventId) return;
-      const { merchantId } = (req as any).merchant as MerchantToken;
+      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
       const raw = req.query['status'];
       // Whitelisted, not passed through: an unknown value must not silently
       // widen the query into "every status" on a screen whose whole job is
@@ -221,9 +239,7 @@ export class MerchantController {
    * later disputed.
    */
   static async handOutTable(req: Request, res: Response): Promise<any> {
-    const eventId = eventTill(req, res, NO_VENUE_TABLES);
-    if (!eventId) return;
-    const { merchantId, merchantOperatorId } = (req as any).merchant as MerchantToken;
+    const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
     const tableId = String(req.params['id']);
     // Shape-checked before the cast: an unguarded ObjectId cast throws a
     // CastError out of a handler Express 4 does not await, hanging the request.
@@ -247,14 +263,13 @@ export class MerchantController {
 
   /**
    * GET /api/merchant/stalls — transfer destinations: the OTHER live stalls at
-   * this event or venue. The caller's own stall is excluded because a transfer
-   * to yourself is rejected downstream; offering it would be a dead option.
+   * this event. The caller's own stall is excluded because a transfer to
+   * yourself is rejected downstream; offering it would be a dead option.
    */
   static async stalls(req: Request, res: Response): Promise<any> {
     try {
-      const token = (req as any).merchant as MerchantToken;
-      const { merchantId } = token;
-      const rows = await Merchant.find({ ...scopeMatch(scopeIds(requireScopeOf(token))), status: 'active' }).select('name').sort({ name: 1 }).lean();
+      const { merchantId, eventId } = (req as any).merchant as MerchantToken;
+      const rows = await Merchant.find({ eventId, status: 'active' }).select('name').sort({ name: 1 }).lean();
       const stalls = rows
         .filter((m: any) => String(m._id) !== String(merchantId))
         .map((m: any) => ({ merchantId: String(m._id), name: m.name }));
@@ -267,30 +282,28 @@ export class MerchantController {
   /** POST /api/merchant/stock/count — a stock-take by this bar (merchantId from JWT). */
   static async recordCount(req: Request, res: Response): Promise<any> {
     try {
-      const m = (req as any).merchant as MerchantToken;
-      const { merchantId, merchantOperatorId } = m;
-      const scope = requireScopeOf(m);
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
       const { error, value } = posCountSchema.validate(req.body);
       if (error) return ApiResponseUtil.error(res, error.message, 400);
       const product = await Product.findById(value.productId).lean();
-      if (!product || !belongsToScope(product, scope)) return ApiResponseUtil.badRequest(res, `product does not belong to ${ownerWord(scope)}`);
-      const { count, onHand } = await StockCountService.recordCount({ ...scopeIds(scope), merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantOperatorId });
+      if (!product || String(product.eventId) !== String(eventId)) return ApiResponseUtil.badRequest(res, 'product does not belong to this event');
+      const { count, onHand } = await StockCountService.recordCount({ eventId, merchantId, productId: value.productId, countedOnHand: value.countedOnHand, phase: value.phase, byType: 'Merchant', by: merchantOperatorId });
       return ApiResponseUtil.success(res, { countId: String(count._id), expectedOnHand: count.expectedOnHand, countedOnHand: count.countedOnHand, variance: count.variance, onHand });
     } catch (e: any) { return ApiResponseUtil.error(res, e?.message || 'Count failed', 500); }
   }
 
   /**
-   * Resolve the product named in the body against the token's owner and turn
+   * Resolve the product named in the body against the token's event and turn
    * the quantity into base units. Returns null after answering the response —
    * every POS stock write shares these two refusals.
    */
   private static async resolveProductAndUnits(
     req: Request, res: Response, value: { productId: string; quantity: number; unit: 'unit' | 'pack' },
   ): Promise<number | null> {
-    const scope = requireScopeOf((req as any).merchant as MerchantToken);
+    const { eventId } = (req as any).merchant as MerchantToken;
     const product = await Product.findById(value.productId).lean();
-    if (!product || !belongsToScope(product, scope)) {
-      ApiResponseUtil.badRequest(res, `product does not belong to ${ownerWord(scope)}`);
+    if (!product || String(product.eventId) !== String(eventId)) {
+      ApiResponseUtil.badRequest(res, 'product does not belong to this event');
       return null;
     }
     const units = toBaseUnits(product, value.quantity, value.unit);
@@ -321,14 +334,13 @@ export class MerchantController {
   /** POST /api/merchant/stock/receive — a delivery INTO this stall. */
   static async receiveStock(req: Request, res: Response): Promise<any> {
     try {
-      const m = (req as any).merchant as MerchantToken;
-      const { merchantId, merchantOperatorId } = m;
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
       const resolved = await MerchantController.validateStockWrite(req, res, posStockAdjustSchema);
       if (resolved == null) return;
       const { value, units } = resolved;
 
       const { onHand, movement } = await StockService.applyMovement({
-        ...scopeIds(requireScopeOf(m)), merchantId, productId: value.productId,
+        eventId, merchantId, productId: value.productId,
         delta: units, reason: StockMovementReason.RECEIVE,
         refType: 'stock_receive', refId: String(new mongoose.Types.ObjectId()),
         byType: 'Merchant', by: merchantOperatorId, note: value.note,
@@ -345,14 +357,13 @@ export class MerchantController {
   /** POST /api/merchant/stock/waste — breakage and spoilage at this stall. */
   static async wasteStock(req: Request, res: Response): Promise<any> {
     try {
-      const m = (req as any).merchant as MerchantToken;
-      const { merchantId, merchantOperatorId } = m;
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
       const resolved = await MerchantController.validateStockWrite(req, res, posStockAdjustSchema);
       if (resolved == null) return;
       const { value, units } = resolved;
 
       const { onHand, movement } = await StockService.applyMovement({
-        ...scopeIds(requireScopeOf(m)), merchantId, productId: value.productId,
+        eventId, merchantId, productId: value.productId,
         delta: -units, reason: StockMovementReason.SPOILAGE,
         refType: 'stock_waste', refId: String(new mongoose.Types.ObjectId()),
         byType: 'Merchant', by: merchantOperatorId, note: value.note,
@@ -374,9 +385,7 @@ export class MerchantController {
   /** POST /api/merchant/stock/transfer — move stock from THIS stall to another. */
   static async transferStock(req: Request, res: Response): Promise<any> {
     try {
-      const m = (req as any).merchant as MerchantToken;
-      const { merchantId, merchantOperatorId } = m;
-      const scope = requireScopeOf(m);
+      const { merchantId, eventId, merchantOperatorId } = (req as any).merchant as MerchantToken;
       const resolved = await MerchantController.validateStockWrite(req, res, posTransferSchema);
       if (resolved == null) return;
       const { value, units } = resolved;
@@ -385,16 +394,16 @@ export class MerchantController {
         return ApiResponseUtil.badRequest(res, 'cannot transfer to the same stall');
       }
 
-      // The destination must be a live stall at THIS event or venue. Without
-      // this check a valid id from another owner would move stock across
+      // The destination must be a live stall at THIS event. Without this check
+      // a valid id from another event would move stock across event
       // boundaries, which no report would ever reconcile.
       const destination = await Merchant.findById(value.toMerchantId).lean();
-      if (!destination || !belongsToScope(destination, scope) || destination.status !== 'active') {
-        return ApiResponseUtil.badRequest(res, `destination stall is not an active stall at ${ownerWord(scope)}`);
+      if (!destination || String(destination.eventId) !== String(eventId) || destination.status !== 'active') {
+        return ApiResponseUtil.badRequest(res, 'destination stall is not an active stall at this event');
       }
 
       const { transfer, fromOnHand, toOnHand } = await StockTransferService.transfer({
-        ...scopeIds(scope), productId: value.productId,
+        eventId, productId: value.productId,
         fromMerchantId: String(merchantId), toMerchantId: String(value.toMerchantId),
         qty: units, byType: 'Merchant', by: merchantOperatorId, note: value.note,
       });

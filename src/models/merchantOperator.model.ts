@@ -2,7 +2,6 @@
 import mongoose, { Schema } from 'mongoose';
 import { IMerchantOperator } from '@interfaces/merchantOperator.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
-import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * A person on the till at one stall (cashless spec — per-person operators).
@@ -11,10 +10,11 @@ import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema
  * ever references this document.
  */
 const merchantOperatorSchema = new Schema<IMerchantOperator>({
+  deletedAt: { type: Date },
   fullName: { type: String, required: true, trim: true },
   phoneNumber: { type: String, trim: true },
   merchantId: { type: Schema.Types.ObjectId, ref: 'Merchant', required: true, index: true, immutable: true },
-  eventId: { type: Schema.Types.ObjectId, ref: 'Event', index: true },
+  eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
   loginCode: { type: String, required: true, unique: true, index: true, trim: true },
   isActive: { type: Boolean, default: true, index: true },
 }, {
@@ -23,10 +23,8 @@ const merchantOperatorSchema = new Schema<IMerchantOperator>({
   toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
 });
 
-applyOperatorCredentials(merchantOperatorSchema);
-applyTradingScope(merchantOperatorSchema);
+applyOperatorCredentials(merchantOperatorSchema, true);
 
 merchantOperatorSchema.index({ merchantId: 1, isActive: 1 });
-merchantOperatorSchema.index({ venueId: 1, isActive: 1 }, VENUE_ONLY_INDEX);
 
 export const MerchantOperator = mongoose.model<IMerchantOperator>('MerchantOperator', merchantOperatorSchema);

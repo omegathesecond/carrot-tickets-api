@@ -2,7 +2,6 @@ import mongoose, { ClientSession } from 'mongoose';
 import { ProductStock, IProductStock } from '@models/productStock.model';
 import { StockMovement, IStockMovement } from '@models/stockMovement.model';
 import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
-import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 export class StockDeclinedError extends Error {
   readonly reason = 'insufficient_stock';
@@ -12,8 +11,8 @@ export class StockDeclinedError extends Error {
   }
 }
 
-/** Exactly one owner (ScopeIds) — event callers pass `eventId` exactly as before. */
-export type MovementInput = ScopeIds & {
+export interface MovementInput {
+  eventId: string | mongoose.Types.ObjectId;
   merchantId: string | mongoose.Types.ObjectId;
   productId: string | mongoose.Types.ObjectId;
   /** Signed base units, non-zero. > 0 adds (upserts the row), < 0 CAS-decrements. */
@@ -26,7 +25,7 @@ export type MovementInput = ScopeIds & {
   note?: string;
   /** Join a caller transaction (e.g. the item-sale charge, Slice 2). */
   session?: ClientSession;
-};
+}
 
 /**
  * The ONLY writer of ProductStock.onHand and StockMovement (design §5). A
@@ -40,11 +39,7 @@ export class StockService {
     if (!Number.isSafeInteger(delta) || delta === 0) {
       throw new Error(`delta must be a non-zero whole number of base units, got ${delta}`);
     }
-    // The owner, written onto the row (on upsert-insert) and the journal entry.
-    const owner = scopeMatch(input);
-    const ownerField = 'venueId' in owner ? 'venueId' : 'eventId';
-    const otherOwnerField = ownerField === 'venueId' ? 'eventId' : 'venueId';
-    const ownerId = 'venueId' in owner ? owner.venueId : owner.eventId;
+    const eventId = toId(input.eventId);
     const merchantId = toId(input.merchantId);
     const productId = toId(input.productId);
 
@@ -61,7 +56,7 @@ export class StockService {
       const stock = (await ProductStock.findOneAndUpdate(
         filter,
         // $ifNull covers the upsert-insert case where onHand doesn't exist yet.
-        [{ $set: { onHand: { $add: [{ $ifNull: ['$onHand', 0] }, delta] }, [ownerField]: { $ifNull: [`$${ownerField}`, ownerId] } } }],
+        [{ $set: { onHand: { $add: [{ $ifNull: ['$onHand', 0] }, delta] }, eventId: { $ifNull: ['$eventId', eventId] } } }],
         { new: true, upsert: !decrement, setDefaultsOnInsert: true, session },
       )) as IProductStock | null;
 
@@ -70,18 +65,9 @@ export class StockService {
         const existing = await ProductStock.findOne({ merchantId, productId }, { onHand: 1 }, { session });
         throw new StockDeclinedError(String(productId), existing?.onHand ?? 0);
       }
-      // The row must carry ONLY the input's owner kind. $ifNull above fills a
-      // missing owner field and never overwrites one, so an event row hit by a
-      // venue movement (or the reverse) would now carry both — a second owner.
-      // Throwing aborts the transaction, which rolls that write back.
-      if (stock[otherOwnerField] != null) {
-        throw new Error(
-          `stock row ${String(stock._id)} is owned by ${otherOwnerField} ${String(stock[otherOwnerField])}; refusing a movement for ${ownerField} ${String(ownerId)}`,
-        );
-      }
 
       const created = await StockMovement.create(
-        [{ ...owner, merchantId, productId, delta, reason, balanceAfter: stock.onHand, refType, refId, byType, by, note, at: new Date() }],
+        [{ eventId, merchantId, productId, delta, reason, balanceAfter: stock.onHand, refType, refId, byType, by, note, at: new Date() }],
         { session },
       );
       // create([oneDoc]) always resolves exactly one element; noUncheckedIndexedAccess

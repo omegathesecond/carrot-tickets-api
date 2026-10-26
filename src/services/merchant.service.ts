@@ -1,5 +1,8 @@
+import { Event } from '@models/event.model';
+import { purchaseChargeAmount, PurchaseTotalChangedError } from '@utils/purchaseCharge.util';
 // api/src/services/merchant.service.ts
 import mongoose from 'mongoose';
+import { priceProductLine } from '@utils/productPrice.util';
 import { Wallet, IWallet } from '@models/wallet.model';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
@@ -9,6 +12,7 @@ import { LedgerAccountType } from '@interfaces/ledger.interface';
 import { Product } from '@models/product.model';
 import { StockService, StockDeclinedError } from '@services/stock.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
+import { HttpError } from '@utils/httpError.util';
 
 // Re-exported so the controller can import both declines from
 // @services/merchant.service if convenient.
@@ -82,13 +86,54 @@ class ReplayedCharge extends Error {
 /**
  * Merchant tap-to-pay money movement (cashless spec) — DOES NOT mutate
  * `balance` outside this one atomic CAS. Same transaction shape as
- * WalletService.topUpCash (open session.withTransaction, atomic
+ * WalletService.topUpAtDesk (open session.withTransaction, atomic
  * aggregation-pipeline wallet update, LedgerService.post on the same
  * session, a durable record write, idempotent on clientTxnId including
  * E11000 recovery) but DEBITS the wallet instead of crediting it, and splits
  * the debit between the merchant and the platform fee.
  */
 export class MerchantService {
+  private static async price(params: { eventId: string; amount?: number; items?: Array<{ productId: string; qty: number }> }) {
+    let amount: number;
+    let itemSnapshots: IMerchantCharge['items'];
+    if (params.items?.length) {
+      const merged = new Map<string, number>();
+      for (const { productId, qty } of params.items!) {
+        if (!Number.isInteger(qty) || qty <= 0) throw new Error('qty must be a positive integer');
+        merged.set(String(productId), (merged.get(String(productId)) ?? 0) + qty);
+      }
+      const ids = [...merged.keys()];
+      const products = await Product.find({ _id: { $in: ids }, eventId: params.eventId, active: true }).lean();
+      if (products.length !== ids.length) throw new Error('one or more products not found for this event');
+      const byId = new Map(products.map((p) => [String(p._id), p]));
+      itemSnapshots = ids.map((pid) => {
+        const p = byId.get(pid)!;
+        const qty = merged.get(pid)!;
+        // unitPrice is the single-unit catalogue price; lineTotal includes any
+        // complete bundle discounts. qty always counts physical stock units.
+        return { productId: p._id as mongoose.Types.ObjectId, name: p.name, unitPrice: p.price, qty, ...priceProductLine(p, qty) };
+      });
+      amount = itemSnapshots.reduce((s, l) => s + l.lineTotal, 0);
+    } else {
+      amount = params.amount!;
+    }
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error('amount must be a positive integer (cents)');
+    if (amount > MAX_CHARGE_CENTS) throw new Error('amount exceeds the maximum allowed charge');
+
+    return { amount, itemSnapshots };
+  }
+
+  static async quote(params: { eventId: string; amount?: number; items?: Array<{ productId: string; qty: number }> }) {
+    const { amount } = await MerchantService.price(params);
+    const event = await Event.findById(params.eventId).lean();
+    if (!event) throw new Error('Event not found');
+    const surcharge = purchaseChargeAmount(amount, event.purchaseCharge);
+    const total = amount + surcharge;
+    if (total > MAX_CHARGE_CENTS) throw new Error('amount exceeds the maximum allowed charge');
+    return { subtotal: amount, purchaseChargeAmount: surcharge, total };
+  }
+
+
   /**
    * Charge a tapped band's wallet on behalf of `merchantId` at `eventId`.
    *
@@ -117,6 +162,7 @@ export class MerchantService {
   static async charge(params: {
     merchantId: string; eventId: string; walletId: string; bandUid: string;
     clientTxnId: string;
+    quotedTotal?: number;
     amount?: number;
     items?: Array<{ productId: string; qty: number }>;
     merchantOperatorId: string;
@@ -132,31 +178,7 @@ export class MerchantService {
     const existing = await MerchantCharge.findOne({ merchantId, clientTxnId });
     if (existing) return MerchantService.replay(existing, params);
 
-    // Resolve amount + item snapshots BEFORE the transaction (prices are stable;
-    // the atomic guard is the per-product stock CAS inside the txn).
-    let amount: number;
-    let itemSnapshots: Array<{ productId: mongoose.Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }> | undefined;
-    if (hasItems) {
-      const merged = new Map<string, number>();
-      for (const { productId, qty } of params.items!) {
-        if (!Number.isInteger(qty) || qty <= 0) throw new Error('qty must be a positive integer');
-        merged.set(String(productId), (merged.get(String(productId)) ?? 0) + qty);
-      }
-      const ids = [...merged.keys()];
-      const products = await Product.find({ _id: { $in: ids }, eventId, active: true }).lean();
-      if (products.length !== ids.length) throw new Error('one or more products not found for this event');
-      const byId = new Map(products.map((p) => [String(p._id), p]));
-      itemSnapshots = ids.map((pid) => {
-        const p = byId.get(pid)!;
-        const qty = merged.get(pid)!;
-        return { productId: p._id as mongoose.Types.ObjectId, name: p.name, unitPrice: p.price, qty, lineTotal: p.price * qty };
-      });
-      amount = itemSnapshots.reduce((s, l) => s + l.lineTotal, 0);
-    } else {
-      amount = params.amount!;
-    }
-    if (!Number.isInteger(amount) || amount <= 0) throw new Error('amount must be a positive integer (cents)');
-    if (amount > MAX_CHARGE_CENTS) throw new Error('amount exceeds the maximum allowed charge');
+    const { amount, itemSnapshots } = await MerchantService.price(params);
 
     const session = await mongoose.startSession();
     try {
@@ -197,22 +219,29 @@ export class MerchantService {
           throw new Error('merchant operator not found or not active');
         }
 
+        const event = await Event.findById(eventId).session(session).lean();
+        if (!event) throw new Error('Event not found');
+        const surcharge = purchaseChargeAmount(amount, event.purchaseCharge);
+        const total = amount + surcharge;
+        if (total > MAX_CHARGE_CENTS) throw new Error('amount exceeds the maximum allowed charge');
+        if (params.quotedTotal !== undefined && params.quotedTotal !== total) throw new PurchaseTotalChangedError();
+
         // Atomic CAS debit: the guard (status active + sufficient balance)
         // and the decrement are the SAME operation, so no concurrent tap can
         // ever push the balance negative. cashFundedBalance is drawn down
-        // first and floored at 0 via $max, mirroring topUpCash's pipeline
+        // first and floored at 0 via $max, mirroring topUpAtDesk's pipeline
         // update and the CAS-debit pattern documented in wallet.model.ts.
         const wallet = await Wallet.findOneAndUpdate(
-          { _id: walletId, eventId, status: 'active', balance: { $gte: amount } },
+          { _id: walletId, eventId, status: 'active', balance: { $gte: total } },
           [
             {
               $set: {
-                balance: { $subtract: ['$balance', amount] },
-                cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', amount] }] },
+                balance: { $subtract: ['$balance', total] },
+                cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', total] }] },
               },
             },
           ],
-          { new: true, session },
+          { new: false, session },
         );
 
         if (!wallet) {
@@ -233,6 +262,12 @@ export class MerchantService {
           }
           throw new WalletDeclinedError('insufficient_balance', 'insufficient balance', fresh.balance);
         }
+
+        // The atomic debit returns its pre-image, capturing the funding split
+        // without another read or a temporary field on the customer's wallet.
+        const cashFundedAmount = Math.min(wallet.cashFundedBalance, total);
+        wallet.balance -= total;
+        wallet.cashFundedBalance -= cashFundedAmount;
 
         // Decrement stock per line inside the SAME transaction. A
         // StockDeclinedError aborts the txn → the wallet debit above rolls back.
@@ -265,8 +300,9 @@ export class MerchantService {
         await LedgerService.post({
           eventId,
           postings: [
-            { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: amount },
+            { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: total },
             { account: { type: LedgerAccountType.MERCHANT, ref: merchantId }, delta: -net },
+            ...(surcharge > 0 ? [{ account: { type: LedgerAccountType.ORGANIZER }, delta: -surcharge }] : []),
             ...(fee > 0 ? [{ account: { type: LedgerAccountType.FEES }, delta: -fee }] : []),
           ],
           refType: 'merchant_charge',
@@ -276,7 +312,7 @@ export class MerchantService {
 
         const [charge] = await MerchantCharge.create(
           [{
-            merchantId, eventId, walletId, bandUid, amount, fee, netAmount: net, clientTxnId, status: 'completed',
+            merchantId, eventId, walletId, bandUid, amount: total, purchaseChargeAmount: surcharge, fee, netAmount: net, clientTxnId, status: 'completed', cashFundedAmount,
             ...(itemSnapshots ? { items: itemSnapshots } : {}),
             merchantOperatorId, staffName: operatorName,
           }],
@@ -311,6 +347,7 @@ export class MerchantService {
     charge: IMerchantCharge,
     requested: { amount?: number; items?: ReadonlyArray<{ productId: unknown; qty: number }> },
   ): Promise<{ wallet: IWallet; charge: IMerchantCharge }> {
+    if (charge.status === 'reversed') throw new HttpError(409, 'This sale was reversed. Start a new sale.');
     // Only a repeat of the SAME sale is a replay. An amount-charge must match
     // the committed amount exactly; an itemised charge must match the
     // committed basket (merged by product, so duplicate lines don't matter);
@@ -319,7 +356,7 @@ export class MerchantService {
     const requestedItems = requested.items ?? [];
     const same = requestedItems.length > 0
       ? committedItems.length > 0 && basketKey(requestedItems) === basketKey(committedItems)
-      : committedItems.length === 0 && requested.amount === charge.amount;
+      : committedItems.length === 0 && requested.amount === charge.amount - charge.purchaseChargeAmount;
     if (!same) throw new ChargeIdempotencyMismatchError(charge.clientTxnId);
 
     const wallet = await Wallet.findById(charge.walletId);
@@ -336,25 +373,31 @@ export class MerchantService {
    */
   static async listTransactions(params: {
     merchantId: string;
-    limit?: number;
+    limit?: number | null;
   }): Promise<{
     transactions: Array<{
       id: string;
       amount: number;
+      purchaseChargeAmount: number;
       fee: number;
       netAmount: number;
       bandUid: string;
-      status: 'completed';
+      status: 'completed' | 'reversed';
+      canReverse: boolean;
+      reversalUnavailableReason: string | null;
+      items: IMerchantCharge['items'];
+      reversal: IMerchantCharge['reversal'];
       createdAt: Date;
+      staffName: string;
     }>;
     summary: { totalCharged: number; totalNet: number; totalFee: number; count: number };
   }> {
     const { merchantId, limit = 50 } = params;
 
     const [rows, aggResult] = await Promise.all([
-      MerchantCharge.find({ merchantId }).sort({ createdAt: -1 }).limit(limit).lean(),
+      MerchantCharge.find({ merchantId }).sort({ createdAt: -1 }).limit(limit ?? 0).lean(),
       MerchantCharge.aggregate([
-        { $match: { merchantId: new mongoose.Types.ObjectId(merchantId) } },
+        { $match: { merchantId: new mongoose.Types.ObjectId(merchantId), status: 'completed' } },
         {
           $group: {
             _id: null,
@@ -370,11 +413,17 @@ export class MerchantService {
     const transactions = rows.map((c) => ({
       id: String(c._id),
       amount: c.amount,
+      purchaseChargeAmount: c.purchaseChargeAmount,
       fee: c.fee,
       netAmount: c.netAmount,
       bandUid: c.bandUid,
       status: c.status,
+      canReverse: c.status === 'completed' && !c.waiterId && Number.isSafeInteger(c.cashFundedAmount),
+      reversalUnavailableReason: c.waiterId ? 'Table payments must be reversed as a whole' : !Number.isSafeInteger(c.cashFundedAmount) ? 'This sale predates reversal support' : null,
+      items: c.items,
+      reversal: c.reversal,
       createdAt: c.createdAt,
+      staffName: c.staffName,
     }));
 
     const agg = aggResult[0];

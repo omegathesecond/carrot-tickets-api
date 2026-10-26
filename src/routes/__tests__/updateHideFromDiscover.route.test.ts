@@ -1,19 +1,13 @@
+import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { Update } from '@models/update.model';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 
-function signVendorToken(vendorId: string, permissions: string[] = [], isSuperAdmin = false): string {
-  return jwt.sign(
-    { app: 'tickets', vendorId, userType: 'vendor', isSuperAdmin, role: 'owner', permissions },
-    JWT_SECRET
-  );
-}
+const sessionToken = (vendorId: string, permissions: string[] = [], isSuperAdmin = false) => seedVendorSessionToken(vendorId, { permissions, isSuperAdmin });
 
 async function seedReadyUpdate() {
   return Update.create({
@@ -30,8 +24,8 @@ const inForYou = (body: any, id: string): boolean =>
 // would CastError → 500). A production super-admin always has a real id.
 const superId = new mongoose.Types.ObjectId().toString();
 const modId = new mongoose.Types.ObjectId().toString();
-const superAdmin = () => `Bearer ${signVendorToken(superId, [], true)}`;
-const moderator = () => `Bearer ${signVendorToken(modId, [TicketsPermission.MODERATE_SOCIAL])}`;
+const superAdmin = async () => `Bearer ${await sessionToken(superId, [], true)}`;
+const moderator = async () => `Bearer ${await sessionToken(modId, [TicketsPermission.MODERATE_SOCIAL])}`;
 
 describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', () => {
   beforeAll(connectTestDb);
@@ -40,7 +34,7 @@ describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', 
 
   it('403s a vendor lacking moderate_social', async () => {
     const u = await seedReadyUpdate();
-    const noPerm = `Bearer ${signVendorToken('v', [TicketsPermission.EDIT_EVENT])}`;
+    const noPerm = `Bearer ${await sessionToken('v', [TicketsPermission.EDIT_EVENT])}`;
     await request(app).post(`/api/tickets/updates/${u.id}/hide-from-discover`).set('Authorization', noPerm).expect(403);
   });
 
@@ -49,7 +43,7 @@ describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', 
     const before = await request(app).get('/api/public/feed?tab=for-you').expect(200);
     expect(inForYou(before.body, u.id)).toBe(true);
 
-    await request(app).post(`/api/tickets/updates/${u.id}/hide-from-discover`).set('Authorization', superAdmin()).expect(200);
+    await request(app).post(`/api/tickets/updates/${u.id}/hide-from-discover`).set('Authorization', await superAdmin()).expect(200);
     const hidden = await Update.findById(u.id);
     expect(hidden!.hiddenFromDiscoverAt).toBeTruthy();
     expect(hidden!.hiddenFromDiscoverBy).toBe(superId);
@@ -57,7 +51,7 @@ describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', 
     const after = await request(app).get('/api/public/feed?tab=for-you').expect(200);
     expect(inForYou(after.body, u.id)).toBe(false);
 
-    await request(app).delete(`/api/tickets/updates/${u.id}/hide-from-discover`).set('Authorization', moderator()).expect(200);
+    await request(app).delete(`/api/tickets/updates/${u.id}/hide-from-discover`).set('Authorization', await moderator()).expect(200);
     const restored = await Update.findById(u.id);
     expect(restored!.hiddenFromDiscoverAt).toBeNull();
     const back = await request(app).get('/api/public/feed?tab=for-you').expect(200);
@@ -67,11 +61,11 @@ describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', 
   it('404s an unknown id and 400s a malformed one', async () => {
     await request(app)
       .post(`/api/tickets/updates/${new mongoose.Types.ObjectId()}/hide-from-discover`)
-      .set('Authorization', superAdmin())
+      .set('Authorization', await superAdmin())
       .expect(404);
     await request(app)
       .post('/api/tickets/updates/not-an-id/hide-from-discover')
-      .set('Authorization', superAdmin())
+      .set('Authorization', await superAdmin())
       .expect(400);
   });
 
@@ -80,7 +74,7 @@ describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', 
     const anon = await request(app).get('/api/public/feed?tab=for-you').expect(200);
     expect(anon.body.data.items.find((i: any) => i.type === 'update').viewerCanModerate).toBeFalsy();
 
-    const mod = await request(app).get('/api/public/feed?tab=for-you').set('Authorization', superAdmin()).expect(200);
+    const mod = await request(app).get('/api/public/feed?tab=for-you').set('Authorization', await superAdmin()).expect(200);
     expect(mod.body.data.items.find((i: any) => i.type === 'update').viewerCanModerate).toBe(true);
   });
 });

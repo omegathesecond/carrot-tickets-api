@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
 import { Block } from '@models/block.model';
@@ -52,7 +52,7 @@ describe('GET /api/social/nearby/people', () => {
     await request(app)
       .get('/api/social/nearby/people')
       .query({ lng: 0 })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(400);
   });
 
@@ -61,7 +61,7 @@ describe('GET /api/social/nearby/people', () => {
     await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: 200, lng: 0 })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(400);
   });
 
@@ -70,7 +70,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
     expect(res.body.data.people).toEqual([]);
   });
@@ -100,7 +100,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const row = res.body.data.people.find((p: any) => p.username === 'nearby_a');
@@ -140,7 +140,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const partnerRow = res.body.data.people.find((p: any) => p.username === 'partner_g');
@@ -162,7 +162,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG, radiusKm: 5 })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const usernames = res.body.data.people.map((p: any) => p.username);
@@ -187,7 +187,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const usernames = res.body.data.people.map((p: any) => p.username);
@@ -205,7 +205,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const usernames = res.body.data.people.map((p: any) => p.username);
@@ -219,7 +219,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG, radiusKm: 200 })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const usernames = res.body.data.people.map((p: any) => p.username);
@@ -236,7 +236,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     expect(res.body.data.people).toEqual([]);
@@ -254,7 +254,7 @@ describe('GET /api/social/nearby/people', () => {
     const res = await request(app)
       .get('/api/social/nearby/people')
       .query({ lat: ORIGIN_LAT, lng: ORIGIN_LNG })
-      .set('Authorization', `Bearer ${signBuyerToken(PHONE)}`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)
       .expect(200);
 
     const usernames = res.body.data.people.map((p: any) => p.username);

@@ -67,6 +67,10 @@ describe('ledger invariant (property)', () => {
     const floatByTag: Record<FloatTag, number> = {
       [FloatTag.KESHLESS]: 0,
       [FloatTag.CASH_DESK]: 0,
+      [FloatTag.CARD_DESK]: 0,
+      [FloatTag.COLLECTOR_CASH]: 0,
+      [FloatTag.DELTAPAY_DESK]: 0,
+      [FloatTag.MOBILE_MONEY_DESK]: 0,
       // Office refunds are not among this test's movements, but the record is
       // keyed by the enum on purpose: adding a tag breaks the BUILD here
       // rather than silently dropping out of the totals below.

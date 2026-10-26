@@ -1,6 +1,7 @@
 // src/services/stockAlert.service.ts
 import { ProductStock } from '@models/productStock.model';
 import { NotificationService } from '@services/notification.service';
+import { ClientSession } from 'mongoose';
 
 /**
  * Low-stock alerting for the cashless stock system (design §4/§7). Best-effort:
@@ -45,7 +46,7 @@ export class StockAlertService {
 
   /** Clear the armed marker once stock is back above threshold, so the next
    *  downward crossing re-alerts. Called after a replenish (receive/transfer-in/count-up). */
-  static async rearm(merchantId: string, productId: string): Promise<void> {
+  static async rearm(merchantId: string, productId: string, session?: ClientSession): Promise<void> {
     try {
       await ProductStock.updateOne(
         {
@@ -54,8 +55,11 @@ export class StockAlertService {
           $expr: { $gt: ['$onHand', '$lowStockThreshold'] },
         },
         { $set: { lowStockAlertedAt: null } },
+        { session },
       );
     } catch (err) {
+      // A stock return uses the caller's transaction: failures must abort it.
+      if (session) throw err;
       console.error('[low-stock] rearm failed for product', productId, err);
     }
   }

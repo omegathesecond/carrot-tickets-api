@@ -1,4 +1,4 @@
-import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { connectLedgerTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { OtpService } from '@services/otp.service';
 import { Vendor } from '@models/vendor.model';
@@ -11,14 +11,14 @@ import { JWT_SECRET } from '@config/jwt.config';
 // Bypass real OTP: run the guarded action, no code check.
 jest.spyOn(OtpService, 'withVerified').mockImplementation(async (_a, _i, _c, action: any) => action());
 
-beforeAll(connectTestDb);
+beforeAll(connectLedgerTestDb);
 afterAll(disconnectTestDb);
 afterEach(async () => {
   await clearTestDb();
   jest.clearAllMocks();
 });
 
-// registerBusiness now validates serviceCategory against the DB
+// registerBusiness now validates serviceCategories against the DB
 // (ServiceCategoryService.isValidActive), not a hardcoded enum — seed the
 // one category these tests need before every test.
 beforeEach(async () => {
@@ -29,11 +29,11 @@ describe('TicketsAuthService.registerBusiness', () => {
   it('creates a PENDING services vendor and mints a token with no ticket perms', async () => {
     const res = await TicketsAuthService.registerBusiness({
       businessName: 'SoundWave Pro', phoneNumber: '+26876111222', password: 'secret1',
-      serviceCategory: 'sound_hire', startingPrice: { amountCents: 25000, unit: 'day' }, code: '000000',
+      serviceCategories: ['sound_hire'], startingPrice: { amountCents: 25000, unit: 'day' }, code: '000000',
     });
     const v = await Vendor.findOne({ phoneNumber: '+26876111222' });
     expect(v?.operatorType).toBe(OperatorType.SERVICES);
-    expect(v?.serviceCategory).toBe('sound_hire');
+    expect(v?.serviceCategories).toEqual(['sound_hire']);
     expect(v?.verificationStatus).toBe('pending');
     const claims: any = jwt.verify(res.accessToken, JWT_SECRET);
     expect(claims.permissions).toContain(TicketsPermission.MANAGE_ENQUIRIES);
@@ -41,10 +41,17 @@ describe('TicketsAuthService.registerBusiness', () => {
     expect(res.refreshToken).toBeTruthy();
   });
 
+  it('persists every selected category and validates the second selection', async () => {
+    await ServiceCategory.create({ value: 'catering', label: 'Catering', isActive: true });
+    await TicketsAuthService.registerBusiness({ businessName: 'Multi', email: 'multi@example.com', password: 'secret1', serviceCategories: ['sound_hire', 'catering'], code: '000000' });
+    expect((await Vendor.findOne({ email: 'multi@example.com' }))?.serviceCategories).toEqual(['sound_hire', 'catering']);
+    await expect(TicketsAuthService.registerBusiness({ businessName: 'Invalid', email: 'invalid@example.com', password: 'secret1', serviceCategories: ['sound_hire', 'missing'], code: '000000' })).rejects.toThrow('Choose a valid service category');
+  });
+
   it('rejects an unknown/unseeded service category', async () => {
     await expect(TicketsAuthService.registerBusiness({
       businessName: 'Bad Cat Co', phoneNumber: '+26876111223', password: 'secret1',
-      serviceCategory: 'bouncy_castle', code: '000000',
+      serviceCategories: ['bouncy_castle'], code: '000000',
     })).rejects.toThrow('Choose a valid service category');
     expect(await Vendor.findOne({ phoneNumber: '+26876111223' })).toBeNull();
   });
@@ -53,7 +60,7 @@ describe('TicketsAuthService.registerBusiness', () => {
     await ServiceCategory.updateOne({ value: 'sound_hire' }, { $set: { isActive: false } });
     await expect(TicketsAuthService.registerBusiness({
       businessName: 'Disabled Cat Co', phoneNumber: '+26876111224', password: 'secret1',
-      serviceCategory: 'sound_hire', code: '000000',
+      serviceCategories: ['sound_hire'], code: '000000',
     })).rejects.toThrow('Choose a valid service category');
   });
 });

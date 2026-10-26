@@ -1,18 +1,16 @@
 // api/src/routes/__tests__/gateOperators.route.test.ts
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { GateOperator } from '@models/gateOperator.model';
 import * as operatorScope from '@services/operatorEventScope.service';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64b000000000000000000a01';
 const VENDOR_B = '64b000000000000000000b02';
 
-function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
-  return jwt.sign({ app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:manage_access'], isSuperAdmin: !!opts.isSuperAdmin, vendorId: opts.vendorId }, JWT_SECRET);
+async function token(opts: { isSuperAdmin?: boolean; vendorId?: string }) {
+  return opts.isSuperAdmin ? signAdminSessionToken() : seedVendorSessionToken(opts.vendorId!);
 }
 
 beforeAll(connectTestDb);
@@ -21,7 +19,7 @@ afterAll(disconnectTestDb);
 
 it('super-admin creates a platform-wide gate operator and gets credentials once', async () => {
   const res = await request(app).post('/api/tickets/gate-operators')
-    .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+    .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
     .send({ fullName: 'Platform Gate', scope: 'platform' });
   expect(res.status).toBe(201);
   expect(res.body.data.loginCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/);
@@ -31,7 +29,7 @@ it('super-admin creates a platform-wide gate operator and gets credentials once'
 
 it('organizer create is forced to their own vendor + organizer scope', async () => {
   const res = await request(app).post('/api/tickets/gate-operators')
-    .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+    .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
     .send({ fullName: 'Org Gate', scope: 'platform', vendorId: VENDOR_B }); // attempts to escalate
   expect(res.status).toBe(201);
   expect(res.body.data.operator.scope).toBe('organizer');
@@ -42,7 +40,7 @@ it('organizer lists only their own operators', async () => {
   await GateOperator.create({ fullName: 'A', loginCode: '810001', pin: '111111', scope: 'organizer', vendorId: VENDOR_A });
   await GateOperator.create({ fullName: 'B', loginCode: '810002', pin: '111111', scope: 'organizer', vendorId: VENDOR_B });
   const res = await request(app).get('/api/tickets/gate-operators')
-    .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+    .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
   expect(res.status).toBe(200);
   expect(res.body.data).toHaveLength(1);
   expect(res.body.data[0].vendorId).toBe(VENDOR_A);
@@ -51,12 +49,12 @@ it('organizer lists only their own operators', async () => {
 it('organizer cannot reset-pin another vendor operator (404)', async () => {
   const other = await GateOperator.create({ fullName: 'B', loginCode: '810003', pin: '111111', scope: 'organizer', vendorId: VENDOR_B });
   const res = await request(app).post(`/api/tickets/gate-operators/${other._id}/reset-pin`)
-    .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`).send({});
+    .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`).send({});
   expect(res.status).toBe(404);
 });
 
 it('a caller without manage_access is forbidden (403)', async () => {
-  const t = jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [], vendorId: VENDOR_A }, JWT_SECRET);
+  const t = await seedVendorSessionToken(VENDOR_A, { permissions: [] });
   const res = await request(app).get('/api/tickets/gate-operators').set('Authorization', `Bearer ${t}`);
   expect(res.status).toBe(403);
 });
@@ -67,7 +65,7 @@ it('PATCH 400s a non-boolean isActive rather than coercing "false" to true', asy
   const op = await GateOperator.create({ fullName: 'A', loginCode: '810004', pin: '111111', scope: 'organizer', vendorId: VENDOR_A });
 
   const res = await request(app).patch(`/api/tickets/gate-operators/${op._id}`)
-    .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`)
+    .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`)
     .send({ isActive: 'false' });
 
   expect(res.status).toBe(400);
@@ -100,7 +98,7 @@ describe('a super-admin creating a register account from inside an event', () =>
     const eventId = await seedEvent(VENDOR_A);
 
     const res = await request(app).post('/api/tickets/gate-operators')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Teddy', eventIds: [eventId], grants: ['issue_tags'] });
 
     expect(res.status).toBe(201);
@@ -111,7 +109,7 @@ describe('a super-admin creating a register account from inside an event', () =>
 
   it('still refuses when there is no event to derive from', async () => {
     const res = await request(app).post('/api/tickets/gate-operators')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Teddy', eventIds: [] });
 
     expect(res.status).toBe(400);
@@ -120,7 +118,7 @@ describe('a super-admin creating a register account from inside an event', () =>
 
   it('refuses an event that does not exist when deriving', async () => {
     const res = await request(app).post('/api/tickets/gate-operators')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Teddy', eventIds: ['64b000000000000000000f99'] });
 
     expect(res.status).toBe(400);
@@ -137,7 +135,7 @@ describe('a super-admin creating a register account from inside an event', () =>
     const eventId = await seedEvent(null);
 
     const res = await request(app).post('/api/tickets/gate-operators')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Teddy', eventIds: [eventId] });
 
     expect(res.status).toBe(400);
@@ -149,7 +147,7 @@ describe('a super-admin creating a register account from inside an event', () =>
     const eventId = await seedEvent(VENDOR_A);
 
     const res = await request(app).post('/api/tickets/gate-operators')
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`)
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`)
       .send({ fullName: 'Teddy', eventIds: [eventId], vendorId: VENDOR_B });
 
     // VENDOR_B does not own the event, so the assignment validator refuses it
@@ -243,4 +241,19 @@ it('keeps management inside the caller’s event permissions', async () => {
       .set('Authorization', auth).send({});
     expect(forbidden.status).toBe(404);
   } finally { scope.mockRestore(); }
+});
+
+it('keeps deleted operators hidden and unmanageable after organizer filtering', async () => {
+  const operator = await GateOperator.create({ fullName: 'Deleted', loginCode: '840001', pin: '111111',
+    scope: 'organizer', vendorId: VENDOR_A, deletedAt: new Date(), isActive: false });
+  const auth = `Bearer ${token({ isSuperAdmin: true })}`;
+  const list = await request(app).get(`/api/tickets/gate-operators?vendorId=${VENDOR_A}`).set('Authorization', auth);
+  expect(list.status).toBe(200);
+  expect(list.body.data).toEqual([]);
+  const update = await request(app).patch(`/api/tickets/gate-operators/${operator._id}`)
+    .set('Authorization', auth).send({ isActive: true });
+  expect(update.status).toBe(404);
+  const reset = await request(app).post(`/api/tickets/gate-operators/${operator._id}/reset-pin`)
+    .set('Authorization', auth).send({});
+  expect(reset.status).toBe(404);
 });

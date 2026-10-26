@@ -1,6 +1,7 @@
 import { clearTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
+import { BuyerPresence } from '@models/buyerPresence.model';
 import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { Channel } from '@models/channel.model';
@@ -29,7 +30,23 @@ describe('cross-instance fan-out via mongo adapter', () => {
     rt2 = await startTestRealtime(true);
   });
   afterEach(async () => {
+    // Leave channel rooms while both adapters are still serving queries.
+    // Closing an adapter first strands the other instance's disconnect count.
+    for (const rt of [rt1, rt2]) {
+      for (const socket of rt.io.sockets.sockets.values()) {
+        for (const room of [...socket.rooms]) {
+          if (room.startsWith('channel:')) await socket.leave(room);
+        }
+      }
+    }
+    const socketIds = clients.map((client) => client.id);
     for (const c of clients.splice(0)) c.close();
+    // Socket.IO close doesn't await the asynchronous presence delete handlers.
+    const deadline = Date.now() + 5000;
+    while (await BuyerPresence.exists({ socketId: { $in: socketIds } })) {
+      if (Date.now() >= deadline) throw new Error('Presence cleanup did not finish');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     await rt1.close();
     await rt2.close();
     await clearTestDb();
@@ -47,11 +64,11 @@ describe('cross-instance fan-out via mongo adapter', () => {
     await Membership.create({ buyerId: a._id, communityId: community._id });
     await Membership.create({ buyerId: b._id, communityId: community._id });
 
-    const clientA = await connectClient(rt1.port, signBuyerToken(PHONE_A));
+    const clientA = await connectClient(rt1.port, await signBuyerSessionToken(PHONE_A));
     clients.push(clientA);
     await new Promise((resolve) => clientA.emit('channel:join', { channelId: general }, resolve));
 
-    const clientB = await connectClient(rt2.port, signBuyerToken(PHONE_B));
+    const clientB = await connectClient(rt2.port, await signBuyerSessionToken(PHONE_B));
     clients.push(clientB);
 
     const [presenceOnA, joinAckB] = await Promise.all([

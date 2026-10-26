@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { DmThread } from '@models/dmThread.model';
 import { BlockService } from '@services/block.service';
@@ -17,12 +17,12 @@ describe('/api/tickets/dm/brand-threads (brand ↔ brand)', () => {
   afterAll(disconnectTestDb);
 
   const makeVendor = (name: string, phone: string, email: string, extra: Record<string, unknown> = {}) =>
-    Vendor.create({ businessName: name, email, phoneNumber: phone, password: 'secret123', ...extra });
+    Vendor.create({ businessName: name, email, phoneNumber: phone, password: 'secret123', logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', ...extra });
 
   async function two() {
     const a = await makeVendor('Alpha Events', '+26878004001', 'a@example.com');
     const b = await makeVendor('Beta Shows', '+26878004002', 'b@example.com');
-    return { a, b, tokA: `Bearer ${signVendorToken(String(a._id))}`, tokB: `Bearer ${signVendorToken(String(b._id))}` };
+    return { a, b, tokA: `Bearer ${await seedVendorSessionToken(String(a._id))}`, tokB: `Bearer ${await seedVendorSessionToken(String(b._id))}` };
   }
 
   it('a brand opens a 1:1 with another brand; the view names the OTHER brand, no contact leaks', async () => {
@@ -95,6 +95,6 @@ describe('/api/tickets/dm/brand-threads (brand ↔ brand)', () => {
       .send({ vendorId: String(b._id) }).expect(201)).body.data.id;
     const outsider = await makeVendor('Nosy', '+26878004003', 'nosy@example.com');
     await request(app).get(`/api/tickets/dm/threads/${threadId}/messages`)
-      .set('Authorization', `Bearer ${signVendorToken(String(outsider._id))}`).expect(404);
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(outsider._id))}`).expect(404);
   });
 });

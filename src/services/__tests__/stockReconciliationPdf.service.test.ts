@@ -4,13 +4,17 @@ import {
   fmtQty,
   groupByStall,
   RECON_COLUMNS,
+  PRICING_COLUMNS,
   type ReconciliationData,
   type ReconciliationRow,
 } from '@services/stockReconciliationPdf.service';
 import { extractPdfText } from '@/__tests__/helpers/pdfText';
 
+const pricing = { regularUnits: 4, specialUnits: 6, specialBundles: 1, unclassifiedUnits: 0, refundedNotRestockedUnits: 0, regularValue: 35000, discountAmount: 2000, salesRevenue: 33000 };
+
 function row(overrides: Partial<ReconciliationRow> = {}): ReconciliationRow {
   return {
+    ...pricing,
     merchantId: 'm1',
     merchantName: 'Main Bar',
     productId: 'p1',
@@ -35,9 +39,9 @@ function data(overrides: Partial<ReconciliationData> = {}): ReconciliationData {
   return {
     perBar,
     byProduct: overrides.byProduct ?? [
-      { productId: 'p1', productName: 'Castle Lite', opening: 100, added: 20, transferIn: 0, transferOut: 5, sold: 40, countAdjust: 0, spoilage: 0, manual: 0, expectedClosing: 75, physicalCount: null, variance: null },
+      { ...pricing, productId: 'p1', productName: 'Castle Lite', opening: 100, added: 20, transferIn: 0, transferOut: 5, sold: 40, countAdjust: 0, spoilage: 0, manual: 0, expectedClosing: 75, physicalCount: null, variance: null },
     ],
-    total: overrides.total ?? { opening: 100, added: 20, transferIn: 0, transferOut: 5, sold: 40, countAdjust: 0, spoilage: 0, manual: 0, expectedClosing: 75, physicalCount: null, variance: null },
+    total: overrides.total ?? { ...pricing, opening: 100, added: 20, transferIn: 0, transferOut: 5, sold: 40, countAdjust: 0, spoilage: 0, manual: 0, expectedClosing: 75, physicalCount: null, variance: null },
   };
 }
 
@@ -77,7 +81,7 @@ describe('groupByStall', () => {
 });
 
 describe('StockReconciliationPdfService.buildPdfBuffer', () => {
-  const event = { name: 'Ocean Summer Vibes', subtitle: 'Ocean Cuisine' };
+  const event = { name: 'Ocean Summer Vibes', venue: 'Ocean Cuisine', currency: 'SZL' as const };
 
   it('renders a PDF', async () => {
     const buffer = await StockReconciliationPdfService.buildPdfBuffer(event, data());
@@ -90,10 +94,12 @@ describe('StockReconciliationPdfService.buildPdfBuffer', () => {
 
     expect(text).toContain('Ocean Summer Vibes');
     expect(text).toContain('Ocean Cuisine');
+    expect(text).toContain('E330.00');
+    expect(text).toContain('E20.00');
     // Headings are drawn uppercased; the assertion is that the column reached
     // the page, not how it was cased.
     const upper = text.toUpperCase();
-    for (const col of RECON_COLUMNS) expect(upper).toContain(col.label.toUpperCase());
+    for (const col of [...RECON_COLUMNS, ...PRICING_COLUMNS]) expect(upper).toContain(col.label.toUpperCase());
     // Printed recons get filed and argued over — the moment they describe has
     // to be on the page, in Eswatini time, not the API's UTC.
     expect(text).toContain('17:30');
@@ -134,7 +140,7 @@ describe('StockReconciliationPdfService.buildPdfBuffer', () => {
   });
 
   it('renders an event with no stock at all without throwing', async () => {
-    const empty = data({ perBar: [], byProduct: [], total: { opening: 0, added: 0, transferIn: 0, transferOut: 0, sold: 0, countAdjust: 0, spoilage: 0, manual: 0, expectedClosing: 0, physicalCount: null, variance: null } });
+    const empty = data({ perBar: [], byProduct: [], total: { ...pricing, opening: 0, added: 0, transferIn: 0, transferOut: 0, sold: 0, countAdjust: 0, spoilage: 0, manual: 0, expectedClosing: 0, physicalCount: null, variance: null } });
     const text = extractPdfText(await StockReconciliationPdfService.buildPdfBuffer(event, empty));
     expect(text).toContain('No stock recorded');
   });

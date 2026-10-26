@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 // Carrot Tickets is always the seller for every organizer-created event —
 // the dashboard no longer asks organizers to choose (see
 // EventDetailsPage's Currency card), and the API must never let anything
@@ -14,11 +15,8 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_ID = '64c000000000000000000a01';
 
-function token() {
-  return jwt.sign({
-    app: 'tickets', userType: 'vendor', role: 'tickets_owner',
-    permissions: ['tickets:create_event', 'tickets:edit_event'], vendorId: VENDOR_ID,
-  }, JWT_SECRET);
+async function token() {
+  return await seedVendorSessionToken(VENDOR_ID, { permissions: ['tickets:create_event', 'tickets:edit_event'] });
 }
 
 function futureIso(daysAhead: number, hour = 18): string {
@@ -35,7 +33,7 @@ afterAll(disconnectTestDb);
 it('forces ticketing to carrot on create, ignoring an external request', async () => {
   const res = await request(app)
     .post('/api/tickets/events')
-    .set('Authorization', `Bearer ${token()}`)
+    .set('Authorization', `Bearer ${await token()}`)
     .send({
       name: 'Rooftop Jam', venue: 'The Roof',
       eventDate: futureIso(10), startTime: futureIso(10, 18), endTime: futureIso(10, 23),
@@ -51,7 +49,7 @@ it('forces ticketing to carrot on create, ignoring an external request', async (
 it('rejects an update attempt to switch an event to external ticketing', async () => {
   const created = await request(app)
     .post('/api/tickets/events')
-    .set('Authorization', `Bearer ${token()}`)
+    .set('Authorization', `Bearer ${await token()}`)
     .send({
       name: 'Block Party', venue: 'Main St',
       eventDate: futureIso(10), startTime: futureIso(10, 18), endTime: futureIso(10, 23),
@@ -62,7 +60,7 @@ it('rejects an update attempt to switch an event to external ticketing', async (
 
   const updated = await request(app)
     .put(`/api/tickets/events/${eventId}`)
-    .set('Authorization', `Bearer ${token()}`)
+    .set('Authorization', `Bearer ${await token()}`)
     .send({ ticketing: 'external', externalTicketUrl: 'https://organizer-owned.example.com/tickets' });
 
   expect(updated.status).toBe(200);

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { clearTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Membership } from '@models/membership.model';
 import { Channel } from '@models/channel.model';
@@ -59,7 +59,7 @@ describe('REST write path broadcasts to gateway rooms', () => {
     await Membership.create({ buyerId: sender._id, communityId: community._id });
     await Membership.create({ buyerId: listenerBuyer._id, communityId: community._id });
 
-    const listener = await connectClient(rt.port, signBuyerToken(PHONE_B));
+    const listener = await connectClient(rt.port, await signBuyerSessionToken(PHONE_B));
     clients.push(listener);
     const ack = await new Promise<any>((resolve) =>
       listener.emit('channel:join', { channelId: String(general._id) }, resolve)
@@ -92,7 +92,7 @@ describe('REST write path broadcasts to gateway rooms', () => {
     await Membership.create({ buyerId: sender._id, communityId: community._id });
     await Membership.create({ buyerId: listenerBuyer._id, communityId: community._id });
 
-    const listener = await connectClient(rt.port, signBuyerToken(PHONE_B));
+    const listener = await connectClient(rt.port, await signBuyerSessionToken(PHONE_B));
     clients.push(listener);
     const ack = await new Promise<any>((resolve) =>
       listener.emit('channel:join', { channelId: String(general._id) }, resolve)

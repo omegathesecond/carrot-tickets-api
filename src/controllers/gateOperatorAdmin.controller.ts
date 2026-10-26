@@ -68,7 +68,7 @@ export class GateOperatorAdminController {
         Object.assign(filter, { scope: 'organizer', vendorId: event.vendorId });
         filter['$or'] = [{ eventIds: eventId }, { eventIds: { $size: 0 } }];
       }
-      const operators = await GateOperator.find(filter).sort({ createdAt: -1 });
+      const operators = await GateOperator.find({ ...filter, deletedAt: null }).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, operators);
     } catch (err) { next(err); }
   }
@@ -143,7 +143,7 @@ export class GateOperatorAdminController {
    */
   static async activity(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await GateOperator.findOne({ _id: req.params['id'], ...await scopeFilter(req) });
+      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...await scopeFilter(req) });
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       const eventId = req.query['eventId'] ? String(req.query['eventId']) : undefined;
       const rawLimit = Number(req.query['limit']);
@@ -159,7 +159,7 @@ export class GateOperatorAdminController {
 
   static async resetPin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await GateOperator.findOne({ _id: req.params['id'], ...await scopeFilter(req) }).select('+pin');
+      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...await scopeFilter(req) }).select('+pin');
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
@@ -174,9 +174,20 @@ export class GateOperatorAdminController {
 
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await GateOperator.findOne({ _id: req.params['id'], ...await scopeFilter(req) });
+      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...await scopeFilter(req) });
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
-      if ('fullName' in req.body) operator.fullName = req.body.fullName;
+      if ('fullName' in req.body) {
+        if (typeof req.body.fullName !== 'string' || !req.body.fullName.trim()) {
+          ApiResponseUtil.badRequest(res, 'fullName must be a non-empty string'); return;
+        }
+        operator.fullName = req.body.fullName.trim();
+      }
+      if ('phoneNumber' in req.body) {
+        if (typeof req.body.phoneNumber !== 'string') {
+          ApiResponseUtil.badRequest(res, 'phoneNumber must be a string'); return;
+        }
+        operator.phoneNumber = req.body.phoneNumber.trim() || undefined;
+      }
       if ('isActive' in req.body) {
         // `!!` read the STRING "false" as true — a client sending the flag as
         // text re-activated the person it meant to switch off. Only a real

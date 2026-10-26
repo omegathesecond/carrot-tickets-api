@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Update } from '@models/update.model';
 import { toggleReaction } from '@services/update.service';
 
@@ -21,7 +21,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
 
     const res = await request(app)
       .get('/api/public/feed?tab=for-you')
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .expect(200);
 
     const slide = res.body.data.items.find((i: any) => i.type === 'update' && i.id === u.id);
@@ -41,7 +41,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
 
     const res = await request(app)
       .get('/api/public/feed?tab=for-you')
-      .set('Authorization', `Bearer ${signVendorToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
       .expect(200);
 
     const slide = res.body.data.items.find((i: any) => i.type === 'update' && i.id === u.id);
@@ -60,7 +60,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
 
     const res = await request(app)
       .get('/api/public/feed?tab=for-you')
-      .set('Authorization', `Bearer ${signVendorToken(viewer)}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(viewer)}`)
       .expect(200);
 
     const slide = res.body.data.items.find((i: any) => i.type === 'update' && i.id === u.id);

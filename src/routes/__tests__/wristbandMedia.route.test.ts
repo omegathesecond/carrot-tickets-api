@@ -1,3 +1,4 @@
+import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '@/app';
@@ -13,7 +14,7 @@ jest.mock('@utils/r2.service', () => ({
 }));
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
-const superAdmin = () => jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [], isSuperAdmin: true }, JWT_SECRET);
+const superAdmin = async () => await signAdminSessionToken();
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 beforeAll(connectTestDb);
@@ -24,7 +25,7 @@ it('uploads artwork to the event wristbands folder and returns the CDN url', asy
   const { eventId } = await seedPublishedEvent({});
   const res = await request(app)
     .post(`/api/media/events/${eventId}/wristband`)
-    .set('Authorization', `Bearer ${superAdmin()}`)
+    .set('Authorization', `Bearer ${await superAdmin()}`)
     .attach('artwork', PNG, { filename: 'bg.png', contentType: 'image/png' });
   expect(res.status).toBe(201);
   expect(res.body.data.url).toBe(`https://cdn.test/events/${eventId}/wristbands/123-bg.png`);
@@ -32,7 +33,7 @@ it('uploads artwork to the event wristbands folder and returns the CDN url', asy
 
 it('403s for a plain organizer token', async () => {
   const { eventId, vendorId } = await seedPublishedEvent({});
-  const t = jwt.sign({ app: 'tickets', userType: 'vendor', permissions: [], vendorId }, JWT_SECRET);
+  const t = await seedVendorSessionToken(vendorId, { permissions: [] });
   const res = await request(app)
     .post(`/api/media/events/${eventId}/wristband`)
     .set('Authorization', `Bearer ${t}`)

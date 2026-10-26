@@ -7,6 +7,7 @@ import { Merchant } from '@models/merchant.model';
 import { Cashier } from '@models/cashier.model';
 import { ResellerOperator } from '@models/resellerOperator.model';
 import { Wallet } from '@models/wallet.model';
+import { topupTotalsGroup, readTopupTotals, sumTopupTotals, TopupTotals } from '@utils/topupTotals.util';
 import { BandBinding } from '@models/bandBinding.model';
 
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
@@ -28,21 +29,21 @@ export class OrganizerCashlessService {
 
     const [topupAgg, withdrawAgg, chargeAgg, leftBehindAgg, fundedAgg, vendorAgg, cashierTopupAgg, cashierWithdrawAgg] =
       await Promise.all([
-        WalletTopup.aggregate([{ $match: { eventId: eid } }, ...sumField('$amount')]),
+        WalletTopup.aggregate([{ $match: { eventId: eid } }, { $group: { _id: null, total: { $sum: '$amount' }, ...topupTotalsGroup() } }]),
         WalletWithdrawal.aggregate([{ $match: { eventId: eid } }, ...sumField('$amount')]),
         MerchantCharge.aggregate([
-          { $match: { eventId: eid } },
-          { $group: { _id: null, gross: { $sum: '$amount' }, fee: { $sum: '$fee' }, count: { $sum: 1 } } },
+          { $match: { eventId: eid, status: 'completed' } },
+          { $group: { _id: null, gross: { $sum: '$amount' }, fee: { $sum: '$fee' }, purchaseCharges: { $sum: '$purchaseChargeAmount' }, count: { $sum: 1 } } },
         ]),
         Wallet.aggregate([{ $match: { eventId: eid } }, { $group: { _id: null, total: { $sum: '$balance' } } }]),
         WalletTopup.aggregate([{ $match: { eventId: eid } }, { $group: { _id: '$walletId' } }, { $count: 'n' }]),
         MerchantCharge.aggregate([
-          { $match: { eventId: eid } },
-          { $group: { _id: '$merchantId', gross: { $sum: '$amount' }, commission: { $sum: '$fee' }, net: { $sum: '$netAmount' }, chargeCount: { $sum: 1 } } },
+          { $match: { eventId: eid, status: 'completed' } },
+          { $group: { _id: '$merchantId', gross: { $sum: { $subtract: ['$amount', '$purchaseChargeAmount'] } }, commission: { $sum: '$fee' }, net: { $sum: '$netAmount' }, chargeCount: { $sum: 1 } } },
         ]),
         WalletTopup.aggregate([
           { $match: { eventId: eid, recordedByType: 'Cashier' } },
-          { $group: { _id: '$recordedBy', toppedUp: { $sum: '$amount' }, n: { $sum: 1 } } },
+          { $group: { _id: '$recordedBy', toppedUp: { $sum: '$amount' }, ...topupTotalsGroup(), n: { $sum: 1 } } },
         ]),
         WalletWithdrawal.aggregate([
           { $match: { eventId: eid, recordedByType: 'Cashier' } },
@@ -71,15 +72,15 @@ export class OrganizerCashlessService {
       .sort((a: any, b: any) => b.gross - a.gross);
 
     // Per-cashier activity, merging top-ups + withdrawals, joined to cashier names.
-    const byCashier = new Map<string, { toppedUp: number; withdrawn: number; txnCount: number }>();
+    const byCashier = new Map<string, TopupTotals & { toppedUp: number; withdrawn: number; txnCount: number }>();
     for (const t of cashierTopupAgg) {
       const k = String(t._id);
-      const c = byCashier.get(k) || { toppedUp: 0, withdrawn: 0, txnCount: 0 };
-      c.toppedUp += t.toppedUp; c.txnCount += t.n; byCashier.set(k, c);
+      const c = byCashier.get(k) || { ...readTopupTotals(), toppedUp: 0, withdrawn: 0, txnCount: 0 };
+      Object.assign(c, sumTopupTotals([c, readTopupTotals(t)])); c.toppedUp += t.toppedUp; c.txnCount += t.n; byCashier.set(k, c);
     }
     for (const w of cashierWithdrawAgg) {
       const k = String(w._id);
-      const c = byCashier.get(k) || { toppedUp: 0, withdrawn: 0, txnCount: 0 };
+      const c = byCashier.get(k) || { ...readTopupTotals(), toppedUp: 0, withdrawn: 0, txnCount: 0 };
       c.withdrawn += w.withdrawn; c.txnCount += w.n; byCashier.set(k, c);
     }
     const cashierIds = [...byCashier.keys()].filter((id) => /^[0-9a-fA-F]{24}$/.test(id));
@@ -92,7 +93,8 @@ export class OrganizerCashlessService {
       .sort((a, b) => (b.toppedUp + b.withdrawn) - (a.toppedUp + a.withdrawn));
 
     return {
-      circulated, spent, withdrawn, leftBehind, fees,
+      ...readTopupTotals(topupAgg[0]),
+      circulated, spent, withdrawn, leftBehind, fees, purchaseCharges: chargeAgg[0]?.purchaseCharges ?? 0,
       walletsFunded: fundedAgg[0]?.n ?? 0,
       vendors,
       cashiers,
@@ -185,9 +187,9 @@ export class OrganizerCashlessService {
     ]);
 
     const merged = [
-      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, amount: t.amount, at: t.createdAt, ref: t.clientTxnId ?? null, status: t.status ?? 'completed', walletId: String(t.walletId), actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
-      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, amount: w.amount, at: w.createdAt, ref: w.clientTxnId ?? null, status: w.status ?? 'completed', walletId: String(w.walletId), actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
-      ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, ref: c.clientTxnId ?? null, status: c.status ?? 'completed', walletId: String(c.walletId), bandUid: c.bandUid, fee: c.fee, netAmount: c.netAmount, actorType: 'Merchant', actorId: c.merchantId ? String(c.merchantId) : null })),
+      ...topups.map((t: any) => ({ id: String(t._id), type: 'topup' as const, method: t.method, amount: t.amount, at: t.createdAt, ref: t.clientTxnId ?? null, status: t.status ?? 'completed', walletId: String(t.walletId), actorType: t.recordedByType, actorId: t.recordedBy ? String(t.recordedBy) : null })),
+      ...withdrawals.map((w: any) => ({ id: String(w._id), type: 'withdrawal' as const, method: w.method, amount: w.amount, at: w.createdAt, ref: w.clientTxnId ?? null, status: w.status ?? 'completed', walletId: String(w.walletId), actorType: w.recordedByType, actorId: w.recordedBy ? String(w.recordedBy) : null })),
+      ...charges.map((c: any) => ({ id: String(c._id), type: 'purchase' as const, amount: c.amount, at: c.createdAt, ref: c.clientTxnId ?? null, status: c.status, reversal: c.reversal, walletId: String(c.walletId), bandUid: c.bandUid, purchaseChargeAmount: c.purchaseChargeAmount, fee: c.fee, netAmount: c.netAmount, actorType: 'Merchant', actorId: c.merchantId ? String(c.merchantId) : null })),
     ].sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
     const start = (page - 1) * limit;

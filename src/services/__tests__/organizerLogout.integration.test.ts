@@ -1,0 +1,22 @@
+import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
+import { Vendor } from '@models/vendor.model';
+import { TicketsAuthService } from '../ticketsAuth.service';
+beforeAll(connectTestDb);
+afterAll(disconnectTestDb);
+afterEach(clearTestDb);
+it('rejects dashboard, public SSO, refresh and pending handoff credentials after organizer logout', async () => {
+  await Vendor.create({ businessName: 'Logout test', email: 'logout@example.com', password: 'secret1', apps: { tickets: { enabled: true } } });
+  const dashboard = await TicketsAuthService.login('logout@example.com', 'secret1');
+  const identity = await TicketsAuthService.verifyAndResolveSession(dashboard.accessToken);
+  const handoff = TicketsAuthService.mintSocialHandoff(identity);
+  const publicSession = await TicketsAuthService.exchangeSocialHandoff(handoff);
+  const pendingHandoff = TicketsAuthService.mintSocialHandoff(identity);
+  await TicketsAuthService.logout(dashboard.accessToken, dashboard.refreshToken);
+  await expect(TicketsAuthService.verifyAndResolveSession(dashboard.accessToken)).rejects.toThrow();
+  await expect(TicketsAuthService.verifyAndResolveSession(publicSession.accessToken)).rejects.toThrow();
+  await expect(TicketsAuthService.refreshAccessToken(dashboard.refreshToken)).rejects.toThrow();
+  await expect(TicketsAuthService.refreshAccessToken(publicSession.refreshToken)).rejects.toThrow();
+  await expect(TicketsAuthService.exchangeSocialHandoff(pendingHandoff)).rejects.toThrow();
+  const freshLogin = await TicketsAuthService.login('logout@example.com', 'secret1');
+  await expect(TicketsAuthService.verifyAndResolveSession(freshLogin.accessToken)).resolves.toBeDefined();
+});

@@ -1,4 +1,5 @@
 // api/src/routes/cashier.route.ts
+import { CashCollectionController } from '@controllers/cashCollection.controller';
 import { Router } from 'express';
 import { CashierController } from '@controllers/cashier.controller';
 import { authenticateCashier, requireCashierPermission } from '@middleware/cashierAuth.middleware';
@@ -25,7 +26,7 @@ router.post(
 
 router.post(
   '/topup',
-  requireCashierPermission(CashierPermission.CASH_TOPUP),
+  // The validated payment method determines the grant inside the controller.
   CashierController.topup,
 );
 
@@ -46,5 +47,12 @@ router.get(
   requireCashierPermission(CashierPermission.VIEW_OWN_TRANSACTIONS),
   CashierController.transactions,
 );
+
+router.get('/transactions/all-methods', requireCashierPermission(CashierPermission.VIEW_OWN_TRANSACTIONS), CashierController.transactionsAllMethods);
+
+router.get('/cash-desk', requireCashierPermission(CashierPermission.VIEW_OWN_TRANSACTIONS), CashCollectionController.desk);
+// Collection authorization is resolved from live grants, never the stale JWT.
+router.post('/cash-collections', CashCollectionController.create);
+router.post('/cash-collections/:id/resolve', CashCollectionController.resolve);
 
 export default router;

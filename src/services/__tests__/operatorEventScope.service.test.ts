@@ -123,13 +123,13 @@ describe('a vanished row fails closed', () => {
     expect(await resolveOperatorEventScope(ownerReq(resellerId))).toEqual([]);
   });
 
-  it('still holds a till to the reseller scope when the till row is gone', async () => {
+  it('denies a till whose operator row is gone', async () => {
     const a = oid();
     const resellerId = await seedScopedReseller([a]);
 
     const scope = await resolveOperatorEventScope(tillReq(resellerId, oid().toString()));
 
-    expect(scope).toEqual([a.toString()]);
+    expect(scope).toEqual([]);
   });
 });
 
@@ -297,11 +297,10 @@ describe('operatorMayActOnEvent', () => {
 
     await Cashier.deleteOne({ _id: c._id });
 
-    // …and DENIED once the row is gone, not freed. authenticateCashier does no
-    // DB lookup and tokens last 7 days, so her token keeps authenticating —
+    // …and DENIED once the row is gone, not freed. the next HTTP request gets a fresh row even though the token lives 7 days —
     // resolving to null here would hand her every event instead of none.
-    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
-    expect(await operatorMayActOnEvent(req as any, oid().toString())).toBe(false);
+    expect(await resolveOperatorEventScope({ ...req } as any)).toEqual([]);
+    expect(await operatorMayActOnEvent({ ...req } as any, oid().toString())).toBe(false);
   });
 
   // Deactivation is the dashboard's only revocation control for a cashier
@@ -324,8 +323,8 @@ describe('operatorMayActOnEvent', () => {
 
     // …and denied everywhere the moment she is deactivated. An EMPTY array,
     // not null — null would mean unrestricted, i.e. the exact opposite.
-    expect(await resolveOperatorEventScope(req as any)).toEqual([]);
-    expect(await operatorMayActOnEvent(req as any, hers.toString())).toBe(false);
+    expect(await resolveOperatorEventScope({ ...req } as any)).toEqual([]);
+    expect(await operatorMayActOnEvent({ ...req } as any, hers.toString())).toBe(false);
   });
 
   // The check has to sit BEFORE the platform branch: platform scope returns

@@ -2,7 +2,7 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
-import { signBuyerToken } from '@/__tests__/helpers/auth';
+import { signBuyerSessionToken } from '@/__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Event } from '@models/event.model';
 import { EventPlan } from '@models/eventPlan.model';
@@ -18,7 +18,7 @@ jest.mock('@utils/updatesR2', () => ({
 }));
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn().mockResolvedValue(undefined) }));
 
-const auth = (phone: string) => ({ Authorization: `Bearer ${signBuyerToken(phone)}` });
+const auth = async (phone: string) => ({ Authorization: `Bearer ${await signBuyerSessionToken(phone)}` });
 const ADMIN = '+26878422613';
 const FRIEND = '+26878000001';
 const AVATAR = 'https://cdn.carrottickets.com/test/avatar.jpg';
@@ -40,8 +40,8 @@ async function makeBuyer(phone: string, name: string, username: string) {
   return Buyer.create({ phone, password: 'secret1', avatarUrl: AVATAR, name, username });
 }
 
-function createPlan(phone: string, body: Record<string, unknown>) {
-  return request(app).post('/api/social/plans').set(auth(phone)).send(body);
+function createPlan(headers: Record<string, string>, body: Record<string, unknown>) {
+  return request(app).post('/api/social/plans').set(headers).send(body);
 }
 
 describe('Trip Plan — manually-entered events', () => {
@@ -54,7 +54,7 @@ describe('Trip Plan — manually-entered events', () => {
 
   it('creates a plan from a manually-entered trip, with no linked Carrot event', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
-    const res = await createPlan(ADMIN, {
+    const res = await createPlan(await auth(ADMIN), {
       manualEvent: { name: 'Weekend in Cape Town', date: new Date(Date.now() + 5 * 86400000).toISOString(), location: 'Cape Town' },
       name: 'Road trip crew',
       visibility: 'private',
@@ -71,7 +71,7 @@ describe('Trip Plan — manually-entered events', () => {
   it('rejects a create with both eventId and manualEvent', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
     const event = await makeEvent();
-    await createPlan(ADMIN, {
+    await createPlan(await auth(ADMIN), {
       eventId: String(event._id),
       manualEvent: { name: 'Also this' },
       name: 'Conflicting',
@@ -81,18 +81,18 @@ describe('Trip Plan — manually-entered events', () => {
 
   it('rejects a create with neither eventId nor manualEvent', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
-    await createPlan(ADMIN, { name: 'No destination', visibility: 'public' }).expect(400);
+    await createPlan(await auth(ADMIN), { name: 'No destination', visibility: 'public' }).expect(400);
   });
 
   it('lists a manual-event plan under My Plans > Upcoming and includes it in the Home feed when public', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
-    const created = await createPlan(ADMIN, {
+    const created = await createPlan(await auth(ADMIN), {
       manualEvent: { name: 'Beach day', date: new Date(Date.now() + 2 * 86400000).toISOString() },
       name: 'Beach day plan',
       visibility: 'public',
     }).expect(201);
 
-    const mine = await request(app).get('/api/social/plans/mine?section=upcoming').set(auth(ADMIN)).expect(200);
+    const mine = await request(app).get('/api/social/plans/mine?section=upcoming').set(await auth(ADMIN)).expect(200);
     expect(mine.body.data.plans.map((p: any) => p.id)).toContain(created.body.data.id);
   });
 });
@@ -111,7 +111,7 @@ describe('Trip Plan — Posts (photo/video)', () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
     const event = await makeEvent();
-    const created = await createPlan(ADMIN, { eventId: String(event._id), name: 'Pregame', visibility: 'public' }).expect(201);
+    const created = await createPlan(await auth(ADMIN), { eventId: String(event._id), name: 'Pregame', visibility: 'public' }).expect(201);
     return created.body.data.id as string;
   }
 
@@ -119,7 +119,7 @@ describe('Trip Plan — Posts (photo/video)', () => {
     const planId = await makeActivePlan();
     const prepared = await request(app)
       .post(`/api/social/plans/${planId}/posts`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ kind: 'image', body: 'trip pic', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(201);
     expect(prepared.body.data.uploads).toHaveLength(1);
@@ -127,7 +127,7 @@ describe('Trip Plan — Posts (photo/video)', () => {
 
     const finalized = await request(app)
       .post(`/api/social/plans/${planId}/posts/${messageId}/finalize`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .expect(200);
     expect(finalized.body.data.message.media[0].status).toBe('ready');
 
@@ -141,7 +141,7 @@ describe('Trip Plan — Posts (photo/video)', () => {
     const planId = await makeActivePlan();
     await request(app)
       .post(`/api/social/plans/${planId}/posts`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ kind: 'video', items: [{ ext: 'mp4', contentType: 'video/mp4' }, { ext: 'mp4', contentType: 'video/mp4' }] })
       .expect(400);
   });
@@ -151,7 +151,7 @@ describe('Trip Plan — Posts (photo/video)', () => {
     await makeBuyer('+26878000099', 'Outsider', 'outsider_one');
     await request(app)
       .post(`/api/social/plans/${planId}/posts`)
-      .set(auth('+26878000099'))
+      .set(await auth('+26878000099'))
       .send({ kind: 'image', items: [{ ext: 'jpg', contentType: 'image/jpeg' }] })
       .expect(403);
   });
@@ -159,8 +159,8 @@ describe('Trip Plan — Posts (photo/video)', () => {
   it('dedupes a retried create via clientToken instead of creating a second post', async () => {
     const planId = await makeActivePlan();
     const body = { kind: 'image', body: 'once', items: [{ ext: 'jpg', contentType: 'image/jpeg' }], clientToken: 'retry-key-1' };
-    const first = await request(app).post(`/api/social/plans/${planId}/posts`).set(auth(ADMIN)).send(body).expect(201);
-    const second = await request(app).post(`/api/social/plans/${planId}/posts`).set(auth(ADMIN)).send(body).expect(201);
+    const first = await request(app).post(`/api/social/plans/${planId}/posts`).set(await auth(ADMIN)).send(body).expect(201);
+    const second = await request(app).post(`/api/social/plans/${planId}/posts`).set(await auth(ADMIN)).send(body).expect(201);
 
     expect(second.body.data.message.id).toBe(first.body.data.message.id);
     expect(second.body.data.uploads).toHaveLength(0);
@@ -169,43 +169,43 @@ describe('Trip Plan — Posts (photo/video)', () => {
 
   it('lets the author edit a caption and delete their own post', async () => {
     const planId = await makeActivePlan();
-    const sent = await request(app).post(`/api/social/plans/${planId}/messages`).set(auth(ADMIN)).send({ body: 'hello' }).expect(201);
+    const sent = await request(app).post(`/api/social/plans/${planId}/messages`).set(await auth(ADMIN)).send({ body: 'hello' }).expect(201);
     const messageId = sent.body.data.message.id;
 
     const edited = await request(app)
       .patch(`/api/social/plans/${planId}/messages/${messageId}`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ body: 'hello edited' })
       .expect(200);
     expect(edited.body.data.message.body).toBe('hello edited');
     expect(edited.body.data.message.editedAt).toBeTruthy();
 
-    await request(app).delete(`/api/social/plans/${planId}/messages/${messageId}`).set(auth(ADMIN)).expect(200);
+    await request(app).delete(`/api/social/plans/${planId}/messages/${messageId}`).set(await auth(ADMIN)).expect(200);
     expect(await EventPlanMessage.findById(messageId).then((m) => m?.deletedAt)).toBeTruthy();
   });
 
   it("lets the plan admin delete another member's post (moderation), but not an unrelated member", async () => {
     const planId = await makeActivePlan();
     // FRIEND joins the public/open plan first.
-    await request(app).post(`/api/social/plans/${planId}/join`).set(auth(FRIEND)).expect(200);
-    const sent = await request(app).post(`/api/social/plans/${planId}/messages`).set(auth(FRIEND)).send({ body: 'friend post' }).expect(201);
+    await request(app).post(`/api/social/plans/${planId}/join`).set(await auth(FRIEND)).expect(200);
+    const sent = await request(app).post(`/api/social/plans/${planId}/messages`).set(await auth(FRIEND)).send({ body: 'friend post' }).expect(201);
     const messageId = sent.body.data.message.id;
 
-    await request(app).delete(`/api/social/plans/${planId}/messages/${messageId}`).set(auth(ADMIN)).expect(200);
+    await request(app).delete(`/api/social/plans/${planId}/messages/${messageId}`).set(await auth(ADMIN)).expect(200);
     expect(await EventPlanMessage.findById(messageId).then((m) => m?.deletedAt)).toBeTruthy();
   });
 
   it('marks posts read and clears the unread count for that viewer only', async () => {
     const planId = await makeActivePlan();
-    await request(app).post(`/api/social/plans/${planId}/join`).set(auth(FRIEND)).expect(200);
-    await request(app).post(`/api/social/plans/${planId}/messages`).set(auth(FRIEND)).send({ body: 'unread to admin' }).expect(201);
+    await request(app).post(`/api/social/plans/${planId}/join`).set(await auth(FRIEND)).expect(200);
+    await request(app).post(`/api/social/plans/${planId}/messages`).set(await auth(FRIEND)).send({ body: 'unread to admin' }).expect(201);
 
-    const before = await request(app).get(`/api/social/plans/${planId}`).set(auth(ADMIN)).expect(200);
+    const before = await request(app).get(`/api/social/plans/${planId}`).set(await auth(ADMIN)).expect(200);
     expect(before.body.data.plan.viewer.unreadCount).toBeGreaterThan(0);
 
-    await request(app).post(`/api/social/plans/${planId}/read`).set(auth(ADMIN)).expect(200);
+    await request(app).post(`/api/social/plans/${planId}/read`).set(await auth(ADMIN)).expect(200);
 
-    const after = await request(app).get(`/api/social/plans/${planId}`).set(auth(ADMIN)).expect(200);
+    const after = await request(app).get(`/api/social/plans/${planId}`).set(await auth(ADMIN)).expect(200);
     expect(after.body.data.plan.viewer.unreadCount).toBe(0);
   });
 });
@@ -223,7 +223,7 @@ describe('Trip Plan — cover photo', () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
     const event = await makeEvent();
-    const created = await createPlan(ADMIN, { eventId: String(event._id), name: 'Scorpion Kings trip', visibility: 'public' }).expect(201);
+    const created = await createPlan(await auth(ADMIN), { eventId: String(event._id), name: 'Scorpion Kings trip', visibility: 'public' }).expect(201);
     return created.body.data.id as string;
   }
 
@@ -237,14 +237,14 @@ describe('Trip Plan — cover photo', () => {
     const planId = await makePlan();
     const presigned = await request(app)
       .post(`/api/social/plans/${planId}/cover/presign`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ ext: 'jpg', contentType: 'image/jpeg' })
       .expect(200);
     expect(presigned.body.data.uploadUrl).toContain('https://r2.example/put');
 
     const finalized = await request(app)
       .post(`/api/social/plans/${planId}/cover/finalize`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ rawKey: presigned.body.data.rawKey })
       .expect(200);
     expect(finalized.body.data.plan.coverImage).toBe(`https://cdn.carrottickets.com/${presigned.body.data.rawKey}`);
@@ -252,7 +252,7 @@ describe('Trip Plan — cover photo', () => {
     const detail = await request(app).get(`/api/social/plans/${planId}`).expect(200);
     expect(detail.body.data.plan.coverImage).toBe(finalized.body.data.plan.coverImage);
 
-    const mine = await request(app).get('/api/social/plans/mine?section=upcoming').set(auth(ADMIN)).expect(200);
+    const mine = await request(app).get('/api/social/plans/mine?section=upcoming').set(await auth(ADMIN)).expect(200);
     expect(mine.body.data.plans.find((p: any) => p.id === planId).coverImage).toBe(finalized.body.data.plan.coverImage);
   });
 
@@ -260,7 +260,7 @@ describe('Trip Plan — cover photo', () => {
     const planId = await makePlan();
     await request(app)
       .post(`/api/social/plans/${planId}/cover/presign`)
-      .set(auth(FRIEND))
+      .set(await auth(FRIEND))
       .send({ ext: 'jpg', contentType: 'image/jpeg' })
       .expect(403);
   });
@@ -269,7 +269,7 @@ describe('Trip Plan — cover photo', () => {
     const planId = await makePlan();
     await request(app)
       .post(`/api/social/plans/${planId}/cover/presign`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ ext: 'gif', contentType: 'image/gif' })
       .expect(400);
   });
@@ -278,16 +278,16 @@ describe('Trip Plan — cover photo', () => {
     const planId = await makePlan();
     const presigned = await request(app)
       .post(`/api/social/plans/${planId}/cover/presign`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ ext: 'png', contentType: 'image/png' })
       .expect(200);
     await request(app)
       .post(`/api/social/plans/${planId}/cover/finalize`)
-      .set(auth(ADMIN))
+      .set(await auth(ADMIN))
       .send({ rawKey: presigned.body.data.rawKey })
       .expect(200);
 
-    await request(app).delete(`/api/social/plans/${planId}/cover`).set(auth(ADMIN)).expect(200);
+    await request(app).delete(`/api/social/plans/${planId}/cover`).set(await auth(ADMIN)).expect(200);
     const detail = await request(app).get(`/api/social/plans/${planId}`).expect(200);
     expect(detail.body.data.plan.coverImage).toBeNull();
   });

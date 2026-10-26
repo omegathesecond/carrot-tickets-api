@@ -1,3 +1,4 @@
+import { purchaseChargeSchema } from '@utils/purchaseCharge.util';
 import mongoose, { Schema } from 'mongoose';
 import { IEvent, EventStatus, ITicketType } from '@interfaces/event.interface';
 import { PaymentMethod } from '@interfaces/ticket.interface';
@@ -107,6 +108,14 @@ const eventSchema = new Schema<IEvent>({
   isMultiDay: {
     type: Boolean,
     default: false
+  },
+  purchaseCharge: {
+    type: new Schema({
+      type: { type: String, enum: ['fixed', 'percentage'], required: true },
+      value: { type: Number, required: true },
+    }, { _id: false }),
+    default: null,
+    validate: { validator: (v: any) => !purchaseChargeSchema.validate(v == null ? null : v.toObject(), { convert: false }).error, message: 'Invalid purchase charge' },
   },
   cashless: {
     type: Boolean,

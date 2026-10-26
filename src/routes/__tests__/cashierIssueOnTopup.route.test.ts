@@ -37,7 +37,7 @@ async function seedDesk(opts: { canIssue: boolean }) {
   });
   const cashier = await Cashier.create({
     fullName: 'Nandi', loginCode: `4KZ${seq++}`, pin: '222222',
-    scope: 'organizer', vendorId, eventId: event._id,
+    scope: 'organizer', vendorId, eventId: event._id, grants: ['topup_cash', ...(opts.canIssue ? ['issue_tags'] : [])],
   });
   const permissions = opts.canIssue
     ? [...CASHIER_PERMISSIONS, CashierPermission.ISSUE_TAGS]
@@ -53,7 +53,7 @@ async function seedDesk(opts: { canIssue: boolean }) {
 const topup = (token: string, eventId: string, body: Record<string, unknown>) =>
   request(app).post('/api/cashier/topup')
     .set('Authorization', `Bearer ${token}`)
-    .send({ eventId, ...body });
+    .send({ method: 'cash', eventId, ...body });
 
 describe('a granted cashier turns a blank tag into a funded wallet in one tap', () => {
   it('registers the tag, gives it a wallet and loads it', async () => {

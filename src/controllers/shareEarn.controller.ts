@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
-import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { resolvePlanParticipant } from '@utils/planParticipant.util';
 import { IBuyer } from '@models/buyer.model';
 import { ShareEarnService } from '@services/shareEarn.service';
 
@@ -16,7 +16,7 @@ export class ShareEarnController {
   /** GET /api/public/events/:eventId/share-earn — visible logged out (spec §2). */
   static async getEventCampaign(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       const result = await ShareEarnService.getPublicCampaign(String(req.params['eventId']), buyer ? String(buyer._id) : undefined);
       return ApiResponseUtil.success(res, result ?? { campaign: null, joined: null });
     } catch (error: any) {
@@ -27,7 +27,7 @@ export class ShareEarnController {
   /** POST /api/public/events/:eventId/share-earn/join — auth required (spec §3). */
   static async join(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in to join Share&Earn');
       const { promoter, campaign } = await ShareEarnService.joinCampaign(String(req.params['eventId']), buyerRef(buyer));
       return ApiResponseUtil.created(res, ShareEarnService.toPromoterBuyerView(promoter, campaign), 'You joined Share&Earn');
@@ -39,7 +39,7 @@ export class ShareEarnController {
   /** PATCH /api/public/share-earn/promoters/:promoterId/leaderboard-opt-out { optOut } */
   static async setLeaderboardOptOut(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const promoter = await ShareEarnService.setLeaderboardOptOut(buyerRef(buyer), String(req.params['promoterId']), !!req.body?.optOut);
       return ApiResponseUtil.success(res, { optOutLeaderboard: promoter.optOutLeaderboard });
@@ -81,7 +81,7 @@ export class ShareEarnController {
   /** GET /api/public/my-share-earn — Active / Completed / Rewards (spec §9). */
   static async mine(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const result = await ShareEarnService.getMyShareEarn(buyerRef(buyer));
       return ApiResponseUtil.success(res, result);
@@ -93,7 +93,7 @@ export class ShareEarnController {
   /** POST /api/public/share-earn/rewards/:rewardId/redeem — non-points rewards only. */
   static async redeemReward(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolvePlanParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const reward = await ShareEarnService.redeemReward(buyerRef(buyer), String(req.params['rewardId']));
       return ApiResponseUtil.success(res, ShareEarnService.toRewardBuyerView(reward), 'Reward redeemed');

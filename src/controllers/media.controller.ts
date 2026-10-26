@@ -1,9 +1,9 @@
+import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { R2Service } from '@utils/r2.service';
 import { Event } from '@models/event.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
-import { getScope } from '@middleware/tradingScope.middleware';
 
 /**
  * MediaController - Handles event media uploads to Cloudflare R2
@@ -23,7 +23,7 @@ export class MediaController {
    */
   static async uploadPoster(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -83,7 +83,7 @@ export class MediaController {
    */
   static async uploadThumbnail(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -144,7 +144,7 @@ export class MediaController {
    */
   static async uploadGalleryImages(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const files = req.files as Express.Multer.File[];
 
@@ -202,7 +202,7 @@ export class MediaController {
    */
   static async uploadQRCode(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -263,12 +263,15 @@ export class MediaController {
    */
   static async deleteMedia(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const { url, mediaType } = req.body;
       const ticketsUser = (req as any).ticketsUser;
 
       if (!url || !mediaType) {
         return ApiResponseUtil.validationError(res, 'URL and media type are required');
+      }
+      if (!['poster', 'thumbnail', 'gallery', 'qrcode'].includes(mediaType) || typeof url !== 'string') {
+        return ApiResponseUtil.validationError(res, 'Invalid media type or URL');
       }
 
       // Verify event exists and belongs to vendor (or superadmin)
@@ -281,7 +284,16 @@ export class MediaController {
         return ApiResponseUtil.notFound(res, 'Event not found');
       }
 
-      // Delete from R2
+      // Authorize the OBJECT, not only the event used to reach this endpoint.
+      const urls = mediaType === 'gallery' ? event.galleryImages || [] :
+        [mediaType === 'poster' ? event.posterUrl : mediaType === 'thumbnail' ? event.thumbnailUrl : event.qrCodeUrl];
+      if (!urls.includes(url)) return ApiResponseUtil.notFound(res, 'Media not found on this event');
+      const expectedFolder = R2Service.getEventMediaFolder(String(event._id), mediaType);
+      const publicPrefix = process.env['R2_PUBLIC_URL'];
+      const expectedPrefix = publicPrefix ? `${publicPrefix}/${expectedFolder}/` : `${expectedFolder}/`;
+      if (!url.startsWith(expectedPrefix)) return ApiResponseUtil.forbidden(res, 'Media is outside this event');
+
+      // Delete only after ownership, type and storage scope are proven.
       await R2Service.deleteEventMediaByUrl(url);
 
       // Remove from event document
@@ -323,7 +335,7 @@ export class MediaController {
    */
   static async listEventMedia(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
 
       // Verify event exists and belongs to vendor (or superadmin)
@@ -361,7 +373,7 @@ export class MediaController {
    */
   static async uploadWristbandAsset(req: Request, res: Response): Promise<any> {
     try {
-      const { eventId } = req.params;
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
       const file = req.file;
 
@@ -407,40 +419,30 @@ export class MediaController {
     res: Response,
     mediaType: 'menu-item' | 'product',
   ): Promise<any> {
-    const { eventId } = req.params;
-    if (!eventId) return ApiResponseUtil.validationError(res, 'Event ID is required');
-    return MediaController.storeItemImage(req, res, mediaType, mediaType, async (file) => {
+    try {
+      const eventId = requireRouteParam(req, 'eventId');
       const ticketsUser = (req as any).ticketsUser;
+      const file = req.file;
+
+      if (!eventId) return ApiResponseUtil.validationError(res, 'Event ID is required');
+      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
+
       const query: any = { _id: eventId };
       if (!ticketsUser.isSuperAdmin) query.vendorId = ticketsUser.vendorId;
       const event = await Event.findOne(query);
-      if (!event) { ApiResponseUtil.notFound(res, 'Event not found'); return null; }
-      return R2Service.uploadEventMedia(eventId, mediaType, file.originalname || mediaType, file.buffer, file.mimetype);
-    });
-  }
+      if (!event) return ApiResponseUtil.notFound(res, 'Event not found');
 
-  /**
-   * The skeleton every item-image upload shares (event menu/product, venue
-   * product): refuse a missing file, let `store` check the owner and write
-   * the file — it answers a refusal itself and returns null — then answer
-   * `{ media }`. Like uploadItemImage, it writes to NO document.
-   */
-  private static async storeItemImage(
-    req: Request,
-    res: Response,
-    mediaType: 'menu-item' | 'product',
-    logLabel: string,
-    store: (file: Express.Multer.File) => Promise<{ key: string; url: string } | null>,
-  ): Promise<any> {
-    try {
-      const file = req.file;
-      if (!file) return ApiResponseUtil.validationError(res, 'No file uploaded');
-      const stored = await store(file);
-      if (!stored) return; // refused — already answered
-      const { key, url } = stored;
+      const { key, url } = await R2Service.uploadEventMedia(
+        eventId,
+        mediaType,
+        file.originalname || mediaType,
+        file.buffer,
+        file.mimetype,
+      );
+
       ApiResponseUtil.success(res, { media: { key, url, type: mediaType } }, 'Image uploaded successfully');
     } catch (error: any) {
-      console.error(`Upload ${logLabel} image error:`, error);
+      console.error(`Upload ${mediaType} image error:`, error);
       ApiResponseUtil.error(res, error.message || 'Failed to upload image');
     }
   }
@@ -453,17 +455,5 @@ export class MediaController {
   /** POST /api/media/events/:eventId/product */
   static async uploadProductImage(req: Request, res: Response): Promise<any> {
     return MediaController.uploadItemImage(req, res, 'product');
-  }
-
-  /**
-   * POST /api/media/venue/product — a venue catalogue image. venueScope has
-   * already resolved the caller's own venue; stored under venues/<id>/product.
-   */
-  static async uploadVenueProductImage(req: Request, res: Response): Promise<any> {
-    return MediaController.storeItemImage(req, res, 'product', 'venue product', async (file) => {
-      const scope = getScope(req);
-      if (scope.kind !== 'venue') throw new Error('uploadVenueProductImage needs a venue scope');
-      return R2Service.uploadFile(`venues/${scope.venueId}/product`, file.originalname || 'product', file.buffer, file.mimetype);
-    });
   }
 }

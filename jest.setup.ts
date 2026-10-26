@@ -10,3 +10,6 @@ process.env['JWT_SECRET'] = process.env['JWT_SECRET'] || 'test-secret-key';
 process.env['VAPID_PUBLIC_KEY'] = process.env['VAPID_PUBLIC_KEY'] || 'test-vapid-public';
 process.env['VAPID_PRIVATE_KEY'] = process.env['VAPID_PRIVATE_KEY'] || 'test-vapid-private';
 process.env['VAPID_SUBJECT'] = process.env['VAPID_SUBJECT'] || 'mailto:test@example.com';
+
+// Test-only encryption key for recoverable event operator PINs.
+process.env['OPERATOR_PIN_ENCRYPTION_KEY'] = Buffer.alloc(32, 7).toString('base64');

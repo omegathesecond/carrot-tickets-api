@@ -1,5 +1,6 @@
 // api/src/models/merchantCharge.model.ts
 import { Schema, model, Document, Types } from 'mongoose';
+import { SalePricing } from '@interfaces/stock.interface';
 
 /**
  * One completed tap-to-pay charge (cashless spec) — the durable record of a
@@ -26,13 +27,18 @@ export interface IMerchantCharge extends Document {
   bandUid: string;
   /** Amount debited from the wallet, integer minor units (cents). */
   amount: number;
+  /** Customer surcharge owed to the organizer, included in amount. */
+  purchaseChargeAmount: number;
   /** Platform commission taken from `amount`, integer minor units (cents). */
   fee: number;
-  /** amount - fee: what the merchant is owed, integer minor units (cents). */
+  /** amount - purchaseChargeAmount - fee: stall earnings, integer cents. */
   netAmount: number;
   clientTxnId: string;
-  status: 'completed';
-  items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number }>;
+  status: 'completed' | 'reversed';
+  /** Exact cash-funded portion consumed by this debit. Never inferred for older sales. */
+  cashFundedAmount?: number;
+  reversal?: { by: Types.ObjectId; staffName: string; reason: string; at: Date; restocked: boolean; ledgerTxnId: string };
+  items?: Array<{ productId: Types.ObjectId; name: string; unitPrice: number; qty: number; lineTotal: number; pricing?: SalePricing }>;
   /**
    * Snapshot of the human who took this charge at sale time — the operator's
    * name for a till charge, the waiter's name for a table charge — so
@@ -53,10 +59,20 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   bandUid: { type: String, required: true, trim: true },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
+  purchaseChargeAmount: { type: Number, default: 0, min: 0, validate: { validator: Number.isSafeInteger, message: 'purchase charge must be integer cents' } },
   fee: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'fee must be integer cents' } },
   netAmount: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'netAmount must be integer cents' } },
   clientTxnId: { type: String, required: true },
-  status: { type: String, enum: ['completed'], required: true, default: 'completed' },
+  status: { type: String, enum: ['completed', 'reversed'], required: true, default: 'completed' },
+  cashFundedAmount: { type: Number, min: 0, validate: Number.isSafeInteger },
+  reversal: { type: new Schema({
+    by: { type: Schema.Types.ObjectId, required: true },
+    staffName: { type: String, required: true },
+    reason: { type: String, required: true, maxlength: 300 },
+    at: { type: Date, required: true },
+    restocked: { type: Boolean, required: true },
+    ledgerTxnId: { type: String, required: true },
+  }, { _id: false }), required: false },
   items: {
     type: [new Schema({
       productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
@@ -64,6 +80,14 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
       unitPrice: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'unitPrice must be integer cents' } },
       qty: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'qty must be a whole number' } },
       lineTotal: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'lineTotal must be integer cents' } },
+      pricing: { type: new Schema({
+        regularUnits: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+        specialUnits: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+        specialBundles: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+        bundleQuantity: { type: Number, min: 2, validate: Number.isSafeInteger },
+        bundlePrice: { type: Number, min: 1, validate: Number.isSafeInteger },
+        discountAmount: { type: Number, required: true, min: 0, validate: Number.isSafeInteger },
+      }, { _id: false }), default: undefined },
     }, { _id: false })],
     required: false,
     default: undefined,

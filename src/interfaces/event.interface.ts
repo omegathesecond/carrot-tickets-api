@@ -59,6 +59,7 @@ export interface IEvent extends Document {
   startTime: Date; // For single-day: start time on eventDate. For multi-day: start datetime
   endTime: Date; // For single-day: end time on eventDate. For multi-day: end datetime
   isMultiDay?: boolean; // Whether this is a multi-day event (default: false)
+  purchaseCharge?: import('@utils/purchaseCharge.util').PurchaseCharge | null;
   cashless: boolean; // Whether NFC tap-and-go wallet/POS is enabled for this event (default: false)
   // An organizer cannot switch `cashless` on themselves (it commits Carrot to
   // bands, handhelds, a float and settlement), so they ask and an admin grants.

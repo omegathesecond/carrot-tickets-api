@@ -2,6 +2,7 @@ import { Schema, model, Document } from 'mongoose';
 
 export interface IRefreshToken extends Document {
   token: string;
+  authVersion: number;
   userId?: string;
   vendorId?: string;
   userType: 'vendor' | 'sub-user';
@@ -13,6 +14,7 @@ export interface IRefreshToken extends Document {
 
 const refreshTokenSchema = new Schema<IRefreshToken>(
   {
+    authVersion: { type: Number, required: true },
     token: { type: String, required: true, unique: true, index: true },
     userId: { type: String },
     vendorId: { type: String },

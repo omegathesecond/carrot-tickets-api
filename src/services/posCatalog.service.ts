@@ -3,7 +3,6 @@ import { Product, IProduct } from '@models/product.model';
 import { ProductStock, IProductStock } from '@models/productStock.model';
 import { Merchant } from '@models/merchant.model';
 import { ProductCategory } from '@interfaces/stock.interface';
-import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 export type PosTileStatus = 'in_stock' | 'low' | 'sold_out';
 
@@ -16,6 +15,7 @@ export interface PosTile {
   productId: string;
   name: string;
   price: number;
+  bundlePrice: IProduct['bundlePrice'];
   barcode: string | null;
   category: ProductCategory;
   imageUrl: string | null;
@@ -30,7 +30,7 @@ export interface PosTile {
 /** The product fields a tile is built from. Structural rather than IProduct so
  *  a .lean() row satisfies it without a cast — nothing here needs a document. */
 type CatalogProduct = Pick<
-  IProduct, 'name' | 'price' | 'barcode' | 'category' | 'imageUrl' | 'unitLabel' | 'unitsPerPack' | 'packLabel'
+  IProduct, 'name' | 'price' | 'bundlePrice' | 'barcode' | 'category' | 'imageUrl' | 'unitLabel' | 'unitsPerPack' | 'packLabel'
 > & { _id: unknown };
 
 /** The stall's count for it. Same reasoning. */
@@ -71,6 +71,7 @@ export class PosCatalogService {
       productId: String(product._id),
       name: product.name,
       price: product.price,
+      bundlePrice: product.bundlePrice ?? null,
       barcode: product.barcode ?? null,
       category: product.category,
       imageUrl: product.imageUrl ?? null,
@@ -89,11 +90,11 @@ export class PosCatalogService {
    * loading every product at the event and left-joining quantities made a
    * stall's handheld list its neighbours' items as permanent sold-out tiles.
    */
-  static async forMerchant(merchantId: string, ids: ScopeIds): Promise<PosTile[]> {
+  static async forMerchant(merchantId: string, eventId: string): Promise<PosTile[]> {
     const rows = await ProductStock.find({ merchantId }).lean();
     const byProduct = new Map(rows.map((r) => [String(r.productId), r]));
     const products = await Product.find({
-      ...scopeMatch(ids), active: true, _id: { $in: rows.map((r) => r.productId) },
+      eventId, active: true, _id: { $in: rows.map((r) => r.productId) },
     }).sort({ name: 1 }).lean();
     return products.map((p) => PosCatalogService.tile(p, byProduct.get(String(p._id))));
   }

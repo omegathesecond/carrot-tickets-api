@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
-import { signBuyerToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { startTestRealtime, connectClient, TestRealtime } from './helpers';
 
@@ -25,7 +25,7 @@ describe('socketAuthMiddleware', () => {
 
   it('accepts a vendor token and attaches a vendor actor (no presence identity)', async () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
-    const client = await connectClient(rt.port, signVendorToken(vendorId));
+    const client = await connectClient(rt.port, await seedVendorSessionToken(vendorId));
 
     const serverSocket = rt.io.sockets.sockets.get(client.id!)!;
     expect(serverSocket.data.actor).toEqual({ type: 'vendor', id: vendorId });
@@ -35,12 +35,15 @@ describe('socketAuthMiddleware', () => {
   });
 
   it('rejects a buyer token whose account does not exist', async () => {
-    await expect(connectClient(rt.port, signBuyerToken('+26878000099'))).rejects.toThrow(/account not found/i);
+    const buyer = await Buyer.create({ phone: '+26878000099', password: 'secret123' });
+    const token = await signBuyerSessionToken(buyer.phone!);
+    await Buyer.deleteOne({ _id: buyer._id });
+    await expect(connectClient(rt.port, token)).rejects.toThrow(/invalid or expired token/i);
   });
 
   it('accepts a valid buyer and attaches identity + lazily assigns username', async () => {
     await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Sock Buyer' });
-    const client = await connectClient(rt.port, signBuyerToken(PHONE));
+    const client = await connectClient(rt.port, await signBuyerSessionToken(PHONE));
 
     const serverSocket = rt.io.sockets.sockets.get(client.id!)!;
     expect(serverSocket.data.phone).toBe(PHONE);

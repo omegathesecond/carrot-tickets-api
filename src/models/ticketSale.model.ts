@@ -2,6 +2,19 @@ import mongoose, { Schema } from 'mongoose';
 import { ITicketSale, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 
 const ticketSaleSchema = new Schema<ITicketSale>({
+  coupon: {
+    type: new Schema({
+      redeemedAt: Date,
+      couponId: { type: Schema.Types.ObjectId, ref: 'EventCoupon', required: true },
+      code: { type: String, required: true },
+      discountType: { type: String, enum: ['percentage', 'fixed'], required: true },
+      discountValue: { type: Number, required: true },
+      discountAmount: { type: Number, required: true, min: 0 },
+      originalAmount: { type: Number, required: true, min: 0 },
+      ticketTypeId: { type: String, required: true },
+    }, { _id: false }),
+    default: undefined,
+  },
   // Sale Identification
   saleId: {
     type: String,
