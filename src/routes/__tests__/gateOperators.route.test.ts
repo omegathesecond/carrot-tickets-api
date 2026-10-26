@@ -170,11 +170,11 @@ describe('organizer and event list context', () => {
       await GateOperator.create({ fullName: loginCode, loginCode, pin: '111111', scope: 'organizer', vendorId });
     }
     const res = await request(app).get(`/api/tickets/gate-operators?vendorId=${VENDOR_A}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
     expect(res.status).toBe(200);
     expect(res.body.data.map((op: any) => op.vendorId)).toEqual([VENDOR_A]);
     const denied = await request(app).get(`/api/tickets/gate-operators?vendorId=${VENDOR_B}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_A })}`);
     expect(denied.status).toBe(403);
   });
 
@@ -190,22 +190,20 @@ describe('organizer and event list context', () => {
       await GateOperator.create({ fullName: loginCode, loginCode, pin: '111111', scope: 'organizer', vendorId, eventIds });
     }
     const res = await request(app).get(`/api/tickets/gate-operators?eventId=${event._id}`)
-      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
     expect(res.status).toBe(200);
     expect(res.body.data.map((op: any) => op.loginCode).sort()).toEqual(['820003', '820004']);
     const denied = await request(app).get(`/api/tickets/gate-operators?eventId=${event._id}`)
-      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_B })}`);
+      .set('Authorization', `Bearer ${await token({ vendorId: VENDOR_B })}`);
     expect(denied.status).toBe(404);
   });
 
-  it('fails closed for accounts without an organizer and rejects malformed filters', async () => {
-    const noScope = await request(app).get('/api/tickets/gate-operators')
-      .set('Authorization', `Bearer ${token({})}`);
-    expect(noScope.status).toBe(200);
-    expect(noScope.body.data).toEqual([]);
+  it('requires an authenticated account and rejects malformed filters', async () => {
+    const noScope = await request(app).get('/api/tickets/gate-operators');
+    expect(noScope.status).toBe(401);
     for (const query of ['eventId=bad', 'vendorId[x]=bad', 'eventId=a&eventId=b']) {
       const res = await request(app).get(`/api/tickets/gate-operators?${query}`)
-        .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+        .set('Authorization', `Bearer ${await token({ isSuperAdmin: true })}`);
       expect(res.status).toBe(400);
     }
   });
@@ -223,7 +221,7 @@ it('keeps management inside the caller’s event permissions', async () => {
     scope: 'organizer', vendorId: VENDOR_A, eventIds: [eventId, outsideId] });
   const scope = jest.spyOn(operatorScope, 'resolveOperatorEventScope').mockResolvedValue([eventId]);
   try {
-    const auth = `Bearer ${token({ vendorId: VENDOR_A })}`;
+    const auth = `Bearer ${await token({ vendorId: VENDOR_A })}`;
     const list = await request(app).get('/api/tickets/gate-operators').set('Authorization', auth);
     expect(list.status).toBe(200);
     expect(list.body.data.map((op: any) => op.fullName)).toEqual(['Permitted']);
@@ -246,7 +244,7 @@ it('keeps management inside the caller’s event permissions', async () => {
 it('keeps deleted operators hidden and unmanageable after organizer filtering', async () => {
   const operator = await GateOperator.create({ fullName: 'Deleted', loginCode: '840001', pin: '111111',
     scope: 'organizer', vendorId: VENDOR_A, deletedAt: new Date(), isActive: false });
-  const auth = `Bearer ${token({ isSuperAdmin: true })}`;
+  const auth = `Bearer ${await token({ isSuperAdmin: true })}`;
   const list = await request(app).get(`/api/tickets/gate-operators?vendorId=${VENDOR_A}`).set('Authorization', auth);
   expect(list.status).toBe(200);
   expect(list.body.data).toEqual([]);
