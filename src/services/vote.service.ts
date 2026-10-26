@@ -83,7 +83,7 @@ const slugify = (s: string): string =>
  * needs — nothing here is ever fabricated.
  */
 export function deriveQuestionDefinitions(
-  event: Pick<IEvent, 'lineup' | 'outfitThemeOptions' | 'category'>
+  event: Pick<IEvent, 'lineup' | 'outfitThemeOptions' | 'category' | 'fanQuestions'>
 ): Array<{ kind: VoteQuestionKind; prompt: string; options: IVoteOption[] }> {
   const defs: Array<{ kind: VoteQuestionKind; prompt: string; options: IVoteOption[] }> = [];
 
@@ -118,7 +118,7 @@ export function deriveQuestionDefinitions(
     });
   }
 
-  return defs;
+  return event.fanQuestions === undefined ? defs : event.fanQuestions.filter(q => q.enabled);
 }
 
 async function loadEventOr404(eventId: string): Promise<IEvent> {
@@ -128,6 +128,8 @@ async function loadEventOr404(eventId: string): Promise<IEvent> {
 }
 
 /**
+ * Explicit event question settings synchronize the selected rows, preserving
+ * question IDs. Otherwise materialize the default questions from event data.
  * Idempotently create this event's VoteQuestion rows from its CURRENT data,
  * skipping any (eventId, kind) pair that already exists — a question's
  * options are frozen the instant it's first materialized (see
@@ -144,6 +146,19 @@ async function loadEventOr404(eventId: string): Promise<IEvent> {
  * required.
  */
 export async function ensureVoteQuestions(event: IEvent): Promise<IVoteQuestion[]> {
+  if (event.fanQuestions !== undefined) {
+    const questions: IVoteQuestion[] = [];
+    for (const [order, def] of deriveQuestionDefinitions(event).entries()) {
+      const question = await VoteQuestion.findOneAndUpdate(
+        { eventId: event._id, kind: def.kind },
+        { $set: { prompt: def.prompt, options: def.options, order } },
+        { upsert: true, new: true, runValidators: true },
+      );
+      if (!question) throw new HttpError(500, 'Failed to load fan question');
+      questions.push(question);
+    }
+    return questions;
+  }
   const existing = await VoteQuestion.find({ eventId: event._id });
   const existingKinds = new Set(existing.map((q) => q.kind));
   const defs = deriveQuestionDefinitions(event);
@@ -229,7 +244,7 @@ async function tallyOptions(
   questionId: string,
   options: Array<{ key: string; label: string }>
 ): Promise<{ totalVotes: number; leadingKey: string | null; options: Array<{ key: string; label: string; count: number; percent: number; selectors: VoteSelectorRef[] }> }> {
-  const rows = await VoteResponse.aggregate([{ $match: { questionId: new Types.ObjectId(questionId) } }, { $group: { _id: '$optionKey', count: { $sum: 1 } } }]);
+  const rows = await VoteResponse.aggregate([{ $match: { questionId: new Types.ObjectId(questionId), optionKey: { $in: options.map(o => o.key) } } }, { $group: { _id: '$optionKey', count: { $sum: 1 } } }]);
   const countByKey = new Map(rows.map((r: any) => [String(r._id), r.count as number]));
   const totalVotes = rows.reduce((sum: number, r: any) => sum + r.count, 0);
   let leadingKey: string | null = null;
@@ -340,6 +355,7 @@ async function buildQuestionView(q: IVoteQuestion, window: VoteWindow, actor: So
   if (actor) {
     viewerResponse = await VoteResponse.findOne({ questionId, actorType: actor.type, actorId: actor.id }).lean();
   }
+  if (viewerResponse && q.kind !== 'song' && !q.options.some(o => o.key === viewerResponse.optionKey)) viewerResponse = null;
   const viewerHasVoted = !!viewerResponse;
   // Results are visible to everyone once the window is open — "see other
   // users' selections before answering" (no vote-to-reveal gate). A closed
@@ -425,7 +441,7 @@ export async function castVote(eventId: string, questionId: string, actor: Socia
   if (!window.hasOpened) throw new HttpError(409, 'Attendance Status is not open yet');
   if (window.hasClosed) throw new HttpError(409, 'Attendance Status has closed');
 
-  const question = await VoteQuestion.findOne({ _id: questionId, eventId });
+  const question = (await ensureVoteQuestions(event)).find(q => String(q._id) === questionId);
   if (!question || question.kind === 'attend') throw new HttpError(404, 'Attendance Status question not found');
 
   const trimmedKey = String(optionKey || '').trim();
@@ -472,7 +488,7 @@ export async function getOptionVoters(
 ): Promise<VoteVotersPage> {
   const event = await loadEventOr404(eventId);
   const window = getVoteWindow(event);
-  const question = await VoteQuestion.findOne({ _id: questionId, eventId });
+  const question = (await ensureVoteQuestions(event)).find(q => String(q._id) === questionId);
   if (!question || question.kind === 'attend') throw new HttpError(404, 'Attendance Status question not found');
 
   if (!window.hasOpened) {
@@ -549,6 +565,7 @@ export async function previewVote(eventId: string, vendorId: string, isSuperAdmi
       hasOpened: window.hasOpened,
       hasClosed: window.hasClosed,
     },
+    settings: event.fanQuestions ?? defs.map(d => ({ ...d, enabled: true })),
     questions: defs.map((d, i) => ({ kind: d.kind, prompt: d.prompt, order: i, options: d.options })),
   };
 }
@@ -618,7 +635,7 @@ export async function suggestSong(eventId: string, questionId: string, actor: So
   if (!window.hasOpened) throw new HttpError(409, 'Attendance Status is not open yet');
   if (window.hasClosed) throw new HttpError(409, 'Attendance Status has closed');
 
-  const question = await VoteQuestion.findOne({ _id: questionId, eventId, kind: 'song' });
+  const question = (await ensureVoteQuestions(event)).find(q => String(q._id) === questionId && q.kind === 'song');
   if (!question) throw new HttpError(404, 'Song question not found for this event');
 
   const trimmedTitle = String(title || '').trim();
@@ -653,4 +670,28 @@ export async function suggestSong(eventId: string, questionId: string, actor: So
   );
 
   return buildQuestionView(question, window, actor);
+}
+
+/** Persist the event's complete question selection, including an intentionally empty list. */
+export async function saveFanQuestions(eventId: string, vendorId: string, isSuperAdmin: boolean, input: unknown) {
+  const event = await loadOwnedEventOr403(eventId, vendorId, isSuperAdmin);
+  if (!Array.isArray(input) || input.length > 30) throw new HttpError(400, 'Provide at most 30 questions');
+  const kinds = new Set<string>();
+  const questions: NonNullable<IEvent['fanQuestions']> = input.map(q => {
+    if (!q || typeof q.kind !== 'string' || !(KIND_DISPLAY_ORDER.includes(q.kind) || /^custom_[a-zA-Z0-9_-]{1,80}$/.test(q.kind)) || kinds.has(q.kind)) throw new HttpError(400, 'Question identifiers must be valid and unique');
+    kinds.add(q.kind);
+    if (typeof q.prompt !== 'string' || !q.prompt.trim() || q.prompt.trim().length > 200 || typeof q.enabled !== 'boolean') throw new HttpError(400, 'Each question needs a title of up to 200 characters and a display selection');
+    if (!Array.isArray(q.options) || q.options.length > 30 || (q.kind !== 'song' && q.options.length < (q.kind.startsWith('custom_') ? 2 : 1)) || (q.kind === 'song' && q.options.length !== 0)) throw new HttpError(400, 'Questions need 2–30 answer options; song questions use suggestions');
+    const keys = new Set<string>();
+    const options = q.options.map((o: any) => {
+      if (!o || typeof o.key !== 'string' || !o.key.trim() || o.key.length > 120 || keys.has(o.key) || typeof o.label !== 'string' || !o.label.trim() || o.label.trim().length > 120) throw new HttpError(400, 'Answer options need unique keys and labels of up to 120 characters');
+      keys.add(o.key);
+      return { key: o.key, label: o.label.trim() };
+    });
+    return { kind: q.kind, prompt: q.prompt.trim(), enabled: q.enabled, options };
+  });
+  event.fanQuestions = questions;
+  await event.save();
+  await ensureVoteQuestions(event);
+  return previewVote(eventId, vendorId, isSuperAdmin);
 }
