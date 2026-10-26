@@ -716,6 +716,7 @@ router.get('/events/:eventId/cashless/reconciliation', requireSuperAdmin, Cashle
  * vote.service/voteDiscussion.service, same pattern as
  * ModerationController's community routes below.
  */
+router.put('/events/:eventId/vote/questions', requireTicketsPermission(TicketsPermission.EDIT_EVENT), VoteAdminController.saveQuestions);
 router.get('/events/:eventId/vote/preview', requireTicketsPermission(TicketsPermission.VIEW_STATS), VoteAdminController.preview);
 router.get('/events/:eventId/vote/summary', requireTicketsPermission(TicketsPermission.VIEW_STATS), VoteAdminController.summary);
 router.get('/vote-questions/:questionId/comments', requireTicketsPermission(TicketsPermission.VIEW_STATS), VoteAdminController.comments);

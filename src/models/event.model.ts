@@ -261,6 +261,11 @@ const eventSchema = new Schema<IEvent>({
     default: undefined
   },
 
+  fanQuestions: {
+    type: [{ _id: false, kind: { type: String, required: true }, prompt: { type: String, required: true, maxlength: 200 }, enabled: { type: Boolean, required: true }, options: [{ _id: false, key: { type: String, required: true, maxlength: 120 }, label: { type: String, required: true, maxlength: 120 } }] }],
+    default: undefined,
+  },
+
   // Publishing
   publishedAt: {
     type: Date

@@ -6,6 +6,8 @@ import { VoteQuestion } from '@models/voteQuestion.model';
 import { VoteResponse } from '@models/voteResponse.model';
 import { SongSuggestion } from '@models/songSuggestion.model';
 import {
+  saveFanQuestions,
+  previewVote,
   deriveQuestionDefinitions,
   ensureVoteQuestions,
   getVotePayload,
@@ -64,6 +66,42 @@ describe('vote.service', () => {
   });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  it('saves edited defaults, custom questions and selections to this event and rejects hidden-question votes', async () => {
+    const event = await seedEvent({ startInDays: 5, publishedDaysAgo: 10 });
+    const eventId = String(event._id);
+    const before = await getVotePayload(eventId, null);
+    const hiddenId = before.questions.find(q => q.kind === 'busy')!.id;
+    const preview = await previewVote(eventId, String(event.vendorId), false);
+    expect(preview.settings.map(q => q.kind)).toEqual(['attending_with', 'busy', 'bump_into', 'cup']);
+    const settings = preview.settings.filter(q => q.kind !== 'cup').map(q => ({ ...q, prompt: q.kind === 'attending_with' ? 'Who is coming with you?' : q.prompt, enabled: q.kind !== 'busy' }));
+    settings.push({ kind: 'custom_transport', prompt: 'How will you travel?', enabled: true, options: [{ key: 'bus', label: 'Bus' }, { key: 'car', label: 'Car' }] });
+    await saveFanQuestions(eventId, String(event.vendorId), false, settings);
+    const payload = await getVotePayload(eventId, null);
+    expect(payload.questions.map(q => q.kind)).toEqual(['attending_with', 'bump_into', 'custom_transport']);
+    expect(payload.questions[0]!.prompt).toBe('Who is coming with you?');
+    expect((await Event.findById(eventId))!.fanQuestions).toHaveLength(4);
+    const actor = { type: 'vendor' as const, id: String(event.vendorId) };
+    await expect(castVote(eventId, hiddenId, actor, 'very_busy')).rejects.toThrow('question not found');
+    const custom = payload.questions.find(q => q.kind === 'custom_transport')!;
+    const voted = await castVote(eventId, custom.id, actor, 'bus');
+    expect(voted.viewerSelection).toBe('bus');
+    const changed = settings.map(q => q.kind === 'custom_transport' ? { ...q, options: [{ key: 'walk', label: 'Walk' }, { key: 'car', label: 'Car' }] } : q);
+    await saveFanQuestions(eventId, String(event.vendorId), false, changed);
+    const refreshed = await getVotePayload(eventId, actor);
+    const refreshedCustom = refreshed.questions.find(q => q.kind === 'custom_transport')!;
+    expect(refreshedCustom.viewerHasVoted).toBe(false);
+    expect(refreshedCustom.totalVotes).toBe(0);
+    await saveFanQuestions(eventId, String(event.vendorId), false, []);
+    expect((await getVotePayload(eventId, null)).questions).toEqual([]);
+  });
+
+  it('rejects invalid question settings and other organizers without modifying the event', async () => {
+    const event = await seedEvent({ startInDays: 5, publishedDaysAgo: 10 });
+    await expect(saveFanQuestions(String(event._id), String(new mongoose.Types.ObjectId()), false, [])).rejects.toThrow('own events');
+    await expect(saveFanQuestions(String(event._id), String(event.vendorId), false, [{ kind: 'custom_test', prompt: 'Question', enabled: true, options: [] }])).rejects.toThrow('answer options');
+    expect((await Event.findById(event._id))!.fanQuestions).toBeUndefined();
+  });
 
   it('getVotePayload returns no questions before the window opens', async () => {
     const event = await seedEvent({ startInDays: 20, publishedDaysAgo: 1 }); // opens at T-7d, we're at T-20d
@@ -284,7 +322,7 @@ describe('vote.service', () => {
     expect(payload.questions.map((q) => q.kind)).not.toContain('attend');
     expect(payload.questions[0]!.kind).toBe('attending_with'); // now first, per the updated order
 
-    await expect(castVote(String(event._id), String(legacyAttend._id), actor, 'maybe')).rejects.toMatchObject({ statusCode: 404 });
+    await expect(castVote(String(event._id), String(legacyAttend._id), actor, 'maybe')).rejects.toThrow('question not found');
     expect(await VoteResponse.countDocuments({ questionId: legacyAttend._id })).toBe(1); // pre-existing response untouched
   });
 });

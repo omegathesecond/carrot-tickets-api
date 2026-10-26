@@ -129,6 +129,7 @@ export interface IEvent extends Document {
   // attendees wear?" question — a poll among organizer-supplied options, not
   // a single fixed dress code.
   outfitThemeOptions?: string[];
+  fanQuestions?: Array<{ kind: import("../models/voteQuestion.model").VoteQuestionKind; prompt: string; enabled: boolean; options: Array<{ key: string; label: string }> }>;
 
   // Publishing
   publishedAt?: Date;

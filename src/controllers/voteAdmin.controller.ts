@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
-import { previewVote, getOrganizerSummary } from '@services/vote.service';
+import { previewVote, getOrganizerSummary, saveFanQuestions } from '@services/vote.service';
 import { listComments, moderateRemoveComment } from '@services/voteDiscussion.service';
 
 /** Organizer dashboard §9 — preview, stats/results/song-suggestions, and
@@ -9,6 +9,15 @@ import { listComments, moderateRemoveComment } from '@services/voteDiscussion.se
  *  checked (or super-admin) inside the service layer, matching the
  *  `/events/:eventId/...` admin routes elsewhere in tickets.route.ts. */
 export class VoteAdminController {
+  static async saveQuestions(req: Request, res: Response): Promise<any> {
+    try {
+      const user = (req as any).ticketsUser;
+      return ApiResponseUtil.success(res, await saveFanQuestions(req.params['eventId'] as string, user.vendorId, !!user.isSuperAdmin, req.body.questions));
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to save fan questions');
+    }
+  }
+
   /** GET /api/tickets/events/:eventId/vote/preview */
   static async preview(req: Request, res: Response): Promise<any> {
     try {
