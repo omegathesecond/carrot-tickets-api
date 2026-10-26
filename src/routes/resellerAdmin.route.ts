@@ -35,7 +35,7 @@ router.post('/resellers/:id/settlement/:sid/mark-paid', ResellerAdminController.
 
 // ─── Ledger B — Organizer Payout ─────────────────────────────────────────────
 router.get('/vendors/:id/payout', ResellerAdminController.previewOrganizerPayout);
-router.post('/vendors/:id/payout/close', ResellerAdminController.closeOrganizerPayout);
+// New payouts must use the reviewed event request flow; period close could pay the same sales twice.
 router.post('/vendors/:id/payout/:pid/mark-paid', ResellerAdminController.markOrganizerPayoutPaid);
 
 // ─── Commission Withdrawals ──────────────────────────────────────────────────
