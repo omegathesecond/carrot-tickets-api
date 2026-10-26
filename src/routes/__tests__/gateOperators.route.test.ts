@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { GateOperator } from '@models/gateOperator.model';
+import * as operatorScope from '@services/operatorEventScope.service';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR_A = '64b000000000000000000a01';
@@ -156,4 +157,90 @@ describe('a super-admin creating a register account from inside an event', () =>
     expect(res.status).toBe(400);
     expect(await GateOperator.countDocuments({})).toBe(0);
   });
+});
+
+describe('organizer and event list context', () => {
+  async function eventFor(vendorId: string) {
+    const { Event } = await import('@models/event.model');
+    const future = new Date(Date.now() + 86400000);
+    return Event.create({ vendorId, name: 'Gate scope', venue: 'Gate', eventDate: future,
+      startTime: future, endTime: future, ticketTypes: [] });
+  }
+
+  it('scopes admin lists to the selected organizer and refuses organizer spoofing', async () => {
+    for (const [vendorId, loginCode] of [[VENDOR_A, '820001'], [VENDOR_B, '820002']]) {
+      await GateOperator.create({ fullName: loginCode, loginCode, pin: '111111', scope: 'organizer', vendorId });
+    }
+    const res = await request(app).get(`/api/tickets/gate-operators?vendorId=${VENDOR_A}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((op: any) => op.vendorId)).toEqual([VENDOR_A]);
+    const denied = await request(app).get(`/api/tickets/gate-operators?vendorId=${VENDOR_B}`)
+      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_A })}`);
+    expect(denied.status).toBe(403);
+  });
+
+  it('includes only the event organizer’s assigned and all-event operators', async () => {
+    const event = await eventFor(VENDOR_A);
+    const other = await eventFor(VENDOR_A);
+    for (const [loginCode, vendorId, eventIds] of [
+      ['820003', VENDOR_A, [String(event._id)]],
+      ['820004', VENDOR_A, []],
+      ['820005', VENDOR_A, [String(other._id)]],
+      ['820006', VENDOR_B, []],
+    ] as [string, string, string[]][]) {
+      await GateOperator.create({ fullName: loginCode, loginCode, pin: '111111', scope: 'organizer', vendorId, eventIds });
+    }
+    const res = await request(app).get(`/api/tickets/gate-operators?eventId=${event._id}`)
+      .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((op: any) => op.loginCode).sort()).toEqual(['820003', '820004']);
+    const denied = await request(app).get(`/api/tickets/gate-operators?eventId=${event._id}`)
+      .set('Authorization', `Bearer ${token({ vendorId: VENDOR_B })}`);
+    expect(denied.status).toBe(404);
+  });
+
+  it('fails closed for accounts without an organizer and rejects malformed filters', async () => {
+    const noScope = await request(app).get('/api/tickets/gate-operators')
+      .set('Authorization', `Bearer ${token({})}`);
+    expect(noScope.status).toBe(200);
+    expect(noScope.body.data).toEqual([]);
+    for (const query of ['eventId=bad', 'vendorId[x]=bad', 'eventId=a&eventId=b']) {
+      const res = await request(app).get(`/api/tickets/gate-operators?${query}`)
+        .set('Authorization', `Bearer ${token({ isSuperAdmin: true })}`);
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
+
+it('keeps management inside the caller’s event permissions', async () => {
+  const eventId = '64b000000000000000000e01';
+  const outsideId = '64b000000000000000000e02';
+  const own = await GateOperator.create({ fullName: 'Permitted', loginCode: '830001', pin: '111111',
+    scope: 'organizer', vendorId: VENDOR_A, eventIds: [eventId] });
+  const broad = await GateOperator.create({ fullName: 'All events', loginCode: '830002', pin: '111111',
+    scope: 'organizer', vendorId: VENDOR_A, eventIds: [] });
+  await GateOperator.create({ fullName: 'Mixed events', loginCode: '830003', pin: '111111',
+    scope: 'organizer', vendorId: VENDOR_A, eventIds: [eventId, outsideId] });
+  const scope = jest.spyOn(operatorScope, 'resolveOperatorEventScope').mockResolvedValue([eventId]);
+  try {
+    const auth = `Bearer ${token({ vendorId: VENDOR_A })}`;
+    const list = await request(app).get('/api/tickets/gate-operators').set('Authorization', auth);
+    expect(list.status).toBe(200);
+    expect(list.body.data.map((op: any) => op.fullName)).toEqual(['Permitted']);
+    const update = await request(app).patch(`/api/tickets/gate-operators/${own._id}`)
+      .set('Authorization', auth).send({ isActive: false });
+    expect(update.status).toBe(200);
+    expect(update.body.data.isActive).toBe(false);
+    const widen = await request(app).patch(`/api/tickets/gate-operators/${own._id}`)
+      .set('Authorization', auth).send({ eventIds: [] });
+    expect(widen.status).toBe(403);
+    const reset = await request(app).post(`/api/tickets/gate-operators/${own._id}/reset-pin`)
+      .set('Authorization', auth).send({});
+    expect(reset.status).toBe(200);
+    const forbidden = await request(app).post(`/api/tickets/gate-operators/${broad._id}/reset-pin`)
+      .set('Authorization', auth).send({});
+    expect(forbidden.status).toBe(404);
+  } finally { scope.mockRestore(); }
 });
