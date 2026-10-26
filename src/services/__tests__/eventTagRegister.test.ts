@@ -3,6 +3,7 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helper
 import { EventTagService, UNREGISTERED_TAG_MESSAGE } from '@services/eventTag.service';
 import { WalletService } from '@services/wallet.service';
 import { EventTag } from '@models/eventTag.model';
+import { WalletTopup } from '@models/walletTopup.model';
 import { Wallet } from '@models/wallet.model';
 import { BandBinding } from '@models/bandBinding.model';
 
@@ -177,7 +178,7 @@ describe('EventTagService.list', () => {
 
     const res = await EventTagService.list(eventId);
     expect(res.tags.map((t) => t.bandUid).sort()).toEqual(['04a22b01', '04a22b02']);
-    expect(res.counts).toEqual({ active: 1, retired: 1, total: 2 });
+    expect(res.counts).toEqual({ active: 0, retired: 1, total: 2 });
   });
 
   it('searches on the CANONICAL uid so a colon-formatted query still finds the tag', async () => {
@@ -195,5 +196,47 @@ describe('EventTagService.list', () => {
     const res = await EventTagService.list(eventId, { status: 'retired' });
     expect(res.tags.map((t) => t.bandUid)).toEqual(['04a22b01']);
     expect(res.total).toBe(1);
+  });
+});
+
+
+describe('funded circulation', () => {
+  it('counts confirmed funding once and follows funding, retirement and unbinding', async () => {
+    const uids = ['04a22b10', '04a22b11', '04a22b12', '04a22b13'];
+    await EventTagService.registerTags({ eventId, bandUids: uids });
+    const wallets = await Promise.all(uids.map(bandUid => Wallet.create({ eventId, bandUid })));
+    const fund = (index: number, status: string, id: string) => WalletTopup.collection.insertOne({
+      eventId: new mongoose.Types.ObjectId(eventId), walletId: wallets[index]!._id,
+      amount: 100, method: 'card', status, clientTxnId: id,
+    });
+    await fund(0, 'completed', 'one');
+    await fund(0, 'completed', 'two');
+    await fund(1, 'pending', 'pending');
+    await fund(2, 'failed', 'failed');
+    // A completed row for another event must never fund this event's tag.
+    await WalletTopup.collection.insertOne({
+      eventId: new mongoose.Types.ObjectId(otherEventId), walletId: wallets[3]!._id,
+      amount: 100, method: 'card', status: 'completed', clientTxnId: 'other-event',
+    });
+    // Spending the confirmed credit does not take the physical tag out of circulation.
+    await Wallet.updateOne({ _id: wallets[0]!._id }, { $set: { balance: 0 } });
+    const view = () => EventTagService.list(eventId, { status: 'active' });
+    let result = await view();
+    expect(result.tags.map(t => t.bandUid)).toEqual([uids[0]]);
+    expect(result.total).toBe(1);
+    expect(result.counts).toEqual({ active: 1, retired: 0, total: 4 });
+    // Search must not override the funded-only constraint.
+    expect((await EventTagService.list(eventId, { status: 'active', q: uids[1] })).total).toBe(0);
+    await fund(1, 'completed', 'confirmed');
+    expect((await view()).counts.active).toBe(2);
+    await Wallet.updateOne({ _id: wallets[0]!._id }, { $set: { bandUid: null } });
+    result = await view();
+    expect(result.tags.map(t => t.bandUid)).toEqual([uids[1]]);
+    await Wallet.updateOne({ _id: wallets[1]!._id }, { $set: { status: 'closed' } });
+    expect((await view()).total).toBe(0);
+    await Wallet.updateOne({ _id: wallets[1]!._id }, { $set: { status: 'active' } });
+    await EventTagService.retireTag({ eventId, bandUid: uids[1]! });
+    expect((await view()).total).toBe(0);
+    expect((await view()).counts.active).toBe(0);
   });
 });

@@ -61,7 +61,7 @@ describe('the event tag register — who may fill it', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.outcome).toBe('registered');
-    expect(res.body.data.counts.active).toBe(1);
+    expect(res.body.data.counts.active).toBe(0); // Registered, but not funded yet.
     expect(await EventTag.countDocuments({ eventId, bandUid: '04a22b1c' })).toBe(1);
   });
 
