@@ -29,6 +29,23 @@ async function ownedCashlessEvent() {
 }
 
 describe('stock admin routes', () => {
+  it('stores, updates and clears a bundle price; rejects a bundle without a discount', async () => {
+    const { eventId, token } = await ownedCashlessEvent();
+    const auth = `Bearer ${token}`;
+    const create = await request(app).post(`/api/tickets/events/${eventId}/products`).set('Authorization', auth)
+      .send({ name: 'Black Label', category: 'beer', price: 3500, bundlePrice: { quantity: 6, price: 19000 } });
+    expect(create.status).toBe(201);
+    expect(create.body.data.bundlePrice).toEqual({ quantity: 6, price: 19000 });
+    const url = `/api/tickets/products/${create.body.data._id}`;
+    const invalid = await request(app).patch(url).set('Authorization', auth).send({ price: 3000 });
+    expect(invalid.status).toBe(400);
+    const update = await request(app).patch(url).set('Authorization', auth).send({ bundlePrice: { quantity: 6, price: 18000 } });
+    expect(update.status).toBe(200);
+    const clear = await request(app).patch(url).set('Authorization', auth).send({ bundlePrice: null });
+    expect(clear.status).toBe(200);
+    expect(clear.body.data.bundlePrice).toBeNull();
+  });
+
   it('creates and lists products for an owned event', async () => {
     const { eventId, token } = await ownedCashlessEvent();
     const create = await request(app)

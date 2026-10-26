@@ -13,6 +13,8 @@ export interface IProduct extends Document {
   barcode?: string;
   category: ProductCategory;
   price: number; // integer ZAR cents, per base unit
+  /** Discount for each complete group in a purchase; stock remains base units. */
+  bundlePrice?: { quantity: number; price: number } | null;
   unitLabel: string;
   unitsPerPack?: number;
   packLabel?: string;
@@ -33,6 +35,10 @@ const productSchema = new Schema<IProduct>(
       validate: { validator: Number.isSafeInteger, message: 'price must be integer minor units (ZAR cents)' },
     },
     unitLabel: { type: String, default: 'unit', trim: true },
+    bundlePrice: { type: new Schema({
+      quantity: { type: Number, required: true, min: 2, max: 1000, validate: Number.isSafeInteger },
+      price: { type: Number, required: true, min: 1, validate: Number.isSafeInteger },
+    }, { _id: false }), default: undefined },
     unitsPerPack: { type: Number, min: 1, validate: { validator: (v: number) => v == null || Number.isSafeInteger(v), message: 'unitsPerPack must be a whole number' } },
     packLabel: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
@@ -40,6 +46,13 @@ const productSchema = new Schema<IProduct>(
   },
   { timestamps: true },
 );
+
+productSchema.pre('validate', function (next) {
+  if (this.bundlePrice && this.bundlePrice.price >= this.price * this.bundlePrice.quantity) {
+    this.invalidate('bundlePrice', 'Bundle price must be less than buying the units individually');
+  }
+  next();
+});
 
 // Unique barcode per event, but ONLY for products that HAVE a barcode.
 // partialFilterExpression (not sparse): a compound sparse index still indexes

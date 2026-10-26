@@ -31,6 +31,7 @@ router.post('/requests/:id/accept', authenticateBuyer, WeekendController.acceptR
 router.post('/requests/:id/decline', authenticateBuyer, WeekendController.declineRequest);
 router.delete('/requests/:id', authenticateBuyer, WeekendController.cancelRequest);
 
+router.get('/users/:username/plans', optionalTicketsAuth, WeekendController.profilePlans);
 router.get('/users/:username', optionalTicketsAuth, WeekendController.getForUser);
 
 export default router;

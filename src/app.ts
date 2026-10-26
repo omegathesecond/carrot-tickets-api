@@ -26,6 +26,7 @@ import { requireTextQuery } from '@middleware/queryParams.middleware';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
+import { migrateServiceCategories } from '@/scripts/migrateServiceCategories';
 import { migrateLegacyEventCategories } from '@/scripts/migrateLegacyEventCategories';
 import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
 
@@ -230,7 +231,8 @@ if (process.env['NODE_ENV'] !== 'test') {
  * only then calls app.listen() — see src/boot.ts for why that order matters
  * on Cloud Run.
  */
-function initAfterConnect(): void {
+async function initAfterConnect(): Promise<void> {
+  await migrateServiceCategories();
   console.log(`📦 Database: ${mongoose.connection.name}`);
   // Log detailed database configuration
   logDatabaseConfig();

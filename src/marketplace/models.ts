@@ -55,6 +55,8 @@ const opportunity = new Schema(
   {
     organiserId: ref,
     organiser: String,
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
+    posterUrl: String,
     name: String,
     location: String,
     country: String,
@@ -124,9 +126,32 @@ application.index(
 application.index({ organiserId: 1, opportunityId: 1, scopeKey: 1, status: 1 });
 application.index({ ownerId: 1, createdAt: -1 });
 export const MarketApplication = model('MarketApplication', application);
+const serviceListing = new Schema(
+  {
+    ownerId: ref,
+    category: { type: String, required: true },
+    name: { type: String, required: true },
+    description: { type: String, required: true },
+    photos: [String],
+    serviceArea: { type: String, required: true },
+    availability: { type: String, required: true },
+    pricing: { type: String, required: true },
+    deliveryDetails: String,
+    contactEmail: { type: String, required: true },
+    status: { type: String, enum: ['draft', 'published'], default: 'draft' },
+  },
+  { timestamps: true },
+);
+serviceListing.index({ status: 1, category: 1, createdAt: -1 });
+serviceListing.index({ ownerId: 1, createdAt: -1 });
+export const MarketServiceListing = model(
+  'MarketServiceListing',
+  serviceListing,
+);
 export async function ensureMarketplaceIndexes() {
   await Promise.all(
     [
+      MarketServiceListing,
       MarketProfile,
       MarketPreference,
       MarketCertificate,

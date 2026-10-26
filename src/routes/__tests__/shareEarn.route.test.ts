@@ -8,6 +8,11 @@ import { signBuyerSessionToken } from '@/__tests__/helpers/auth';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { Buyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
+import { VendorSubUser } from '@models/vendorSubUser.model';
+import { TicketsUserAccess } from '@models/ticketsUserAccess.model';
+import { SubUserRole } from '@interfaces/subUser.interface';
+import { TicketsRole } from '@interfaces/ticketsPermission.interface';
 
 jest.mock('@services/push.service', () => ({ PushService: { sendToBuyer: jest.fn().mockResolvedValue(undefined) } }));
 
@@ -39,6 +44,12 @@ async function makeBuyer(phone: string) {
 
 describe('Share&Earn routes', () => {
   beforeAll(connectTestDb);
+  beforeEach(async () => {
+    await Vendor.create([
+      { _id: VENDOR_ID, email: 'organizer@example.com', password: 'secret123', businessName: 'Organizer' },
+      { _id: '64c000000000000000000b02', email: 'rival@example.com', password: 'secret123', businessName: 'Rival' },
+    ]);
+  });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
 

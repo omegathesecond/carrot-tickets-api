@@ -3,7 +3,7 @@ import Joi from 'joi';
 import { PaymentMethod, PaymentStatus, SalesChannel, TicketStatus } from '@interfaces/ticket.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError, failOtpRequest, failAuthRequest } from '@utils/controllerHelpers.util';
-import { TicketsAuthService } from '@services/ticketsAuth.service';
+import { TicketsAuthService, SessionAuthError } from '@services/ticketsAuth.service';
 import { EventService } from '@services/event.service';
 import { TicketService } from '@services/ticket.service';
 import { ScanService } from '@services/scan.service';
@@ -223,7 +223,8 @@ export class TicketsController {
       ApiResponseUtil.success(res, result, 'Token refreshed successfully');
     } catch (error: any) {
       console.error('Refresh token error:', error);
-      ApiResponseUtil.error(res, error.message || 'Token refresh failed', 401);
+      if (error instanceof SessionAuthError) return ApiResponseUtil.error(res, error.message, 401, error.code);
+      return failWithHttpError(res, error, 'Token refresh failed');
     }
   }
 
@@ -232,11 +233,7 @@ export class TicketsController {
    */
   static async logout(req: Request, res: Response): Promise<any> {
     try {
-      const { refreshToken } = req.body;
-
-      if (refreshToken) {
-        await TicketsAuthService.revokeRefreshToken(refreshToken);
-      }
+      await TicketsAuthService.logout(req.headers.authorization?.replace(/^Bearer /, ""), req.body?.refreshToken);
 
       ApiResponseUtil.success(res, null, 'Logged out successfully');
     } catch (error: any) {

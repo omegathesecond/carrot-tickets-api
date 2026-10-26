@@ -98,3 +98,11 @@ describe('buildEventCardFields — currency + external price + gallery', () => {
     expect(f.galleryImages).toEqual(['a.jpg', 'b.jpg']);
   });
 });
+
+it('identifies buyer listings independently of ticketing or ticket availability', () => {
+  expect(toPublicEventCard(baseEvent).isCommunityListing).toBe(false);
+  for (const ticketing of ['carrot', 'external']) {
+    expect(toPublicEventCard({ ...baseEvent, submittedByBuyerId: 'buyer1', ticketing }).isCommunityListing).toBe(true);
+  }
+  expect(toPublicEventCard({ ...baseEvent, ticketTypes: [], ticketing: 'external' }).isCommunityListing).toBe(false);
+});

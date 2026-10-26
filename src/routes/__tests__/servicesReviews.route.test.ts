@@ -22,7 +22,7 @@ async function seedServicesVendor() {
     phoneNumber: '+26876500' + Math.floor(Math.random() * 10000),
     password: 'secret1',
     operatorType: OperatorType.SERVICES,
-    serviceCategory: 'furniture_decor',
+    serviceCategories: ['furniture_decor'],
     verificationStatus: VerificationStatus.VERIFIED,
   });
 }

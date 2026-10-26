@@ -57,7 +57,7 @@ export class AdminOrganizersController {
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
-          .select('businessName email phoneNumber primaryContact businessType operatorType serviceCategory verificationStatus verifiedAt rejectionReason isActive createdAt')
+          .select('businessName email phoneNumber primaryContact businessType operatorType serviceCategories verificationStatus verifiedAt rejectionReason isActive createdAt')
           .lean(),
         Vendor.countDocuments(filter),
         // Status breakdown across ALL organizers (ignores search/status filter)
@@ -103,7 +103,7 @@ export class AdminOrganizersController {
           primaryContact: v.primaryContact ?? null,
           businessType: v.businessType ?? null,
           operatorType: v.operatorType ?? null,
-          serviceCategory: v.serviceCategory ?? null,
+          serviceCategories: v.operatorType === OperatorType.SERVICES ? v.serviceCategories : null,
           verificationStatus: v.verificationStatus,
           verifiedAt: v.verifiedAt ?? null,
           rejectionReason: v.rejectionReason ?? null,

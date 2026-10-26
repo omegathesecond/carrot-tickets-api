@@ -10,16 +10,16 @@ describe('Vendor — services fields', () => {
   it('persists a services vendor with category and starting price', async () => {
     const v = await Vendor.create({
       businessName: 'Luxe Decor', phoneNumber: '+26876000001', password: 'secret1',
-      operatorType: OperatorType.SERVICES, serviceCategory: 'furniture_decor',
+      operatorType: OperatorType.SERVICES, serviceCategories: ['furniture_decor'],
       startingPrice: { amountCents: 18000, unit: 'day' },
     });
     expect(v.operatorType).toBe('services');
-    expect(v.serviceCategory).toBe('furniture_decor');
+    expect(v.serviceCategories).toEqual(['furniture_decor']);
     expect(v.startingPrice?.amountCents).toBe(18000);
     expect(v.startingPrice?.unit).toBe('day');
   });
 
-  // serviceCategory is no longer a Mongoose enum — categories are DB-driven
+  // serviceCategories is no longer a Mongoose enum — categories are DB-driven
   // (ServiceCategory model), so ANY string persists at the model layer. The
   // "is this a real, active category" check now happens one layer up, at
   // signup, via ServiceCategoryService.isValidActive
@@ -28,9 +28,9 @@ describe('Vendor — services fields', () => {
   it('persists an arbitrary category string (validity is checked at signup, not by the model)', async () => {
     const v = await Vendor.create({
       businessName: 'X', phoneNumber: '+26876000002', password: 'secret1',
-      operatorType: OperatorType.SERVICES, serviceCategory: 'bouncy_castle',
+      operatorType: OperatorType.SERVICES, serviceCategories: ['bouncy_castle'],
     });
-    expect(v.serviceCategory).toBe('bouncy_castle');
+    expect(v.serviceCategories).toEqual(['bouncy_castle']);
   });
 
   it('requires a category when operatorType is services', async () => {
@@ -43,7 +43,7 @@ describe('Vendor — services fields', () => {
   it('rejects a non-integer amountCents', async () => {
     await expect(Vendor.create({
       businessName: 'FloatyCents', phoneNumber: '+26876000004', password: 'secret1',
-      operatorType: OperatorType.SERVICES, serviceCategory: 'catering',
+      operatorType: OperatorType.SERVICES, serviceCategories: ['catering'],
       startingPrice: { amountCents: 180.5, unit: 'day' },
     })).rejects.toThrow();
   });

@@ -55,6 +55,19 @@ describe('boot', () => {
     expect(order).toEqual(['connect', 'afterConnect', 'listen']);
   });
 
+  it('waits for asynchronous migrations and refuses traffic if they fail', async () => {
+    const migration = deferred();
+    const listen = jest.fn();
+    const exit = jest.fn();
+    const done = boot({ connect: async () => {}, afterConnect: () => migration.promise, listen, exit, log: () => {}, error: () => {} });
+    await flush();
+    expect(listen).not.toHaveBeenCalled();
+    migration.reject(new Error('migration failed'));
+    await done;
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(listen).not.toHaveBeenCalled();
+  });
+
   it('never listens and exits 1 when the connection fails — a port with no database behind it must not pass the probe', async () => {
     const boom = new Error('Server selection timed out after 30000 ms');
     const listen = jest.fn();

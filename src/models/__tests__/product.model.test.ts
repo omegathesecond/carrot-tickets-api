@@ -26,6 +26,15 @@ describe('Product model', () => {
     ).rejects.toThrow();
   });
 
+  it.each([
+    { quantity: 1, price: 1000 }, { quantity: 6, price: 15000 },
+    { quantity: 6, price: 15001 }, { quantity: 6, price: 1000.5 },
+    { quantity: 6.5, price: 1000 }, { quantity: 6, price: 0 },
+  ])('rejects an invalid bundle price %j', async (bundlePrice) => {
+    await expect(Product.create({ eventId: eventId(), name: 'Beer', category: ProductCategory.BEER,
+      price: 2500, bundlePrice })).rejects.toThrow();
+  });
+
   it('enforces barcode uniqueness per event, but allows many barcodeless products', async () => {
     const ev = eventId();
     await Product.create({ eventId: ev, name: 'A', category: ProductCategory.BEER, price: 100, barcode: '6001240100015' });

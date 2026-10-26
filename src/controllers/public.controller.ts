@@ -281,6 +281,8 @@ const publicPurchaseSchema = Joi.object({
   keshlessPin: Joi.string().optional().length(4).pattern(/^\d{4}$/)
 }).or('items', 'ticketTypeId');
 
+const PUBLIC_EVENT_STATUSES = [EventStatus.PUBLISHED, EventStatus.ONGOING, EventStatus.COMPLETED, EventStatus.CANCELLED];
+
 export class PublicController {
   /**
    * Resolve the public-safe organizer identity for an event's vendor.
@@ -354,9 +356,10 @@ export class PublicController {
 
       const { page, limit, search, startDate, endDate, category } = value;
 
-      // Build query - only published events
+      const searchTerm = search?.trim();
+      // Search includes the public archive; drafts and pending approvals stay private.
       const filter: any = {
-        status: EventStatus.PUBLISHED
+        status: searchTerm ? { $in: PUBLIC_EVENT_STATUSES } : EventStatus.PUBLISHED
       };
 
       // Category chip filter (Home/Discover). 'All' or absent means
@@ -370,27 +373,26 @@ export class PublicController {
         filter.eventDate = {};
         if (startDate) filter.eventDate.$gte = new Date(startDate);
         if (endDate) filter.eventDate.$lte = new Date(endDate);
-      } else {
+      } else if (!searchTerm) {
         // Default: show every event that hasn't ended yet, so an in-progress
         // event (e.g. a late-night show) stays discoverable and buyable until
         // its endTime — not just until its start instant. See notEndedFilter.
         Object.assign(filter, notEndedFilter());
       }
 
-      // Search by name, venue, or description
-      if (search) {
-        filter.$or = [
-          { name: { $regex: search, $options: 'i' } },
-          { venue: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } }
-        ];
+      if (searchTerm) {
+        // Treat input as literal text and ignore extra whitespace in either name.
+        const pattern = searchTerm.split(/\s+/)
+          .map((word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('\\s+');
+        filter.name = { $regex: pattern, $options: 'i' };
       }
 
       // Execute query with pagination
       const skip = (page - 1) * limit;
       const [events, total] = await Promise.all([
         Event.find(filter)
-          .select('name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category priceMin priceMax currency galleryImages')
+          .select('status submittedByBuyerId name description venue eventDate startTime endTime posterUrl thumbnailUrl ticketTypes capacity totalTicketsSold vendorId likeCount ticketing externalTicketUrl category priceMin priceMax currency galleryImages')
           .sort({ eventDate: 1 })
           .skip(skip)
           .limit(limit)
@@ -467,10 +469,7 @@ export class PublicController {
         }
       }
 
-      // Transform events for public display. `filter` above already scopes
-      // this whole query to status: EventStatus.PUBLISHED, so every event here
-      // is already published/active — safe to apply the synthetic+real blend
-      // (item #19) to all of them.
+      // Transform public events for display.
       const publicEvents = events.map((event: any) => toPublicEventCard(event, {
         recentSales: blendedRecentSales(recentMap.get(String(event._id)) || 0, String(event._id)),
         trending: trendingIds.has(String(event._id)),
@@ -781,7 +780,7 @@ export class PublicController {
 
       const event = await Event.findOne({
         _id: eventId,
-        status: EventStatus.PUBLISHED
+        status: { $in: PUBLIC_EVENT_STATUSES }
       }).lean();
 
       if (!event) {

@@ -9,6 +9,7 @@ import { FollowService } from '@services/follow.service';
 import { BlockService } from '@services/block.service';
 import { WeekendService } from '@services/weekend.service';
 
+const PLAN_MEDIA = [{ url: 'https://cdn.carrottickets.com/plan.jpg', type: 'image' as const }];
 const DAY_MS = 24 * 60 * 60 * 1000;
 let phoneCounter = 0;
 
@@ -593,11 +594,43 @@ describe('WeekendService', () => {
     beforeEach(() => { process.env = { ...OLD_ENV, UPDATES_R2_PUBLIC_URL: 'https://cdn.carrottickets.com' }; });
     afterEach(() => { process.env = OLD_ENV; });
 
+    it('requires media on create and update, preserving the saved plan on failure', async () => {
+      const buyer = await seedBuyer('media_required');
+      await expect(WeekendService.createPlan(buyer, { statusType: 'have_plans' })).rejects.toMatchObject({ statusCode: 400 });
+      const plan = await WeekendService.createPlan(buyer, { statusType: 'have_plans', media: PLAN_MEDIA });
+      await expect(WeekendService.updatePlan(buyer, plan.id, { statusType: 'have_plans', media: [] })).rejects.toMatchObject({ statusCode: 400 });
+      expect((await WeekendService.getPlan(buyer, plan.id)).media).toHaveLength(1);
+    });
+
+    it('shows all profile posts to their owner and public posts to any viewer', async () => {
+      const buyer = await seedBuyer('profile_posts');
+      const media = [{ url: 'https://cdn.carrottickets.com/plan.mp4', type: 'video' }];
+      const plan = await WeekendService.createPlan(buyer, { statusType: 'have_plans', media });
+      await WeekendService.createPlan(buyer, { statusType: 'have_plans', media, audience: 'only_me' });
+      expect(await WeekendService.getProfilePlans(buyer, buyer.username!)).toHaveLength(2);
+      const publicPosts = await WeekendService.getProfilePlans(null, buyer.username!);
+      expect(publicPosts.map((p) => p.id)).toEqual([plan.id]);
+      expect(publicPosts[0]!.mediaItems[0]!.type).toBe('video');
+      expect(publicPosts[0]!.isOwner).toBe(false);
+    });
+
+    it('keeps hidden, expired and blocked posts off visitor profiles', async () => {
+      const owner = await seedBuyer('profile_privacy');
+      const visitor = await seedBuyer('profile_visitor');
+      await WeekendService.createPlan(owner, { statusType: 'have_plans', media: PLAN_MEDIA, audience: 'only_me' });
+      const publicPlan = await WeekendService.createPlan(owner, { statusType: 'have_plans', media: PLAN_MEDIA });
+      const expired = await WeekendService.createPlan(owner, { statusType: 'have_plans', media: PLAN_MEDIA });
+      await WeekendStatus.updateOne({ _id: expired.id }, { activeUntil: new Date(0) });
+      expect((await WeekendService.getProfilePlans(visitor, owner.username!)).map((p) => p.id)).toEqual([publicPlan.id]);
+      await BlockService.block(visitor, String(owner._id));
+      expect(await WeekendService.getProfilePlans(visitor, owner.username!)).toEqual([]);
+    });
+
     it('creates a brand-new plan on every call — never upserts, and never touches the profile-widget row', async () => {
       const buyer = await seedBuyer('u_plan_multi');
       await WeekendService.upsertStatus(buyer, { statusType: 'staying_in' });
-      const first = await WeekendService.createPlan(buyer, { statusType: 'have_plans', audience: 'public' });
-      const second = await WeekendService.createPlan(buyer, { statusType: 'bored', audience: 'public' });
+      const first = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'have_plans', audience: 'public' });
+      const second = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'bored', audience: 'public' });
       expect(first.id).not.toBe(second.id);
       expect(await WeekendStatus.countDocuments({ buyerId: buyer._id })).toBe(3); // 1 profile_widget + 2 plan_post
       const widget = await WeekendService.getOwnStatus(buyer);
@@ -606,9 +639,9 @@ describe('WeekendService', () => {
 
     it('rejects an invalid status / missing custom message / bad selected-people audience, same rules as upsertStatus', async () => {
       const buyer = await seedBuyer('u_plan_validate');
-      await expect(WeekendService.createPlan(buyer, { statusType: 'not_real' })).rejects.toMatchObject({ statusCode: 400 });
-      await expect(WeekendService.createPlan(buyer, { statusType: 'custom' })).rejects.toMatchObject({ statusCode: 400 });
-      await expect(WeekendService.createPlan(buyer, { statusType: 'bored', audience: 'selected', selectedViewerIds: [] })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'not_real' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'custom' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'bored', audience: 'selected', selectedViewerIds: [] })).rejects.toMatchObject({ statusCode: 400 });
     });
 
     it('persists an ordered media array and returns it in cover-first order', async () => {
@@ -642,8 +675,8 @@ describe('WeekendService', () => {
 
     it('is idempotent on a repeated clientRequestId (double-click / retried request never duplicates)', async () => {
       const buyer = await seedBuyer('u_plan_idempotent');
-      const first = await WeekendService.createPlan(buyer, { statusType: 'have_plans', clientRequestId: 'dup-token-1' });
-      const second = await WeekendService.createPlan(buyer, { statusType: 'have_plans', clientRequestId: 'dup-token-1' });
+      const first = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'have_plans', clientRequestId: 'dup-token-1' });
+      const second = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'have_plans', clientRequestId: 'dup-token-1' });
       expect(second.id).toBe(first.id);
       expect(await WeekendStatus.countDocuments({ buyerId: buyer._id, source: 'plan_post' })).toBe(1);
     });
@@ -651,8 +684,8 @@ describe('WeekendService', () => {
     it('lets two different plans reuse the same clientRequestId across different buyers', async () => {
       const a = await seedBuyer('u_plan_idem_a');
       const b = await seedBuyer('u_plan_idem_b');
-      const planA = await WeekendService.createPlan(a, { statusType: 'have_plans', clientRequestId: 'shared-token' });
-      const planB = await WeekendService.createPlan(b, { statusType: 'have_plans', clientRequestId: 'shared-token' });
+      const planA = await WeekendService.createPlan(a, { media: PLAN_MEDIA, statusType: 'have_plans', clientRequestId: 'shared-token' });
+      const planB = await WeekendService.createPlan(b, { media: PLAN_MEDIA, statusType: 'have_plans', clientRequestId: 'shared-token' });
       expect(planA.id).not.toBe(planB.id);
     });
 
@@ -660,7 +693,7 @@ describe('WeekendService', () => {
       const buyer = await seedBuyer('u_plan_get');
       const person = await seedBuyer('u_plan_get_person');
       const stranger = await seedBuyer('u_plan_get_stranger');
-      const plan = await WeekendService.createPlan(buyer, { statusType: 'bored', audience: 'selected', selectedViewerIds: [String(person._id)] });
+      const plan = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'bored', audience: 'selected', selectedViewerIds: [String(person._id)] });
       const fetched = await WeekendService.getPlan(buyer, plan.id);
       expect(fetched.selectedViewers.map((p) => p.id)).toEqual([String(person._id)]);
       await expect(WeekendService.getPlan(stranger, plan.id)).rejects.toMatchObject({ statusCode: 404 });
@@ -669,9 +702,9 @@ describe('WeekendService', () => {
     it('updatePlan edits only the targeted plan, leaving the buyer\'s other plans and profile-widget row untouched', async () => {
       const buyer = await seedBuyer('u_plan_update');
       await WeekendService.upsertStatus(buyer, { statusType: 'staying_in' });
-      const planA = await WeekendService.createPlan(buyer, { statusType: 'have_plans', message: 'Plan A' });
-      const planB = await WeekendService.createPlan(buyer, { statusType: 'bored' });
-      const updated = await WeekendService.updatePlan(buyer, planA.id, { statusType: 'custom', message: 'Updated plan A' });
+      const planA = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'have_plans', message: 'Plan A' });
+      const planB = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'bored' });
+      const updated = await WeekendService.updatePlan(buyer, planA.id, { media: PLAN_MEDIA, statusType: 'custom', message: 'Updated plan A' });
       expect(updated.statusType).toBe('custom');
       expect(updated.message).toBe('Updated plan A');
       const untouchedB = await WeekendService.getPlan(buyer, planB.id);
@@ -683,14 +716,14 @@ describe('WeekendService', () => {
     it('updatePlan 404s when editing another buyer\'s plan', async () => {
       const owner = await seedBuyer('u_plan_update_owner');
       const stranger = await seedBuyer('u_plan_upd_stranger');
-      const plan = await WeekendService.createPlan(owner, { statusType: 'have_plans' });
-      await expect(WeekendService.updatePlan(stranger, plan.id, { statusType: 'bored' })).rejects.toMatchObject({ statusCode: 404 });
+      const plan = await WeekendService.createPlan(owner, { media: PLAN_MEDIA, statusType: 'have_plans' });
+      await expect(WeekendService.updatePlan(stranger, plan.id, { media: PLAN_MEDIA, statusType: 'bored' })).rejects.toMatchObject({ statusCode: 404 });
     });
 
     it('removePlan deletes only the targeted plan', async () => {
       const buyer = await seedBuyer('u_plan_remove');
-      const planA = await WeekendService.createPlan(buyer, { statusType: 'have_plans' });
-      const planB = await WeekendService.createPlan(buyer, { statusType: 'bored' });
+      const planA = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'have_plans' });
+      const planB = await WeekendService.createPlan(buyer, { media: PLAN_MEDIA, statusType: 'bored' });
       await WeekendService.removePlan(buyer, planA.id);
       await expect(WeekendService.getPlan(buyer, planA.id)).rejects.toMatchObject({ statusCode: 404 });
       expect(await WeekendService.getPlan(buyer, planB.id)).toBeTruthy();
@@ -699,7 +732,7 @@ describe('WeekendService', () => {
     it('removePlan 404s when removing another buyer\'s plan (and does not delete it)', async () => {
       const owner = await seedBuyer('u_plan_remove_owner');
       const stranger = await seedBuyer('u_plan_rm_stranger');
-      const plan = await WeekendService.createPlan(owner, { statusType: 'have_plans' });
+      const plan = await WeekendService.createPlan(owner, { media: PLAN_MEDIA, statusType: 'have_plans' });
       await expect(WeekendService.removePlan(stranger, plan.id)).rejects.toMatchObject({ statusCode: 404 });
       expect(await WeekendService.getPlan(owner, plan.id)).toBeTruthy();
     });
@@ -740,9 +773,9 @@ describe('WeekendService', () => {
     it('prepends ALL of the viewer\'s own active plans (plus their profile-widget status), newest first, none hidden or replaced', async () => {
       const viewer = await seedBuyer('u_multi_feed_viewer');
       await WeekendService.upsertStatus(viewer, { statusType: 'staying_in', audience: 'public' });
-      const older = await WeekendService.createPlan(viewer, { statusType: 'have_plans', audience: 'public' });
+      const older = await WeekendService.createPlan(viewer, { media: PLAN_MEDIA, statusType: 'have_plans', audience: 'public' });
       await new Promise((r) => setTimeout(r, 5));
-      const newer = await WeekendService.createPlan(viewer, { statusType: 'bored', audience: 'public' });
+      const newer = await WeekendService.createPlan(viewer, { media: PLAN_MEDIA, statusType: 'bored', audience: 'public' });
 
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
       const ownCards = cards.filter((c) => c.user.id === String(viewer._id));
@@ -756,7 +789,7 @@ describe('WeekendService', () => {
     it('a viewed-by-someone-else card is never flagged editableAsPlan', async () => {
       const viewer = await seedBuyer('u_multi_feed_v2');
       const owner = await seedBuyer('u_multi_feed_owner2');
-      await WeekendService.createPlan(owner, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.createPlan(owner, { media: PLAN_MEDIA, statusType: 'have_plans', audience: 'public' });
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
       expect(cards.find((c) => c.user.id === String(owner._id))?.editableAsPlan).toBe(false);
     });

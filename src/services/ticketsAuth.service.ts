@@ -1,3 +1,4 @@
+import mongoose, { ClientSession } from 'mongoose';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 import { Vendor } from '@models/vendor.model';
@@ -18,6 +19,7 @@ import { SecurityRateLimitService } from '@services/securityRateLimit.service';
 import { HttpError } from '@utils/httpError.util';
 
 export class SessionAuthError extends HttpError {
+  readonly code = 'SESSION_INVALID';
   constructor(message = 'Session revoked. Please sign in again.') { super(401, message); }
 }
 
@@ -215,12 +217,12 @@ export class TicketsAuthService {
     email?: string;
     phoneNumber?: string;
     password: string;
-    serviceCategory: string;
+    serviceCategories: string[];
     startingPrice?: { amountCents: number; unit?: 'day' | 'event' | 'hour' };
     city?: string;
     code: string;
   }) {
-    const { businessName, email, phoneNumber, password, serviceCategory, startingPrice, city, code } = params;
+    const { businessName, email, phoneNumber, password, serviceCategories, startingPrice, city, code } = params;
 
     const id = this.signupIdentifier(email, phoneNumber);
     if (!password || password.length < 6) {
@@ -238,7 +240,8 @@ export class TicketsAuthService {
     // Categories are DB-driven now (ServiceCategoryService), not a hardcoded
     // enum — check BEFORE burning the OTP code, so an invalid category never
     // consumes it (same reasoning as the duplicate-account guards above).
-    if (!(await ServiceCategoryService.isValidActive(serviceCategory))) {
+    if (!Array.isArray(serviceCategories) || !serviceCategories.length ||
+      !(await Promise.all(serviceCategories.map((category) => ServiceCategoryService.isValidActive(category)))).every(Boolean)) {
       throw new Error('Choose a valid service category');
     }
 
@@ -249,7 +252,7 @@ export class TicketsAuthService {
         phoneNumber,
         password,
         operatorType: OperatorType.SERVICES,
-        serviceCategory,
+        serviceCategories,
         ...(startingPrice ? { startingPrice: { amountCents: startingPrice.amountCents, unit: startingPrice.unit ?? 'day' } } : {}),
         ...(city ? { address: { city } } : {}),
         // verificationStatus, isActive, isVerified and apps.tickets.enabled all
@@ -913,11 +916,12 @@ export class TicketsAuthService {
     vendorId: string | undefined,
     userType: 'vendor' | 'sub-user',
     authVersion: number,
-    deviceInfo?: string
+    deviceInfo?: string,
+    session?: ClientSession
   ): Promise<void> {
     const expiresAt = this.calculateExpiryDate(JWT_REFRESH_EXPIRY);
 
-    await RefreshToken.create({
+    await RefreshToken.create([{
       token: refreshToken,
       authVersion,
       userId,
@@ -926,93 +930,120 @@ export class TicketsAuthService {
       expiresAt,
       deviceInfo,
       isRevoked: false
-    });
+    }], { session });
   }
 
   /**
    * Refresh access token using refresh token
    */
   static async refreshAccessToken(refreshTokenString: string): Promise<{ accessToken: string; refreshToken: string }> {
-    // Find refresh token in database
-    const refreshTokenDoc = await RefreshToken.findOneAndUpdate({
-      token: refreshTokenString,
-      isRevoked: false,
-      expiresAt: { $gt: new Date() }
-    }, { $set: { isRevoked: true } }, { new: true });
-
-    if (!refreshTokenDoc || !Number.isInteger(refreshTokenDoc.authVersion)) {
-      throw new Error('Invalid or expired refresh token');
+    if (typeof refreshTokenString !== 'string' || !refreshTokenString) {
+      throw new HttpError(400, 'Refresh token must be a non-empty string.');
     }
+    let result!: { accessToken: string; refreshToken: string };
+    await mongoose.connection.transaction(async (session) => {
+      // Claim and rotate together; a dependency failure leaves the old token usable.
+      const refreshTokenDoc = await RefreshToken.findOneAndUpdate({
+        token: refreshTokenString,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() }
+      }, { $set: { isRevoked: true } }, { new: true, session });
 
-    // Get user data based on user type
-    let payload: any;
-
-    if (refreshTokenDoc.userType === 'vendor') {
-      const vendor = await Vendor.findById(refreshTokenDoc.vendorId);
-      if (!vendor || !vendor.isActive || !vendor.apps?.tickets?.enabled || vendor.authVersion !== refreshTokenDoc.authVersion) {
-        throw new Error('Vendor account not found or inactive');
+      if (!refreshTokenDoc || !Number.isInteger(refreshTokenDoc.authVersion)) {
+        throw new SessionAuthError('Invalid or expired refresh token');
       }
 
-      payload = {
-        authVersion: vendor.authVersion,
-        vendorId: vendor._id.toString(),
-        userType: 'vendor',
-        app: 'tickets',
-        role: TicketsRole.OWNER,
-        permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType),
-        isSuperAdmin: vendor.isSuperAdmin || false
-      };
-    } else {
-      const subUser = await VendorSubUser.findById(refreshTokenDoc.userId);
-      if (!subUser || !subUser.isActive || subUser.authVersion !== refreshTokenDoc.authVersion) {
-        throw new Error('User account not found or inactive');
+      // Get user data based on user type
+      let payload: any;
+
+      if (refreshTokenDoc.userType === 'vendor') {
+        const vendor = await Vendor.findById(refreshTokenDoc.vendorId).session(session);
+        if (!vendor || !vendor.isActive || !vendor.apps?.tickets?.enabled || vendor.authVersion !== refreshTokenDoc.authVersion) {
+          throw new SessionAuthError('Vendor account not found or inactive');
+        }
+
+        payload = {
+          authVersion: vendor.authVersion,
+          vendorId: vendor._id.toString(),
+          userType: 'vendor',
+          app: 'tickets',
+          role: TicketsRole.OWNER,
+          permissions: scopePermissionsToType(TICKETS_ROLE_PERMISSIONS[TicketsRole.OWNER], vendor.operatorType),
+          isSuperAdmin: vendor.isSuperAdmin || false
+        };
+      } else {
+        const subUser = await VendorSubUser.findById(refreshTokenDoc.userId).session(session);
+        if (!subUser || !subUser.isActive || subUser.authVersion !== refreshTokenDoc.authVersion) {
+          throw new SessionAuthError('User account not found or inactive');
+        }
+
+        const ticketsAccess = await TicketsUserAccess.findOne({
+          userId: subUser._id,
+          isActive: true
+        }).session(session);
+
+        if (!ticketsAccess) {
+          throw new SessionAuthError('Carrot Tickets access not found');
+        }
+
+        const vendorForSubUser = await Vendor.findById(subUser.vendorId).session(session);
+        if (!vendorForSubUser?.isActive || !vendorForSubUser.apps?.tickets?.enabled) throw new SessionAuthError();
+        const subType = vendorForSubUser.operatorType;
+
+        payload = {
+          authVersion: subUser.authVersion,
+          userId: subUser._id.toString(),
+          vendorId: subUser.vendorId.toString(),
+          userType: 'sub-user',
+          app: 'tickets',
+          role: ticketsAccess.role,
+          permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType)
+        };
       }
 
-      const ticketsAccess = await TicketsUserAccess.findOne({
-        userId: subUser._id,
-        isActive: true
-      });
+      // Generate new access token
+      const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 
-      if (!ticketsAccess) {
-        throw new Error('Carrot Tickets access not found');
-      }
+      // Generate new refresh token (rotation)
+      const newRefreshToken = this.generateRefreshToken();
 
-      const vendorForSubUser = await Vendor.findById(subUser.vendorId);
-      if (!vendorForSubUser?.isActive || !vendorForSubUser.apps?.tickets?.enabled) throw new SessionAuthError();
-      const subType = vendorForSubUser.operatorType;
+      // The old token was claimed atomically above; concurrent replay fails.
 
-      payload = {
-        authVersion: subUser.authVersion,
-        userId: subUser._id.toString(),
-        vendorId: subUser.vendorId.toString(),
-        userType: 'sub-user',
-        app: 'tickets',
-        role: ticketsAccess.role,
-        permissions: scopePermissionsToType(ticketsAccess.permissions as any, subType)
-      };
+      // Store new refresh token
+      await this.storeRefreshToken(
+        newRefreshToken,
+        refreshTokenDoc.userId,
+        refreshTokenDoc.vendorId,
+        refreshTokenDoc.userType,
+        refreshTokenDoc.authVersion,
+        undefined,
+        session,
+      );
+
+      result = { accessToken, refreshToken: newRefreshToken };
+    });
+    return result;
+  }
+
+  /** Organizer logout also invalidates the separate public-site SSO session.
+   * A single atomic version change revokes access, refresh and handoff tokens
+   * across organizer devices. Other account types retain refresh-only logout. */
+  static async logout(accessToken?: string, refreshToken?: string): Promise<void> {
+    if (refreshToken !== undefined && (typeof refreshToken !== 'string' || !refreshToken)) {
+      throw new HttpError(400, 'Refresh token must be a non-empty string.');
     }
-
-    // Generate new access token
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
-
-    // Generate new refresh token (rotation)
-    const newRefreshToken = this.generateRefreshToken();
-
-    // The old token was claimed atomically above; concurrent replay fails.
-
-    // Store new refresh token
-    await this.storeRefreshToken(
-      newRefreshToken,
-      refreshTokenDoc.userId,
-      refreshTokenDoc.vendorId,
-      refreshTokenDoc.userType,
-      refreshTokenDoc.authVersion,
-    );
-
-    return {
-      accessToken,
-      refreshToken: newRefreshToken
-    };
+    // Refresh credentials also permit logout after the access token expires.
+    const stored = refreshToken ? await RefreshToken.findOne({ token: refreshToken, isRevoked: false, expiresAt: { $gt: new Date() } }) : null;
+    const identity = stored || (accessToken ? await this.verifyAndResolveSession(accessToken) : null);
+    if (!identity) throw new SessionAuthError('A valid session is required to log out.');
+    if (identity.userType === 'vendor') {
+      await Vendor.updateOne(
+        { _id: identity.vendorId, authVersion: identity.authVersion },
+        { $inc: { authVersion: 1 } },
+      );
+    } else if (refreshToken) {
+      await this.revokeRefreshToken(refreshToken);
+    }
   }
 
   /**

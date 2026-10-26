@@ -40,8 +40,8 @@ async function makeBuyer(phone: string, name: string, username: string) {
   return Buyer.create({ phone, password: 'secret1', avatarUrl: AVATAR, name, username });
 }
 
-async function createPlan(phone: string, body: Record<string, unknown>, expectedStatus = 201) {
-  return request(app).post('/api/social/plans').set(await auth(phone)).send(body).expect(expectedStatus);
+function createPlan(headers: Record<string, string>, body: Record<string, unknown>) {
+  return request(app).post('/api/social/plans').set(headers).send(body);
 }
 
 describe('Trip Plan — manually-entered events', () => {
@@ -54,11 +54,11 @@ describe('Trip Plan — manually-entered events', () => {
 
   it('creates a plan from a manually-entered trip, with no linked Carrot event', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
-    const res = await createPlan(ADMIN, {
+    const res = await createPlan(await auth(ADMIN), {
       manualEvent: { name: 'Weekend in Cape Town', date: new Date(Date.now() + 5 * 86400000).toISOString(), location: 'Cape Town' },
       name: 'Road trip crew',
       visibility: 'private',
-    }, 201);
+    }).expect(201);
 
     expect(res.body.data.eventId).toBeNull();
     expect(res.body.data.event).toBeNull();
@@ -71,26 +71,26 @@ describe('Trip Plan — manually-entered events', () => {
   it('rejects a create with both eventId and manualEvent', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
     const event = await makeEvent();
-    await createPlan(ADMIN, {
+    await createPlan(await auth(ADMIN), {
       eventId: String(event._id),
       manualEvent: { name: 'Also this' },
       name: 'Conflicting',
       visibility: 'public',
-    }, 400);
+    }).expect(400);
   });
 
   it('rejects a create with neither eventId nor manualEvent', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
-    await createPlan(ADMIN, { name: 'No destination', visibility: 'public' }, 400);
+    await createPlan(await auth(ADMIN), { name: 'No destination', visibility: 'public' }).expect(400);
   });
 
   it('lists a manual-event plan under My Plans > Upcoming and includes it in the Home feed when public', async () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
-    const created = await createPlan(ADMIN, {
+    const created = await createPlan(await auth(ADMIN), {
       manualEvent: { name: 'Beach day', date: new Date(Date.now() + 2 * 86400000).toISOString() },
       name: 'Beach day plan',
       visibility: 'public',
-    }, 201);
+    }).expect(201);
 
     const mine = await request(app).get('/api/social/plans/mine?section=upcoming').set(await auth(ADMIN)).expect(200);
     expect(mine.body.data.plans.map((p: any) => p.id)).toContain(created.body.data.id);
@@ -111,7 +111,7 @@ describe('Trip Plan — Posts (photo/video)', () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
     const event = await makeEvent();
-    const created = await createPlan(ADMIN, { eventId: String(event._id), name: 'Pregame', visibility: 'public' }, 201);
+    const created = await createPlan(await auth(ADMIN), { eventId: String(event._id), name: 'Pregame', visibility: 'public' }).expect(201);
     return created.body.data.id as string;
   }
 
@@ -223,7 +223,7 @@ describe('Trip Plan — cover photo', () => {
     await makeBuyer(ADMIN, 'Admin', 'admin_one');
     await makeBuyer(FRIEND, 'Friend', 'friend_one');
     const event = await makeEvent();
-    const created = await createPlan(ADMIN, { eventId: String(event._id), name: 'Scorpion Kings trip', visibility: 'public' }, 201);
+    const created = await createPlan(await auth(ADMIN), { eventId: String(event._id), name: 'Scorpion Kings trip', visibility: 'public' }).expect(201);
     return created.body.data.id as string;
   }
 

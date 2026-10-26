@@ -2,7 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
-import { signBuyerSessionToken as signBuyerSessionToken, signVendorSessionToken as seedVendorSessionToken } from '../../__tests__/helpers/auth';
+import { signBuyerSessionToken, signVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 
@@ -75,7 +75,7 @@ describe('event Q&A routes', () => {
 
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
-      .set('Authorization', `Bearer ${await seedVendorSessionToken(vendorId)}`)
+      .set('Authorization', `Bearer ${await signVendorSessionToken(vendorId)}`)
       .send({ body: 'Gates open at 6pm.' })
       .expect(201);
 

@@ -8,15 +8,19 @@ import { OperatorType } from '@interfaces/vendor.interface';
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 afterEach(clearTestDb);
+let adminToken: string;
+beforeEach(async () => {
+  adminToken = await signAdminSessionToken();
+});
 
-describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory', () => {
-  it('includes operatorType and serviceCategory on each row, and filters by ?operatorType=services', async () => {
+describe('GET /api/tickets/admin/organizers — operatorType + serviceCategories', () => {
+  it('includes operatorType and serviceCategories on each row, and filters by ?operatorType=services', async () => {
     await Vendor.create({
       businessName: 'Luxe Decor',
       phoneNumber: '+26876000010',
       password: 'secret1',
       operatorType: OperatorType.SERVICES,
-      serviceCategory: 'furniture_decor',
+      serviceCategories: ['furniture_decor'],
     });
     await Vendor.create({
       businessName: 'Big Concerts Co',
@@ -32,10 +36,10 @@ describe('GET /api/tickets/admin/organizers — operatorType + serviceCategory',
     expect(all.status).toBe(200);
     const servicesRow = all.body.data.organizers.find((o: any) => o.businessName === 'Luxe Decor');
     expect(servicesRow.operatorType).toBe('services');
-    expect(servicesRow.serviceCategory).toBe('furniture_decor');
+    expect(servicesRow.serviceCategories).toEqual(['furniture_decor']);
     const eventsRow = all.body.data.organizers.find((o: any) => o.businessName === 'Big Concerts Co');
     expect(eventsRow.operatorType).toBe('events');
-    expect(eventsRow.serviceCategory).toBeNull();
+    expect(eventsRow.serviceCategories).toBeNull();
 
     // Filtered by operatorType=services returns only the services vendor.
     const filtered = await request(app)

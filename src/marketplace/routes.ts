@@ -2,15 +2,23 @@ import { Router, Request, Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import Joi from 'joi';
 import {
-  authenticateTickets,
+  authenticateBuyerOrOrganizer,
   requireTicketsOwner,
 } from '@middleware/ticketsAuth.middleware';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { HttpError } from '@utils/httpError.util';
+import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { Buyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
+import { Event } from '@models/event.model';
+import { R2Service } from '@utils/r2.service';
+import { posterUpload, handleMulterError } from '@middleware/media.middleware';
+import { ServiceCategoryService } from '@services/serviceCategory.service';
+import { ServiceCategory } from '@models/serviceCategory.model';
 import { NotificationService } from '@services/notification.service';
 import {
+  MarketServiceListing,
   MarketApplication,
   MarketCertificate,
   MarketOpportunity,
@@ -19,6 +27,7 @@ import {
   ensureMarketplaceIndexes,
 } from './models';
 import {
+  serviceListingSchema,
   AVAILABILITY,
   CERTIFICATE_TYPES,
   MARKET_TYPES,
@@ -55,7 +64,7 @@ const wrap =
       return failWithHttpError(res, e, 'Marketplace request failed');
     }
   };
-const actor = (req: Request) => String((req as any).ticketsUser.vendorId);
+const actor = (req: Request) => String((req as any).marketplaceOwnerId);
 const admin = (req: Request) => (req as any).ticketsUser.isSuperAdmin === true;
 const id = (value: unknown): string => validate(idSchema, value);
 const ok = (res: Response, data: unknown) =>
@@ -95,192 +104,216 @@ async function transaction<T>(
     await session.endSession();
   }
 }
-router.get('/options', (_req, res) =>
-  ok(res, {
-    marketTypes: MARKET_TYPES,
-    availability: AVAILABILITY,
-    certificateTypes: CERTIFICATE_TYPES,
-    regions: REGIONS,
-  }),
-);
 router.get(
-  '/opportunities',
-  wrap(async (req, res) => {
-    const q = validate(
-      Joi.object({
-        search: Joi.string().max(200).allow(''),
-        location: Joi.string().max(200).allow(''),
-        date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/),
-        marketType: Joi.string().valid(...MARKET_TYPES),
-        category: Joi.string().max(200),
-        availability: Joi.string().valid(...AVAILABILITY),
-        maxFee: Joi.number().min(0),
-        minFee: Joi.number().min(0),
-        currency: Joi.string()
-          .length(3)
-          .uppercase()
-          .pattern(/^[A-Z]{3}$/),
-        available: Joi.boolean(),
-        page: Joi.number().integer().min(1).max(10000).default(1),
-      }),
-      req.query,
-    );
-    const filter: any = {
-      status: 'published',
-      applicationDeadline: { $gt: new Date() },
-    };
-    const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (q.search)
-      filter.$or = ['name', 'organiser', 'description'].map((k) => ({
-        [k]: { $regex: literal(q.search), $options: 'i' },
-      }));
-    if (q.location)
-      filter.location = { $regex: literal(q.location), $options: 'i' };
-    for (const key of ['marketType', 'availability', 'currency'])
-      if (q[key]) filter[key] = q[key];
-    if (q.category) filter.categories = q.category;
-    if (q.maxFee !== undefined || q.minFee !== undefined) {
-      if (!q.currency)
-        throw new HttpError(400, 'Select a currency when filtering stall fees');
-      filter.stallFee = {
-        ...(q.maxFee !== undefined ? { $lte: q.maxFee } : {}),
-        ...(q.minFee !== undefined ? { $gte: q.minFee } : {}),
-      };
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    filter.dates = q.date || { $gte: today };
-    const upcomingDates = q.date
-      ? { $literal: [q.date] }
-      : {
-          $filter: {
-            input: '$dates',
-            as: 'date',
-            cond: { $gte: ['$$date', today] },
-          },
-        };
-    const items = await MarketOpportunity.aggregate([
-      { $match: filter },
+  '/options',
+  wrap(async (_req, res) =>
+    ok(res, {
+      categories: await ServiceCategoryService.listActive(),
+      marketTypes: MARKET_TYPES,
+      availability: AVAILABILITY,
+      certificateTypes: CERTIFICATE_TYPES,
+      regions: REGIONS,
+    }),
+  ),
+);
+const listOpportunities = wrap(async (req, res) => {
+  const q = validate(
+    Joi.object({
+      search: Joi.string().max(200).allow(''),
+      location: Joi.string().max(200).allow(''),
+      date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/),
+      marketType: Joi.string().valid(...MARKET_TYPES),
+      category: Joi.string().max(200),
+      availability: Joi.string().valid(...AVAILABILITY),
+      maxFee: Joi.number().min(0),
+      minFee: Joi.number().min(0),
+      currency: Joi.string()
+        .length(3)
+        .uppercase()
+        .pattern(/^[A-Z]{3}$/),
+      available: Joi.boolean(),
+      page: Joi.number().integer().min(1).max(10000).default(1),
+    }),
+    req.query,
+  );
+  const filter: any = {
+    status: 'published',
+    applicationDeadline: { $gt: new Date() },
+  };
+  const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (q.search)
+    filter.$or = ['name', 'organiser', 'description'].map((k) => ({
+      [k]: { $regex: literal(q.search), $options: 'i' },
+    }));
+  if (q.location)
+    filter.location = { $regex: literal(q.location), $options: 'i' };
+  for (const key of ['marketType', 'availability', 'currency'])
+    if (q[key]) filter[key] = q[key];
+  if (q.category) filter.categories = q.category;
+  if (req.path === '/matched-opportunities') {
+    const vendor = await Vendor.findById(actor(req))
+      .select('serviceCategories')
+      .lean();
+    if (!vendor) throw new HttpError(404, 'Provider not found');
+    const selected = vendor.serviceCategories ?? [];
+    // Marketplace accepts category names as well as stable service identifiers.
+    // Resolve current labels from the same catalogue used during signup.
+    const categories = await ServiceCategory.find({ value: { $in: selected } })
+      .select('label')
+      .lean();
+    const terms = [
+      ...new Set([...selected, ...categories.map((c) => c.label)]),
+    ];
+    filter.$and = [
       {
-        $set: {
-          nextTradingDate: {
-            $min: upcomingDates,
-          },
+        categories: {
+          $in: terms.map((term) => new RegExp('^' + literal(term) + '$', 'i')),
         },
       },
-      {
-        $lookup: {
-          from: MarketApplication.collection.name,
-          let: {
-            opportunityId: '$_id',
-            dates: upcomingDates,
-            scope: '$scope',
-          },
-          pipeline: [
-            {
-              $match: {
-                status: 'approved',
-                $expr: {
-                  $and: [
-                    { $eq: ['$opportunityId', '$$opportunityId'] },
-                    {
-                      $cond: [
-                        { $eq: ['$$scope', 'regular'] },
-                        { $eq: ['$scopeKey', 'regular'] },
-                        { $in: ['$scopeKey', '$$dates'] },
-                      ],
-                    },
-                  ],
-                },
+    ];
+  }
+  if (q.maxFee !== undefined || q.minFee !== undefined) {
+    if (!q.currency)
+      throw new HttpError(400, 'Select a currency when filtering stall fees');
+    filter.stallFee = {
+      ...(q.maxFee !== undefined ? { $lte: q.maxFee } : {}),
+      ...(q.minFee !== undefined ? { $gte: q.minFee } : {}),
+    };
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  filter.dates = q.date || { $gte: today };
+  const upcomingDates = q.date
+    ? { $literal: [q.date] }
+    : {
+        $filter: {
+          input: '$dates',
+          as: 'date',
+          cond: { $gte: ['$$date', today] },
+        },
+      };
+  const items = await MarketOpportunity.aggregate([
+    { $match: filter },
+    {
+      $set: {
+        nextTradingDate: {
+          $min: upcomingDates,
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: MarketApplication.collection.name,
+        let: {
+          opportunityId: '$_id',
+          dates: upcomingDates,
+          scope: '$scope',
+        },
+        pipeline: [
+          {
+            $match: {
+              status: 'approved',
+              $expr: {
+                $and: [
+                  { $eq: ['$opportunityId', '$$opportunityId'] },
+                  {
+                    $cond: [
+                      { $eq: ['$$scope', 'regular'] },
+                      { $eq: ['$scopeKey', 'regular'] },
+                      { $in: ['$scopeKey', '$$dates'] },
+                    ],
+                  },
+                ],
               },
             },
-            { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
-          ],
-          as: 'approvals',
-        },
+          },
+          { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
+        ],
+        as: 'approvals',
       },
-      {
-        $set: {
-          approvedProviders: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$approvals',
-                    as: 'approval',
-                    cond: {
-                      $eq: [
-                        '$$approval._id',
-                        {
-                          $cond: [
-                            { $eq: ['$scope', 'regular'] },
-                            'regular',
-                            q.date || '$nextTradingDate',
-                          ],
-                        },
-                      ],
-                    },
+    },
+    {
+      $set: {
+        approvedProviders: {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: '$approvals',
+                  as: 'approval',
+                  cond: {
+                    $eq: [
+                      '$$approval._id',
+                      {
+                        $cond: [
+                          { $eq: ['$scope', 'regular'] },
+                          'regular',
+                          q.date || '$nextTradingDate',
+                        ],
+                      },
+                    ],
                   },
                 },
-                as: 'approval',
-                in: '$$approval.count',
               },
+              as: 'approval',
+              in: '$$approval.count',
             },
           },
         },
       },
-      {
-        $set: {
-          remainingCapacity: {
-            $cond: [
-              { $eq: ['$capacity', null] },
-              null,
-              { $subtract: ['$capacity', '$approvedProviders'] },
-            ],
-          },
+    },
+    {
+      $set: {
+        remainingCapacity: {
+          $cond: [
+            { $eq: ['$capacity', null] },
+            null,
+            { $subtract: ['$capacity', '$approvedProviders'] },
+          ],
         },
       },
-      ...(q.available
-        ? [
-            {
-              $match: {
-                $expr: {
-                  $or: [
-                    { $eq: ['$capacity', null] },
-                    {
-                      $lt: [
-                        // An unfilled date may have no approval group at all.
-                        {
-                          $size: {
-                            $filter: {
-                              input: '$approvals',
-                              as: 'approval',
-                              cond: { $gte: ['$$approval.count', '$capacity'] },
-                            },
+    },
+    ...(q.available
+      ? [
+          {
+            $match: {
+              $expr: {
+                $or: [
+                  { $eq: ['$capacity', null] },
+                  {
+                    $lt: [
+                      // An unfilled date may have no approval group at all.
+                      {
+                        $size: {
+                          $filter: {
+                            input: '$approvals',
+                            as: 'approval',
+                            cond: { $gte: ['$$approval.count', '$capacity'] },
                           },
                         },
-                        {
-                          $cond: [
-                            { $eq: ['$scope', 'regular'] },
-                            1,
-                            { $size: upcomingDates },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
+                      },
+                      {
+                        $cond: [
+                          { $eq: ['$scope', 'regular'] },
+                          1,
+                          { $size: upcomingDates },
+                        ],
+                      },
+                    ],
+                  },
+                ],
               },
             },
-          ]
-        : []),
-      { $unset: ['approvals', '__v', 'revision'] },
-      { $sort: { nextTradingDate: 1, _id: 1 } },
-      { $skip: (q.page - 1) * 30 },
-      { $limit: 31 },
-    ]);
-    return ok(res, { items: items.slice(0, 30), hasMore: items.length > 30 });
-  }),
-);
+          },
+        ]
+      : []),
+    { $unset: ['approvals', '__v', 'revision'] },
+    { $sort: { nextTradingDate: 1, _id: 1 } },
+    { $skip: (q.page - 1) * 30 },
+    { $limit: 31 },
+  ]);
+  return ok(res, { items: items.slice(0, 30), hasMore: items.length > 30 });
+});
+router.get('/opportunities', listOpportunities);
 router.get(
   '/opportunities/:id',
   wrap(async (req, res) => {
@@ -299,14 +332,93 @@ router.get(
     });
   }),
 );
-// All provider and organiser mutations require a live vendor-owner session.
-// Sales/scanner/sub-user tokens cannot access private applications or files.
-router.use(authenticateTickets, requireTicketsOwner);
+router.get(
+  '/service-listings',
+  wrap(async (req, res) => {
+    const q = validate(
+      Joi.object({
+        category: Joi.string().max(200).allow(''),
+        page: Joi.number().integer().min(1).max(10000).default(1),
+      }),
+      req.query,
+    );
+    const items = await MarketServiceListing.find({
+      status: 'published',
+      ...(q.category ? { category: q.category } : {}),
+    })
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((q.page - 1) * 24)
+      .limit(25)
+      .lean();
+    return ok(res, { items: items.slice(0, 24), hasMore: items.length > 24 });
+  }),
+);
+// Buyers share the provider profile/application flow. Staff and scanner tokens
+// cannot access private marketplace data; business-only routes retain their gates.
+router.use(authenticateBuyerOrOrganizer);
 router.use((req: Request, res: Response, next: NextFunction) => {
-  if (!(req as any).ticketsUser.vendorId)
-    return ApiResponseUtil.unauthorized(res, 'A business session is required');
-  return next();
+  if ((req as any).ticketsUser.userType !== 'buyer') {
+    return requireTicketsOwner(req, res, () => {
+      (req as any).marketplaceOwnerId = (req as any).ticketsUser.vendorId;
+      next();
+    });
+  }
+  resolveBuyerFromRequest(req).then((buyer) => {
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Buyer account no longer exists');
+    (req as any).marketplaceOwnerId = String(buyer._id);
+    return next();
+  }).catch(next);
 });
+router.get('/matched-opportunities', listOpportunities);
+async function requireProvider(req: Request) {
+  if ((req as any).ticketsUser.userType !== 'vendor')
+    throw new HttpError(403, 'A service provider business is required');
+  const vendor = await Vendor.findById(actor(req))
+    .select('operatorType')
+    .lean();
+  if (!vendor || vendor.operatorType !== 'services')
+    throw new HttpError(403, 'A service provider business is required');
+}
+router.get(
+  '/my-service-listings',
+  wrap(async (req, res) => {
+    await requireProvider(req);
+    return ok(res, {
+      items: await MarketServiceListing.find({ ownerId: actor(req) })
+        .sort({ createdAt: -1 })
+        .lean(),
+    });
+  }),
+);
+const saveServiceListing = wrap(async (req, res) => {
+  await requireProvider(req);
+  const value = validate(serviceListingSchema, req.body);
+  if (
+    !(await ServiceCategory.exists({ value: value.category, isActive: true }))
+  )
+    throw new HttpError(400, 'Choose an active service category');
+  const listing = req.params['listingId']
+    ? await MarketServiceListing.findOneAndUpdate(
+        { _id: id(req.params['listingId']), ownerId: actor(req) },
+        { $set: value },
+        { new: true, runValidators: true },
+      )
+    : await MarketServiceListing.create({ ...value, ownerId: actor(req) });
+  if (!listing) throw new HttpError(404, 'Service listing not found');
+  return ok(res, listing);
+});
+router.post('/service-listings', saveServiceListing);
+router.put('/service-listings/:listingId', saveServiceListing);
+router.post(
+  '/service-photos',
+  posterUpload.single('poster'),
+  handleMulterError,
+  wrap(async (req, res) => {
+    await requireProvider(req);
+    return uploadMarketplacePhoto(req, res);
+  }),
+);
+
 router.get(
   '/profiles',
   wrap(async (req, res) => {
@@ -578,6 +690,49 @@ router.post(
     return ok(res, application);
   }),
 );
+// Resolve the current account, rather than trusting a client role or stale token.
+router.use('/manage', requireTicketsOwner);
+router.use('/manage', (req, res, next) =>
+  wrap(async () => {
+    const vendor = await Vendor.findById(actor(req)).select('operatorType');
+    if (!vendor) throw new HttpError(401, 'Business account no longer exists');
+    if (!admin(req) && !['events', 'both'].includes(vendor.operatorType))
+      throw new HttpError(
+        403,
+        'Only organisers can manage stall opportunities',
+      );
+    // The wrapper handles failures using the normal API error response.
+    return next();
+  })(req, res),
+);
+// Publicly listed Carrot events may be linked without transferring ownership.
+async function validateLinkedEvent(value: { eventId?: string | null }) {
+  if (
+    value.eventId &&
+    !(await Event.exists({
+      _id: value.eventId,
+      status: { $in: ['published', 'ongoing', 'completed'] },
+    }))
+  )
+    throw new HttpError(400, 'Choose a published Carrot event');
+}
+async function uploadMarketplacePhoto(req: Request, res: Response) {
+  if (!req.file) throw new HttpError(400, 'Choose a photo');
+  if (!process.env['R2_PUBLIC_URL'])
+    throw new HttpError(503, 'Photo storage is not configured');
+  const key = R2Service.generateMediaKey(
+    `marketplace/${actor(req)}/${new mongoose.Types.ObjectId()}`,
+    req.file.originalname,
+  );
+  await R2Service.uploadBufferToR2(key, req.file.buffer, req.file.mimetype);
+  return ok(res, { posterUrl: R2Service.getPublicUrl(key) });
+}
+router.post(
+  '/manage/poster',
+  posterUpload.single('poster'),
+  handleMulterError,
+  wrap(uploadMarketplacePhoto),
+);
 router.get(
   '/manage/opportunities',
   wrap(async (req, res) => {
@@ -593,6 +748,7 @@ router.post(
   '/manage/opportunities',
   wrap(async (req, res) => {
     const value = validateOpportunity(req.body);
+    await validateLinkedEvent(value);
     const vendor = await Vendor.findById(actor(req)).select('businessName');
     if (!vendor) throw new HttpError(401, 'Business account no longer exists');
     return ok(
@@ -609,6 +765,7 @@ router.put(
   '/manage/opportunities/:id',
   wrap(async (req, res) => {
     const value = validateOpportunity(req.body);
+    await validateLinkedEvent(value);
     return ok(
       res,
       await transaction(async (session) => {
@@ -625,6 +782,7 @@ router.put(
         // Accepted dates, scope and terms cannot be silently rewritten beneath applicants.
         if (existing) {
           for (const key of [
+            'eventId',
             'dates',
             'scope',
             'stallFee',
@@ -694,7 +852,9 @@ router.patch(
             Object.fromEntries(
               Object.keys(opportunitySchema.describe().keys!).map((key) => [
                 key,
-                (fields as any)[key],
+                key === 'eventId'
+                  ? fields.eventId?.toString()
+                  : (fields as any)[key],
               ]),
             ),
           );
@@ -799,7 +959,7 @@ router.patch(
       await app.save({ session });
       if (changed)
         await NotificationService.create(
-          'vendor',
+          await Buyer.exists({ _id: app.ownerId }).session(session) ? 'buyer' : 'vendor',
           String(app.ownerId),
           'market_application',
           'Market application updated',

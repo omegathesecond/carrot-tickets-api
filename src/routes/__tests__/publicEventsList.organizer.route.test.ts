@@ -2,12 +2,30 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
+import { Event } from '@models/event.model';
+import { Types } from 'mongoose';
 import { Vendor } from '@models/vendor.model';
 
 describe('public events list — organizer identity', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  it('identifies listings without exposing the submitter and includes both origins in Calendar', async () => {
+    const hosted = await seedPublishedEvent();
+    const listed = await seedPublishedEvent();
+    const submitter = new Types.ObjectId();
+    await Event.updateOne({ _id: listed.eventId }, { $set: { submittedByBuyerId: submitter } });
+    const events = (await request(app).get('/api/public/events').expect(200)).body.data.events;
+    expect(events.find((event: { _id: string }) => event._id === hosted.eventId).isCommunityListing).toBe(false);
+    expect(events.find((event: { _id: string }) => event._id === listed.eventId).isCommunityListing).toBe(true);
+    expect(JSON.stringify(events)).not.toContain(String(submitter));
+    const document = await Event.findById(listed.eventId).orFail();
+    const calendar = (await request(app).get(`/api/public/calendar?year=${document.eventDate.getUTCFullYear()}`).expect(200)).body.data.events;
+    const ids = calendar.map((event: { _id: string }) => event._id);
+    expect(ids).toEqual(expect.arrayContaining([hosted.eventId, listed.eventId]));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 
   it('includes organizer { id, businessName, logoUrl } for an active vendor, with no PII leaked', async () => {
     const vendor = await Vendor.create({
