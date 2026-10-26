@@ -1,3 +1,4 @@
+jest.mock('../eventApprovalEmail.service', () => ({ EventApprovalEmailService: { send: jest.fn().mockResolvedValue(undefined) } }));
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
