@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { GateOperator } from '@models/gateOperator.model';
 import { Event } from '@models/event.model';
 import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
-import { validateEventAssignment } from '@services/operatorEventScope.service';
+import { resolveOperatorEventScope, validateEventAssignment } from '@services/operatorEventScope.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
 import { GateOperatorActivityService } from '@services/gateOperatorActivity.service';
@@ -15,16 +15,60 @@ function actorOf(req: Request) {
 }
 
 /** Operators this actor is allowed to see/manage. */
-function scopeFilter(req: Request): Record<string, unknown> {
+async function scopeFilter(req: Request): Promise<Record<string, unknown>> {
   const actor = actorOf(req);
-  if (actor.isSuperAdmin) return {};
-  return { scope: 'organizer', vendorId: actor.vendorId };
+  // A missing organizer must never become an unbounded database query.
+  const filter: Record<string, unknown> = actor.isSuperAdmin
+    ? {}
+    : { scope: 'organizer', vendorId: actor.vendorId ?? null };
+  if (!actor.isSuperAdmin && !actor.vendorId) return { _id: { $in: [] } };
+  const allowed = await resolveOperatorEventScope(req);
+  if (allowed !== null) {
+    // Managing an all-event operator would also change access outside the
+    // caller's assignment. Only expose operators wholly within that scope.
+    filter['eventIds.0'] = { $exists: true };
+    filter['eventIds'] = { $not: { $elemMatch: { $nin: allowed.map(id => new mongoose.Types.ObjectId(id)) } } };
+  }
+  return filter;
+}
+
+async function assignmentWithinActorScope(req: Request, eventIds: string[]): Promise<boolean> {
+  const allowed = await resolveOperatorEventScope(req);
+  return allowed === null || (eventIds.length > 0 && eventIds.every(id => allowed.includes(id)));
 }
 
 export class GateOperatorAdminController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operators = await GateOperator.find({ ...scopeFilter(req), deletedAt: null }).sort({ createdAt: -1 });
+      const filter = await scopeFilter(req);
+      const actor = actorOf(req);
+      for (const key of ['vendorId', 'eventId'] as const) {
+        const value = req.query[key];
+        if (value !== undefined && (typeof value !== 'string' || !mongoose.Types.ObjectId.isValid(value))) {
+          ApiResponseUtil.badRequest(res, `${key} must be a valid id`); return;
+        }
+      }
+      const vendorId = req.query['vendorId'] as string | undefined;
+      if (vendorId) {
+        if (!actor.isSuperAdmin && vendorId !== actor.vendorId) {
+          ApiResponseUtil.forbidden(res, 'Organizer access denied'); return;
+        }
+        Object.assign(filter, { scope: 'organizer', vendorId });
+      }
+      const eventId = req.query['eventId'] as string | undefined;
+      if (eventId) {
+        const event = await Event.findOne({
+          _id: eventId,
+          ...(!actor.isSuperAdmin || vendorId ? { vendorId: vendorId ?? actor.vendorId } : {}),
+        }).select('vendorId').lean();
+        const allowed = await resolveOperatorEventScope(req);
+        if (!event?.vendorId || (allowed !== null && !allowed.includes(eventId))) {
+          ApiResponseUtil.notFound(res, 'Event not found'); return;
+        }
+        Object.assign(filter, { scope: 'organizer', vendorId: event.vendorId });
+        filter['$or'] = [{ eventIds: eventId }, { eventIds: { $size: 0 } }];
+      }
+      const operators = await GateOperator.find({ ...filter, deletedAt: null }).sort({ createdAt: -1 });
       ApiResponseUtil.success(res, operators);
     } catch (err) { next(err); }
   }
@@ -78,6 +122,7 @@ export class GateOperatorAdminController {
       // on an organizer's behalf still cannot reach past that organizer.
       const assignment = await validateEventAssignment(req.body.eventIds ?? [], vendorId);
       if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+      if (!await assignmentWithinActorScope(req, assignment.eventIds)) { ApiResponseUtil.forbidden(res, 'Event assignment exceeds your permissions'); return; }
 
       const loginCode = await generateUniqueLoginCode();
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
@@ -98,7 +143,7 @@ export class GateOperatorAdminController {
    */
   static async activity(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await GateOperator.findOne({ _id: req.params['id'], ...scopeFilter(req) });
+      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...await scopeFilter(req) });
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       const eventId = req.query['eventId'] ? String(req.query['eventId']) : undefined;
       const rawLimit = Number(req.query['limit']);
@@ -114,7 +159,7 @@ export class GateOperatorAdminController {
 
   static async resetPin(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...scopeFilter(req) }).select('+pin');
+      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...await scopeFilter(req) }).select('+pin');
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
@@ -129,7 +174,7 @@ export class GateOperatorAdminController {
 
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...scopeFilter(req) });
+      const operator = await GateOperator.findOne({ _id: req.params['id'], deletedAt: null, ...await scopeFilter(req) });
       if (!operator) { ApiResponseUtil.notFound(res, 'Operator not found'); return; }
       if ('fullName' in req.body) {
         if (typeof req.body.fullName !== 'string' || !req.body.fullName.trim()) {
@@ -159,6 +204,7 @@ export class GateOperatorAdminController {
       if ('eventIds' in req.body) {
         const assignment = await validateEventAssignment(req.body.eventIds, operator.vendorId?.toString());
         if (!assignment.ok) { ApiResponseUtil.badRequest(res, assignment.message); return; }
+        if (!await assignmentWithinActorScope(req, assignment.eventIds)) { ApiResponseUtil.forbidden(res, 'Event assignment exceeds your permissions'); return; }
         operator.eventIds = assignment.eventIds as any;
       }
       await operator.save();
