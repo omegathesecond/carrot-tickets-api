@@ -5,6 +5,7 @@ import { GateOperator } from '@models/gateOperator.model';
 import { Cashier } from '@models/cashier.model';
 import { Vendor } from '@models/vendor.model';
 import { Wallet } from '@models/wallet.model';
+import { WalletTopup } from '@models/walletTopup.model';
 import { WalletService } from '@services/wallet.service';
 import { IEventTag, EventTagStatus } from '@interfaces/eventTag.interface';
 import { assertValidBandUid, normalizeBandUid } from '@utils/bandUid.util';
@@ -193,13 +194,31 @@ export class EventTagService {
     if (!found) throw new Error(UNREGISTERED_TAG_MESSAGE);
   }
 
-  /** How many tags this event has in circulation, and how many were pulled. */
-  static async counts(eventId: string): Promise<{ active: number; retired: number; total: number }> {
-    const [active, retired] = await Promise.all([
-      EventTag.countDocuments({ eventId, status: 'active' }),
+  /** Only confirmed positive funding on a currently bound, open wallet counts.
+   * A spent-down wallet remains funded; an unbound/replaced tag does not.
+   */
+  private static async fundedBandUids(eventId: string): Promise<string[]> {
+    const walletIds = await WalletTopup.distinct('walletId', {
+      eventId, status: 'completed', amount: { $gt: 0 },
+    });
+    return Wallet.distinct('bandUid', {
+      eventId, _id: { $in: walletIds }, status: { $ne: 'closed' },
+      bandUid: { $type: 'string', $ne: '' },
+    });
+  }
+
+  private static async registryCounts(eventId: string, fundedBandUids: string[]) {
+    const [active, retired, total] = await Promise.all([
+      EventTag.countDocuments({ eventId, status: 'active', bandUid: { $in: fundedBandUids } }),
       EventTag.countDocuments({ eventId, status: 'retired' }),
+      EventTag.countDocuments({ eventId }),
     ]);
-    return { active, retired, total: active + retired };
+    return { active, retired, total };
+  }
+
+  /** Funded tags in circulation, retired tags, and the complete register. */
+  static async counts(eventId: string): Promise<{ active: number; retired: number; total: number }> {
+    return EventTagService.registryCounts(eventId, await EventTagService.fundedBandUids(eventId));
   }
 
   /** The registry screen — newest enrolment first, optionally filtered/searched. */
@@ -214,20 +233,22 @@ export class EventTagService {
     const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
     const skip = Math.max(opts.skip ?? 0, 0);
 
+    const fundedBandUids = await EventTagService.fundedBandUids(eventId);
     const filter: Record<string, unknown> = { eventId };
+    if (opts.status === 'active') filter['bandUid'] = { $in: fundedBandUids };
     if (opts.status) filter['status'] = opts.status;
     if (opts.q?.trim()) {
       // Search the CANONICAL form: the operator may type `04:A2:B1` or upper
       // case, but the stored uid is normalized, so searching the raw string
       // would find nothing and read as "that tag isn't registered".
       const needle = normalizeBandUid(opts.q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter['bandUid'] = { $regex: needle };
+      filter['bandUid'] = { ...(opts.status === 'active' ? { $in: fundedBandUids } : {}), $regex: needle };
     }
 
     const [tags, total, counts] = await Promise.all([
       EventTag.find(filter).sort({ registeredAt: -1 }).skip(skip).limit(limit).lean<IEventTag[]>(),
       EventTag.countDocuments(filter),
-      EventTagService.counts(eventId),
+      EventTagService.registryCounts(eventId, fundedBandUids),
     ]);
 
     const names = await resolveActorNames(tags.map((t) => t.registeredBy));
