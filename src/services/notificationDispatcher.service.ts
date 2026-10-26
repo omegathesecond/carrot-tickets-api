@@ -6,6 +6,7 @@ import { BlockService } from '@services/block.service';
 import { isBuyerOnline } from '@utils/buyerOnline.util';
 
 export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
+  payout_status: 'social',
   market_application: 'social',
   announcement: 'announcements',
   dm: 'dms',

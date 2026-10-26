@@ -43,6 +43,7 @@ import { boot } from './boot';
 import yebopayRoutes from '@routes/yebopay.route';
 import resellerRoutes from '@routes/reseller.route';
 import resellerAdminRoutes from '@routes/resellerAdmin.route';
+import eventPayoutRoutes from '@routes/eventPayout.route';
 import operatorRoutes from '@routes/operator.route';
 import merchantRoutes from '@routes/merchant.route';
 import cashierRoutes from '@routes/cashier.route';
@@ -183,6 +184,7 @@ app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller/transport', transportPosRoutes); // POS bus selling + boarding - before the broad /api/reseller
 app.use('/api/reseller', resellerRoutes);
 app.use('/api/admin', resellerAdminRoutes);
+app.use('/api/payout-requests', eventPayoutRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/public/updates', updateRoutes);          // Buyer updates (Discover feed) - mounted before the broader /api/public below
 app.use('/api/public/whats-hot', whatsHotRoutes);      // What's Hot This Weekend See All page - mounted before the broader /api/public below
