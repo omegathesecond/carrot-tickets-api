@@ -60,6 +60,9 @@ export interface IWeekendPlanMediaItem {
 export type WeekendStatusSource = 'profile_widget' | 'plan_post';
 
 export interface IWeekendStatus extends Document {
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
   buyerId: Types.ObjectId;
   /** See the class doc comment above — `plan_post` rows are never unique per buyer. */
   source: WeekendStatusSource;
@@ -113,6 +116,9 @@ const weekendPlanMediaItemSchema = new Schema<IWeekendPlanMediaItem>({
 
 const weekendStatusSchema = new Schema<IWeekendStatus>(
   {
+    viewCount: { type: Number, default: 0 },
+    likeCount: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
     buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true },
     source: { type: String, enum: ['profile_widget', 'plan_post'], required: true, default: 'profile_widget' },
     clientRequestId: { type: String },

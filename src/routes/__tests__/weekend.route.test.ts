@@ -62,6 +62,43 @@ describe('Weekend routes', () => {
     }
   });
 
+  it('persists weekend views, likes and comment threads on the selected card', async () => {
+    const buyer = await seedBuyer();
+    const plan = await WeekendService.upsertStatus(buyer, { statusType: 'have_plans' });
+    const token = await signBuyerSessionToken(PHONE);
+    const base = `/api/social/weekend/cards/${plan.id}`;
+    await request(app).post(`${base}/view`).expect(200).expect(r => expect(r.body.data.viewCount).toBe(1));
+    await request(app).post(`${base}/like`).expect(401);
+    await request(app).post(`${base}/like`).set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data).toMatchObject({ active: true, likeCount: 1 }));
+    const created = await request(app).post(`${base}/comments`).set('Authorization', `Bearer ${token}`).send({ body: 'See you there!' }).expect(201);
+    const commentId = created.body.data.id;
+    await request(app).post(`${base}/comments`).set('Authorization', `Bearer ${token}`).send({ body: 'Bringing friends', parentId: commentId }).expect(201);
+    await request(app).get(`${base}/comments`).expect(200).expect(r => {
+      expect(r.body.data.comments[0]).toMatchObject({ body: 'See you there!', replies: [expect.objectContaining({ body: 'Bringing friends' })] });
+    });
+    await request(app).get(base).set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data.card).toMatchObject({ viewCount: 1, likeCount: 1, liked: true, commentCount: 2 }));
+    await request(app).post(`${base}/like`).set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data).toMatchObject({ active: false, likeCount: 0 }));
+    await request(app).delete(`/api/social/weekend/comments/${commentId}`).set('Authorization', `Bearer ${token}`).expect(200);
+    await request(app).get(`${base}/comments`).expect(200).expect(r => expect(r.body.data.comments).toEqual([]));
+    await request(app).get(base).expect(200).expect(r => expect(r.body.data.card.commentCount).toBe(0));
+  });
+
+  it('rejects engagement and shared links when the viewer cannot see a plan', async () => {
+    const owner = await seedBuyer();
+    const plan = await WeekendService.upsertStatus(owner, { statusType: 'have_plans', audience: 'only_me' });
+    const viewer = await seedBuyer('+26878422614', 'private_viewer');
+    const token = await signBuyerSessionToken(viewer.phone!);
+    const base = `/api/social/weekend/cards/${plan.id}`;
+    await request(app).get(base).expect(404);
+    await request(app).get(`${base}/comments`).expect(404);
+    for (const action of ['view', 'like', 'comments']) {
+      await request(app).post(`${base}/${action}`).set('Authorization', `Bearer ${token}`).send({ body: 'Hidden' }).expect(404);
+    }
+  });
+
   describe('auth guards', () => {
     it('401s GET /me when signed out', async () => {
       await request(app).get('/api/social/weekend/me').expect(401);

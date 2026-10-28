@@ -1,3 +1,4 @@
+import { WeekendReaction } from '@models/weekendEngagement.model';
 import { Types } from 'mongoose';
 import { WeekendStatus, IWeekendStatus, IWeekendStatusMedia, IWeekendPlanMediaItem } from '@models/weekendStatus.model';
 import { updatesR2 } from '@utils/updatesR2';
@@ -215,6 +216,10 @@ export interface CreatePlanInput {
 }
 
 export interface WeekendFeedCardDto {
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  liked: boolean;
   id: string;
   user: BuyerSummary;
   statusType: WeekendStatusType;
@@ -536,6 +541,21 @@ export class WeekendService {
     return { uploadUrl, publicUrl: updatesR2.publicUrl(key) };
   }
 
+  /** Shared access check for detail links and every engagement operation. */
+  static async visiblePlan(id: string, viewerId: string | null): Promise<IWeekendStatus> {
+    if (!HEX24.test(id)) throw new HttpError(400, 'Invalid plan id');
+    const following = viewerId ? await FollowService.followingIds(viewerId, 'buyer') : [];
+    const doc = await WeekendStatus.findOne({ _id: id, activeUntil: { $gt: new Date() },
+      $or: [...WeekendService.audienceOrClause(viewerId, following.map(String)), ...(viewerId ? [{ buyerId: viewerId }] : [])] });
+    if (!doc || (viewerId && await BlockService.isBlockedEitherWay(viewerId, String(doc.buyerId)))) throw new HttpError(404, 'Plan not found');
+    return doc;
+  }
+
+  static async getCard(id: string, viewerId: string | null): Promise<WeekendFeedCardDto> {
+    const doc = await WeekendService.visiblePlan(id, viewerId);
+    return (await WeekendService.toFeedCards([doc], viewerId))[0]!;
+  }
+
   /** Profile posts use the same audience and blocking rules as the feed, with no role restriction. */
   static async getProfilePlans(viewer: IBuyer | null, username: string): Promise<WeekendFeedCardDto[]> {
     const owner = await Buyer.findOne({ username: username.toLowerCase() }).select('username');
@@ -686,6 +706,7 @@ export class WeekendService {
 
   private static async toFeedCards(candidates: IWeekendStatus[], viewerId: string | null = null): Promise<WeekendFeedCardDto[]> {
     if (candidates.length === 0) return [];
+    const likedIds = new Set(viewerId ? (await WeekendReaction.find({ planId: { $in: candidates.map(c => c._id) }, buyerId: viewerId, actorType: 'buyer', type: 'like' }).lean()).map(r => String(r.planId)) : []);
     const buyerIds = [...new Set(candidates.map((c) => String(c.buyerId)))];
     const eventIds = [...new Set(candidates.filter((c) => c.eventId).map((c) => String(c.eventId)))];
     const [buyers, events] = await Promise.all([
@@ -723,6 +744,10 @@ export class WeekendService {
       const event = c.eventId ? eventById.get(String(c.eventId)) : null;
       const isOwner = viewerId !== null && String(c.buyerId) === viewerId;
       return {
+        viewCount: c.viewCount ?? 0,
+        likeCount: c.likeCount ?? 0,
+        commentCount: c.commentCount ?? 0,
+        liked: likedIds.has(String(c._id)),
         id: String(c._id),
         user: buyer ? toBuyerSummary(buyer) : { id: String(c.buyerId), username: null, name: null, avatarUrl: null },
         statusType: c.statusType,
