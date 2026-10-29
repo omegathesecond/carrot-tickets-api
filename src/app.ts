@@ -1,3 +1,4 @@
+import { publicTagWithdrawalRoutes, adminTagWithdrawalRoutes } from '@routes/tagWithdrawal.route';
 import dotenv from 'dotenv';
 
 // Load environment variables first (SENTRY_DSN etc. must be in process.env
@@ -184,12 +185,14 @@ app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/reseller/transport', transportPosRoutes); // POS bus selling + boarding - before the broad /api/reseller
 app.use('/api/reseller', resellerRoutes);
+app.use('/api/admin/tag-withdrawals', adminTagWithdrawalRoutes);
 app.use('/api/admin', resellerAdminRoutes);
 app.use('/api/payout-requests', eventPayoutRoutes);
 app.use('/api/guarantees', guaranteeRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/public/updates', updateRoutes);          // Buyer updates (Discover feed) - mounted before the broader /api/public below
 app.use('/api/public/whats-hot', whatsHotRoutes);      // What's Hot This Weekend See All page - mounted before the broader /api/public below
+app.use('/api/public/tag-withdrawals', publicTagWithdrawalRoutes);
 app.use('/api/public', publicRoutes);                  // Public routes - no auth required
 app.use('/api/public/purchase/peach-card', cardRoutes);      // Peach card webhook (unauthenticated)
 app.use('/api/public/purchase/deltapay', deltapayRoutes);    // DeltaPay return + session callback (unauthenticated)
