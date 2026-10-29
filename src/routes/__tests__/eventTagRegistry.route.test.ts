@@ -1,3 +1,6 @@
+import { Wallet } from '@models/wallet.model';
+import { WalletService } from '@services/wallet.service';
+import { BandBinding } from '@models/bandBinding.model';
 // api/src/routes/__tests__/eventTagRegistry.route.test.ts
 import request from 'supertest';
 import mongoose from 'mongoose';
@@ -115,6 +118,8 @@ describe('the event tag register — who may fill it', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.registered).toEqual(['04a22b01', '04a22b02']);
     expect(res.body.data.rejected).toHaveLength(1);
+    expect(await Wallet.countDocuments({ eventId, status: 'active', balance: 0 })).toBe(2);
+    expect(await BandBinding.countDocuments({ eventId })).toBe(2);
   });
 
   it('rejects a malformed uid with a 400 the operator can act on', async () => {
@@ -281,4 +286,34 @@ describe('Carrot staff working the register on an organizer\'s behalf', () => {
 
     expect(res.status).toBe(403);
   });
+});
+
+
+it('re-pasting registered IDs fills missing wallets and preserves existing balances and bindings', async () => {
+  const { eventId, organizerToken } = await seedCashlessEvent();
+  await EventTag.create([{ eventId, bandUid: '04a22b01' }, { eventId, bandUid: '04a22b02' }]);
+  const existing = await WalletService.ensureStandaloneWalletForBand({ eventId, bandUid: '04a22b01' });
+  await Wallet.updateOne({ _id: existing.wallet._id }, { $set: { balance: 5200, cashFundedBalance: 5200 } });
+  const send = () => request(app).post(`/api/tickets/events/${eventId}/tags/registry`)
+    .set('Authorization', `Bearer ${organizerToken}`).send({ bandUids: ['04a22b01', '04a22b02', '04A2:2B:02'] });
+  const res = await send();
+  expect(res.status).toBe(200);
+  expect(res.body.data.alreadyRegistered).toEqual(['04a22b01', '04a22b02']);
+  expect((await Wallet.findById(existing.wallet._id))!.balance).toBe(5200);
+  expect((await Wallet.findOne({ eventId, bandUid: '04a22b02' }))!.balance).toBe(0);
+  expect((await send()).status).toBe(200);
+  expect(await Wallet.countDocuments({ eventId })).toBe(2);
+  expect(await BandBinding.countDocuments({ eventId })).toBe(2);
+});
+
+it('fails loudly if a pasted tag cannot have its wallet prepared, then recovers on retry', async () => {
+  const { eventId, organizerToken } = await seedCashlessEvent();
+  const spy = jest.spyOn(WalletService, 'ensureStandaloneWalletForBand').mockRejectedValueOnce(new Error('Wallet preparation failed'));
+  const send = () => request(app).post(`/api/tickets/events/${eventId}/tags/registry`)
+    .set('Authorization', `Bearer ${organizerToken}`).send({ bandUids: ['04a22b01'] });
+  try { expect((await send()).status).toBe(500); }
+  finally { spy.mockRestore(); }
+  expect(await Wallet.countDocuments({ eventId })).toBe(0);
+  expect((await send()).status).toBe(200);
+  expect(await Wallet.countDocuments({ eventId })).toBe(1);
 });

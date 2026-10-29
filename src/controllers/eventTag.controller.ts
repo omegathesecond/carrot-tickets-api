@@ -113,6 +113,11 @@ export class EventTagController {
           bandUids: bandUids.map(String),
           ...(actorId ? { registeredBy: actorId } : {}),
         });
+        await WalletService.ensureStandaloneWalletsForBands({
+          eventId,
+          bandUids: [...result.registered, ...result.alreadyRegistered, ...result.reactivated],
+          ...(actorId ? { issuedBy: actorId } : {}),
+        });
         return ApiResponseUtil.success(res, result);
       }
 
@@ -126,19 +131,9 @@ export class EventTagController {
         ...(actorId ? { registeredBy: actorId } : {}),
       });
 
-      // ONE TAP = ONE TAG GOING INTO SOMEBODY'S HAND. The POS Register loop
-      // posts a single {bandUid} per scan, so that scan has to leave the tag
-      // spendable — enrolling it and stopping there is what produced "No wallet
-      // for that band/ticket" at the cashier. Doing it here rather than in the
-      // app means the handhelds already in the field get it with no release.
-      //
-      // The bulk {bandUids} branch above deliberately does NOT do this: a
-      // pasted tag order is stock nobody is carrying yet, and minting a wallet
-      // per line would fill the Balances screen with tags still in the box.
-      //
-      // Not swallowed if it fails: the operator must not be told a tag is
-      // registered when it cannot hold money. Both halves are idempotent, so
-      // re-tapping recovers.
+      // Registration must leave a real wallet ready for loading, whether the
+      // UID arrived from an NFC tap or a pasted batch. Both writers are
+      // idempotent; a failed preparation is surfaced and can be retried safely.
       const { wallet } = await WalletService.ensureStandaloneWalletForBand({
         eventId,
         bandUid: one.bandUid,
