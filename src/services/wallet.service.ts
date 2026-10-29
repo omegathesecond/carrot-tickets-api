@@ -1,3 +1,4 @@
+import { mapConcurrent } from '@utils/mapConcurrent.util';
 import { CashDeskService } from '@services/cashDesk.service';
 import mongoose from 'mongoose';
 import { Wallet, IWallet } from '@models/wallet.model';
@@ -190,6 +191,19 @@ export class WalletService {
       }
       return { wallet: winner, created: false };
     }
+  }
+
+  /** Prepare pasted/imported registered tags using the same wallet + binding writer as a tap. */
+  static async ensureStandaloneWalletsForBands(params: {
+    eventId: string; bandUids: string[]; issuedBy?: string;
+  }): Promise<{ created: number; existing: number }> {
+    const uids = [...new Set(params.bandUids.map(assertValidBandUid))];
+    const results = await mapConcurrent(uids, 20, bandUid => this.ensureStandaloneWalletForBand({
+      eventId: params.eventId, bandUid, acceptTicketBound: true,
+      ...(params.issuedBy ? { issuedBy: params.issuedBy } : {}),
+    }));
+    const created = results.filter(result => result.created).length;
+    return { created, existing: results.length - created };
   }
 
   static async bindBand(walletId: string, bandUid: string, boundBy?: string): Promise<IWallet> {
