@@ -7,7 +7,9 @@ import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { WeekendService } from '@services/weekend.service';
 import { Vendor } from '@models/vendor.model';
 import { OperatorType } from '@interfaces/vendor.interface';
-import { signVendorToken } from '../../__tests__/helpers/auth';
+import { signVendorToken, signVendorSessionToken, signStaffSessionToken } from '../../__tests__/helpers/auth';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import { updatesR2 } from '@utils/updatesR2';
 import { Buyer } from '@models/buyer.model';
 
 const PHONE = '+26878422613';
@@ -59,6 +61,48 @@ describe('Weekend routes', () => {
     } finally {
       if (previousBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL'];
       else process.env['UPDATES_R2_PUBLIC_URL'] = previousBase;
+    }
+  });
+
+  it.each([OperatorType.EVENTS, OperatorType.BOTH, OperatorType.SERVICES])('lets %s owners upload images/videos and manage only their own weekend posts', async operatorType => {
+    const vendor = await Vendor.create({ businessName: 'Weekend brand', password: 'secret1', operatorType, serviceCategories: ['photography'],
+      logoUrl: 'https://cdn.carrottickets.com/logo.jpg', apps: { tickets: { enabled: true } } });
+    const token = await signVendorSessionToken(String(vendor._id));
+    const auth = { Authorization: `Bearer ${token}` };
+    const oldBase = process.env['UPDATES_R2_PUBLIC_URL'];
+    process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com';
+    const upload = jest.spyOn(updatesR2, 'presignPut').mockResolvedValue('https://upload.test/signed');
+    try {
+      const identity = await request(app).get('/api/social/weekend/participant').set(auth).expect(200);
+      expect(identity.body.data).toMatchObject({ name: vendor.businessName, avatarUrl: vendor.logoUrl });
+      expect(await Buyer.findById(identity.body.data.id)).toMatchObject({ sourceVendorId: vendor._id });
+      for (const [contentType, type] of [['image/jpeg', 'image'], ['video/mp4', 'video']]) {
+        await request(app).post('/api/social/weekend/plans/media').set(auth).send({ contentType }).expect(200)
+          .expect(r => expect(r.body.data).toMatchObject({ uploadUrl: 'https://upload.test/signed', type }));
+      }
+      const input = { statusType: 'have_plans', media: [{ url: 'https://cdn.carrottickets.com/plan.mp4', type: 'video' }] };
+      const created = await request(app).post('/api/social/weekend/plans').set(auth).send(input).expect(201);
+      const id = created.body.data.plan.id;
+      await request(app).get('/api/social/weekend/feed/all').set(auth).expect(200)
+        .expect(r => expect(r.body.data.cards).toEqual(expect.arrayContaining([expect.objectContaining({ id, isOwner: true, editableAsPlan: true })])));
+      const buyer = await seedBuyer();
+      const buyerToken = await signBuyerSessionToken(buyer.phone!);
+      await request(app).put(`/api/social/weekend/plans/${id}`).set('Authorization', `Bearer ${buyerToken}`).send(input).expect(404);
+      await request(app).get(`/api/social/weekend/plans/${id}`).set(auth).expect(200);
+      await request(app).put(`/api/social/weekend/plans/${id}`).set(auth).send({ ...input, message: 'Updated' }).expect(200);
+      await request(app).delete(`/api/social/weekend/plans/${id}`).set(auth).expect(200);
+      // A brand session must never acquire buyer-only account privileges.
+      await request(app).get('/api/social/me').set(auth).expect(401);
+      const staff = await signStaffSessionToken(String(vendor._id), [TicketsPermission.EDIT_BRAND]);
+      await request(app).post('/api/social/weekend/plans').set('Authorization', `Bearer ${staff}`).send(input).expect(403);
+      await Vendor.updateOne({ _id: vendor._id }, { $unset: { logoUrl: 1 } });
+      await request(app).post('/api/social/weekend/plans/media').set(auth).send({ contentType: 'image/jpeg' }).expect(403);
+      await Vendor.updateOne({ _id: vendor._id }, { $set: { isActive: false } });
+      await request(app).delete(`/api/social/weekend/plans/${id}`).set(auth).expect(401);
+    } finally {
+      upload.mockRestore();
+      if (oldBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL'];
+      else process.env['UPDATES_R2_PUBLIC_URL'] = oldBase;
     }
   });
 

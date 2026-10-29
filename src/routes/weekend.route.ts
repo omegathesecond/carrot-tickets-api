@@ -3,32 +3,34 @@ import { weekendComments } from '@services/weekendEngagement.service';
 import { WeekendService } from '@services/weekend.service';
 import { WeekendStatus } from '@models/weekendStatus.model';
 import { WeekendReaction } from '@models/weekendEngagement.model';
-import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { resolveWeekendParticipant } from '@utils/planParticipant.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { toggleReactionGeneric } from '@services/reactions.service';
 import { assertActorNotSuspended } from '@services/socialAuthor.service';
 import { Router } from 'express';
-import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
+import { authenticateBuyer, authenticateWeekendParticipant, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
 import { WeekendController } from '@controllers/weekend.controller';
 
 const router = Router();
 
-const comments = createPlanCommentController(weekendComments, resolveBuyerFromRequest);
+router.get('/participant', authenticateWeekendParticipant, WeekendController.participant);
+
+const comments = createPlanCommentController(weekendComments, resolveWeekendParticipant);
 router.get('/cards/:id/comments', optionalTicketsAuth, comments.list);
 router.post('/cards/:id/comments', authenticateBuyer, requireProfilePhoto, comments.create);
 router.post('/comments/:commentId/like', authenticateBuyer, comments.like);
 router.delete('/comments/:commentId', authenticateBuyer, comments.remove);
 router.get('/cards/:id', optionalTicketsAuth, async (req, res) => {
   try {
-    const buyer = await resolveBuyerFromRequest(req);
+    const buyer = await resolveWeekendParticipant(req);
     return ApiResponseUtil.success(res, { card: await WeekendService.getCard(String(req.params['id']), buyer ? String(buyer._id) : null) });
   } catch (error) { return failWithHttpError(res, error, 'Could not load plan'); }
 });
 router.post('/cards/:id/view', optionalTicketsAuth, async (req, res) => {
   try {
-    const buyer = await resolveBuyerFromRequest(req);
+    const buyer = await resolveWeekendParticipant(req);
     const doc = await WeekendService.visiblePlan(String(req.params['id']), buyer ? String(buyer._id) : null);
     const updated = await WeekendStatus.findByIdAndUpdate(doc._id, { $inc: { viewCount: 1 } }, { new: true });
     return ApiResponseUtil.success(res, { viewCount: updated!.viewCount });
@@ -36,7 +38,7 @@ router.post('/cards/:id/view', optionalTicketsAuth, async (req, res) => {
 });
 router.post('/cards/:id/like', authenticateBuyer, async (req, res) => {
   try {
-    const buyer = await resolveBuyerFromRequest(req);
+    const buyer = await resolveWeekendParticipant(req);
     if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
     const actor = { type: 'buyer' as const, id: String(buyer._id) };
     await assertActorNotSuspended(actor);
@@ -58,11 +60,11 @@ router.post('/media', authenticateBuyer, requireProfilePhoto, WeekendController.
 // "+Add" plan composer (spec: separate from the singular /me status above —
 // see weekendStatus.model.ts's class doc comment). '/plans/media' before
 // '/plans/:id', same fixed-segment-first convention as '/users/search'.
-router.post('/plans/media', authenticateBuyer, requireProfilePhoto, WeekendController.presignPlanMedia);
-router.post('/plans', authenticateBuyer, requireProfilePhoto, WeekendController.createPlan);
-router.get('/plans/:id', authenticateBuyer, WeekendController.getPlan);
-router.put('/plans/:id', authenticateBuyer, requireProfilePhoto, WeekendController.updatePlan);
-router.delete('/plans/:id', authenticateBuyer, WeekendController.removePlan);
+router.post('/plans/media', authenticateWeekendParticipant, requireProfilePhoto, WeekendController.presignPlanMedia);
+router.post('/plans', authenticateWeekendParticipant, requireProfilePhoto, WeekendController.createPlan);
+router.get('/plans/:id', authenticateWeekendParticipant, WeekendController.getPlan);
+router.put('/plans/:id', authenticateWeekendParticipant, requireProfilePhoto, WeekendController.updatePlan);
+router.delete('/plans/:id', authenticateWeekendParticipant, WeekendController.removePlan);
 
 router.get('/feed', optionalTicketsAuth, WeekendController.feed);
 router.get('/feed/all', optionalTicketsAuth, WeekendController.feedAll);

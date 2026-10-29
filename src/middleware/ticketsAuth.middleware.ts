@@ -413,17 +413,28 @@ export const requireSuperAdminOrAnyPermission = (permissions: TicketsPermission[
 
 /** Participant-only surface: keep buyer authentication and all unrelated
  * permission gates unchanged; providers authenticate their live vendor session. */
-export const authenticatePlanParticipant = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  await authenticateBuyerOrOrganizer(req, res, async (error?: unknown) => {
-    if (error) return next(error);
-    try {
-      if ((req as any).ticketsUser.userType === 'buyer') return next();
-      const { resolvePlanParticipant } = await import('@utils/planParticipant.util');
-      if (!(await resolvePlanParticipant(req))) {
-        ApiResponseUtil.forbidden(res, 'This account cannot participate in plans or Share&Earn');
-        return;
-      }
-      next();
-    } catch (err) { next(err); }
-  });
-};
+function authenticateParticipant(resolve: (req: Request) => Promise<unknown>) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    await authenticateBuyerOrOrganizer(req, res, async (error?: unknown) => {
+      if (error) return next(error);
+      try {
+        if ((req as any).ticketsUser.userType === 'buyer') return next();
+        if (!(await resolve(req))) {
+          ApiResponseUtil.forbidden(res, 'This account cannot participate in this feature');
+          return;
+        }
+        next();
+      } catch (err) { next(err); }
+    });
+  };
+}
+
+export const authenticatePlanParticipant = authenticateParticipant(async req => {
+  const { resolvePlanParticipant } = await import('@utils/planParticipant.util');
+  return resolvePlanParticipant(req);
+});
+
+export const authenticateWeekendParticipant = authenticateParticipant(async req => {
+  const { resolveWeekendParticipant } = await import('@utils/planParticipant.util');
+  return resolveWeekendParticipant(req);
+});

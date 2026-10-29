@@ -1,6 +1,8 @@
+import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { toBuyerSummary } from '@utils/buyerSummary.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
-import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { resolveWeekendParticipant } from '@utils/planParticipant.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { WeekendService } from '@services/weekend.service';
 
@@ -30,9 +32,19 @@ function parseExcludeIds(raw: unknown): string[] {
 }
 
 export class WeekendController {
+  static async participant(req: Request, res: Response): Promise<any> {
+    try {
+      const participant = await resolveWeekendParticipant(req);
+      if (!participant) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      return ApiResponseUtil.success(res, toBuyerSummary(participant));
+    } catch (error) {
+      return failWithHttpError(res, error, 'Failed to load your weekend identity');
+    }
+  }
+
   static async profilePlans(req: Request, res: Response): Promise<any> {
     try {
-      const viewer = await resolveBuyerFromRequest(req);
+      const viewer = await resolveWeekendParticipant(req);
       const cards = await WeekendService.getProfilePlans(viewer, String(req.params['username'] || ''));
       return ApiResponseUtil.success(res, { cards });
     } catch (error: any) {
@@ -94,7 +106,7 @@ export class WeekendController {
    *  of the "+Add" plan composer's media set (image or video). */
   static async presignPlanMedia(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolveWeekendParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const contentType = String(req.body?.contentType || '');
       const result = await WeekendService.presignPlanMediaUpload(contentType);
@@ -107,7 +119,7 @@ export class WeekendController {
   /** POST /api/social/weekend/plans — the "+Add" composer's Post action. */
   static async createPlan(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolveWeekendParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const plan = await WeekendService.createPlan(buyer, req.body || {});
       return ApiResponseUtil.success(res, { plan }, 'Posted', 201);
@@ -119,7 +131,7 @@ export class WeekendController {
   /** GET /api/social/weekend/plans/:id — edit-mode prefill for one plan. */
   static async getPlan(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolveWeekendParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const plan = await WeekendService.getPlan(buyer, String(req.params['id'] || ''));
       return ApiResponseUtil.success(res, { plan });
@@ -131,7 +143,7 @@ export class WeekendController {
   /** PUT /api/social/weekend/plans/:id — the card's own "Edit" action. */
   static async updatePlan(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolveWeekendParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const plan = await WeekendService.updatePlan(buyer, String(req.params['id'] || ''), req.body || {});
       return ApiResponseUtil.success(res, { plan }, 'Plan updated');
@@ -143,7 +155,7 @@ export class WeekendController {
   /** DELETE /api/social/weekend/plans/:id */
   static async removePlan(req: Request, res: Response): Promise<any> {
     try {
-      const buyer = await resolveBuyerFromRequest(req);
+      const buyer = await resolveWeekendParticipant(req);
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       await WeekendService.removePlan(buyer, String(req.params['id'] || ''));
       return ApiResponseUtil.success(res, { ok: true }, 'Plan removed');
@@ -155,7 +167,7 @@ export class WeekendController {
   /** GET /api/social/weekend/users/:username */
   static async getForUser(req: Request, res: Response): Promise<any> {
     try {
-      const viewer = await resolveBuyerFromRequest(req);
+      const viewer = await resolveWeekendParticipant(req);
       const result = await WeekendService.getForViewer(viewer, String(req.params['username'] || ''));
       return ApiResponseUtil.success(res, result);
     } catch (error: any) {
@@ -166,7 +178,7 @@ export class WeekendController {
   /** GET /api/social/weekend/feed — "Who Has Plans This Weekend" */
   static async feed(req: Request, res: Response): Promise<any> {
     try {
-      const viewer = await resolveBuyerFromRequest(req);
+      const viewer = await resolveWeekendParticipant(req);
       const cards = await WeekendService.getWhoHasPlansCards(viewer, parseLimit(req.query['limit']), parseExcludeIds(req.query['exclude']));
       return ApiResponseUtil.success(res, { cards });
     } catch (error: any) {
@@ -177,7 +189,7 @@ export class WeekendController {
   /** GET /api/social/weekend/feed/all — the "Who Has Plans" See All page (cursor-paginated). */
   static async feedAll(req: Request, res: Response): Promise<any> {
     try {
-      const viewer = await resolveBuyerFromRequest(req);
+      const viewer = await resolveWeekendParticipant(req);
       const cursor = req.query['cursor'] ? String(req.query['cursor']) : null;
       const { cards, nextCursor } = await WeekendService.getWhoHasPlansPage(viewer, cursor, parseSeeAllLimit(req.query['limit']));
       return ApiResponseUtil.success(res, { cards, nextCursor });
@@ -189,7 +201,7 @@ export class WeekendController {
   /** GET /api/social/weekend/feed/looking-for-plans */
   static async lookingForPlansFeed(req: Request, res: Response): Promise<any> {
     try {
-      const viewer = await resolveBuyerFromRequest(req);
+      const viewer = await resolveWeekendParticipant(req);
       const cards = await WeekendService.getLookingForPlansCards(viewer, parseLimit(req.query['limit']), parseExcludeIds(req.query['exclude']));
       return ApiResponseUtil.success(res, { cards });
     } catch (error: any) {
