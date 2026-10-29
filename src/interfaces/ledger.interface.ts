@@ -27,7 +27,8 @@ export enum FloatTag {
   /** Physical cash handed to a collector with both parties' confirmation. */
   COLLECTOR_CASH = 'collector_cash',
   /**
-   * Cash handed back to an attendee at the office after the event. Distinct
+   * Funds returned to an attendee by the office after the event, including
+   * cash, bank and mobile-money payouts. Distinct
    * from CASH_DESK on purpose: tagging an office refund as cash-desk would
    * corrupt the venue cash reconciliation that tag exists to serve.
    */

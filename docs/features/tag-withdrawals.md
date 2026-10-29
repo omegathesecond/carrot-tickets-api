@@ -1,0 +1,13 @@
+# Attendee tag withdrawals
+
+Signed-in attendees open a cashless event and select **Withdraw tag balance**. The printed NFC UID identifies the wallet within that event. There is no tag-to-account ownership verification. Event detail exposes `cashless`; global navigation does not expose withdrawals.
+
+The form supports Eswatini mobile money (MTN MoMo or Eswatini Mobile) and bank accounts, and South African bank accounts. Amounts use the wallet's recorded currency and integer minor units; the event's display currency does not relabel or convert funds. Requests open only after the event's `endTime` and request the entire available balance.
+
+`/api/public/tag-withdrawals` requires an existing buyer or organizer session. `POST /lookup` requires `eventId` and `bandUid`; `POST /` accepts payout/contact details, expected balance, a client UUID and a random tracking token. `POST /:id/track` also requires the event ID and tracking token. Tracking URLs stay within `/event/:eventId/withdraw` and put the token in the fragment; login redirects preserve it. Tracking responses contain no recipient/contact details.
+
+Creating a request transactionally freezes its wallet and inserts a durable pending request. The money remains a wallet liability in the ledger until payment is confirmed. The existing active-wallet gates block purchases, top-ups, cash-outs and reissues while reserved. Unique indexes and request fingerprints arbitrate concurrent submissions and safe retries.
+
+Super-administrators use **Tag withdrawals** in the dashboard or the event Cashless page link. Start processing assigns one administrator. The assigned administrator sends the payout through the bank/mobile-money service, then confirms completed payment with a reference. This release records external payments; it does not call a bank or mobile-money disbursement API. Confirmation atomically debits the reserved balance, closes the wallet, records a bank/mobile-money WalletWithdrawal through the shared ledger writer, and marks the request paid. Matching reference retries are idempotent. Rejecting an unpaid request requires a reason and releases the balance. The attendee's tracking page updates to processing, paid or rejected.
+
+Full recipient/contact details use the existing `OPERATOR_PIN_ENCRYPTION_KEY` authenticated encryption, bound to the request ID, with encrypted/hash fields excluded from ordinary reads. Dashboard listing shows masked destinations. Database/encryption failures propagate; there are no fabricated success responses. No new secret bindings are needed. Deploy API before the dashboard and website. Do not test this workflow using real customer balances or mark an actual payment paid unless it was sent.

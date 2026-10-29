@@ -556,6 +556,63 @@ export class WalletService {
    *   WALLET:ref  += amount   (attendee liability reduced)
    *   FLOAT       -= amount   (cash paid out of the desk)
    */
+  /** Shared atomic wallet debit + ledger writer. Caller owns the transaction. */
+  static async recordWithdrawal(params: {
+    walletId: string; eventId: string; amount: number; recordedBy: string;
+    recordedByType: IWalletWithdrawal['recordedByType']; clientTxnId: string;
+    method: IWalletWithdrawal['method']; floatTag: FloatTag;
+    session: mongoose.ClientSession; requiredStatus: 'active' | 'frozen'; closeWallet: boolean;
+  }): Promise<{ wallet: IWallet; withdrawal: IWalletWithdrawal }> {
+    const { walletId, eventId, amount, recordedBy, recordedByType, clientTxnId,
+      method, floatTag, session, requiredStatus, closeWallet } = params;
+    if (!session.inTransaction()) throw new Error('Withdrawal requires a transaction');
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_TOPUP_CENTS)
+      throw new Error('Invalid withdrawal amount');
+    const wallet = await Wallet.findOneAndUpdate(
+      { _id: walletId, eventId, status: requiredStatus, balance: { $gte: amount } },
+      [
+        {
+          $set: {
+            balance: { $subtract: ['$balance', amount] },
+            cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', amount] }] },
+            ...(closeWallet ? { status: 'closed', closedAt: new Date() } : {}),
+          },
+        },
+      ],
+      { new: true, session },
+    );
+
+    if (!wallet) {
+      // DECLINE — nothing written yet; re-read only to report a true reason.
+      const fresh = await Wallet.findOne({ _id: walletId, eventId }).session(session);
+      if (!fresh) throw new WalletDeclinedError('wallet_not_found', 'wallet not found', null);
+      if (fresh.status !== requiredStatus) {
+        throw new WalletDeclinedError('wallet_not_active', 'wallet is not active', fresh.balance);
+      }
+      throw new WalletDeclinedError('insufficient_balance', 'insufficient balance', fresh.balance);
+    }
+
+    await LedgerService.post({
+      eventId,
+      postings: [
+        { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: amount },
+        { account: { type: LedgerAccountType.FLOAT }, delta: -amount, tag: floatTag },
+      ],
+      refType: 'wallet_withdrawal',
+      refId: clientTxnId,
+      session,
+    });
+
+    const [withdrawal] = await WalletWithdrawal.create(
+      [{ walletId, eventId, amount, method, status: 'completed', recordedBy, recordedByType, clientTxnId }],
+      { session },
+    );
+    if (!withdrawal) throw new Error('wallet withdrawal insert failed');
+
+
+    return { wallet, withdrawal };
+  }
+
   static async withdrawCash(params: {
     walletId: string;
     eventId: string;
@@ -603,47 +660,8 @@ export class WalletService {
       let out!: { wallet: IWallet; withdrawal: IWalletWithdrawal };
       await session.withTransaction(async () => {
         if (cashDesk) await CashDeskService.touch(eventId, recordedBy, session);
-        const wallet = await Wallet.findOneAndUpdate(
-          { _id: walletId, eventId, status: 'active', balance: { $gte: amount } },
-          [
-            {
-              $set: {
-                balance: { $subtract: ['$balance', amount] },
-                cashFundedBalance: { $max: [0, { $subtract: ['$cashFundedBalance', amount] }] },
-              },
-            },
-          ],
-          { new: true, session },
-        );
-
-        if (!wallet) {
-          // DECLINE — nothing written yet; re-read only to report a true reason.
-          const fresh = await Wallet.findOne({ _id: walletId, eventId }).session(session);
-          if (!fresh) throw new WalletDeclinedError('wallet_not_found', 'wallet not found', null);
-          if (fresh.status !== 'active') {
-            throw new WalletDeclinedError('wallet_not_active', 'wallet is not active', fresh.balance);
-          }
-          throw new WalletDeclinedError('insufficient_balance', 'insufficient balance', fresh.balance);
-        }
-
-        await LedgerService.post({
-          eventId,
-          postings: [
-            { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: amount },
-            { account: { type: LedgerAccountType.FLOAT }, delta: -amount, tag: floatTag },
-          ],
-          refType: 'wallet_withdrawal',
-          refId: clientTxnId,
-          session,
-        });
-
-        const [withdrawal] = await WalletWithdrawal.create(
-          [{ walletId, eventId, amount, method, status: 'completed', recordedBy, recordedByType, clientTxnId }],
-          { session },
-        );
-        if (!withdrawal) throw new Error('wallet withdrawal insert failed');
-
-        out = { wallet, withdrawal };
+        out = await this.recordWithdrawal({ walletId, eventId, amount, method, recordedBy,
+          recordedByType, clientTxnId, floatTag, session, requiredStatus: 'active', closeWallet: false });
       });
       return out;
     } catch (e) {
