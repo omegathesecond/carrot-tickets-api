@@ -471,13 +471,9 @@ export class AnalyticsService {
       ]);
 
       let totalRevenue = 0;
-      let cashRevenue = 0;
-      let walletRevenue = 0;
 
       methodStats.forEach(stat => {
         totalRevenue += stat.revenue;
-        if (stat._id === PaymentMethod.CASH) cashRevenue = stat.revenue;
-        if (stat._id === PaymentMethod.KESHLESS_WALLET) walletRevenue = stat.revenue;
       });
 
       // Revenue by day/week/month

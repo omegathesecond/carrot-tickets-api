@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 // api/src/models/gateOperator.model.ts
 import mongoose, { Schema } from 'mongoose';
 import { IGateOperator } from '@interfaces/gateOperator.interface';
@@ -14,8 +15,8 @@ const gateOperatorSchema = new Schema<IGateOperator>({
   isActive: { type: Boolean, default: true, index: true },
 }, {
   timestamps: true,
-  toJSON: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
-  toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
+  toJSON: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', '__v']); return rest; } },
+  toObject: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', '__v']); return rest; } },
 });
 
 applyOperatorCredentials(gateOperatorSchema, true);

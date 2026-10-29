@@ -1,11 +1,9 @@
 import { Reseller } from '@models/reseller.model';
 import { Event } from '@models/event.model';
 import { TicketSale } from '@models/ticketSale.model';
-import { Ticket } from '@models/ticket.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { PaymentConfigService } from '@services/paymentConfig.service';
 import { TicketService } from '@services/ticket.service';
-import { SmsService } from '@services/sms.service';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import type { CartLine } from '@interfaces/cart.interface';
 

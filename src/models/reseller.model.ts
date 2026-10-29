@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { IReseller } from '@interfaces/reseller.interface';
@@ -18,13 +19,13 @@ const resellerSchema = new Schema<IReseller>({
   timestamps: true,
   toJSON: {
     transform: function(_doc, ret) {
-      const { __v, password, ...rest } = ret;
+      const rest = omit(ret, ['__v', 'password']);
       return rest;
     }
   },
   toObject: {
     transform: function(_doc, ret) {
-      const { __v, password, ...rest } = ret;
+      const rest = omit(ret, ['__v', 'password']);
       return rest;
     }
   }

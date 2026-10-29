@@ -89,7 +89,7 @@ export async function createComment(updateId: string, actor: SocialActor, body: 
   if (!trimmed) throw new HttpError(400, 'Comment cannot be empty');
   if (trimmed.length > MAX_BODY_LENGTH) throw new HttpError(400, 'Comment is too long');
 
-  const update = await loadCommentableUpdate(updateId);
+  await loadCommentableUpdate(updateId);
 
   const comment = await UpdateComment.create({
     updateId,

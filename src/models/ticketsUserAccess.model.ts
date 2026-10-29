@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import mongoose, { Schema } from 'mongoose';
 import { ITicketsUserAccess } from '@interfaces/userAccess.interface';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
@@ -34,7 +35,7 @@ const ticketsUserAccessSchema = new Schema<ITicketsUserAccess>({
   timestamps: true,
   toJSON: {
     transform: function(doc, ret) {
-      const { __v, ...rest } = ret;
+      const rest = omit(ret, ['__v']);
       return rest;
     }
   }

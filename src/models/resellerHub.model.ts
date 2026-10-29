@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import mongoose, { Schema } from 'mongoose';
 import { IResellerHub } from '@interfaces/reseller.interface';
 
@@ -13,13 +14,13 @@ const hubSchema = new Schema<IResellerHub>({
   timestamps: true,
   toJSON: {
     transform: function(_doc, ret) {
-      const { __v, ...rest } = ret;
+      const rest = omit(ret, ['__v']);
       return rest;
     }
   },
   toObject: {
     transform: function(_doc, ret) {
-      const { __v, ...rest } = ret;
+      const rest = omit(ret, ['__v']);
       return rest;
     }
   }

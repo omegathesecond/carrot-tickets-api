@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import { requireRouteParam } from '@utils/controllerHelpers.util';
 import { Request, Response } from 'express';
 import Joi from 'joi';
@@ -14,7 +15,6 @@ import { deskTopupSchema } from '@validators/reseller.validator';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
-import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
 export class ResellerController {
   /**
@@ -228,7 +228,7 @@ export class ResellerController {
 
       // The spread is why TypeScript cannot see a shape change here, so the
       // cart is resolved explicitly rather than riding along in `value`.
-      const { items: _items, ticketTypeId: _tt, quantity: _q, ...rest } = value;
+      const rest: typeof value = omit(value, ['items', 'ticketTypeId', 'quantity']);
       const items = Array.isArray(value.items) && value.items.length > 0
         ? value.items
         : [{ ticketTypeId: value.ticketTypeId, quantity: value.quantity ?? 1 }];

@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { IVendorSubUser, SubUserRole, Permission } from '@interfaces/subUser.interface';
@@ -80,13 +81,13 @@ const vendorSubUserSchema = new Schema<IVendorSubUser>({
   timestamps: true,
   toJSON: {
     transform: function(_doc, ret) {
-      const { password, __v, ...rest } = ret;
+      const rest = omit(ret, ['password', '__v']);
       return rest;
     }
   },
   toObject: {
     transform: function(_doc, ret) {
-      const { password, __v, ...rest } = ret;
+      const rest = omit(ret, ['password', '__v']);
       return rest;
     }
   }

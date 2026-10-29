@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import mongoose, { Schema } from 'mongoose';
 import { IWaiter } from '@interfaces/waiter.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
@@ -27,8 +28,8 @@ const waiterSchema = new Schema<IWaiter>({
   isActive: { type: Boolean, default: true, index: true },
 }, {
   timestamps: true,
-  toJSON: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
-  toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
+  toJSON: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', '__v']); return rest; } },
+  toObject: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', '__v']); return rest; } },
 });
 
 applyOperatorCredentials(waiterSchema, true);

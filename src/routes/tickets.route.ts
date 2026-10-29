@@ -14,7 +14,6 @@ import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import {
   authenticateTickets,
   requireTicketsPermission,
-  requireAnyPermission,
   requireSuperAdmin,
   requireSuperAdminOrPermission,
 } from '@middleware/ticketsAuth.middleware';

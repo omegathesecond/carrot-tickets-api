@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import { Story, IStory } from '@models/story.model';
 import { StorySeen } from '@models/storySeen.model';
 import { StoryLike } from '@models/storyLike.model';
@@ -542,5 +543,5 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
   const own = all.filter((g) => g.isOwn);
   const unseen = all.filter((g) => !g.isOwn && !g.seen);
   const seen = all.filter((g) => !g.isOwn && g.seen);
-  return [...own, ...unseen, ...seen].map(({ latestCreatedAt, ...g }) => g);
+  return [...own, ...unseen, ...seen].map(group => omit(group, ['latestCreatedAt']));
 }

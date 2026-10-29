@@ -56,7 +56,6 @@ export const validateDatabaseConfig = (): {
   const errors: string[] = [];
   const uri = getDatabaseURI();
   const dbName = getDatabaseName(uri);
-  const env = getEnvironment();
 
   // Check if URI is set
   if (!process.env['MONGODB_URI']) {

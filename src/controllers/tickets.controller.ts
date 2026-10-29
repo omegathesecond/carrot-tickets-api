@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import { Request, Response } from 'express';
 import Joi from 'joi';
 import { PaymentMethod, PaymentStatus, SalesChannel, TicketStatus } from '@interfaces/ticket.interface';
@@ -487,7 +488,7 @@ export class TicketsController {
       // to scan. The organizer's takings are not part of that job: the money
       // fields come off for the door, everything the picker needs stays.
       if (ticketsUser.userType === 'gate-operator') {
-        const { totalRevenue: _revenue, totalTicketsSold: _sold, salesSummary: _summary, ...forTheDoor } = responseEvent;
+        const forTheDoor = omit(responseEvent, ['totalRevenue', 'totalTicketsSold', 'salesSummary']);
         ApiResponseUtil.success(res, forTheDoor);
         return;
       }

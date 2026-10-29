@@ -2,7 +2,7 @@ import { Ticket } from '@models/ticket.model';
 import { TicketSale } from '@models/ticketSale.model';
 import { Event } from '@models/event.model';
 import { ITicket, ITicketSale, TicketStatus, PaymentMethod, PaymentStatus, SalesChannel, TicketPdfStatus } from '@interfaces/ticket.interface';
-import { EventStatus, type ITicketType } from '@interfaces/event.interface';
+import { type ITicketType } from '@interfaces/event.interface';
 import { resolveCart, assertSingleAttribution } from '@services/cart.service';
 import { EventCouponService } from '@services/eventCoupon.service';
 import type { ResolvedCart, CartLine } from '@interfaces/cart.interface';
@@ -22,9 +22,8 @@ import {
   classifyCheckoutStatus,
 } from '@services/payments/yebopay.client';
 import { ReservationService } from '@services/reservation.service';
-import { TicketReservation } from '@models/ticketReservation.model';
 import { PaymentConfigService } from '@services/paymentConfig.service';
-import { computeServiceFee, round2 } from '@utils/serviceFee.util';
+import { round2 } from '@utils/serviceFee.util';
 import { resolveSaleResellerId } from '@utils/allocationAttribution.util';
 import { computeSaleEconomics, SaleEconomics, SaleSoldByType } from '@services/saleEconomics.service';
 import { assertCarrotTicketing } from '@utils/ticketingGuard.util';
@@ -631,8 +630,8 @@ export class TicketService {
         // Defensive: any unexpected status is treated as a failure, never completed.
         throw new Error(charge.message || `Unexpected charge status: ${charge.status}`);
       }
-      let walletTransactionId = charge.providerRef;
-      let paymentMessage = charge.message;
+      const walletTransactionId = charge.providerRef;
+      const paymentMessage = charge.message;
 
       // Immutable economic snapshot — computed once, persisted on the sale in
       // BOTH the main and no-transaction-fallback branches. Without it the sale
@@ -1095,7 +1094,7 @@ export class TicketService {
   static async refundTicket(
     ticketId: string,
     vendorId: string,
-    reason?: string
+    _reason?: string
   ): Promise<ITicket> {
     const session = await this.startSessionSafely();
 

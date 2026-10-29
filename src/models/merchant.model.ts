@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 // api/src/models/merchant.model.ts
 import mongoose, { Schema } from 'mongoose';
 import { IMerchant } from '@interfaces/merchant.interface';
@@ -30,8 +31,8 @@ const merchantSchema = new Schema<IMerchant>({
   // (MerchantAdminController.list / .transactions). Stripping them regardless
   // of what the schema declares takes deploy ORDER out of a credential-hash
   // exposure: the response is clean whether or not the migration has run.
-  toJSON: { transform: (_doc, ret) => { const { pin, loginCode, __v, ...rest } = ret; return rest; } },
-  toObject: { transform: (_doc, ret) => { const { pin, loginCode, __v, ...rest } = ret; return rest; } },
+  toJSON: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', 'loginCode', '__v']); return rest; } },
+  toObject: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', 'loginCode', '__v']); return rest; } },
 });
 
 merchantSchema.index({ eventId: 1, status: 1 });

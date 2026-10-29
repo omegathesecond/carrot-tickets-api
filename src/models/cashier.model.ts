@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 // api/src/models/cashier.model.ts
 import mongoose, { Schema } from 'mongoose';
 import { ICashier } from '@interfaces/cashier.interface';
@@ -33,8 +34,8 @@ const cashierSchema = new Schema<ICashier>({
   isActive: { type: Boolean, default: true, index: true },
 }, {
   timestamps: true,
-  toJSON: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
-  toObject: { transform: (_doc, ret) => { const { pin, __v, ...rest } = ret; return rest; } },
+  toJSON: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', '__v']); return rest; } },
+  toObject: { transform: (_doc, ret) => { const rest = omit(ret, ['pin', '__v']); return rest; } },
 });
 
 applyOperatorCredentials(cashierSchema, true);

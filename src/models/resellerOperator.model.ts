@@ -1,3 +1,4 @@
+import { omit } from '@utils/omit.util';
 import mongoose, { Schema } from 'mongoose';
 import { IResellerOperator } from '@interfaces/reseller.interface';
 import { applyOperatorCredentials } from '@models/operatorCredentials.schema';
@@ -21,13 +22,13 @@ const operatorSchema = new Schema<IResellerOperator>({
   timestamps: true,
   toJSON: {
     transform: function (_doc, ret) {
-      const { pin, __v, ...rest } = ret;
+      const rest = omit(ret, ['pin', '__v']);
       return rest;
     },
   },
   toObject: {
     transform: function (_doc, ret) {
-      const { pin, __v, ...rest } = ret;
+      const rest = omit(ret, ['pin', '__v']);
       return rest;
     },
   },

@@ -77,7 +77,7 @@ export class ExternalServiceError extends AppError {
 /**
  * Async error wrapper to catch errors in async route handlers
  */
-export const asyncHandler = (fn: Function) => {
+export const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => unknown) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
