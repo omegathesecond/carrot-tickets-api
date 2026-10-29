@@ -1,0 +1,10 @@
+[Unit]
+Description=Bound aged disposable Docker build cache on test worker
+ConditionPathExists=/usr/bin/docker
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker builder prune --force --filter until=168h --keep-storage=3GB
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly retention of aged test-worker Docker build cache
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

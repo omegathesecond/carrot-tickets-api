@@ -104,3 +104,52 @@ cannot be restored. No application deploy or production branch merge is needed.
 - `python3 -m unittest discover -s scripts -p test_worker_test.py`: five tests cover age/lock retention, live process preservation, symlink refusal, low capacity, and PID namespace deferral.
 - Installed timer active; service Result=success, ExecMainStatus=0; healthy JSON in journal.
 - Sandbox-only Mongo attempts fail with `listen EPERM`; the successful run used narrowly approved host socket access. No API/dependency errors were hidden.
+
+## Fleet-2 remediation (2026-10-29, rework)
+
+This resumed session ran directly on `omevision-fleet-2`; remote Tailscale
+identity verification was therefore unnecessary. The existing timer and journal
+limits were present, but the capacity service failed (ExecMainStatus=1).
+Before remediation root had 10,636,324,864 bytes available out of
+160,938,012,672 bytes (df 94% used). Docker/containerd consumed 22 GiB;
+Docker reported 16.73 GB of images (14.74 GB reclaimable) and 6.988 GB
+build cache (6.246 GB reclaimable). `/root/.claude` consumed 18 GiB.
+These are current measurements, not proof of the exact historical allocation
+at the original zero-space failure. Unbounded disposable image/build cache
+contributes materially to root pressure alongside retained worktrees.
+
+Reclaimed 2.659 GB of unused build cache older than seven days and 14.64 GB
+of images older than 30 days with no container reference. All containers,
+volumes, worktrees and installed dependencies were preserved. Image cleanup
+was a one-time recovery; scheduled cleanup affects build cache only.
+After recovery root available was 27,928,870,912 bytes (df 82% used), a
+17,292,546,048-byte increase subject to concurrent activity.
+
+Reinstalled the checked-in monitoring script, service, timer and journald
+limits on fleet-2. Added `carrot-test-worker-cache.service` and `.timer`:
+weekly Docker builder cleanup with a seven-day minimum age and 3 GB cache
+retention target. Docker excludes in-use build cache. It never prunes images,
+containers or volumes on schedule. Installation additionally requires:
+
+```sh
+sudo install -m 644 ops/carrot-test-worker-cache.service ops/carrot-test-worker-cache.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now carrot-test-worker-cache.timer
+sudo systemctl start carrot-test-worker-cache.service
+```
+
+Both services report Result=success and ExecMainStatus=0; both timers have a
+next scheduled run. The capacity monitor reports healthy=true,
+retentionDeferred=false, 27,944,820,736 bytes available and 82.64% used.
+The existing 15-minute monitor surfaces low capacity as a failed systemd unit;
+external paging remains outside this implementation. Rollback additionally
+disables/removes the cache timer and service. Removed caches are rebuilt or
+pulled when needed; deleted cache/image data cannot be restored locally.
+
+Fleet-2 verification: `env -u TMPDIR -u TMP -u TEMP npm test --
+--runTestsByPath src/routes/__tests__/weekend.route.test.ts` passed **19/19**
+in 37.542 seconds using real Mongo on root-backed `/tmp`; teardown left
+27,957,694,464 bytes available (82.63% used). Log:
+`/tmp/fleet2-weekend-tests.log`. Five retention unit tests and `npm run build`
+also passed. No production application deploy, credentials or env bindings
+changed.
