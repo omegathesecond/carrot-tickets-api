@@ -49,7 +49,7 @@ export class ResellerOperatorAdminController {
       }
 
       // Resolve the target hub within the actor's scope.
-      let hubId = actor.role === 'reseller_hub_manager' ? actor.hubId : req.body.hubId;
+      const hubId = actor.role === 'reseller_hub_manager' ? actor.hubId : req.body.hubId;
       if (!hubId) {
         ApiResponseUtil.badRequest(res, 'hubId is required');
         return;

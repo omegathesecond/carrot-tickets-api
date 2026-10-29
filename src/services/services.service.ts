@@ -1,6 +1,6 @@
 import { Update } from '@models/update.model';
 import { Vendor } from '@models/vendor.model';
-import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
+import { VerificationStatus } from '@interfaces/vendor.interface';
 import { ReviewService } from '@services/review.service';
 import { FollowService } from '@services/follow.service';
 import { HttpError } from '@utils/httpError.util';

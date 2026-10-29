@@ -3,7 +3,7 @@ import Joi from 'joi';
 import { TicketsRole, TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { EVENT_CATEGORY_IDS } from '@/constants/eventCategories';
-import { TicketStatus, PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
+import { PaymentMethod, PaymentStatus, SalesChannel } from '@interfaces/ticket.interface';
 import { OperatorType } from '@interfaces/vendor.interface';
 import { STARTING_PRICE_UNITS } from '@/constants/serviceCategories';
 import { isValidPhone } from '@utils/phone.util';

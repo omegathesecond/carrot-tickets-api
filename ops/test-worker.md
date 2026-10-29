@@ -195,3 +195,66 @@ To reproduce dependency validation, archive the task HEAD to a fresh writable
 volume directory, run `npm ci` there, verify `npm ls --all`, then run the build
 and tests there. Prefer the capacity-gated `npm test` command on a worker with a
 healthy reserve; direct Jest bypasses that guard and must be reported explicitly.
+
+
+## Capacity and lint rework (2026-10-29, fleet-2)
+
+Resumed the existing task branch at `d0a6218` without repeating the prior
+cleanup or replacing shared dependencies. This session runs on fleet-2.
+Root available at entry was 20,675,362,816 bytes (df 87% used), already below
+the 90% ceiling. The prior fleet-2 before/after recovery measurements above
+remain the cleanup evidence; no additional reclamation is claimed here.
+Both installed retention services report Result=success / ExecMainStatus=0;
+the 15-minute monitor and weekly build-cache timer both have next runs.
+The 21:40 UTC monitor reports healthy=true, retentionDeferred=false,
+20,737,261,568 bytes available and 87.11% usage. Journald retains the existing
+512 MiB / 14-day limits and 10 GiB free-space reserve.
+
+Resolved the review's 70 lint errors: remove unused imports/bindings while
+preserving awaited validation calls, use const for bindings never reassigned,
+and type the async error wrapper's callback explicitly. Configure unused-vars
+with ignoreRestSiblings for intentional sensitive-field omission in object
+serialization; other unused variables still fail lint. No serializers, capacity
+thresholds, lockfile, credentials, active worktrees or shared dependencies changed.
+
+Validation uses a fresh archive plus this patch at
+`/mnt/HC_Volume_107303380/tmp/carrot-disk-rework-20261029`, with a separate
+`npm ci --offline` from the volume-backed cache. Express resolves to 5.3.0;
+`npm ls --all --json` exits 0. The lock hash remains
+`92965961b92698700b32aeaadcee2b550bed06c51717f7a84125a17484800947`.
+Node v24.19.0 / npm 11.17.0. Lint exits 0 (zero errors; 2,006 existing any
+warnings), build exits 0, and all five retention tests pass. Logs are
+`/tmp/disk-rework-{ci,lint,build,retention,tests}.log` and dependency tree
+`/tmp/disk-rework-deps.json`.
+
+
+The broad 540-suite `env -u TMPDIR -u TMP -u TEMP npm test` run cleared the
+capacity guard with 20,674,764,800 bytes available (87.15% used), then passed
+21 suites before being deliberately stopped to keep incident validation scoped.
+It is **not** a full-suite pass. Sent SIGTERM only to that invocation's wrapper;
+its normal teardown removed the owned run directory and reported 20,662,157,312
+bytes available (87.16% used). No other processes or artifacts were removed.
+The passing suites included weekend service, story service/routes, MoMo sale,
+wallet, event questions and reporting. The final focused command retains the
+same `npm test` capacity gate, unsets TMPDIR/TMP/TEMP, and runs weekend/security
+routes plus updateComment and four analytics service suites.
+
+
+Final capacity-gated focused result: **7/7 suites, 78/78 tests passed** in
+92.7 seconds (all 19 weekend route and all 23 security route checks included).
+Command: `env -u TMPDIR -u TMP -u TEMP npm test -- --runTestsByPath
+src/routes/__tests__/weekend.route.test.ts
+src/routes/__tests__/securityAudit.route.test.ts
+src/services/__tests__/updateComment.service.test.ts
+src/services/__tests__/analytics.momo.test.ts
+src/services/__tests__/analytics.channel.test.ts
+src/services/__tests__/analytics.refunds.test.ts
+src/services/__tests__/analytics.tagsAndCash.test.ts`.
+Before: 20,662,054,912 bytes available, 87.16% used; after teardown:
+20,656,832,512 bytes available, 87.16% used. The owned `run-*` directory was
+removed; only maintenance.lock remains. Tests used real Mongo with host socket
+permission, root-backed `/tmp`, and Express 5.3.0. Log:
+`/tmp/disk-rework-focused.log`. Small capacity differences include concurrent
+worker activity. Current reserve meets the unchanged guard. Isolated validation
+artifacts remain on the attached volume for review; no active dependencies or
+worktrees were deleted. No production deploy or merge was performed.

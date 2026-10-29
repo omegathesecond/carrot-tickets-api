@@ -14,7 +14,6 @@ import { deskTopupSchema } from '@validators/reseller.validator';
 import { Event } from '@models/event.model';
 import { Wallet } from '@models/wallet.model';
 import { WalletService, WalletIdempotencyMismatchError } from '@services/wallet.service';
-import { ResellerPermission } from '@interfaces/resellerPermission.interface';
 
 export class ResellerController {
   /**

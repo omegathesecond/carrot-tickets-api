@@ -4,9 +4,9 @@ dotenv.config();
 
 const BASE_URL = 'http://localhost:5000/api/tickets';
 let authToken = '';
-let createdEvents: any[] = [];
-let createdTickets: any[] = [];
-let createdSales: any[] = [];
+const createdEvents: any[] = [];
+const createdTickets: any[] = [];
+const createdSales: any[] = [];
 
 // Helper function to make API requests
 async function apiRequest(endpoint: string, options: any = {}) {
