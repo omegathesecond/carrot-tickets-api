@@ -221,7 +221,7 @@ npm run lint             # Run ESLint
 npm run lint:fix         # Fix ESLint errors automatically
 
 # Testing
-npm test                 # Run tests (when implemented)
+npm test                 # Linux/Python 3 worker guard + serial Jest (see ops/test-worker.md)
 
 # Database Seeds (when implemented)
 npm run seed:admin       # Create admin user

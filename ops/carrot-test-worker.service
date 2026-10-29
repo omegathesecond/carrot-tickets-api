@@ -1,0 +1,10 @@
+[Unit]
+Description=Carrot API test disk capacity and abandoned artifact retention
+
+[Service]
+Type=oneshot
+Environment=TMPDIR=/tmp
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/carrot-test-worker/test-worker.py --maintain
+StandardOutput=journal
+StandardError=journal

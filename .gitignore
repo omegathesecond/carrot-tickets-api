@@ -43,3 +43,6 @@ temp/
 # SDD scratch — never commit
 .superpowers/
 .worktrees/
+
+# Python test-worker tooling
+__pycache__/
