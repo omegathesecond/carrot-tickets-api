@@ -153,3 +153,45 @@ in 37.542 seconds using real Mongo on root-backed `/tmp`; teardown left
 `/tmp/fleet2-weekend-tests.log`. Five retention unit tests and `npm run build`
 also passed. No production application deploy, credentials or env bindings
 changed.
+
+
+## Lockfile-isolated rework validation (2026-10-29)
+
+Review observed shared Express 4.21.2 despite this branch requiring Express
+5.3.0, causing the async MoMo callback rejection check to time out. Do not
+replace an active shared `node_modules` to repair a validation environment.
+For this pass, archived task commit `7bec7b5` into a separate directory on the
+attached data volume and ran `npm ci` there with its own volume-backed cache.
+No shared dependencies, active worktrees or credentials were changed. The
+isolated install resolved Express **5.3.0**; `npm ls --all --json` exited 0.
+The package-lock SHA-256 was
+`92965961b92698700b32aeaadcee2b550bed06c51717f7a84125a17484800947`.
+Node was v24.19.0 and npm 11.17.0. No application fix was needed.
+
+On fleet-1, with TMPDIR/TMP/TEMP unset, ran the isolated Jest directly with
+`--runInBand --runTestsByPath src/routes/__tests__/weekend.route.test.ts
+src/routes/__tests__/securityAudit.route.test.ts`: **42/42 passed**, two suites,
+51.026 seconds. This includes all 19 weekend Mongo tests and all 23 security
+checks, including dependency rejection returning HTTP 500 and a healthy process
+afterwards. Mongo used normal root-backed `/tmp`, with host socket permission;
+no `/dev/shm` override. `npm run build` and all five Python retention tests also
+passed. Logs: `/tmp/carrot-disk-lock-routes.log`,
+`/tmp/carrot-disk-lock-build.log`, `/tmp/carrot-disk-npm-ci.log`.
+
+Capacity is a separate result: fleet-1 now has renewed pressure from concurrent
+worker activity. Before isolated installation root available was 13,901,225,984
+bytes; at the capacity check it was 13,528,559,616 bytes (91.59% by the monitor).
+The normal `npm test` wrapper correctly **rejected** this worker before Jest
+because usage exceeds its 90% ceiling. After route validation, root available
+was 13,508,206,592 bytes (df 92%); changes reflect concurrent worker activity,
+not a cleanup claim. The direct Jest command above deliberately
+validated dependency correctness separately; it is not a passing capacity-gated
+`npm test` claim. Do not lower that threshold or interpret route success as a
+healthy worker reserve. The previously verified fleet-2 retention rollout and
+27.96 GB after-test reserve remain the fleet-2 evidence; this pass neither
+repeated its cleanup nor deleted unrelated fleet-1 data.
+
+To reproduce dependency validation, archive the task HEAD to a fresh writable
+volume directory, run `npm ci` there, verify `npm ls --all`, then run the build
+and tests there. Prefer the capacity-gated `npm test` command on a worker with a
+healthy reserve; direct Jest bypasses that guard and must be reported explicitly.
