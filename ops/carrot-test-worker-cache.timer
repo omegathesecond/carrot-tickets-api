@@ -1,8 +1,8 @@
 [Unit]
-Description=Weekly retention of aged test-worker Docker build cache
+Description=Daily retention of aged test-worker Docker build cache
 
 [Timer]
-OnCalendar=weekly
+OnCalendar=daily
 Persistent=true
 RandomizedDelaySec=1h
 

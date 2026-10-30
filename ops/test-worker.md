@@ -258,3 +258,42 @@ permission, root-backed `/tmp`, and Express 5.3.0. Log:
 worker activity. Current reserve meets the unchanged guard. Isolated validation
 artifacts remain on the attached volume for review; no active dependencies or
 worktrees were deleted. No production deploy or merge was performed.
+
+
+## Reserve recurrence follow-up (2026-10-30, fleet-2)
+
+Reused existing task commit 3038d11 and its isolated dependency installation;
+source files, package manifest, lockfile, lint config and test wrapper match
+byte-for-byte. No duplicate implementation or shared dependency replacement.
+Authenticated host-context dashboard task/session reads both returned HTTP 200.
+
+Root available before recovery: **14,678,687,744 bytes**, df 91% used.
+The monitor correctly failed. Docker reported 4.325 GB build cache (3.991 GB
+reclaimable), with cache entries last accessed 29–42 hours ago. The weekly
+seven-day age cutoff could not reclaim this cache before reserve was exhausted
+again. Reduced build-cache retention to **daily**, **24 hours minimum age**,
+**1 GB retention target**. These are Docker build caches only, excluding in-use
+entries; no containers, images, volumes, worktrees or installed dependencies
+were removed. This improves cache headroom but cannot bound unrelated worker
+allocations; the unchanged capacity monitor remains the admission gate.
+
+Installed the revised service/timer and ran the service: Docker reclaimed
+**3.476 GB**. Root available afterwards: **18,150,899,712 bytes**, **88.72%**
+used. Both services report Result=success / ExecMainStatus=0; host monitor
+healthy=true, retentionDeferred=false. Existing journal limits remain intact.
+
+Isolated Express **5.3.0** validation: lint exits 0 (zero errors, 2,006 existing
+warnings), build passes, five Python retention tests pass. Dependency tree is
+retained in /tmp/disk-resume-deps.json; lock SHA-256 remains
+92965961b92698700b32aeaadcee2b550bed06c51717f7a84125a17484800947.
+Logs: /tmp/disk-resume-{lint,build,tests}.log.
+
+Final normal-TMPDIR capacity-gated focused run: **7 suites / 78 tests passed**
+in 96.499 seconds, including all 19 weekend and 23 security route tests, plus
+updateComment and the four analytics suites listed in the prior pass. Command
+is the same seven-path `env -u TMPDIR -u TMP -u TEMP npm test --
+--runTestsByPath ...` above. Before: 18,150,518,784 bytes available (88.72%);
+after owned-artifact teardown: **18,164,047,872 bytes** (88.71%). Concurrent
+worker allocations account for small measurement changes. This is a focused
+suite pass, not a full-suite claim. Daily cache timer next run verified for
+2026-10-31 00:11:56 UTC. No production deploy or merge performed.
