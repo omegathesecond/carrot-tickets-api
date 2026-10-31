@@ -682,6 +682,7 @@ router.patch('/merchants/:id', requireSuperAdminOrPermission(TicketsPermission.M
  */
 router.get('/merchants/:merchantId/operators', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.list);
 router.post('/merchants/:merchantId/operators', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.create);
+router.post('/events/:eventId/stall-users', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.createMissing);
 router.patch('/merchant-operators/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.update);
 router.post('/merchant-operators/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantOperatorAdminController.resetPin);
 

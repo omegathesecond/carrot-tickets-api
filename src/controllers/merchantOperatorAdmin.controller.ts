@@ -2,10 +2,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
-import { generateUniqueLoginCode, generatePin } from '@utils/operatorCredentials.util';
+import { generatePin } from '@utils/operatorCredentials.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedEvent } from '@controllers/merchantAdmin.controller';
 import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
+import { MerchantOperatorService } from '@services/merchantOperator.service';
 
 /**
  * Admin CRUD for the people on a stall's till. eventId is always inherited
@@ -21,6 +22,17 @@ import { sanitizeGrants } from '@interfaces/operatorGrant.interface';
  * or rotate credentials for a stranger's till.
  */
 export class MerchantOperatorAdminController {
+  static async createMissing(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const eventId = String(req.params['eventId'] || '');
+      const event = await loadOwnedEvent(req, res, eventId);
+      if (!event) return;
+      if (!event.cashless) { ApiResponseUtil.badRequest(res, 'Cashless is not enabled for this event'); return; }
+      const result = await MerchantOperatorService.createMissingForEvent(eventId);
+      ApiResponseUtil.success(res, result);
+    } catch (err) { next(err); }
+  }
+
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const merchant = await Merchant.findOne({ _id: req.params['merchantId'], deletedAt: null });
@@ -46,19 +58,17 @@ export class MerchantOperatorAdminController {
         ApiResponseUtil.badRequest(res, 'fullName is required'); return;
       }
 
-      const loginCode = await generateUniqueLoginCode();
       const pin = typeof req.body.pin === 'string' && /^\d{6}$/.test(req.body.pin)
         ? req.body.pin
         : generatePin();
 
-      const operator = await MerchantOperator.create({
+      const { operator, loginCode } = await MerchantOperatorService.create({
         fullName: req.body.fullName,
         phoneNumber: req.body.phoneNumber,
-        merchantId: merchant._id,
-        eventId: merchant.eventId,
-        loginCode,
+        merchantId: String(merchant._id),
+        eventId: String(merchant.eventId),
         pin,
-        grants: sanitizeGrants(req.body.grants),
+        grants: req.body.grants,
       });
       // loginCode + pin are returned ONCE here (the pin is never serialized again).
       ApiResponseUtil.created(res, { operator, loginCode, pin });

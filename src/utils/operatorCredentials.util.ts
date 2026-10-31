@@ -43,9 +43,10 @@ function randomCode(): string {
  * NEVER reclaimed — history must stay attributable — so uniqueness is
  * permanent. At 32^6 (~1.07 billion) the retry loop is a formality.
  */
-export async function generateUniqueLoginCode(): Promise<string> {
+export async function generateUniqueLoginCode(reserved?: ReadonlySet<string>): Promise<string> {
   for (let attempt = 0; attempt < 20; attempt++) {
     const code = randomCode();
+    if (reserved?.has(code)) continue;
     const [r, g, c, m, w] = await Promise.all([
       ResellerOperator.exists({ loginCode: code }),
       GateOperator.exists({ loginCode: code }),
