@@ -35,6 +35,14 @@ it('generateUniqueLoginCode returns 6 characters drawn only from the alphabet', 
   }
 });
 
+it('avoids codes reserved by users in the same uncommitted batch', async () => {
+  const spy = jest.spyOn(crypto, 'randomInt') as unknown as jest.SpyInstance;
+  for (let i = 0; i < 6; i++) spy.mockReturnValueOnce(0);
+  for (let i = 0; i < 6; i++) spy.mockReturnValueOnce(1);
+  expect(await generateUniqueLoginCode(new Set(['000000']))).toBe('111111');
+  expect(spy).toHaveBeenCalledTimes(12);
+});
+
 it('normalizeLoginCode uppercases and folds the ambiguous glyphs', () => {
   expect(normalizeLoginCode('abc123')).toBe('ABC123');
   expect(normalizeLoginCode('  4kz9p2  ')).toBe('4KZ9P2');
