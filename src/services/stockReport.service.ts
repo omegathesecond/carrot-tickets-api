@@ -19,7 +19,7 @@ export const EVENT_TZ_OFFSET = '+02:00';
 /** Predicted stock-out lookback window (minutes), computed at read time. */
 export const PREDICT_WINDOW_MIN = 60;
 
-type StockStatus = 'IN_STOCK' | 'LOW' | 'SOLD_OUT';
+type StockStatus = 'IN_STOCK' | 'LOW' | 'SOLD_OUT' | 'UNTRACKED';
 function statusOf(onHand: number, threshold: number | null): StockStatus {
   if (onHand <= 0) return 'SOLD_OUT';
   if (threshold != null && threshold > 0 && onHand <= threshold) return 'LOW';
@@ -37,7 +37,7 @@ export class StockReportService {
     const eid = oid(eventId);
     const [rows, products, merchants, sales] = await Promise.all([
       ProductStock.find({ eventId: eid }).lean(),
-      Product.find({ eventId: eid }).select('name category').lean(),
+      Product.find({ eventId: eid }).select('name category stockTracked').lean(),
       Merchant.find({ eventId: eid }).select('name').lean(),
       // What actually left the shelf and what it brought in, from the CHARGES
       // rather than the stock journal: the journal knows units, only the charge
@@ -57,6 +57,7 @@ export class StockReportService {
       ]),
     ]);
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
+    const untracked = new Set(products.filter(p => p.stockTracked === false).map(p => String(p._id)));
     const productCat = new Map(products.map((p: any) => [String(p._id), p.category]));
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name]));
     const soldByBar = new Map<string, { unitsSold: number; revenue: number }>(
@@ -79,7 +80,8 @@ export class StockReportService {
         unitsSold: sold.unitsSold,
         revenue: sold.revenue,
         lowStockThreshold: threshold,
-        status: statusOf(r.onHand, threshold),
+        stockTracked: !untracked.has(String(r.productId)),
+        status: untracked.has(String(r.productId)) ? 'UNTRACKED' as const : statusOf(r.onHand, threshold),
       };
     }).sort((a, b) => a.productName.localeCompare(b.productName) || a.merchantName.localeCompare(b.merchantName));
 
@@ -108,7 +110,8 @@ export class StockReportService {
       totalOnHand: a.totalOnHand,
       unitsSold: a.unitsSold,
       revenue: a.revenue,
-      status: (a.totalOnHand <= 0 ? 'SOLD_OUT' : (a.anyLow ? 'LOW' : 'IN_STOCK')) as StockStatus,
+      stockTracked: !untracked.has(productId),
+      status: (untracked.has(productId) ? 'UNTRACKED' : a.totalOnHand <= 0 ? 'SOLD_OUT' : (a.anyLow ? 'LOW' : 'IN_STOCK')) as StockStatus,
     })).sort((a, b) => a.productName.localeCompare(b.productName));
 
     return { perBar, byProduct };
@@ -174,7 +177,7 @@ export class StockReportService {
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId', pre: { $lt: ['$at', startTime] } }, qty: { $sum: '$delta' } } },
       ]),
       ProductStock.find({ eventId: eid }).lean(),
-      Product.find({ eventId: eid }).select('name').lean(),
+      Product.find({ eventId: eid }).select('name stockTracked').lean(),
       Merchant.find({ eventId: eid }).select('name').lean(),
       MerchantCharge.aggregate([
         { $match: { eventId: eid, status: { $in: ['completed', 'reversed'] } } },
@@ -203,6 +206,7 @@ export class StockReportService {
     ]);
 
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
+    const untracked = new Set(products.filter(p => p.stockTracked === false).map(p => String(p._id)));
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name]));
 
     const rowByKey = new Map<string, any>();
@@ -212,7 +216,7 @@ export class StockReportService {
       if (!r) {
         r = {
           merchantId, merchantName: merchantName.get(merchantId) || 'Unknown bar',
-          productId, productName: productName.get(productId) || 'Unknown product',
+          productId, productName: productName.get(productId) || 'Unknown product', stockTracked: !untracked.has(productId),
           opening: 0, added: 0, transferIn: 0, transferOut: 0, sold: 0, countAdjust: 0, spoilage: 0, manual: 0,
           expectedClosing: 0, physicalCount: null, variance: null,
           ...Object.fromEntries(SALES_PRICING_FIELDS.map(k => [k, 0])),
@@ -225,6 +229,7 @@ export class StockReportService {
     for (const audit of pricingAudit) {
       const r = ensure(String(audit._id.merchantId), String(audit._id.productId));
       for (const field of SALES_PRICING_FIELDS) r[field] = audit[field];
+      if (!r.stockTracked) r.sold = r.regularUnits + r.specialUnits + r.unclassifiedUnits;
     }
 
     // Fold movement sums by reason (transfer_out/sale/spoilage deltas are negative -> report as positive magnitudes).
@@ -263,9 +268,9 @@ export class StockReportService {
     // bar has a CLOSING count — a rollup of "0" would read as "counted zero units"
     // rather than "not yet counted", which is a materially different signal.
     const byProdMap = new Map<string, any>();
-    const total: any = { ...blank(), physicalCount: null, variance: null };
+    const total: any = { ...blank(), stockTracked: perBar.some(r => r.stockTracked), physicalCount: null, variance: null };
     for (const r of perBar) {
-      const agg = byProdMap.get(r.productId) || { productId: r.productId, productName: r.productName, ...blank(), physicalCount: null, variance: null };
+      const agg = byProdMap.get(r.productId) || { productId: r.productId, productName: r.productName, stockTracked: r.stockTracked, ...blank(), physicalCount: null, variance: null };
       for (const k of NUM) { agg[k] += r[k]; total[k] += r[k]; }
       if (r.physicalCount != null) { agg.physicalCount = (agg.physicalCount ?? 0) + r.physicalCount; total.physicalCount = (total.physicalCount ?? 0) + r.physicalCount; }
       if (r.variance != null) { agg.variance = (agg.variance ?? 0) + r.variance; total.variance = (total.variance ?? 0) + r.variance; }
@@ -302,7 +307,19 @@ export class StockReportService {
       ]),
       StockMovement.aggregate([
         { $match: { eventId: eid, reason: { $in: [StockMovementReason.SALE, StockMovementReason.SALE_REVERSAL] } } },
-        { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: { $multiply: ['$delta', -1] } } } },
+        { $project: { at: 1, units: { $multiply: ['$delta', -1] } } },
+        // Uncounted goods have sales records, deliberately no stock journal.
+        { $unionWith: { coll: 'merchantcharges', pipeline: [
+          { $match: { eventId: eid, status: { $in: ['completed', 'reversed'] } } },
+          { $unwind: '$items' },
+          { $lookup: { from: 'products', localField: 'items.productId', foreignField: '_id', as: 'product' } },
+          { $match: { 'product.stockTracked': false } },
+          { $project: { entries: { $concatArrays: [[{ at: '$createdAt', units: '$items.qty' }],
+            { $cond: [{ $eq: ['$status', 'reversed'] }, [{ at: '$reversal.at', units: { $multiply: ['$items.qty', -1] } }], []] }] } } },
+          { $unwind: '$entries' },
+          { $project: { at: '$entries.at', units: '$entries.units' } },
+        ] } },
+        { $group: { _id: { $hour: { date: '$at', timezone: EVENT_TZ_OFFSET } }, units: { $sum: '$units' } } },
       ]),
       StockCount.aggregate([
         { $match: { eventId: eid, phase: 'closing' } }, { $sort: { at: -1 } },
@@ -313,11 +330,12 @@ export class StockReportService {
         { $match: { eventId: eid, reason: { $in: [StockMovementReason.SALE, StockMovementReason.SALE_REVERSAL] }, at: { $gte: windowStart } } },
         { $group: { _id: { merchantId: '$merchantId', productId: '$productId' }, units: { $sum: { $multiply: ['$delta', -1] } } } },
       ]),
-      Product.find({ eventId: eid }).select('name').lean(),
+      Product.find({ eventId: eid }).select('name stockTracked').lean(),
       Merchant.find({ eventId: eid }).select('name').lean(),
     ]);
 
     const productName = new Map(products.map((p: any) => [String(p._id), p.name]));
+    const untracked = new Set(products.filter(p => p.stockTracked === false).map(p => String(p._id)));
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name]));
 
     const revenueByProduct = productRevenue
@@ -355,7 +373,7 @@ export class StockReportService {
     const soldByKey = new Map(saleWindow.map((s: any) => [`${s._id.merchantId}|${s._id.productId}`, s.units]));
     let noRecentSales = 0;
     const predictedStockOut = stockRows
-      .filter((s: any) => s.onHand > 0)
+      .filter((s: any) => s.onHand > 0 && !untracked.has(String(s.productId)))
       .map((s: any) => {
         const units = (soldByKey.get(`${s.merchantId}|${s.productId}`) as number) || 0;
         const ratePerMin = units / PREDICT_WINDOW_MIN;

@@ -17,6 +17,7 @@ import { MerchantReversalService } from '@services/merchantReversal.service';
 import { Event } from '@models/event.model';
 import { StockReportService } from '@services/stockReport.service';
 import { StockCountService } from '@services/stockCount.service';
+import { PosCatalogService } from '@services/posCatalog.service';
 
 const eventId = new mongoose.Types.ObjectId();
 let __loginCodeSeq = 0;
@@ -47,6 +48,56 @@ describe('MerchantService.charge — itemised', () => {
   beforeAll(connectLedgerTestDb, 60000);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  async function uncounted(merchantId: any) {
+    const product = await Product.create({ eventId, name: 'Made-to-order plate', category: 'food', price: 5000, stockTracked: false });
+    await ProductStock.create({ eventId, merchantId, productId: product._id, onHand: 0 });
+    return product;
+  }
+
+  it('charges allocated uncounted products, replays once, and refunds without inventing stock', async () => {
+    const { merchant, operator, wallet } = await seed();
+    await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
+    const product = await uncounted(merchant._id);
+    const args = chargeArgs(merchant, wallet, { items: [{ productId: String(product._id), qty: 2 }], quotedTotal: 10000 }, operator);
+    const first = await MerchantService.charge(args);
+    const replay = await MerchantService.charge(args);
+    expect(String(replay.charge._id)).toBe(String(first.charge._id));
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(90000);
+    expect(first.charge.items![0]).toMatchObject({ qty: 2, unitPrice: 5000, lineTotal: 10000 });
+    expect(await LedgerService.totalOwed(String(eventId), LedgerAccountType.MERCHANT)).toBe(10000);
+    const tiles = await PosCatalogService.forMerchant(String(merchant._id), String(eventId));
+    expect(tiles.find(p => p.productId === String(product._id))).toMatchObject({ status: 'untracked', onHand: 0, price: 5000 });
+    const board = await StockReportService.board(String(eventId));
+    expect(board.byProduct.find(p => p.productId === String(product._id))).toMatchObject({ stockTracked: false, status: 'UNTRACKED', unitsSold: 2, revenue: 10000 });
+    const recon = await StockReportService.reconciliation(String(eventId), new Date());
+    expect(recon.byProduct.find(p => p.productId === String(product._id))).toMatchObject({ stockTracked: false, sold: 2, salesRevenue: 10000, physicalCount: null, variance: null });
+    const dashboard = await StockReportService.dashboard(String(eventId));
+    expect(dashboard.peakTimes.reduce((n, p) => n + p.units, 0)).toBe(2);
+    await expect(StockService.applyMovement({ eventId, merchantId: merchant._id, productId: product._id, delta: 10, reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: 'test' })).rejects.toThrow('does not track inventory');
+    await expect(StockCountService.recordCount({ eventId: String(eventId), merchantId: String(merchant._id), productId: String(product._id), countedOnHand: 0, byType: 'Organizer', by: 'test' })).rejects.toThrow('does not track inventory');
+    await MerchantReversalService.reverse({ chargeId: String(first.charge._id), eventId: String(eventId), merchantId: String(merchant._id), merchantOperatorId: String(operator._id), bandUid: wallet.bandUid!, pin: '111111', reason: 'Customer return', restock: true });
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(100000);
+    expect(await LedgerService.totalOwed(String(eventId), LedgerAccountType.MERCHANT)).toBe(0);
+    expect((await ProductStock.findOne({ productId: product._id }))!.onHand).toBe(0);
+    expect(await StockMovement.countDocuments({ productId: product._id })).toBe(0);
+  });
+
+  it('refuses an unallocated uncounted product and rolls back the wallet', async () => {
+    const { merchant, operator, wallet } = await seed();
+    const product = await Product.create({ eventId, name: 'Other stall meal', category: 'food', price: 5000, stockTracked: false });
+    await expect(MerchantService.charge(chargeArgs(merchant, wallet, { items: [{ productId: String(product._id), qty: 1 }], quotedTotal: 5000 }, operator))).rejects.toThrow('product not sold at that stall');
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(100000);
+    expect(await MerchantCharge.countDocuments()).toBe(0);
+  });
+
+  it('still declines a mixed basket when its counted product runs out', async () => {
+    const { merchant, operator, beer, wallet } = await seed({ beerStock: 1 });
+    const product = await uncounted(merchant._id);
+    await expect(MerchantService.charge(chargeArgs(merchant, wallet, { items: [{ productId: String(product._id), qty: 1 }, { productId: String(beer._id), qty: 2 }], quotedTotal: 10000 }, operator))).rejects.toBeInstanceOf(StockDeclinedError);
+    expect((await Wallet.findById(wallet._id))!.balance).toBe(100000);
+    expect(await MerchantCharge.countDocuments()).toBe(0);
+  });
 
   it.each([[1, 3500], [5, 17500], [6, 19000], [7, 22500], [10, 33000], [12, 38000], [13, 41500]])(
     'charges %i base units at %i cents and deducts that exact stock quantity', async (qty, total) => {

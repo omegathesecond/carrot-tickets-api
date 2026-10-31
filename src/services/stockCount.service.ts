@@ -1,5 +1,6 @@
 // src/services/stockCount.service.ts
 import mongoose from 'mongoose';
+import { Product } from '@models/product.model';
 import { StockService } from '@services/stock.service';
 import { StockAlertService } from '@services/stockAlert.service';
 import { StockMovementReason } from '@interfaces/stock.interface';
@@ -18,6 +19,9 @@ export class StockCountService {
     try {
       let out!: { count: IStockCount; onHand: number };
       await session.withTransaction(async () => {
+        if (await Product.exists({ _id: productId, eventId, stockTracked: false }).session(session)) {
+          throw new Error('This product does not track inventory quantities');
+        }
         const expected = await StockService.getOnHand(merchantId, productId, session);
         const variance = countedOnHand - expected;
         if (variance !== 0) {

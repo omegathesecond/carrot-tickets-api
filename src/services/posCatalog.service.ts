@@ -4,7 +4,7 @@ import { ProductStock, IProductStock } from '@models/productStock.model';
 import { Merchant } from '@models/merchant.model';
 import { ProductCategory } from '@interfaces/stock.interface';
 
-export type PosTileStatus = 'in_stock' | 'low' | 'sold_out';
+export type PosTileStatus = 'in_stock' | 'low' | 'sold_out' | 'untracked';
 
 /**
  * One product tile as the handhelds render it. Price is integer minor units —
@@ -30,7 +30,7 @@ export interface PosTile {
 /** The product fields a tile is built from. Structural rather than IProduct so
  *  a .lean() row satisfies it without a cast — nothing here needs a document. */
 type CatalogProduct = Pick<
-  IProduct, 'name' | 'price' | 'bundlePrice' | 'barcode' | 'category' | 'imageUrl' | 'unitLabel' | 'unitsPerPack' | 'packLabel'
+  IProduct, 'name' | 'price' | 'bundlePrice' | 'barcode' | 'category' | 'imageUrl' | 'unitLabel' | 'unitsPerPack' | 'packLabel' | 'stockTracked'
 > & { _id: unknown };
 
 /** The stall's count for it. Same reasoning. */
@@ -80,7 +80,7 @@ export class PosCatalogService {
       packLabel: product.packLabel ?? null,
       onHand,
       lowStockThreshold,
-      status: PosCatalogService.statusOf(onHand, lowStockThreshold),
+      status: product.stockTracked === false ? 'untracked' : PosCatalogService.statusOf(onHand, lowStockThreshold),
     };
   }
 

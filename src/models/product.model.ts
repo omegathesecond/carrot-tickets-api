@@ -20,6 +20,8 @@ export interface IProduct extends Document {
   packLabel?: string;
   imageUrl?: string;
   active: boolean;
+  /** False for made-to-order goods/services with no inventory count. Fixed at setup. */
+  stockTracked: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +45,7 @@ const productSchema = new Schema<IProduct>(
     packLabel: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
     active: { type: Boolean, default: true, index: true },
+    stockTracked: { type: Boolean, default: true, immutable: true },
   },
   { timestamps: true },
 );
