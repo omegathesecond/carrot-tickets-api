@@ -24,6 +24,7 @@ export interface ReconciliationRow extends SalesPricingAudit {
   merchantName: string;
   productId: string;
   productName: string;
+  stockTracked?: boolean;
   opening: number;
   added: number;
   transferIn: number;
@@ -72,9 +73,9 @@ export const RECON_COLUMNS = [
   { key: 'expectedClosing', label: 'Expected' },
   { key: 'physicalCount', label: 'Physical' },
   { key: 'variance', label: 'Variance' },
-] as const satisfies readonly { key: keyof ReconciliationTotal; label: string }[];
+] as const satisfies readonly { key: Exclude<keyof ReconciliationTotal, 'stockTracked'>; label: string }[];
 
-type ReportColumn = { key: keyof ReconciliationTotal; label: string; money?: boolean };
+type ReportColumn = { key: Exclude<keyof ReconciliationTotal, 'stockTracked'>; label: string; money?: boolean };
 export const PRICING_COLUMNS = [
   { key: 'regularUnits', label: 'Regular units' },
   { key: 'specialUnits', label: 'Special units' },
@@ -372,7 +373,8 @@ export class StockReconciliationPdfService {
       doc.fillColor(INK).fontSize(8.5).font(font)
         .text(name, nameX + 2, y + 4, { width: nameW - 4 });
       columns.forEach((col, i) => {
-        const value = values[col.key];
+        const noCount = values.stockTracked === false && (RECON_COLUMNS as readonly { key: string }[]).some(c => c.key === col.key) && col.key !== 'sold';
+        const value = noCount ? null : values[col.key];
         // Shrinkage is the one figure an organiser is scanning for.
         const negative = typeof value === 'number' && value < 0 && col.key === 'variance';
         doc.fillColor(negative ? NEGATIVE : INK)

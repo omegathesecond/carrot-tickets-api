@@ -60,7 +60,7 @@ export class MerchantReversalService {
         if (!credited) throw new HttpError(409, 'Band wallet changed. Tap again.');
         if (restock) for (const item of charge.items!) {
           const productId = String(item.productId);
-          await StockService.applyMovement({ eventId, merchantId, productId, delta: item.qty, reason: StockMovementReason.SALE_REVERSAL, refType: 'merchant_reversal', refId: chargeId, byType: 'Merchant', by: merchantOperatorId, note: reason, session });
+          await StockService.applySaleMovement({ eventId, merchantId, productId, delta: item.qty, reason: StockMovementReason.SALE_REVERSAL, refType: 'merchant_reversal', refId: chargeId, byType: 'Merchant', by: merchantOperatorId, note: reason, session });
           await StockAlertService.rearm(merchantId, productId, session);
         }
         const ledgerTxnId = await LedgerService.post({ eventId, refType: 'merchant_reversal', refId: chargeId, session, postings: [

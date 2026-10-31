@@ -543,7 +543,7 @@ export class TableService {
           throw new Error(`table is not open (status: ${existing.status})`);
         }
         for (const line of lines) {
-          await StockService.applyMovement({
+          await StockService.applySaleMovement({
             eventId: eventObjId, merchantId: line.merchantId, productId: line.productId,
             delta: -line.qty, reason: StockMovementReason.SALE, refType: 'table', refId: tableId,
             byType: 'Waiter', by: addedBy, session,
@@ -614,7 +614,7 @@ export class TableService {
         // The compensating movement is its OWN event (MANUAL, not a smaller
         // SALE) so the stock history can be read backwards: "this bottle came
         // back because a line was removed", not silently absorbed into the sale.
-        await StockService.applyMovement({
+        await StockService.applySaleMovement({
           eventId: table.eventId, merchantId: line.merchantId, productId: line.productId,
           delta: line.qty, reason: StockMovementReason.MANUAL,
           refType: 'table_line_removed', refId: lineId,

@@ -2,6 +2,7 @@ import mongoose, { ClientSession } from 'mongoose';
 import { ProductStock, IProductStock } from '@models/productStock.model';
 import { StockMovement, IStockMovement } from '@models/stockMovement.model';
 import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
+import { Product } from '@models/product.model';
 
 export class StockDeclinedError extends Error {
   readonly reason = 'insufficient_stock';
@@ -34,6 +35,23 @@ export interface MovementInput {
  * StockDeclinedError and writes nothing — hard-block-at-zero, no silent clamp.
  */
 export class StockService {
+  /** Sales and returns still use real catalogue prices and allocation checks,
+   * but explicitly uncounted products never create inventory movements. */
+  static async applySaleMovement(input: MovementInput): Promise<void> {
+    if (!Number.isSafeInteger(input.delta) || input.delta === 0) throw new Error('delta must be a non-zero whole number');
+    if (!input.session?.inTransaction()) throw new Error('applySaleMovement requires a transaction');
+    const product = await Product.findOne({ _id: input.productId, eventId: input.eventId })
+      .select('stockTracked').session(input.session).lean();
+    if (!product) throw new Error('product not found for this event');
+    if (product.stockTracked === false) {
+      if (input.delta < 0 && !await ProductStock.exists({ eventId: input.eventId, merchantId: input.merchantId, productId: input.productId }).session(input.session)) {
+        throw new Error('product not sold at that stall');
+      }
+      return;
+    }
+    await StockService.applyMovement(input);
+  }
+
   static async applyMovement(input: MovementInput): Promise<{ onHand: number; movement: IStockMovement }> {
     const { delta, reason, refType, refId, byType, by, note } = input;
     if (!Number.isSafeInteger(delta) || delta === 0) {
@@ -48,6 +66,9 @@ export class StockService {
     }
 
     const work = async (session: ClientSession) => {
+      if (await Product.exists({ _id: productId, eventId, stockTracked: false }).session(session)) {
+        throw new Error('This product does not track inventory quantities');
+      }
       const decrement = delta < 0;
       const filter: Record<string, unknown> = { merchantId, productId };
       // CAS guard: a decrement matches only when there is enough on hand.

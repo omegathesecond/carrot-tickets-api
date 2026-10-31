@@ -274,7 +274,7 @@ export class MerchantService {
         if (itemSnapshots) {
           try {
             for (const line of itemSnapshots) {
-              await StockService.applyMovement({
+              await StockService.applySaleMovement({
                 eventId, merchantId, productId: String(line.productId), delta: -line.qty,
                 reason: StockMovementReason.SALE, refType: 'merchant_charge', refId: clientTxnId,
                 byType: 'Merchant', by: merchantOperatorId, session,
