@@ -674,6 +674,7 @@ router.post('/waiters/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermi
 router.get('/merchants', requireSuperAdminOrAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.list);
 router.post('/merchants', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
 router.get('/merchants/:id/transactions', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
+router.get('/merchants/:id/menu', requireSuperAdminOrAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.menu);
 router.patch('/merchants/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
 
 /**
