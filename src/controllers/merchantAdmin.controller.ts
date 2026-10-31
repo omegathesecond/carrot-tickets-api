@@ -3,6 +3,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Merchant } from '@models/merchant.model';
 import { Event } from '@models/event.model';
 import { MerchantService } from '@services/merchant.service';
+import { PosCatalogService } from '@services/posCatalog.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 
 function actorOf(req: Request) {
@@ -28,6 +29,23 @@ export async function loadOwnedEvent(req: Request, res: Response, eventId: strin
 }
 
 export class MerchantAdminController {
+  /** The same assigned, active products shown on this stall's POS. */
+  static async menu(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const merchant = await Merchant.findOne({ _id: req.params['id'], deletedAt: null });
+      if (!merchant) { ApiResponseUtil.notFound(res, 'Stall not found'); return; }
+      const event = await loadOwnedEvent(req, res, String(merchant.eventId));
+      if (!event) return;
+      if (event.currency !== 'ZAR' && event.currency !== 'SZL') throw new Error('Event currency is not configured');
+      const products = await PosCatalogService.forMerchant(String(merchant._id), String(event._id));
+      ApiResponseUtil.success(res, {
+        merchantId: String(merchant._id),
+        event: { id: String(event._id), name: event.name, currency: event.currency },
+        products,
+      });
+    } catch (err) { next(err); }
+  }
+
   /** GET /api/tickets/merchants?eventId= — vendors at one (owned) event. */
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
