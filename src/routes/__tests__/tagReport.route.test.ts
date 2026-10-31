@@ -7,6 +7,7 @@ import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { Wallet } from '@models/wallet.model';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key';
 const VENDOR = '64c000000000000000000a01';
@@ -68,6 +69,22 @@ it('400s a malformed cursor', async () => {
     .get(`/api/tickets/events/${event._id}/tags?cursor=nope`)
     .set('Authorization', `Bearer ${await token(['tickets:view_revenue'])}`);
   expect(res.status).toBe(400);
+});
+
+it('passes a strict fundedOnly filter to the report without exposing empty wallets', async () => {
+  const event = await cashlessEvent();
+  await Wallet.create([
+    { eventId: event._id, bandUid: '04a22b1c', balance: 100, cashFundedBalance: 0 },
+    { eventId: event._id, bandUid: '04a22b1d', balance: 0, cashFundedBalance: 0 },
+  ]);
+  const auth = `Bearer ${await token(['tickets:view_revenue'])}`;
+  const url = `/api/tickets/events/${event._id}/tags`;
+  const funded = await request(app).get(`${url}?fundedOnly=true`).set('Authorization', auth);
+  expect(funded.status).toBe(200);
+  expect(funded.body.data.tags.map((t: any) => t.bandUid)).toEqual(['04a22b1c']);
+  const all = await request(app).get(`${url}?fundedOnly=false`).set('Authorization', auth);
+  expect(all.body.data.tags).toHaveLength(2);
+  expect((await request(app).get(`${url}?fundedOnly=yes`).set('Authorization', auth)).status).toBe(400);
 });
 
 it('serves the registrations route rather than treating "registrations" as a tag id', async () => {

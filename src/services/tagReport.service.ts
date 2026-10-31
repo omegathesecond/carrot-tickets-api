@@ -121,10 +121,13 @@ export class TagReportService {
 
   static async list(
     eventId: string,
-    opts: { limit?: number; cursor?: string; status?: TagStatus; q?: string },
+    opts: { limit?: number; cursor?: string; status?: TagStatus; q?: string; fundedOnly?: boolean },
   ): Promise<{ tags: TagRow[]; hasMore: boolean; nextCursor: string | null }> {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
     const match: Record<string, unknown> = { eventId: new mongoose.Types.ObjectId(eventId) };
+    // Filter before pagination: pre-registered empty tags must never push
+    // older wallets holding money beyond a client-side scan limit.
+    if (opts.fundedOnly) match['balance'] = { $gt: 0 };
     // _id desc + a strictly-less-than cursor: the same convention as the stock
     // movements feed, so a row can neither repeat nor be skipped at a boundary.
     if (opts.cursor) match['_id'] = { $lt: new mongoose.Types.ObjectId(opts.cursor) };
