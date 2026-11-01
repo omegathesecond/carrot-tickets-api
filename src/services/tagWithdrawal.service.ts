@@ -65,7 +65,10 @@ export class TagWithdrawalService {
     if (existing) return existing;
     const requestId = new mongoose.Types.ObjectId();
     const encrypted = encryptOperatorPin(JSON.stringify(value.details), `tag-withdrawal:${requestId}`);
-    await TagWithdrawalRequest.init();
+    // init() retains startup failures even after the connection recovers.
+    // Recheck the schema's indexes directly before reserving any balance;
+    // a failed check stays loud and a later request can try again.
+    await TagWithdrawalRequest.createIndexes();
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
