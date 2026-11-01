@@ -97,6 +97,35 @@ it('deduplicates simultaneous submissions and refuses a second pending request',
   expect((await post({ ...input, fullName: 'Different Name' })).status).toBe(409);
 });
 
+it('accepts a withdrawal after the database recovers from a cached startup initialization failure', async () => {
+  const model = TagWithdrawalRequest as typeof TagWithdrawalRequest & { $init: Promise<unknown> };
+  const initialized = model.$init;
+  model.$init = Promise.reject(new Error('Connection pool was cleared during startup'));
+  void model.$init.catch(() => {});
+  try {
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('pending');
+    expect((await post()).body.data.id).toBe(res.body.data.id);
+    expect(await TagWithdrawalRequest.countDocuments()).toBe(1);
+    expect((await Wallet.findById(wallet._id))!.status).toBe('frozen');
+  } finally { model.$init = initialized; }
+});
+
+it('surfaces an index failure before reserving funds and allows the same request to retry', async () => {
+  const indexes = jest.spyOn(TagWithdrawalRequest, 'createIndexes')
+    .mockRejectedValueOnce(new Error('Index storage unavailable'));
+  try {
+    expect((await post()).status).toBe(500);
+    expect((await Wallet.findById(wallet._id))!.status).toBe('active');
+    expect(await TagWithdrawalRequest.countDocuments()).toBe(0);
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('pending');
+    expect(await TagWithdrawalRequest.countDocuments()).toBe(1);
+  } finally { indexes.mockRestore(); }
+});
+
 it('requires the private token for tracking and never exposes destination details', async () => {
   const { body } = await post();
   const path = `/public/${body.data.id}/track`;
