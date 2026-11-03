@@ -14,6 +14,7 @@ import { TagWithdrawalRequest } from '@models/tagWithdrawalRequest.model';
 import { LedgerEntry } from '@models/ledgerEntry.model';
 import { WalletService } from '@services/wallet.service';
 import { ReconciliationService } from '@services/reconciliation.service';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { SecurityRateLimitService } from '@services/securityRateLimit.service';
 
@@ -137,11 +138,11 @@ it('requires the private token for tracking and never exposes destination detail
   expect(tracked.headers['cache-control']).toBe('no-store');
 });
 
-it('restricts dashboard details and decisions to administrators', async () => {
+it('restricts private payout details and decisions to administrators', async () => {
   const { body } = await post();
   expect((await request(app).get('/admin')).status).toBe(401);
   const normal = await seedVendorSessionToken(String(new mongoose.Types.ObjectId()));
-  expect((await request(app).get(`/admin/${body.data.id}`).set(auth(normal))).status).toBe(403);
+  expect((await request(app).get(`/admin/${body.data.id}`).set(auth(normal))).status).toBe(404);
   const details = await request(app).get(`/admin/${body.data.id}`).set(auth());
   expect(details.status).toBe(200);
   expect(details.body.data.details.bank.accountNumber).toBe(bank.accountNumber);
@@ -214,4 +215,48 @@ it('requires login for lookup, submission and tracking, and prevents cross-event
   expect((await request(app).post('/public').send(input)).status).toBe(401);
   expect((await request(app).post('/public/000000000000000000000000/track').send({ token: input.trackingToken, eventId: String(event._id) })).status).toBe(401);
   expect((await request(app).post('/public/lookup').set(auth(customer)).send({ bandUid: '0ae98d36', eventId: String(new mongoose.Types.ObjectId()) })).status).toBe(404);
+});
+
+it('gives organizers financial visibility only for their own events, without payout details or decisions', async () => {
+  const owner = await seedVendorSessionToken(String(event.vendorId));
+  const outsider = await seedVendorSessionToken('other-organizer');
+  const { body } = await post();
+  const id = body.data.id;
+  const list = await request(app).get('/admin').set(auth(owner));
+  expect(list.status).toBe(200);
+  expect(list.body.data.total).toBe(1);
+  expect(list.body.data.items[0]._id).toBe(id);
+  const detail = await request(app).get(`/admin/${id}`).set(auth(owner));
+  expect(detail.status).toBe(200);
+  expect(detail.body.data.status).toBe('pending');
+  for (const response of [list, detail]) {
+    expect(JSON.stringify(response.body)).not.toContain(bank.accountNumber);
+    expect(response.body.data).not.toHaveProperty('details');
+    expect(JSON.stringify(response.body)).not.toContain('detailsEncrypted');
+  }
+  expect((await request(app).get('/admin').set(auth(outsider))).body.data.total).toBe(0);
+  expect((await request(app).get(`/admin?eventId=${event._id}`).set(auth(outsider))).body.data.total).toBe(0);
+  expect((await request(app).get(`/admin/${id}`).set(auth(outsider))).status).toBe(404);
+  for (const status of ['processing', 'paid', 'rejected']) {
+    expect((await decision(id, { status, paymentReference: 'REF', paymentCompleted: true, rejectionReason: 'Reason' }, owner)).status).toBe(403);
+  }
+  expect((await TagWithdrawalRequest.findById(id))!.status).toBe('pending');
+  await decision(id, { status: 'processing' });
+  const processing = await request(app).get('/admin?status=processing').set(auth(owner));
+  expect(processing.body.data.total).toBe(1);
+  expect(processing.body.data.items[0].status).toBe('processing');
+  expect((await request(app).get('/admin?status=pending').set(auth(owner))).body.data.total).toBe(0);
+});
+
+it('requires financial permission for organizer staff and rejects buyer access', async () => {
+  const viewer = await seedVendorSessionToken(String(event.vendorId), { permissions: [TicketsPermission.VIEW_REVENUE] });
+  const scanner = await seedVendorSessionToken(String(event.vendorId), { permissions: [TicketsPermission.SCAN_TICKETS] });
+  const { body } = await post();
+  expect((await request(app).get('/admin').set(auth(viewer))).status).toBe(200);
+  expect((await request(app).get(`/admin/${body.data.id}`).set(auth(viewer))).status).toBe(200);
+  for (const token of [scanner, customer]) {
+    expect((await request(app).get('/admin').set(auth(token))).status).toBe(403);
+    expect((await request(app).get(`/admin/${body.data.id}`).set(auth(token))).status).toBe(403);
+  }
+  expect((await decision(body.data.id, { status: 'processing' }, viewer)).status).toBe(403);
 });

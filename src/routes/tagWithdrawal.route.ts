@@ -1,6 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
-import { authenticateTickets, requireSuperAdmin, authenticateBuyerOrOrganizer } from '@middleware/ticketsAuth.middleware';
+import { Event } from '@models/event.model';
+import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
+import { authenticateTickets, requireSuperAdmin, requireSuperAdminOrPermission, authenticateBuyerOrOrganizer } from '@middleware/ticketsAuth.middleware';
 import { TagWithdrawalService } from '@services/tagWithdrawal.service';
 import { TagWithdrawalRequest, TAG_WITHDRAWAL_STATUSES } from '@models/tagWithdrawalRequest.model';
 import { SecurityRateLimitService, SecurityRateLimitError } from '@services/securityRateLimit.service';
@@ -44,7 +46,17 @@ publicTagWithdrawalRoutes.post('/:id/track', handle(async (req, res) => {
 }));
 
 export const adminTagWithdrawalRoutes = Router();
-adminTagWithdrawalRoutes.use(authenticateTickets, requireSuperAdmin, authenticateBuyerOrOrganizer);
+adminTagWithdrawalRoutes.use(authenticateTickets, authenticateBuyerOrOrganizer,
+  requireSuperAdminOrPermission(TicketsPermission.VIEW_REVENUE));
+
+// Scope every read, including direct request IDs, to the organizer's events.
+async function eventScope(req: Request, eventId?: string) {
+  const user = (req as any).ticketsUser;
+  if (user.isSuperAdmin) return eventId ? { eventId } : {};
+  if (!user.vendorId) throw new HttpError(403, 'Organizer account required');
+  const events = await Event.find({ vendorId: user.vendorId, ...(eventId ? { _id: eventId } : {}) }).select('_id');
+  return { eventId: { $in: events.map(event => event._id) } };
+}
 adminTagWithdrawalRoutes.get('/', handle(async (req, res) => {
   const { error, value } = Joi.object({
     status: Joi.string().valid(...TAG_WITHDRAWAL_STATUSES),
@@ -53,9 +65,8 @@ adminTagWithdrawalRoutes.get('/', handle(async (req, res) => {
     page: Joi.number().integer().min(1).default(1),
   }).unknown(false).validate(req.query);
   if (error) throw new HttpError(400, 'Invalid withdrawal filters');
-  const query: any = {};
+  const query: any = await eventScope(req, value.eventId);
   if (value.status) query.status = value.status;
-  if (value.eventId) query.eventId = value.eventId;
   if (value.search) {
     const text = value.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     query.$or = ['eventName', 'bandUid', 'paymentReference'].map(key => ({ [key]: { $regex: text, $options: 'i' } }));
@@ -67,9 +78,18 @@ adminTagWithdrawalRoutes.get('/', handle(async (req, res) => {
   ApiResponseUtil.success(res, { items, total, page: value.page });
 }));
 adminTagWithdrawalRoutes.get('/:id', handle(async (req, res) => {
-  ApiResponseUtil.success(res, await TagWithdrawalService.detail(String(req.params['id'])));
+  if ((req as any).ticketsUser.isSuperAdmin) {
+    ApiResponseUtil.success(res, await TagWithdrawalService.detail(String(req.params['id'])));
+    return;
+  }
+  const id = String(req.params['id']);
+  if (!/^[a-fA-F0-9]{24}$/.test(id)) throw new HttpError(404, 'Withdrawal request not found');
+  // Organizer visibility does not expose decrypted attendee payment/contact data.
+  const row = await TagWithdrawalRequest.findOne({ _id: id, ...await eventScope(req) });
+  if (!row) throw new HttpError(404, 'Withdrawal request not found');
+  ApiResponseUtil.success(res, row);
 }));
-adminTagWithdrawalRoutes.post('/:id/status', handle(async (req, res) => {
+adminTagWithdrawalRoutes.post('/:id/status', requireSuperAdmin, handle(async (req, res) => {
   const { error, value } = Joi.object({
     status: Joi.string().valid('processing', 'paid', 'rejected').required(),
     paymentReference: Joi.string().trim().max(120), paymentCompleted: Joi.boolean(),
