@@ -260,3 +260,38 @@ it('requires financial permission for organizer staff and rejects buyer access',
   }
   expect((await decision(body.data.id, { status: 'processing' }, viewer)).status).toBe(403);
 });
+
+
+it('searches distinct withdrawal events on the server and scopes options to the organizer', async () => {
+  const owner = await seedVendorSessionToken(String(event.vendorId));
+  const outsider = await seedVendorSessionToken('event-picker-outsider');
+  const { body } = await post();
+  const source = (await TagWithdrawalRequest.findById(body.data.id).select('+detailsEncrypted +trackingHash +inputHash').lean())!;
+  const otherEventId = new mongoose.Types.ObjectId();
+  await TagWithdrawalRequest.create({ ...source, _id: new mongoose.Types.ObjectId(), walletId: new mongoose.Types.ObjectId() });
+  await TagWithdrawalRequest.create({ ...source, _id: new mongoose.Types.ObjectId(), walletId: new mongoose.Types.ObjectId(), eventId: otherEventId, eventName: 'Other festival [special]' });
+  const options = await request(app).get('/admin/events').set(auth(owner));
+  expect(options.status).toBe(200);
+  expect(options.body.data).toEqual([{ id: String(event._id), name: event.name }]);
+  expect((await request(app).get('/admin/events').set(auth(outsider))).body.data).toEqual([]);
+  const searched = await request(app).get('/admin/events').query({ search: '[special]' }).set(auth());
+  expect(searched.body.data).toEqual([{ id: String(otherEventId), name: 'Other festival [special]' }]);
+  expect((await request(app).get('/admin/events').query({ search: 'NOT FOUND' }).set(auth())).body.data).toEqual([]);
+  expect((await request(app).get('/admin/events').set(auth(customer))).status).toBe(403);
+  expect((await request(app).get('/admin/events').query({ search: 'x'.repeat(121) }).set(auth())).status).toBe(400);
+  const filtered = await request(app).get('/admin').query({ eventId: String(event._id), status: 'pending', search: 'Withdrawal' }).set(auth());
+  expect(filtered.body.data.total).toBe(2);
+  expect(filtered.body.data.items.every((row: any) => row.eventId === String(event._id))).toBe(true);
+});
+
+it('limits event options on the server while searches can find events beyond the first page', async () => {
+  const { body } = await post();
+  const source = (await TagWithdrawalRequest.findById(body.data.id).select('+detailsEncrypted +trackingHash +inputHash').lean())!;
+  await TagWithdrawalRequest.insertMany(Array.from({ length: 25 }, (_, i) => ({ ...source,
+    _id: new mongoose.Types.ObjectId(), walletId: new mongoose.Types.ObjectId(), eventId: new mongoose.Types.ObjectId(), eventName: `Festival ${String(i).padStart(2, '0')}` })));
+  const options = await request(app).get('/admin/events').set(auth());
+  expect(options.body.data).toHaveLength(20);
+  const searched = await request(app).get('/admin/events').query({ search: 'Festival 24' }).set(auth());
+  expect(searched.body.data).toHaveLength(1);
+  expect(searched.body.data[0].name).toBe('Festival 24');
+});

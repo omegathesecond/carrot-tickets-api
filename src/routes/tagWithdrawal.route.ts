@@ -21,6 +21,7 @@ const handle = (fn: (req: Request, res: Response) => Promise<void>) => async (re
 // Cloud Run appends the connection IP to X-Forwarded-For; use the last value,
 // never a caller-prepended first value, for the same cross-instance quota.
 const sourceIp = (req: Request) => req.get('x-forwarded-for')?.split(',').at(-1)?.trim() || req.ip || 'unknown';
+const escapeSearch = (search: string) => search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function limit(req: Request) {
   const user = (req as any).ticketsUser;
   await SecurityRateLimitService.consume('tag-withdrawal-user', String(user.buyerId ?? user.userId ?? user.vendorId), 100, 15 * 60_000);
@@ -68,7 +69,7 @@ adminTagWithdrawalRoutes.get('/', handle(async (req, res) => {
   const query: any = await eventScope(req, value.eventId);
   if (value.status) query.status = value.status;
   if (value.search) {
-    const text = value.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const text = escapeSearch(value.search);
     query.$or = ['eventName', 'bandUid', 'paymentReference'].map(key => ({ [key]: { $regex: text, $options: 'i' } }));
   }
   const [items, total] = await Promise.all([
@@ -76,6 +77,21 @@ adminTagWithdrawalRoutes.get('/', handle(async (req, res) => {
     TagWithdrawalRequest.countDocuments(query),
   ]);
   ApiResponseUtil.success(res, { items, total, page: value.page });
+}));
+adminTagWithdrawalRoutes.get('/events', handle(async (req, res) => {
+  const { error, value } = Joi.object({ search: Joi.string().trim().max(120).allow('').default('') }).unknown(false).validate(req.query);
+  if (error) throw new HttpError(400, 'Invalid event search');
+  const scope = await eventScope(req);
+  // Return only events with withdrawal requests visible to this caller.
+  // Search/group/limit happen in MongoDB; no client-side event scan is needed.
+  const events = await TagWithdrawalRequest.aggregate([
+    { $match: { ...scope, ...(value.search ? { eventName: { $regex: escapeSearch(value.search), $options: 'i' } } : {}) } },
+    { $group: { _id: '$eventId', name: { $first: '$eventName' } } },
+    { $sort: { name: 1, _id: 1 } },
+    { $limit: 20 },
+    { $project: { _id: 0, id: { $toString: '$_id' }, name: 1 } },
+  ]);
+  ApiResponseUtil.success(res, events);
 }));
 adminTagWithdrawalRoutes.get('/:id', handle(async (req, res) => {
   if ((req as any).ticketsUser.isSuperAdmin) {
