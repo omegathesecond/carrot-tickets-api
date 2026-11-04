@@ -18,6 +18,7 @@ import { LedgerService, Posting } from '@services/ledger.service';
 import { LedgerAccountType } from '@interfaces/ledger.interface';
 import { WalletDeclinedError } from '@services/merchant.service';
 import { normalizeBandUid } from '@utils/bandUid.util';
+import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 /** Thrown when a label is already open at this event — the caller maps it to 409. */
 export class TableLabelTakenError extends Error {
@@ -232,7 +233,7 @@ async function merchantNames(ids: string[]): Promise<Map<string, string>> {
   return new Map(rows.map((r) => [String(r._id), r.name]));
 }
 
-async function waiterNames(openedBy: string[]): Promise<Map<string, string>> {
+export async function waiterNames(openedBy: string[]): Promise<Map<string, string>> {
   const ids = [...new Set(openedBy.filter((id) => mongoose.isValidObjectId(id)))];
   if (ids.length === 0) return new Map();
   const rows = await Waiter.find(
@@ -280,6 +281,33 @@ function labelFilter(q?: string): Record<string, unknown> {
 }
 
 /**
+ * Move ONE row of a table's array from one status to the next, atomically —
+ * shared by an event table's `fulfilment` rows and a venue table's `orders`.
+ * Null when nothing matched; the caller diagnoses why.
+ */
+export async function advanceArrayRow(params: {
+  /** The table itself: its id, its owner, and any status it must be in. */
+  table: Record<string, unknown>;
+  array: 'fulfilment' | 'orders';
+  /** What identifies the row inside the array. */
+  row: Record<string, unknown>;
+  from: string;
+  to: string;
+  stamp: Record<string, unknown>;
+}): Promise<ITable | null> {
+  const { table, array, row, from, to, stamp } = params;
+  const set: Record<string, unknown> = { [`${array}.$[row].status`]: to };
+  for (const [k, v] of Object.entries(stamp)) set[`${array}.$[row].${k}`] = v;
+  const arrayFilter: Record<string, unknown> = { 'row.status': from };
+  for (const [k, v] of Object.entries(row)) arrayFilter[`row.${k}`] = v;
+  return Table.findOneAndUpdate(
+    { ...table, [array]: { $elemMatch: { ...row, status: from } } },
+    { $set: set },
+    { new: true, arrayFilters: [arrayFilter] },
+  );
+}
+
+/**
  * Move ONE stall's handover from one status to the next, atomically.
  *
  * The expected `from` status is in the FILTER, not checked and then written:
@@ -300,20 +328,10 @@ async function advanceFulfilment(params: {
   const eventObjId = new mongoose.Types.ObjectId(eventId);
   const merchantObjId = new mongoose.Types.ObjectId(merchantId);
 
-  const set: Record<string, unknown> = { 'fulfilment.$[row].status': to };
-  for (const [k, v] of Object.entries(stamp)) set[`fulfilment.$[row].${k}`] = v;
-
-  const updated = await Table.findOneAndUpdate(
-    {
-      _id: tableObjId, eventId: eventObjId, status: 'settled',
-      fulfilment: { $elemMatch: { merchantId: merchantObjId, status: from } },
-    },
-    { $set: set },
-    {
-      new: true,
-      arrayFilters: [{ 'row.merchantId': merchantObjId, 'row.status': from }],
-    },
-  );
+  const updated = await advanceArrayRow({
+    table: { _id: tableObjId, eventId: eventObjId, status: 'settled' },
+    array: 'fulfilment', row: { merchantId: merchantObjId }, from, to, stamp,
+  });
   if (updated) return updated;
 
   // eventId stays in this lookup too: a table at another event must read
@@ -337,13 +355,16 @@ export class TableService {
     return { subtotal, purchaseChargeAmount: surcharge, total: subtotal + surcharge };
   }
 
-  static async open(params: { eventId: string; label: string; openedBy: string }): Promise<ITable> {
+  static async open(params: ScopeIds & { label: string; openedBy: string }): Promise<ITable> {
     const label = params.label.trim();
     if (!label) throw new Error('label is required');
+    const owner = scopeMatch(params);
     try {
       return await Table.create({
-        eventId: new mongoose.Types.ObjectId(params.eventId),
+        ...owner,
         label, status: 'open', openedBy: params.openedBy, items: [], subtotal: 0,
+        // A venue table runs a tab: rounds, and payments against it.
+        ...('venueId' in owner ? { orders: [], paidTotal: 0 } : {}),
       });
     } catch (err) {
       // The partial unique index is the arbiter, so two waiters opening "7" at
@@ -375,18 +396,27 @@ export class TableService {
    * legitimately want every table) honest and explicit.
    */
   static async list(
-    eventId: string,
+    ids: ScopeIds,
     opts: { status?: string; tab?: string; q?: string; openedBy?: string } = {},
   ): Promise<WaiterTableView[]> {
     const { status, tab, q, openedBy } = opts;
     const tables = await Table.find({
-      eventId: new mongoose.Types.ObjectId(eventId),
+      ...scopeMatch(ids),
       ...(status ? { status } : {}),
       ...(openedBy ? { openedBy } : {}),
       ...tabFilter(tab),
       ...labelFilter(q),
     }).sort({ createdAt: -1 }).limit(200).lean<ITable[]>();
+    return TableService.present(tables);
+  }
 
+  /** A table as a plain object: the document an update returns, or the lean row a query returns. */
+  static plain(table: ITable): ITable {
+    return (typeof (table as any).toObject === 'function' ? (table as any).toObject() : table) as ITable;
+  }
+
+  /** Adds the waiter's name and each line's stall name to a batch of tables. */
+  static async present(tables: ITable[]): Promise<WaiterTableView[]> {
     const [names, stalls] = await Promise.all([
       waiterNames(tables.map((t) => t.openedBy)),
       merchantNames(tables.flatMap((t) => t.items.map((i) => String(i.merchantId)))),
@@ -615,7 +645,7 @@ export class TableService {
         // SALE) so the stock history can be read backwards: "this bottle came
         // back because a line was removed", not silently absorbed into the sale.
         await StockService.applySaleMovement({
-          eventId: table.eventId, merchantId: line.merchantId, productId: line.productId,
+          eventId: eventObjId, merchantId: line.merchantId, productId: line.productId,
           delta: line.qty, reason: StockMovementReason.MANUAL,
           refType: 'table_line_removed', refId: lineId,
           byType: 'Waiter', by: removedBy, session,
@@ -637,23 +667,22 @@ export class TableService {
    * transaction needed: unlike addItem/removeItem this touches only the
    * table document, nothing in ProductStock.
    */
-  static async voidTable(params: { tableId: string; eventId: string; reason: string; voidedBy: string }): Promise<ITable> {
-    const { tableId, eventId, voidedBy } = params;
+  static async voidTable(params: ScopeIds & { tableId: string; reason: string; voidedBy: string }): Promise<ITable> {
+    const { tableId, voidedBy } = params;
     const reason = params.reason.trim();
     if (!reason) throw new Error('reason is required');
-    const eventObjId = new mongoose.Types.ObjectId(eventId);
 
-    // eventId lives in BOTH the guarded update's filter and the fallback
+    // The owner lives in BOTH the guarded update's filter and the fallback
     // lookup below — same reasoning as removeItem: a table belonging to
-    // another event must be indistinguishable from a missing one, in every
-    // branch, or the error message itself becomes the leak.
+    // another event or venue must be indistinguishable from a missing one, in
+    // every branch, or the error message itself becomes the leak.
     const updated = await Table.findOneAndUpdate(
-      { _id: new mongoose.Types.ObjectId(tableId), eventId: eventObjId, status: 'open' },
+      { _id: new mongoose.Types.ObjectId(tableId), ...scopeMatch(params), status: 'open' },
       { $set: { status: 'voided', voidedAt: new Date(), voidReason: reason, voidedBy } },
       { new: true },
     );
     if (!updated) {
-      const existing = await Table.findOne({ _id: tableId, eventId: eventObjId });
+      const existing = await Table.findOne({ _id: tableId, ...scopeMatch(params) });
       if (!existing) throw new Error('table not found');
       throw new Error(`table is not open (status: ${existing.status})`);
     }

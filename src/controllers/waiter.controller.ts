@@ -129,7 +129,7 @@ export class WaiterController {
     const event = await loadWaiterEvent(req, res);
     if (!event) return;
     try {
-      const products = await PosCatalogService.forEvent(String(event._id));
+      const products = await PosCatalogService.forScope({ eventId: String(event._id) });
       return ApiResponseUtil.success(res, { products });
     } catch (e: any) {
       // Answered, not thrown: Express 4 does not await these handlers, so an
@@ -196,7 +196,7 @@ export class WaiterController {
     const seesWholeFloor =
       waiter.permissions?.includes(WaiterPermission.MANAGE_ALL_TABLES) ?? false;
     const str = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
-    const tables = await TableService.list(String(event._id), {
+    const tables = await TableService.list({ eventId: String(event._id) }, {
       status: str('status'), tab: str('tab'), q: str('q'),
       ...(seesWholeFloor ? {} : { openedBy: waiter.waiterId }),
     });

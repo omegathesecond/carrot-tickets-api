@@ -1,6 +1,7 @@
 // api/src/services/waiterAuth.service.ts
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { Waiter } from '@models/waiter.model';
+import { Venue } from '@models/venue.model';
 import { WaiterToken } from '@interfaces/waiter.interface';
 import { deriveWaiterPermissions } from '@interfaces/operatorGrant.interface';
 import { JWT_SECRET } from '@config/jwt.config';
@@ -24,9 +25,18 @@ export class WaiterAuthService {
     }).select('+pin');
     if (!waiter) throw new Error('Invalid credentials');
 
+    // A venue's people are signed out with it. Checked BEFORE the lockout is
+    // cleared, so a correct PIN at a suspended venue changes nothing.
+    let venue: { name: string; currency: 'SZL' | 'ZAR'; status: string } | null = null;
+    if (waiter.venueId) {
+      venue = await Venue.findById(waiter.venueId).select('name currency status').lean<{ name: string; currency: 'SZL' | 'ZAR'; status: string } | null>();
+      if (!venue || venue.status !== 'active') throw new Error('Venue trading is suspended');
+    }
+
     await verifyOperatorPin(Waiter, waiter, pin);
 
     const isSuperAdmin = waiter.scope === 'platform';
+    const permissions = deriveWaiterPermissions(waiter.grants);
     const payload: Record<string, unknown> = {
       scope: 'waiter',
       userType: 'waiter',
@@ -34,12 +44,13 @@ export class WaiterAuthService {
       role: 'waiter',
       // The POS's rendering copy only — authenticateWaiter re-derives this
       // from the row on every request, and THAT is what authorizes.
-      permissions: deriveWaiterPermissions(waiter.grants),
+      permissions,
       isSuperAdmin,
       fullName: waiter.fullName,
     };
     if (!isSuperAdmin && waiter.vendorId) payload['vendorId'] = waiter.vendorId.toString();
     if (!isSuperAdmin && waiter.eventId) payload['eventId'] = waiter.eventId.toString();
+    if (waiter.venueId) payload['venueId'] = waiter.venueId.toString();
 
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY } as SignOptions);
 
@@ -53,6 +64,9 @@ export class WaiterAuthService {
         fullName: waiter.fullName,
         scope: waiter.scope,
         eventId: waiter.eventId ? waiter.eventId.toString() : null,
+        // A venue waiter's app has no event to load: the venue, its currency
+        // and what this person may do come with the sign-in itself.
+        ...(venue ? { venueId: waiter.venueId!.toString(), venueName: venue.name, currency: venue.currency, permissions } : {}),
       },
     };
   }
@@ -79,6 +93,7 @@ export class WaiterAuthService {
       fullName: decoded.fullName,
       vendorId: decoded.vendorId,
       eventId: decoded.eventId,
+      venueId: decoded.venueId,
     };
   }
 }

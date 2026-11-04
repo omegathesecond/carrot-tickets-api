@@ -19,6 +19,8 @@ export interface IWaiter extends Document {
   vendorId?: Types.ObjectId;
   /** The single event this waiter works. Unset only for platform scope. */
   eventId?: Types.ObjectId;
+  /** The venue this waiter works (venue trading). An organizer waiter has exactly one of eventId / venueId. */
+  venueId?: Types.ObjectId;
   isActive: boolean;
   failedPinAttempts: number;
   lockedUntil: Date | null;
@@ -62,4 +64,6 @@ export interface WaiterToken {
   fullName: string;
   vendorId?: string;
   eventId?: string;
+  /** Set for a venue waiter; an organizer token carries exactly one of eventId / venueId. */
+  venueId?: string;
 }

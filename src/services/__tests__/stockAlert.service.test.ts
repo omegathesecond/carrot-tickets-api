@@ -21,20 +21,20 @@ describe('StockAlertService', () => {
 
   it('fires exactly one low_stock vendor notification when onHand crosses <= threshold', async () => {
     await stock(5, 20);
-    await StockAlertService.evaluateAfterSale({ eventId: String(eventId), vendorId: String(vendorId), merchantId: String(merchantId), productIds: [String(productId)] });
+    await StockAlertService.evaluateAfterSale({ vendorId: String(vendorId), merchantId: String(merchantId), productIds: [String(productId)] });
     const notes = await Notification.find({ recipientType: 'vendor', recipientId: vendorId, type: 'low_stock' });
     expect(notes).toHaveLength(1);
     // armed: lowStockAlertedAt now set
     expect((await ProductStock.findOne({ merchantId, productId }))!.lowStockAlertedAt).not.toBeNull();
 
     // a second evaluation while still armed fires nothing more
-    await StockAlertService.evaluateAfterSale({ eventId: String(eventId), vendorId: String(vendorId), merchantId: String(merchantId), productIds: [String(productId)] });
+    await StockAlertService.evaluateAfterSale({ vendorId: String(vendorId), merchantId: String(merchantId), productIds: [String(productId)] });
     expect(await Notification.countDocuments({ recipientId: vendorId, type: 'low_stock' })).toBe(1);
   });
 
   it('does not alert a product with no threshold', async () => {
     await stock(1, null);
-    await StockAlertService.evaluateAfterSale({ eventId: String(eventId), vendorId: String(vendorId), merchantId: String(merchantId), productIds: [String(productId)] });
+    await StockAlertService.evaluateAfterSale({ vendorId: String(vendorId), merchantId: String(merchantId), productIds: [String(productId)] });
     expect(await Notification.countDocuments({ type: 'low_stock' })).toBe(0);
   });
 
@@ -54,6 +54,6 @@ describe('StockAlertService', () => {
   it('never throws even if notification creation fails', async () => {
     await stock(1, 20);
     // vendorId '' would make NotificationService.create throw on cast; evaluateAfterSale must swallow it
-    await expect(StockAlertService.evaluateAfterSale({ eventId: String(eventId), vendorId: 'not-an-objectid', merchantId: String(merchantId), productIds: [String(productId)] })).resolves.toBeUndefined();
+    await expect(StockAlertService.evaluateAfterSale({ vendorId: 'not-an-objectid', merchantId: String(merchantId), productIds: [String(productId)] })).resolves.toBeUndefined();
   });
 });

@@ -51,6 +51,9 @@ import { EnquiryController } from '@controllers/enquiry.controller';
 import { UpdateController } from '@controllers/update.controller';
 import { VoteAdminController } from '@controllers/voteAdmin.controller';
 import { ShareEarnOrganizerController } from '@controllers/shareEarnOrganizer.controller';
+import { AdminVenuesController } from '@controllers/adminVenues.controller';
+import venueRoutes from '@routes/venue.route';
+import { eventScope } from '@middleware/tradingScope.middleware';
 
 const router = Router();
 
@@ -110,6 +113,13 @@ router.get(
 router.get('/admin/organizers', requireSuperAdmin, AdminOrganizersController.listOrganizers);
 router.post('/admin/organizers', requireSuperAdmin, AdminOrganizersController.createOrganizer);
 router.patch('/admin/organizers/:id/verification', requireSuperAdmin, AdminOrganizersController.updateVerification);
+
+/**
+ * Venue trading switch — super-admin creates a vendor's Venue (one per
+ * vendor; a second is a 409) and suspends / reactivates it.
+ */
+router.post('/admin/venues', requireSuperAdmin, AdminVenuesController.activate);
+router.patch('/admin/venues/:id', requireSuperAdmin, AdminVenuesController.updateStatus);
 
 /**
  * Service-categories admin — the DB-driven category manager behind the
@@ -174,6 +184,10 @@ router.delete(
 // Auth management
 router.post('/auth/logout', TicketsController.logout);
 router.get('/auth/me', TicketsController.getMe);
+
+// Venue trading — the signed-in vendor's own venue: GET /venue plus its
+// stalls, till staff, catalogue, stock and reports (routes/venue.route.ts).
+router.use('/venue', venueRoutes);
 
 /**
  * End-customer ticket list — the Keshless user-app calls this to show
@@ -671,8 +685,8 @@ router.post('/waiters/:id/reset-pin', requireSuperAdminOrPermission(TicketsPermi
 // MANAGER-role organizer holds MANAGE_STOCK without MANAGE_ACCESS (see
 // TICKETS_ROLE_PERMISSIONS) — mirroring the tab's own gate is a read, not
 // access management. Create/edit/operators below stay MANAGE_ACCESS-only.
-router.get('/merchants', requireSuperAdminOrAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.list);
-router.post('/merchants', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.create);
+router.get('/merchants', requireSuperAdminOrAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), eventScope('query'), MerchantAdminController.list);
+router.post('/merchants', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), eventScope('body'), MerchantAdminController.create);
 router.get('/merchants/:id/transactions', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.transactions);
 router.get('/merchants/:id/menu', requireSuperAdminOrAnyPermission([TicketsPermission.MANAGE_ACCESS, TicketsPermission.MANAGE_STOCK]), MerchantAdminController.menu);
 router.patch('/merchants/:id', requireSuperAdminOrPermission(TicketsPermission.MANAGE_ACCESS), MerchantAdminController.update);
@@ -782,14 +796,14 @@ router.post('/events/:eventId/tags/:walletId/deactivate', requireTicketsPermissi
 router.post('/events/:eventId/tags/:walletId/reissue', requireTicketsPermission(TicketsPermission.MANAGE_ACCESS), TagAdminController.reissue);
 router.post('/events/:eventId/tags/:walletId/refund', requireTicketsPermission(TicketsPermission.REFUND_TICKET), TagAdminController.refund);
 
-router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.board);
-router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliation);
+router.get('/events/:eventId/stock/board', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.board);
+router.get('/events/:eventId/stock/reconciliation', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.reconciliation);
 // Registered BEFORE the bare path would ever be reached with a ".pdf" suffix —
 // Express matches literally, so the two are distinct routes, not one with an
 // extension. Same guard as the JSON view: the PDF exposes nothing extra.
-router.get('/events/:eventId/stock/reconciliation.pdf', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.reconciliationPdf);
-router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.dashboard);
-router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), StockReportController.movements);
+router.get('/events/:eventId/stock/reconciliation.pdf', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.reconciliationPdf);
+router.get('/events/:eventId/stock/dashboard', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.dashboard);
+router.get('/events/:eventId/stock/movements', requireTicketsPermission(TicketsPermission.VIEW_REVENUE), eventScope('params', { requireCashless: true }), StockReportController.movements);
 
 /**
  * The organizer's Tables view (task 13) — a waiter opens a table, adds items
@@ -805,18 +819,20 @@ router.get('/events/:eventId/tables', requireSuperAdminOrPermission(TicketsPermi
 
 /**
  * Cashless Stock/Inventory — organiser manages the product catalogue and
- * loads per-bar stock (design 2026-08-12, Slice 1). MANAGE_STOCK gate +
- * event-ownership enforced in the controller.
+ * loads per-bar stock (design 2026-08-12, Slice 1). MANAGE_STOCK gate, then
+ * eventScope enforces event ownership; the handlers are shared with
+ * /api/tickets/venue/*. PATCH /products/:id has no :eventId — the handler
+ * derives the scope from the product's own event (resolveDocScope).
  */
-router.post('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.createProduct);
-router.get('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listProducts);
+router.post('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.createProduct);
+router.get('/events/:eventId/products', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.listProducts);
 router.patch('/products/:id', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.updateProduct);
-router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.receiveStock);
-router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setThreshold);
-router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.transferStock);
-router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.recordCount);
-router.get('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.listAllocations);
-router.put('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), StockAdminController.setAllocations);
+router.post('/events/:eventId/stock/receive', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.receiveStock);
+router.patch('/events/:eventId/stock/threshold', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.setThreshold);
+router.post('/events/:eventId/stock/transfer', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.transferStock);
+router.post('/events/:eventId/stock/count', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.recordCount);
+router.get('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.listAllocations);
+router.put('/events/:eventId/stock/allocations', requireTicketsPermission(TicketsPermission.MANAGE_STOCK), eventScope('params'), StockAdminController.setAllocations);
 
 /**
  * Event Menu — organiser manages the bar/vendor preorder catalogue shown on

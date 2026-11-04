@@ -1,6 +1,7 @@
 // api/src/models/merchantCharge.model.ts
 import { Schema, model, Document, Types } from 'mongoose';
 import { SalePricing } from '@interfaces/stock.interface';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * One completed tap-to-pay charge (cashless spec) — the durable record of a
@@ -22,9 +23,13 @@ export interface IMerchantCharge extends Document {
   merchantOperatorId?: Types.ObjectId;
   /** The WAITER who settled this on behalf of a table, when there was no till operator. */
   waiterId?: Types.ObjectId;
-  eventId: Types.ObjectId;
-  walletId: Types.ObjectId;
-  bandUid: string;
+  eventId?: Types.ObjectId;
+  /** Set on a venue charge (cash/card at a venue), instead of eventId. */
+  venueId?: Types.ObjectId;
+  /** Absent on a venue charge — cash/card, no wallet. */
+  walletId?: Types.ObjectId;
+  /** Absent on a venue charge — cash/card, no band. */
+  bandUid?: string;
   /** Amount debited from the wallet, integer minor units (cents). */
   amount: number;
   /** Customer surcharge owed to the organizer, included in amount. */
@@ -55,9 +60,9 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
   // comment above). Index kept for the per-operator takings report's existing lookup.
   merchantOperatorId: { type: Schema.Types.ObjectId, index: true },
   waiterId: { type: Schema.Types.ObjectId, ref: 'Waiter', index: true },
-  eventId: { type: Schema.Types.ObjectId, required: true, index: true },
-  walletId: { type: Schema.Types.ObjectId, required: true, index: true },
-  bandUid: { type: String, required: true, trim: true },
+  eventId: { type: Schema.Types.ObjectId, index: true },
+  walletId: { type: Schema.Types.ObjectId, index: true, required: function (this: { eventId?: unknown }) { return this.eventId != null; } },
+  bandUid: { type: String, trim: true, required: function (this: { eventId?: unknown }) { return this.eventId != null; } },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
   purchaseChargeAmount: { type: Number, default: 0, min: 0, validate: { validator: Number.isSafeInteger, message: 'purchase charge must be integer cents' } },
   fee: { type: Number, required: true, min: 0, validate: { validator: Number.isInteger, message: 'fee must be integer cents' } },
@@ -100,5 +105,8 @@ const merchantChargeSchema = new Schema<IMerchantCharge>({
 // The same clientTxnId reused by a DIFFERENT merchant is a different,
 // legitimate charge, not a duplicate of this one.
 merchantChargeSchema.index({ merchantId: 1, clientTxnId: 1 }, { unique: true });
+
+applyTradingScope(merchantChargeSchema);
+merchantChargeSchema.index({ venueId: 1, createdAt: -1 }, VENUE_ONLY_INDEX);
 
 export const MerchantCharge = model<IMerchantCharge>('MerchantCharge', merchantChargeSchema);
