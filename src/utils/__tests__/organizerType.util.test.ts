@@ -84,7 +84,7 @@ describe('organizerTypeFilter agrees with organizerTypeOf (no drift)', () => {
             password: 'secret1',
             businessType,
             ...(operatorType ? { operatorType } : {}),
-            ...(operatorType === 'services' ? { serviceCategory: 'catering' } : {}),
+            ...(operatorType === 'services' ? { serviceCategories: ['catering'] } : {}),
           });
           // The model defaults operatorType; a legacy row simply lacks the field.
           if (!operatorType) await Vendor.collection.updateOne({ _id: v._id }, { $unset: { operatorType: '' } });
