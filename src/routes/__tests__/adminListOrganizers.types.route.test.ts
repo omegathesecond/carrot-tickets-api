@@ -19,6 +19,7 @@ async function seed(businessName: string, extra: Record<string, unknown> = {}) {
   // Directory fixtures do not sign in with a password; avoid hashing every row.
   const [vendor] = await Vendor.insertMany([{
     businessName,
+    slug: `directory-fixture-${n}`,
     phoneNumber: `+268762${String(n).padStart(5, '0')}`,
     password: 'secret1',
     ...extra,
@@ -340,7 +341,7 @@ describe('fails loudly on a bad query (400, exact messages)', () => {
     ['?type=events&venueTrading=on', 'venueTrading needs type=venues'],
     ['?category=catering', 'category needs type=services'],
     ['?type=venues&category=catering', 'category needs type=services'],
-    ['?type=events&type=venues', 'Unknown organizer type'],
+    ['?type=events&type=venues', 'Invalid query parameter: type'],
   ])('%s -> 400 %s', async (qs, message) => {
     await seedMixed();
     const res = await list(qs);
@@ -359,17 +360,17 @@ describe('fails loudly on a bad query (400, exact messages)', () => {
   // Express parses with allowPrototypes, so `x[toString]=y` is an object whose
   // String() throws; that used to escape the handler and kill the process.
   it.each([
-    ['?type[toString]=x', 'Unknown organizer type'],
-    ['?type[]=events', 'Unknown organizer type'],
-    ['?status[a]=b', 'Unknown verification status'],
-    ['?sort[]=name', 'Unknown sort'],
-    ['?type=venues&venueTrading[a]=b', 'Unknown venue trading filter'],
-    ['?search[a]=b', 'Invalid search'],
-    ['?search[toString]=x', 'Invalid search'],
-    ['?type=services&category[a]=b', 'Invalid category'],
-    ['?page[x]=1', 'Invalid page'],
-    ['?limit[toString]=1', 'Invalid limit'],
-    ['?search=a&search=b', 'Invalid search'],
+    ['?type[toString]=x', 'Invalid query parameter: type'],
+    ['?type[]=events', 'Invalid query parameter: type'],
+    ['?status[a]=b', 'Invalid query parameter: status'],
+    ['?sort[]=name', 'Invalid query parameter: sort'],
+    ['?type=venues&venueTrading[a]=b', 'Invalid query parameter: venueTrading'],
+    ['?search[a]=b', 'Invalid query parameter: search'],
+    ['?search[toString]=x', 'Invalid query parameter: search'],
+    ['?type=services&category[a]=b', 'Invalid query parameter: category'],
+    ['?page[x]=1', 'Invalid query parameter: page'],
+    ['?limit[toString]=1', 'Invalid query parameter: limit'],
+    ['?search=a&search=b', 'Invalid query parameter: search'],
   ])('a non-text param %s is a 400 %s, and the API keeps serving', async (qs, message) => {
     await seedMixed();
     const res = await list(qs);

@@ -82,7 +82,7 @@ describe('venue stalls', () => {
     const res = await request(app).get(`/api/tickets/venue/stalls/${mine._id}/transactions`).set('Authorization', a.auth);
     expect(res.status).toBe(200);
     expect(res.body.data.merchant.name).toBe('Mine');
-    expect(res.body.data.venue).toEqual({ id: a.venueId, name: a.venueName });
+    expect(res.body.data.venue).toEqual({ id: a.venueId, name: a.venueName, currency: 'SZL' });
     expect(res.body.data.event).toBeUndefined();
   });
 

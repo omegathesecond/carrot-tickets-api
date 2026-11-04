@@ -52,7 +52,7 @@ describe('venue stock reports', () => {
 
     const res = await request(app).get('/api/tickets/venue/stock/board').set('Authorization', a.auth);
     expect(res.status).toBe(200);
-    expect(res.body.data.venue).toEqual({ id: a.venueId, name: a.venueName });
+    expect(res.body.data.venue).toEqual({ id: a.venueId, name: a.venueName, currency: 'SZL' });
     expect(res.body.data.perBar.map((r: any) => r.productName)).toEqual(['Castle Lite 330ml']);
   });
 
@@ -60,7 +60,7 @@ describe('venue stock reports', () => {
     const a = await stockedVenue();
     const res = await request(app).get('/api/tickets/venue/stock/reconciliation').set('Authorization', a.auth);
     expect(res.status).toBe(200);
-    expect(res.body.data.venue).toEqual({ id: a.venueId, name: a.venueName });
+    expect(res.body.data.venue).toEqual({ id: a.venueId, name: a.venueName, currency: 'SZL' });
     expect(res.body.data.perBar[0]).toMatchObject({ opening: 0, added: 6, expectedClosing: 6 });
   });
 

@@ -60,7 +60,7 @@ describe('VenueService.activate', () => {
   // section. Refuse it up front, and write nothing.
   it('refuses a transport or services vendor with VenueOperatorTypeError, writing nothing', async () => {
     const transport = await makeVendor({ operatorType: 'transport' });
-    const services = await makeVendor({ operatorType: 'services', serviceCategory: 'sound_hire' });
+    const services = await makeVendor({ operatorType: 'services', serviceCategories: ['sound_hire'] });
     for (const v of [transport, services]) {
       await expect(
         VenueService.activate({ vendorId: String(v._id), name: 'X', currency: 'SZL', activatedBy: 'admin-1' }),

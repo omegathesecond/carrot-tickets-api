@@ -99,7 +99,7 @@ describe('dashboard — venue payments', () => {
     for (const [query, message] of [
       ['method=momo', 'Unknown payment method'], ['source=online', 'Unknown payment source'],
       ['staffId=junk', 'Invalid staffId'], ['merchantId=junk', 'Invalid merchantId'],
-      ['page=abc', 'Invalid page'], ['limit=0', 'Invalid limit'], ['method[toString]=x', 'Unknown payment method'],
+      ['page=abc', 'Invalid page'], ['limit=0', 'Invalid limit'], ['method[toString]=x', 'Invalid query parameter: method'],
       ['from=2026-10-02T00:00:00%2B02:00&to=2026-10-01T00:00:00%2B02:00', 'from must be before to'],
       ['from=yesterday', 'from and to must be ISO dates'],
     ] as const) {
@@ -114,13 +114,13 @@ describe('dashboard — venue payments', () => {
     const venue = await seedVenue();
     const auth = await venueDashboardAuth(venue);
     for (const [query, message] of [
-      ['from[a]=b', 'from and to must be ISO dates'], ['from[toString]=x', 'from and to must be ISO dates'],
-      ['to[a]=b', 'from and to must be ISO dates'], ['from[]=2026-10-01T00:00:00%2B02:00', 'from and to must be ISO dates'],
-      ['method[toString]=x', 'Unknown payment method'], ['method[]=cash', 'Unknown payment method'],
-      ['source[toString]=x', 'Unknown payment source'], ['source=table&source=counter', 'Unknown payment source'],
-      ['staffId[toString]=x', 'Invalid staffId'], ['staffId[]=aaaaaaaaaaaaaaaaaaaaaaaa', 'Invalid staffId'],
-      ['merchantId[toString]=x', 'Invalid merchantId'], ['reference[toString]=x', 'Invalid reference'],
-      ['page[]=1', 'Invalid page'], ['page[toString]=x', 'Invalid page'], ['limit[toString]=x', 'Invalid limit'],
+      ['from[a]=b', 'Invalid query parameter: from'], ['from[toString]=x', 'Invalid query parameter: from'],
+      ['to[a]=b', 'Invalid query parameter: to'], ['from[]=2026-10-01T00:00:00%2B02:00', 'Invalid query parameter: from'],
+      ['method[toString]=x', 'Invalid query parameter: method'], ['method[]=cash', 'Invalid query parameter: method'],
+      ['source[toString]=x', 'Invalid query parameter: source'], ['source=table&source=counter', 'Invalid query parameter: source'],
+      ['staffId[toString]=x', 'Invalid query parameter: staffId'], ['staffId[]=aaaaaaaaaaaaaaaaaaaaaaaa', 'Invalid query parameter: staffId'],
+      ['merchantId[toString]=x', 'Invalid query parameter: merchantId'], ['reference[toString]=x', 'Invalid query parameter: reference'],
+      ['page[]=1', 'Invalid query parameter: page'], ['page[toString]=x', 'Invalid query parameter: page'], ['limit[toString]=x', 'Invalid query parameter: limit'],
     ] as const) {
       const res = await request(app).get(`${URL}?${query}`).set('Authorization', auth);
       expect([query, res.status, res.body.message]).toEqual([query, 400, message]);

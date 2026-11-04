@@ -99,11 +99,9 @@ export async function seedVenueTill(venue: SeededVenue, merchantId: string, opts
   return { merchantOperatorId: String(operator._id), loginCode: operator.loginCode, auth: `Bearer ${token}` };
 }
 
-const ALL = [TicketsPermission.MANAGE_VENUE, TicketsPermission.MANAGE_STOCK, TicketsPermission.VIEW_REVENUE];
-
 /** A dashboard token for the venue's vendor. Default: every venue permission. */
-export const venueDashboardAuth = async (venue: SeededVenue, permissions: string[] = ALL) =>
-  `Bearer ${await seedVendorSessionToken(venue.vendorId, { permissions })}`;
+export const venueDashboardAuth = async (venue: SeededVenue, permissions?: string[]) =>
+  `Bearer ${await seedVendorSessionToken(venue.vendorId, permissions ? { permissions } : {})}`;
 
 /** Arm the low-stock alert for one stall's product: it fires once when on-hand falls to `lowStockThreshold`. */
 export const setLowStockThreshold = (merchantId: string, productId: string, lowStockThreshold: number) =>

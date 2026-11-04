@@ -158,8 +158,9 @@ describe('dashboard — venue tables, edges', () => {
     expect((await request(app).get(`${URL}/${f.tableId}`).set('Authorization', manager)).status).toBe(200);
     const closed = await request(app).post(`${URL}/${f.tableId}/void`).set('Authorization', manager).send({ reason: 'Guests left without paying' });
     expect(closed.status).toBe(200);
-    // an owner token names no sub-user, so the vendor is the actor
-    expect((await Table.findById(f.tableId))!.voidedBy).toBe(f.venue.vendorId);
+    // The restricted grant belongs to persisted staff, who is the audit actor.
+    const staffId = JSON.parse(Buffer.from(manager.split('.')[1]!, 'base64url').toString()).userId;
+    expect((await Table.findById(f.tableId))!.voidedBy).toBe(staffId);
   });
 
   it('an UPPER-CASE table id closes the walkout too', async () => {

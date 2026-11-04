@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import app from '@/app';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
-import { signSuperAdminToken, signVendorToken } from '../../__tests__/helpers/auth';
+import { signAdminSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { Vendor } from '@models/vendor.model';
 import { Venue } from '@models/venue.model';
 import { GateOperator } from '@models/gateOperator.model';
@@ -12,7 +12,9 @@ beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 afterEach(clearTestDb);
 
-const admin = () => `Bearer ${signSuperAdminToken()}`;
+let adminToken: string;
+beforeEach(async () => { adminToken = await signAdminSessionToken(); });
+const admin = () => `Bearer ${adminToken}`;
 let seq = 0;
 async function makeVendor(overrides: Record<string, unknown> = {}) {
   seq += 1;
@@ -30,7 +32,7 @@ describe('POST /api/tickets/admin/venues', () => {
     expect(res.body.data).toMatchObject({ name: 'Kwa-Linda Lounge', currency: 'SZL', status: 'active' });
     expect(res.body.data.id).toMatch(/^[0-9a-f]{24}$/);
     const stored = await Venue.findOne({ vendorId: v._id }).lean();
-    expect(stored?.activatedBy).toBe('admin-vendor-id');
+    expect(stored?.activatedBy).toBe((jwt.decode(adminToken) as { vendorId: string }).vendorId);
   });
 
   it('409s a second switch-on and keeps exactly one venue', async () => {
@@ -55,7 +57,7 @@ describe('POST /api/tickets/admin/venues', () => {
   // scopePermissionsToType), so a switch-on would be a success nobody can see.
   it('409s a transport or services account and creates no venue', async () => {
     const transport = await makeVendor({ operatorType: 'transport' });
-    const services = await makeVendor({ operatorType: 'services', serviceCategory: 'sound_hire' });
+    const services = await makeVendor({ operatorType: 'services', serviceCategories: ['sound_hire'] });
     for (const v of [transport, services]) {
       const res = await request(app)
         .post('/api/tickets/admin/venues')
@@ -83,7 +85,7 @@ describe('POST /api/tickets/admin/venues', () => {
     const v = await makeVendor();
     const res = await request(app)
       .post('/api/tickets/admin/venues')
-      .set('Authorization', `Bearer ${signVendorToken(String(v._id))}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(v._id))}`)
       .send({ vendorId: String(v._id), name: 'A', currency: 'SZL' });
     expect(res.status).toBe(403);
   });
@@ -178,7 +180,7 @@ describe('PATCH /api/tickets/admin/venues/:id', () => {
     const id = await activeVenue();
     const res = await request(app)
       .patch(`/api/tickets/admin/venues/${id}`)
-      .set('Authorization', `Bearer ${signVendorToken(new mongoose.Types.ObjectId().toHexString())}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(new mongoose.Types.ObjectId().toHexString())}`)
       .send({ status: 'suspended' });
     expect(res.status).toBe(403);
   });
