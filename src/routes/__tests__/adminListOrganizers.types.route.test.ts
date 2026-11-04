@@ -8,18 +8,22 @@ import { Venue } from '@models/venue.model';
 beforeAll(connectTestDb);
 afterAll(disconnectTestDb);
 afterEach(clearTestDb);
+let adminToken: string;
+beforeEach(async () => { adminToken = await signAdminSessionToken(); });
 
 type Row = { id: string; businessName: string; type: string; verificationStatus: string };
 
 let n = 0;
 async function seed(businessName: string, extra: Record<string, unknown> = {}) {
   n += 1;
-  return Vendor.create({
+  // Directory fixtures do not sign in with a password; avoid hashing every row.
+  const [vendor] = await Vendor.insertMany([{
     businessName,
     phoneNumber: `+268762${String(n).padStart(5, '0')}`,
     password: 'secret1',
     ...extra,
-  });
+  }]);
+  return vendor!;
 }
 
 async function venueFor(vendorId: unknown, status: 'active' | 'suspended' = 'active') {
@@ -27,7 +31,7 @@ async function venueFor(vendorId: unknown, status: 'active' | 'suspended' = 'act
 }
 
 async function list(qs = '') {
-  return request(app).get(`/api/tickets/admin/organizers${qs}`).set('Authorization', `Bearer ${await signAdminSessionToken()}`);
+  return request(app).get(`/api/tickets/admin/organizers${qs}`).set('Authorization', `Bearer ${adminToken}`);
 }
 
 const names = (res: request.Response) => (res.body.data.organizers as Row[]).map((r) => r.businessName);
