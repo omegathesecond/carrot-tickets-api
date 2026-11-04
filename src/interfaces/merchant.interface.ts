@@ -12,8 +12,9 @@ export type MerchantStatus = 'active' | 'suspended';
 export interface IMerchant extends Document {
   deletedAt?: Date;
   name: string;
-  /** The event this merchant sells at — a merchant is scoped to ONE event. */
-  eventId: Types.ObjectId;
+  /** The event OR venue this stall trades at — exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: Types.ObjectId;
+  venueId?: Types.ObjectId;
   /** Platform commission taken off every charge, 0-100. Defaults to 0 (no cut). */
   commissionPercent: number;
   status: MerchantStatus;
@@ -34,10 +35,16 @@ export interface MerchantToken {
   /** The PERSON on the till — what each charge is attributed to. */
   merchantOperatorId: string;
   operatorName: string;
-  eventId: string;
   /** The stall's display name. */
   name: string;
-  /** The event's display name, for UI headers (e.g. the vendor/POS chrome). */
+  /** Exactly one of eventId / venueId — the stall's owner. */
+  eventId?: string;
+  /** The event's display name, for UI headers (event tills). */
   eventName?: string;
+  venueId?: string;
+  /** The venue's display name, for UI headers (venue tills). */
+  venueName?: string;
+  /** The venue's currency (venue tills), so the POS shows E or R without asking. */
+  currency?: 'SZL' | 'ZAR';
   permissions: MerchantPermission[];
 }

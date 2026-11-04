@@ -2,6 +2,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { WaiterAuthService } from '@services/waiterAuth.service';
 import { Waiter } from '@models/waiter.model';
+import { Venue } from '@models/venue.model';
 import { WaiterPermission, WaiterToken } from '@interfaces/waiter.interface';
 import { deriveWaiterPermissions } from '@interfaces/operatorGrant.interface';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
@@ -42,10 +43,17 @@ export const authenticateWaiter = async (req: Request, res: Response, next: Next
   // A database failure is NOT swallowed into a 401 — it goes to the error
   // handler as a 500, so an outage reads as an outage rather than "signed out".
   let waiter: { isActive?: boolean; grants?: string[] } | null;
+  let venue: { _id: unknown; name: string; currency: string; vendorId: unknown; status: string } | null = null;
   try {
-    waiter = await Waiter.findById(decoded.waiterId)
-      .select('isActive grants')
-      .lean<{ isActive?: boolean; grants?: string[] } | null>();
+    [waiter, venue] = await Promise.all([
+      Waiter.findById(decoded.waiterId)
+        .select('isActive grants')
+        .lean<{ isActive?: boolean; grants?: string[] } | null>(),
+      // An event token adds no read.
+      decoded.venueId
+        ? Venue.findById(decoded.venueId).select('name currency vendorId status').lean<{ _id: unknown; name: string; currency: string; vendorId: unknown; status: string } | null>()
+        : Promise.resolve(null),
+    ]);
   } catch (e) {
     next(e);
     return;
@@ -54,11 +62,17 @@ export const authenticateWaiter = async (req: Request, res: Response, next: Next
   // A row that no longer exists is refused the same way as a revoked one: a
   // deleted person must not keep working because nothing says no.
   if (!waiter || !waiter.isActive) { ApiResponseUtil.unauthorized(res, 'Operator deactivated'); return; }
+  // Suspending a venue signs its waiters out on their next request — the
+  // token alone (7 days) would otherwise keep them trading.
+  if (decoded.venueId && (!venue || venue.status !== 'active')) {
+    ApiResponseUtil.unauthorized(res, 'Venue trading is suspended'); return;
+  }
 
   // The token's own `permissions` is the POS's copy for rendering; it is NEVER
   // what authorizes. The row is already in hand from the liveness read above,
   // so deriving here costs no extra query.
   (req as any).waiter = { ...decoded, permissions: deriveWaiterPermissions(waiter.grants) };
+  if (venue) (req as any).waiterVenue = venue;
   next();
 };
 

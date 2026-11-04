@@ -1,4 +1,5 @@
 import mongoose, { ClientSession } from 'mongoose';
+import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 import { Event } from '@models/event.model';
 import { Merchant } from '@models/merchant.model';
 import { MerchantOperator } from '@models/merchantOperator.model';
@@ -9,8 +10,8 @@ const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toUpp
 
 export class MerchantOperatorService {
   /** Shared by manual creation and the stall-named account generator. */
-  static async create(params: {
-    merchantId: string; eventId: string; fullName: string; phoneNumber?: string;
+  static async create(params: ScopeIds & {
+    merchantId: string; fullName: string; phoneNumber?: string;
     pin?: string; grants?: unknown; session?: ClientSession; reservedCodes?: Set<string>;
   }) {
     const loginCode = await generateUniqueLoginCode(params.reservedCodes);
@@ -18,7 +19,7 @@ export class MerchantOperatorService {
     const pin = params.pin ?? generatePin();
     const operator = await new MerchantOperator({
       fullName: params.fullName, phoneNumber: params.phoneNumber,
-      merchantId: params.merchantId, eventId: params.eventId,
+      merchantId: params.merchantId, ...scopeMatch(params),
       loginCode, pin, grants: sanitizeGrants(params.grants),
     }).save({ session: params.session });
     return { operator, loginCode, pin };

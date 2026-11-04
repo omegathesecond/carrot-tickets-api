@@ -66,13 +66,13 @@ describe('MerchantService.charge — itemised', () => {
     expect((await Wallet.findById(wallet._id))!.balance).toBe(90000);
     expect(first.charge.items![0]).toMatchObject({ qty: 2, unitPrice: 5000, lineTotal: 10000 });
     expect(await LedgerService.totalOwed(String(eventId), LedgerAccountType.MERCHANT)).toBe(10000);
-    const tiles = await PosCatalogService.forMerchant(String(merchant._id), String(eventId));
+    const tiles = await PosCatalogService.forMerchant(String(merchant._id), { eventId: String(eventId) });
     expect(tiles.find(p => p.productId === String(product._id))).toMatchObject({ status: 'untracked', onHand: 0, price: 5000 });
-    const board = await StockReportService.board(String(eventId));
+    const board = await StockReportService.board({ eventId: String(eventId) });
     expect(board.byProduct.find(p => p.productId === String(product._id))).toMatchObject({ stockTracked: false, status: 'UNTRACKED', unitsSold: 2, revenue: 10000 });
-    const recon = await StockReportService.reconciliation(String(eventId), new Date());
+    const recon = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: new Date() });
     expect(recon.byProduct.find(p => p.productId === String(product._id))).toMatchObject({ stockTracked: false, sold: 2, salesRevenue: 10000, physicalCount: null, variance: null });
-    const dashboard = await StockReportService.dashboard(String(eventId));
+    const dashboard = await StockReportService.dashboard({ eventId: String(eventId) });
     expect(dashboard.peakTimes.reduce((n, p) => n + p.units, 0)).toBe(2);
     await expect(StockService.applyMovement({ eventId, merchantId: merchant._id, productId: product._id, delta: 10, reason: StockMovementReason.RECEIVE, byType: 'Organizer', by: 'test' })).rejects.toThrow('does not track inventory');
     await expect(StockCountService.recordCount({ eventId: String(eventId), merchantId: String(merchant._id), productId: String(product._id), countedOnHand: 0, byType: 'Organizer', by: 'test' })).rejects.toThrow('does not track inventory');
@@ -142,7 +142,7 @@ describe('MerchantService.charge — itemised', () => {
     if (scenario.includes('refund')) await MerchantReversalService.reverse({ chargeId: String(charge._id),
       eventId: String(eventId), merchantId: String(merchant._id), merchantOperatorId: String(operator._id),
       bandUid: wallet.bandUid!, pin: '111111', reason: 'Customer return', restock: scenario !== 'kept refund' });
-    const report = await StockReportService.reconciliation(String(eventId), new Date());
+    const report = await StockReportService.reconciliation({ eventId: String(eventId) }, { doorsAt: new Date() });
     const row = report.perBar.find(r => r.productId === String(beer._id))!;
     const sign = scenario === 'refund after opening' ? -1 : scenario.includes('refund') ? 0 : 1;
     expect(row).toMatchObject({ regularUnits: scenario === 'historical' ? 0 : sign * 4,

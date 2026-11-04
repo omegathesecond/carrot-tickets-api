@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { Merchant } from '@models/merchant.model';
 import { ExportService } from '@services/export.service';
-import { loadOwnedEvent } from '@controllers/merchantAdmin.controller';
+import { loadOwnedEvent } from '@middleware/tradingScope.middleware';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { HEX24 } from '@utils/controllerHelpers.util';
 

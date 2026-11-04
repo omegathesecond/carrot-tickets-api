@@ -3,6 +3,7 @@ import { Product, IProduct } from '@models/product.model';
 import { ProductStock, IProductStock } from '@models/productStock.model';
 import { Merchant } from '@models/merchant.model';
 import { ProductCategory } from '@interfaces/stock.interface';
+import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 export type PosTileStatus = 'in_stock' | 'low' | 'sold_out' | 'untracked';
 
@@ -90,30 +91,30 @@ export class PosCatalogService {
    * loading every product at the event and left-joining quantities made a
    * stall's handheld list its neighbours' items as permanent sold-out tiles.
    */
-  static async forMerchant(merchantId: string, eventId: string): Promise<PosTile[]> {
+  static async forMerchant(merchantId: string, ids: ScopeIds): Promise<PosTile[]> {
     const rows = await ProductStock.find({ merchantId }).lean();
     const byProduct = new Map(rows.map((r) => [String(r.productId), r]));
     const products = await Product.find({
-      eventId, active: true, _id: { $in: rows.map((r) => r.productId) },
+      ...scopeMatch(ids), active: true, _id: { $in: rows.map((r) => r.productId) },
     }).sort({ name: 1 }).lean();
     return products.map((p) => PosCatalogService.tile(p, byProduct.get(String(p._id))));
   }
 
   /**
-   * The whole event's catalogue in ONE list, for the waiter working the floor
-   * rather than a stall. A product carried by three stalls appears three
+   * One event's or one venue's whole menu in ONE list, for the waiter working
+   * the floor rather than a stall. A product carried by three stalls appears three
    * times: the waiter is choosing WHERE to fetch it from, and the count that
    * decides sold-out — and the stall that gets the order — differ per row.
    *
-   * Scoped through the event's ACTIVE stalls rather than by ProductStock's own
-   * eventId. Two reasons: a Merchant is the authoritative event boundary (it
+   * Scoped through the owner's ACTIVE stalls rather than by ProductStock's own
+   * eventId. Two reasons: a Merchant is the authoritative owner boundary (it
    * is what the stall's own catalogue keys off), and a suspended stall must
    * not be offered to the floor — it can neither log its till in
    * (merchantAuth) nor take a charge (MerchantService.charge), so advertising
    * its shelves would be the one remaining way stock left a closed stall.
    */
-  static async forEvent(eventId: string): Promise<StallPosTile[]> {
-    const merchants = await Merchant.find({ eventId, status: 'active' }).select('name').lean();
+  static async forScope(ids: ScopeIds): Promise<StallPosTile[]> {
+    const merchants = await Merchant.find({ ...scopeMatch(ids), status: 'active' }).select('name').lean();
     if (merchants.length === 0) return [];
     const merchantName = new Map(merchants.map((m: any) => [String(m._id), m.name as string]));
 
@@ -121,7 +122,7 @@ export class PosCatalogService {
     if (rows.length === 0) return [];
 
     const products = await Product.find({
-      eventId, active: true, _id: { $in: rows.map((r) => r.productId) },
+      ...scopeMatch(ids), active: true, _id: { $in: rows.map((r) => r.productId) },
     }).lean();
     const byId = new Map<string, CatalogProduct>(products.map((p) => [String(p._id), p]));
 

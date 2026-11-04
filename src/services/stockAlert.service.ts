@@ -14,7 +14,7 @@ export class StockAlertService {
   /** After a sale, for each sold product atomically arm-and-detect a downward
    *  threshold crossing, and fire one low_stock notification per crossing. */
   static async evaluateAfterSale(params: {
-    eventId: string; vendorId: string; merchantId: string; productIds: string[];
+    vendorId: string; merchantId: string; productIds: string[];
   }): Promise<void> {
     const { vendorId, merchantId, productIds } = params;
     for (const productId of productIds) {

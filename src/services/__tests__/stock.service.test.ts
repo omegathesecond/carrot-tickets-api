@@ -110,6 +110,35 @@ describe('StockService.applyMovement', () => {
     expect(String(stock!.eventId)).toBe(String(eventA));
   });
 
+  it('refuses a venue movement on an event-owned row: throws, and the row and journal are unchanged', async () => {
+    await StockService.applyMovement({ ...base, delta: 10, reason: StockMovementReason.RECEIVE });
+    const venueId = new mongoose.Types.ObjectId();
+    await expect(StockService.applyMovement({
+      venueId, merchantId, productId, byType: 'Organizer', by: 'o1', delta: 5, reason: StockMovementReason.RECEIVE,
+    })).rejects.toThrow(`refusing a movement for venueId ${venueId}`);
+    const row = await ProductStock.findOne({ merchantId, productId }).lean();
+    expect(row!.onHand).toBe(10);
+    expect(String(row!.eventId)).toBe(String(eventId));
+    expect(row!.venueId).toBeUndefined();
+    expect(await StockMovement.countDocuments({ merchantId, productId })).toBe(1);
+  });
+
+  it('refuses an event movement on a venue-owned row, decrements included', async () => {
+    const venueId = new mongoose.Types.ObjectId();
+    const venueBase = { venueId, merchantId, productId, byType: 'Organizer' as const, by: 'o1' };
+    await StockService.applyMovement({ ...venueBase, delta: 10, reason: StockMovementReason.RECEIVE });
+    for (const delta of [5, -2]) {
+      await expect(StockService.applyMovement({
+        ...base, delta, reason: delta > 0 ? StockMovementReason.RECEIVE : StockMovementReason.SALE,
+      })).rejects.toThrow(`refusing a movement for eventId ${eventId}`);
+    }
+    const row = await ProductStock.findOne({ merchantId, productId }).lean();
+    expect(row!.onHand).toBe(10);
+    expect(String(row!.venueId)).toBe(String(venueId));
+    expect(row!.eventId).toBeUndefined();
+    expect(await StockMovement.countDocuments({ merchantId, productId })).toBe(1);
+  });
+
   it('getOnHand returns 0 when no row exists, then the current balance after a receive', async () => {
     expect(await StockService.getOnHand(merchantId, productId)).toBe(0);
     await StockService.applyMovement({ ...base, delta: 12, reason: StockMovementReason.RECEIVE });

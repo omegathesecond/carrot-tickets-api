@@ -51,9 +51,11 @@ export interface ReconciliationData {
   total: ReconciliationTotal;
 }
 
-export interface ReconciliationPdfEvent {
+/** The PDF's identity block: the event or venue name, and a line under it. */
+export interface ReconciliationPdfHeader {
   name: string;
-  venue?: string | undefined;
+  /** An event's venue, or a venue report's date range. */
+  subtitle?: string;
   currency: 'SZL' | 'ZAR';
 }
 
@@ -156,7 +158,7 @@ export class StockReconciliationPdfService {
    * total.
    */
   static async buildPdfBuffer(
-    event: ReconciliationPdfEvent,
+    header: ReconciliationPdfHeader,
     data: ReconciliationData,
     generatedAt: Date = new Date(),
   ): Promise<Buffer> {
@@ -172,10 +174,10 @@ export class StockReconciliationPdfService {
 
       // Fires for every page AFTER the first (the constructor already made
       // page 1), so continuation pages carry the event forward.
-      doc.on('pageAdded', () => this.drawContinuationHeader(doc, event, generatedAt));
+      doc.on('pageAdded', () => this.drawContinuationHeader(doc, header, generatedAt));
 
       try {
-        this.draw(doc, event, data, generatedAt);
+        this.draw(doc, header, data, generatedAt);
         this.stampPageNumbers(doc);
         doc.end();
       } catch (e) {
@@ -186,17 +188,17 @@ export class StockReconciliationPdfService {
 
   private static draw(
     doc: PDFKit.PDFDocument,
-    event: ReconciliationPdfEvent,
+    header: ReconciliationPdfHeader,
     data: ReconciliationData,
     generatedAt: Date,
   ): void {
-    this.drawHeader(doc, event, generatedAt);
+    this.drawHeader(doc, header, generatedAt);
 
     const stalls = groupByStall(data.perBar);
     if (stalls.length === 0) {
       doc.moveDown(2);
       doc.fillColor(MUTED).fontSize(11).font('Helvetica')
-        .text('No stock recorded for this event yet.', PAGE_MARGIN, doc.y);
+        .text('No stock recorded yet.', PAGE_MARGIN, doc.y);
       this.drawFooter(doc);
       return;
     }
@@ -219,32 +221,32 @@ export class StockReconciliationPdfService {
     if (doc.y + 100 > doc.page.height - PAGE_MARGIN - ROW_HEIGHT) doc.addPage();
     else doc.moveDown(1);
     doc.fillColor(INK).fontSize(10).font('Helvetica').text(
-      `Sales pricing audit (${event.currency}). Net of refunds; excludes purchase surcharges and commission.`, PAGE_MARGIN, doc.y);
+      `Sales pricing audit (${header.currency}). Net of refunds; excludes purchase surcharges and commission.`, PAGE_MARGIN, doc.y);
     doc.moveDown(0.3);
     doc.fontSize(8).fillColor(MUTED).text(
       'Regular + Special + Unclassified + Refund kept = stock sold. Refund kept means refunded units not returned to stock. Unclassified sales have no saved price split. List value - Discount = Net sales.',
       PAGE_MARGIN, doc.y, { width: doc.page.width - PAGE_MARGIN * 2 });
     for (const stall of stalls) {
       this.drawTable(doc, { title: `${stall.merchantName} - Sales pricing`, nameHeader: 'Product',
-        rows: stall.rows.map(r => ({ name: r.productName, values: r })), columns: PRICING_COLUMNS, currency: event.currency });
+        rows: stall.rows.map(r => ({ name: r.productName, values: r })), columns: PRICING_COLUMNS, currency: header.currency });
     }
     this.drawTable(doc, { title: 'All stalls - Sales pricing', nameHeader: 'Product',
       rows: data.byProduct.map(r => ({ name: r.productName, values: r })), totalRow: data.total,
-      columns: PRICING_COLUMNS, currency: event.currency });
+      columns: PRICING_COLUMNS, currency: header.currency });
 
     this.drawFooter(doc);
   }
 
-  private static drawHeader(doc: PDFKit.PDFDocument, event: ReconciliationPdfEvent, generatedAt: Date): void {
+  private static drawHeader(doc: PDFKit.PDFDocument, header: ReconciliationPdfHeader, generatedAt: Date): void {
     const width = doc.page.width - PAGE_MARGIN * 2;
 
     doc.rect(PAGE_MARGIN, PAGE_MARGIN, width, 4).fillColor(BRAND).fill();
     doc.fillColor(INK).fontSize(18).font('Helvetica-Bold')
       .text('Stock reconciliation', PAGE_MARGIN, PAGE_MARGIN + 16);
     doc.fillColor(INK).fontSize(12).font('Helvetica')
-      .text(event.name, PAGE_MARGIN, doc.y + 2);
-    if (event.venue) {
-      doc.fillColor(MUTED).fontSize(10).font('Helvetica').text(event.venue, PAGE_MARGIN, doc.y + 1);
+      .text(header.name, PAGE_MARGIN, doc.y + 2);
+    if (header.subtitle) {
+      doc.fillColor(MUTED).fontSize(10).font('Helvetica').text(header.subtitle, PAGE_MARGIN, doc.y + 1);
     }
     // A printed reconciliation gets filed, emailed and argued over weeks later.
     // Without the moment it describes it is just a page of numbers.
@@ -256,14 +258,14 @@ export class StockReconciliationPdfService {
   /** Slim header for pages 2+ — enough to identify a page on its own. */
   private static drawContinuationHeader(
     doc: PDFKit.PDFDocument,
-    event: ReconciliationPdfEvent,
+    header: ReconciliationPdfHeader,
     generatedAt: Date,
   ): void {
     const width = doc.page.width - PAGE_MARGIN * 2;
     doc.rect(PAGE_MARGIN, PAGE_MARGIN, width, 2).fillColor(BRAND).fill();
     doc.fillColor(MUTED).fontSize(8).font('Helvetica')
       .text(
-        `Stock reconciliation — ${event.name} — as at ${formatAsAt(generatedAt)} (Eswatini time)`,
+        `Stock reconciliation — ${header.name} — as at ${formatAsAt(generatedAt)} (Eswatini time)`,
         PAGE_MARGIN,
         PAGE_MARGIN + 6,
         { width, lineBreak: false },

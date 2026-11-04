@@ -2,6 +2,24 @@ import { Document, Types } from 'mongoose';
 
 export type TableStatus = 'open' | 'settled' | 'voided';
 
+export type TableOrderStatus = 'sent' | 'handed_out' | 'collected';
+
+/** One stall's share of one round at a VENUE table (venue trading Phase 3). */
+export interface ITableOrder {
+  _id: Types.ObjectId;
+  merchantId: Types.ObjectId;
+  lineIds: Types.ObjectId[];
+  /** The round's idempotency key — shared by every order row the round created. */
+  clientTxnId: string;
+  status: TableOrderStatus;
+  sentAt: Date;
+  sentBy: string;
+  handedOutAt?: Date;
+  handedOutBy?: string;
+  acceptedAt?: Date;
+  acceptedBy?: string;
+}
+
 /**
  * How far one STALL has got with handing its share of a table over.
  *
@@ -51,10 +69,15 @@ export interface ITableLine {
   qty: number;
   addedBy: string;
   addedAt: Date;
+  /** Venue lines only: the round (ITableOrder) this line was sent in. */
+  orderId?: Types.ObjectId;
+  /** Venue lines only: how many of `qty` have been paid for. */
+  paidQty?: number;
 }
 
 export interface ITable extends Document {
-  eventId: Types.ObjectId;
+  eventId?: Types.ObjectId;
+  venueId?: Types.ObjectId;
   label: string;
   status: TableStatus;
   openedBy: string;
@@ -77,6 +100,10 @@ export interface ITable extends Document {
    * which reads as "nothing outstanding", the right answer for both.
    */
   fulfilment: ITableFulfilment[];
+  /** VENUE tables only: the rounds sent to each stall. Event tables use `fulfilment`. */
+  orders?: ITableOrder[];
+  /** VENUE tables only: what has been paid so far (a venue bill takes several payments). */
+  paidTotal?: number;
   settledAt?: Date;
   settledBy?: string;
   walletId?: Types.ObjectId;

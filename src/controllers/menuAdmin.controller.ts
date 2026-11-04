@@ -1,8 +1,10 @@
 import { NextFunction, Request, Response } from 'express';
-import { Event } from '@models/event.model';
 import { MenuItem } from '@models/menuItem.model';
 import { MenuOrder, MenuOrderFulfillmentStatus, fulfillmentTransitionRefusal } from '@models/menuOrder.model';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+// A menu op is only allowed by the owner of the event it belongs to
+// (super-admin bypasses) — the same check every stall and stock handler runs.
+import { loadOwnedEvent } from '@middleware/tradingScope.middleware';
 import {
   createMenuItemSchema,
   updateMenuItemSchema,
@@ -13,19 +15,6 @@ import {
 function actorOf(req: Request) {
   const u = (req as any).ticketsUser;
   return { isSuperAdmin: !!u?.isSuperAdmin, vendorId: u?.vendorId as string | undefined };
-}
-
-// Mirrors StockAdminController.loadOwnedEvent — a menu op is only allowed by
-// the owner of the event it belongs to (super-admin bypasses).
-async function loadOwnedEvent(req: Request, res: Response, eventId: string): Promise<any | null> {
-  if (!eventId) { ApiResponseUtil.badRequest(res, 'eventId is required'); return null; }
-  const event = await Event.findById(eventId).lean();
-  if (!event) { ApiResponseUtil.notFound(res, 'Event not found'); return null; }
-  const actor = actorOf(req);
-  if (!actor.isSuperAdmin && String(event.vendorId) !== actor.vendorId) {
-    ApiResponseUtil.forbidden(res, 'Event belongs to a different vendor'); return null;
-  }
-  return event;
 }
 
 export class MenuAdminController {
