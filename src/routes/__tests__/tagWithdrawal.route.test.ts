@@ -138,7 +138,7 @@ it('requires the private token for tracking and never exposes destination detail
   expect(tracked.headers['cache-control']).toBe('no-store');
 });
 
-it('restricts private payout details and decisions to administrators', async () => {
+it('protects private payout details from other organizers', async () => {
   const { body } = await post();
   expect((await request(app).get('/admin')).status).toBe(401);
   const normal = await seedVendorSessionToken(String(new mongoose.Types.ObjectId()));
@@ -217,7 +217,7 @@ it('requires login for lookup, submission and tracking, and prevents cross-event
   expect((await request(app).post('/public/lookup').set(auth(customer)).send({ bandUid: '0ae98d36', eventId: String(new mongoose.Types.ObjectId()) })).status).toBe(404);
 });
 
-it('gives organizers financial visibility only for their own events, without payout details or decisions', async () => {
+it('allows event owners to read payout details but prevents other organizers from reading or changing them', async () => {
   const owner = await seedVendorSessionToken(String(event.vendorId));
   const outsider = await seedVendorSessionToken('other-organizer');
   const { body } = await post();
@@ -229,16 +229,14 @@ it('gives organizers financial visibility only for their own events, without pay
   const detail = await request(app).get(`/admin/${id}`).set(auth(owner));
   expect(detail.status).toBe(200);
   expect(detail.body.data.status).toBe('pending');
-  for (const response of [list, detail]) {
-    expect(JSON.stringify(response.body)).not.toContain(bank.accountNumber);
-    expect(response.body.data).not.toHaveProperty('details');
-    expect(JSON.stringify(response.body)).not.toContain('detailsEncrypted');
-  }
+  expect(detail.body.data.details.bank.accountNumber).toBe(bank.accountNumber);
+  expect(detail.body.data).not.toHaveProperty('detailsEncrypted');
+  expect(JSON.stringify(list.body)).not.toContain(bank.accountNumber);
   expect((await request(app).get('/admin').set(auth(outsider))).body.data.total).toBe(0);
   expect((await request(app).get(`/admin?eventId=${event._id}`).set(auth(outsider))).body.data.total).toBe(0);
   expect((await request(app).get(`/admin/${id}`).set(auth(outsider))).status).toBe(404);
   for (const status of ['processing', 'paid', 'rejected']) {
-    expect((await decision(id, { status, paymentReference: 'REF', paymentCompleted: true, rejectionReason: 'Reason' }, owner)).status).toBe(403);
+    expect((await decision(id, { status, paymentReference: 'REF', paymentCompleted: true, rejectionReason: 'Reason' }, outsider)).status).toBe(404);
   }
   expect((await TagWithdrawalRequest.findById(id))!.status).toBe('pending');
   await decision(id, { status: 'processing' });
@@ -253,7 +251,10 @@ it('requires financial permission for organizer staff and rejects buyer access',
   const scanner = await seedVendorSessionToken(String(event.vendorId), { permissions: [TicketsPermission.SCAN_TICKETS] });
   const { body } = await post();
   expect((await request(app).get('/admin').set(auth(viewer))).status).toBe(200);
-  expect((await request(app).get(`/admin/${body.data.id}`).set(auth(viewer))).status).toBe(200);
+  const view = await request(app).get(`/admin/${body.data.id}`).set(auth(viewer));
+  expect(view.status).toBe(200);
+  expect(view.body.data).not.toHaveProperty('details');
+  expect(JSON.stringify(view.body)).not.toContain(bank.accountNumber);
   for (const token of [scanner, customer]) {
     expect((await request(app).get('/admin').set(auth(token))).status).toBe(403);
     expect((await request(app).get(`/admin/${body.data.id}`).set(auth(token))).status).toBe(403);
@@ -294,4 +295,52 @@ it('limits event options on the server while searches can find events beyond the
   const searched = await request(app).get('/admin/events').query({ search: 'Festival 24' }).set(auth());
   expect(searched.body.data).toHaveLength(1);
   expect(searched.body.data[0].name).toBe('Festival 24');
+});
+
+
+it('lets an organizer claim and pay its own withdrawal exactly once, keeping payment details available', async () => {
+  const owner = await seedVendorSessionToken(String(event.vendorId));
+  const { body } = await post();
+  const id = body.data.id;
+  expect((await decision(id, { status: 'processing' }, owner)).status).toBe(200);
+  const details = await request(app).get(`/admin/${id}`).set(auth(owner));
+  expect(details.body.data).toMatchObject({ status: 'processing', processingBy: String(event.vendorId), details: { bank } });
+  // Another processor must not claim, pay or release money assigned to this owner.
+  for (const status of ['processing', 'paid', 'rejected']) {
+    expect((await decision(id, { status, paymentCompleted: true, paymentReference: 'OTHER', rejectionReason: 'Other' })).status).toBe(409);
+  }
+  const payment = { status: 'paid', paymentCompleted: true, paymentReference: 'OWNER-BANK-123' };
+  expect((await decision(id, payment, owner)).status).toBe(200);
+  expect((await decision(id, payment, owner)).status).toBe(200);
+  expect(await WalletWithdrawal.countDocuments({ walletId: wallet._id })).toBe(1);
+  expect((await Wallet.findById(wallet._id))).toMatchObject({ balance: 0, status: 'closed' });
+  expect((await ReconciliationService.checkWalletBalances(String(event._id))).ok).toBe(true);
+  const paidDetails = await request(app).get(`/admin/${id}`).set(auth(owner));
+  expect(paidDetails.body.data.details.bank.accountNumber).toBe(bank.accountNumber);
+  const outsider = await seedVendorSessionToken('paid-replay-outsider');
+  expect((await decision(id, payment, outsider)).status).toBe(404);
+  const tracked = await request(app).post(`/public/${id}/track`).set(auth(customer)).send({ token: input.trackingToken, eventId: String(event._id) });
+  expect(tracked.body.data).toMatchObject({ status: 'paid', paymentReference: 'OWNER-BANK-123' });
+});
+
+it('lets an organizer reject its own request and releases the reserved balance', async () => {
+  const owner = await seedVendorSessionToken(String(event.vendorId));
+  const { body } = await post();
+  const id = body.data.id;
+  expect((await decision(id, { status: 'processing' }, owner)).status).toBe(200);
+  expect((await decision(id, { status: 'rejected', rejectionReason: 'Incorrect account details' }, owner)).status).toBe(200);
+  expect((await Wallet.findById(wallet._id))).toMatchObject({ balance: 12345, status: 'active' });
+  expect(await WalletWithdrawal.countDocuments()).toBe(0);
+});
+
+it('checks event ownership again before a claimed request is updated', async () => {
+  const owner = await seedVendorSessionToken(String(event.vendorId));
+  const { body } = await post();
+  const id = body.data.id;
+  expect((await decision(id, { status: 'processing' }, owner)).status).toBe(200);
+  await Event.updateOne({ _id: event._id }, { $set: { vendorId: new mongoose.Types.ObjectId() } });
+  expect((await request(app).get(`/admin/${id}`).set(auth(owner))).status).toBe(404);
+  expect((await decision(id, { status: 'paid', paymentCompleted: true, paymentReference: 'CHANGED-OWNER' }, owner)).status).toBe(404);
+  expect((await Wallet.findById(wallet._id))).toMatchObject({ balance: 12345, status: 'frozen' });
+  expect(await WalletWithdrawal.countDocuments()).toBe(0);
 });

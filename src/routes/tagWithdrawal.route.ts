@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import { Event } from '@models/event.model';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
-import { authenticateTickets, requireSuperAdmin, requireSuperAdminOrPermission, authenticateBuyerOrOrganizer } from '@middleware/ticketsAuth.middleware';
+import { authenticateTickets, requireTicketsOwner, requireSuperAdminOrPermission, authenticateBuyerOrOrganizer } from '@middleware/ticketsAuth.middleware';
 import { TagWithdrawalService } from '@services/tagWithdrawal.service';
 import { TagWithdrawalRequest, TAG_WITHDRAWAL_STATUSES } from '@models/tagWithdrawalRequest.model';
 import { SecurityRateLimitService, SecurityRateLimitError } from '@services/securityRateLimit.service';
@@ -50,7 +50,12 @@ export const adminTagWithdrawalRoutes = Router();
 adminTagWithdrawalRoutes.use(authenticateTickets, authenticateBuyerOrOrganizer,
   requireSuperAdminOrPermission(TicketsPermission.VIEW_REVENUE));
 
-// Scope every read, including direct request IDs, to the organizer's events.
+// Scope requests to the organizer's events. Payout writes also verify event
+// ownership inside the ledger transaction, before any status change or replay.
+const processorVendorId = (req: Request): string | null => {
+  const user = (req as any).ticketsUser;
+  return user.isSuperAdmin ? null : String(user.vendorId);
+};
 async function eventScope(req: Request, eventId?: string) {
   const user = (req as any).ticketsUser;
   if (user.isSuperAdmin) return eventId ? { eventId } : {};
@@ -94,18 +99,19 @@ adminTagWithdrawalRoutes.get('/events', handle(async (req, res) => {
   ApiResponseUtil.success(res, events);
 }));
 adminTagWithdrawalRoutes.get('/:id', handle(async (req, res) => {
-  if ((req as any).ticketsUser.isSuperAdmin) {
-    ApiResponseUtil.success(res, await TagWithdrawalService.detail(String(req.params['id'])));
+  const user = (req as any).ticketsUser;
+  if (user.isSuperAdmin || user.userType === 'vendor') {
+    ApiResponseUtil.success(res, await TagWithdrawalService.detail(String(req.params['id']), processorVendorId(req)));
     return;
   }
   const id = String(req.params['id']);
   if (!/^[a-fA-F0-9]{24}$/.test(id)) throw new HttpError(404, 'Withdrawal request not found');
-  // Organizer visibility does not expose decrypted attendee payment/contact data.
+  // Financial viewers on staff accounts cannot access payout/contact details.
   const row = await TagWithdrawalRequest.findOne({ _id: id, ...await eventScope(req) });
   if (!row) throw new HttpError(404, 'Withdrawal request not found');
   ApiResponseUtil.success(res, row);
 }));
-adminTagWithdrawalRoutes.post('/:id/status', requireSuperAdmin, handle(async (req, res) => {
+adminTagWithdrawalRoutes.post('/:id/status', requireTicketsOwner, handle(async (req, res) => {
   const { error, value } = Joi.object({
     status: Joi.string().valid('processing', 'paid', 'rejected').required(),
     paymentReference: Joi.string().trim().max(120), paymentCompleted: Joi.boolean(),
@@ -114,5 +120,5 @@ adminTagWithdrawalRoutes.post('/:id/status', requireSuperAdmin, handle(async (re
   if (error) throw new HttpError(400, 'Invalid withdrawal decision');
   const actor = (req as any).ticketsUser;
   ApiResponseUtil.success(res, await TagWithdrawalService.transition(String(req.params['id']), value.status,
-    String(actor.userId ?? actor.vendorId), value));
+    String(actor.userId ?? actor.vendorId), value, processorVendorId(req)));
 }));

@@ -107,15 +107,17 @@ export class TagWithdrawalService {
     return publicTagWithdrawal(row);
   }
 
-  static async detail(id: string) {
+  static async detail(id: string, vendorId: string | null) {
     const row = await TagWithdrawalRequest.findById(oid(id)).select('+detailsEncrypted');
     if (!row) throw new HttpError(404, 'Withdrawal request not found');
+    if (vendorId !== null && !await Event.exists({ _id: row.eventId, vendorId: oid(vendorId) }))
+      throw new HttpError(404, 'Withdrawal request not found');
     const { detailsEncrypted, ...safe } = row.toObject();
     const details: TagWithdrawalDetails = JSON.parse(decryptOperatorPin(detailsEncrypted, `tag-withdrawal:${row._id}`));
     return { ...safe, details };
   }
 
-  static async transition(id: string, status: TagWithdrawalStatus, actor: string, input: { paymentReference?: string; paymentCompleted?: boolean; rejectionReason?: string }) {
+  static async transition(id: string, status: TagWithdrawalStatus, actor: string, input: { paymentReference?: string; paymentCompleted?: boolean; rejectionReason?: string }, vendorId: string | null) {
     if (!['processing', 'paid', 'rejected'].includes(status)) throw new HttpError(400, 'Invalid withdrawal decision');
     const reference = input.paymentReference?.trim();
     const reason = input.rejectionReason?.trim();
@@ -127,6 +129,8 @@ export class TagWithdrawalService {
       await session.withTransaction(async () => {
         const row = await TagWithdrawalRequest.findById(oid(id)).session(session);
         if (!row) throw new HttpError(404, 'Withdrawal request not found');
+        const event = await Event.findOne({ _id: row.eventId, ...(vendorId !== null ? { vendorId: oid(vendorId) } : {}) }).session(session);
+        if (!event) throw new HttpError(404, 'Withdrawal request not found');
         // Replaying the same payment reference is safe; conflicting decisions are not.
         if (row.status === 'paid' && status === 'paid' && row.paymentReference === reference) return;
         if (status === 'processing' && row.status === 'processing' && row.processingBy === actor) return;
@@ -134,9 +138,8 @@ export class TagWithdrawalService {
         if (status === 'processing' ? row.status !== 'pending' : status === 'paid'
           ? row.status !== 'processing' || row.processingBy !== actor
           : !['pending', 'processing'].includes(row.status) || row.status === 'processing' && row.processingBy !== actor)
-          throw new HttpError(409, 'This request changed or is assigned to another administrator; refresh it');
+          throw new HttpError(409, 'This request changed or is assigned to another person; refresh it');
         if (status === 'paid') {
-          const event = await Event.findById(row.eventId).session(session);
           const wallet = await Wallet.findOne({ _id: row.walletId, eventId: row.eventId, status: 'frozen', balance: row.amount, currency: row.currency }).session(session);
           if (!wallet || !event || event.endTime.getTime() >= Date.now())
             throw new HttpError(409, 'Reserved balance or event settings changed; reconcile before confirming payment');
