@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { Event } from '@models/event.model';
 import { EventQuestion, IEventQuestion } from '@models/eventQuestion.model';
 import { EventQuestionReply } from '@models/eventQuestionReply.model';
@@ -163,6 +164,49 @@ export async function getQuestion(questionId: string, actor: SocialActor | null)
     ...hydrated,
     event: { id: String(question.eventId), name: ev?.name ?? null, image: ev?.thumbnailUrl ?? ev?.posterUrl ?? null },
   };
+}
+
+/** Discovery summaries across all event topics. Membership remains per question;
+ * the event badge only reports whether the viewer joined any of its topics. */
+interface EventTopicGroup {
+  event: { id: string; name: string; image: string | null };
+  replyCount: number;
+  likeCount: number;
+  createdAt: Date;
+  viewerIsMember: boolean;
+}
+
+export async function listTopicEvents(actor: SocialActor | null): Promise<EventTopicGroup[]> {
+  const groups = await EventQuestion.aggregate<{
+    _id: Types.ObjectId; replyCount: number; likeCount: number; createdAt: Date;
+  }>([
+    { $match: { eventId: { $type: 'objectId' } } },
+    { $group: {
+      _id: '$eventId', replyCount: { $sum: '$replyCount' },
+      likeCount: { $sum: '$likeCount' }, createdAt: { $max: '$createdAt' },
+    } },
+    { $sort: { createdAt: -1, _id: 1 } },
+  ]);
+  if (!groups.length) return [];
+  const eventIds = groups.map((g) => g._id);
+  const [events, joinedEventIds] = await Promise.all([
+    Event.find({ _id: { $in: eventIds } }).select('name posterUrl thumbnailUrl').lean(),
+    actor ? EventQuestionMember.distinct('eventId', {
+      eventId: { $in: eventIds }, buyerId: actor.id, actorType: actor.type,
+    }) : Promise.resolve([]),
+  ]);
+  const eventMap = new Map(events.map((e) => [String(e._id), e]));
+  const joined = new Set(joinedEventIds.map(String));
+  return groups.flatMap((g) => {
+    const event = eventMap.get(String(g._id));
+    // Deleted events cannot own a discoverable event card.
+    if (!event) return [];
+    return [{
+      event: { id: String(event._id), name: event.name, image: event.thumbnailUrl || event.posterUrl || null },
+      replyCount: g.replyCount, likeCount: g.likeCount, createdAt: g.createdAt,
+      viewerIsMember: joined.has(String(g._id)),
+    }];
+  });
 }
 
 /**

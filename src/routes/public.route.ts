@@ -97,6 +97,9 @@ router.get('/trending', PublicController.getTrending);
  */
 router.get('/topics/:tag/posts', optionalTicketsAuth, PublicController.getTopicPosts);
 
+/** Event discovery across all topics; optional auth personalizes the Joined badge. */
+router.get('/question-events', optionalTicketsAuth, EventQuestionController.topicEvents);
+
 /**
  * @route   GET /api/public/questions
  * @desc    Cross-event Q&A: the most recent questions across ALL events,

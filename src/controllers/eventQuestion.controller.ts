@@ -4,6 +4,7 @@ import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import {
   listQuestions,
+  listTopicEvents,
   listRecent,
   listRecentGeneral,
   getQuestion,
@@ -22,6 +23,16 @@ import {
  * anonymous view, writes 401 when no actor resolves.
  */
 export class EventQuestionController {
+  /** GET /api/public/question-events — event summaries, never merged conversations. */
+  static async topicEvents(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = await resolveActorFromRequest(req);
+      return ApiResponseUtil.success(res, await listTopicEvents(actor));
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load event topics');
+    }
+  }
+
   /** GET /api/community/:eventId/questions */
   static async list(req: Request, res: Response): Promise<any> {
     try {
