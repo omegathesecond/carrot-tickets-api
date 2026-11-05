@@ -15,18 +15,30 @@ describe('username.util', () => {
     for (let i = 0; i < 20; i++) {
       const u = await generateUniqueUsername();
       expect(u).toMatch(USERNAME_REGEX);
+      expect(u).not.toMatch(/\d/);
     }
   });
 
   it('derives from the buyer name when present', async () => {
     const u = await generateUniqueUsername('Laslie Georges');
-    expect(u).toMatch(/^laslie_georges_\d{3}$/);
+    expect(u).toBe('laslie_georges');
   });
 
-  it('avoids taken usernames', async () => {
-    await Buyer.create({ phone: '+26878000001', password: 'secret1', username: 'neon_fox_123' });
-    const u = await generateUniqueUsername();
-    expect(u).not.toBe('neon_fox_123');
+  it('adds letters only when the readable name is already taken', async () => {
+    await Buyer.create({ phone: '+26878000001', password: 'secret1', username: 'laslie_georges' });
+    const u = await generateUniqueUsername('Laslie Georges');
+    expect(u).toMatch(/^laslie_georges_[a-z]{4}$/);
+    expect(u).toMatch(USERNAME_REGEX);
+  });
+
+  it('keeps long collision candidates within the username limit', async () => {
+    const name = 'abcdefghijklmnop';
+    await Buyer.create({ phone: '+26878000004', password: 'secret1', username: name });
+    expect(await generateUniqueUsername(name)).toMatch(/^[a-z]{15}_[a-z]{4}$/);
+  });
+
+  it('does not assign reserved names', async () => {
+    expect(await generateUniqueUsername('Admin')).toMatch(/^admin_[a-z]{4}$/);
   });
 
   it('ensureUsername backfills once and is idempotent', async () => {
