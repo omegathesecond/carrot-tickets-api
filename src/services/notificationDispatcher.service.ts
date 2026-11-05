@@ -26,6 +26,7 @@ export const PREF_BY_TYPE: Record<NotificationType, keyof NotificationPrefs> = {
   // directly), so this entry exists only for Record<NotificationType,…>
   // exhaustiveness.
   enquiry_received: 'social',
+  preparation_update: 'social',
   story_like: 'social',
   // Vendor low-stock alerts bypass this buyer dispatcher entirely (written
   // directly via NotificationService.create — see cashless stock Slice 3

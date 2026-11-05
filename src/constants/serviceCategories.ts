@@ -9,6 +9,17 @@ export const SERVICE_CATEGORIES = [
   { value: 'security',        label: 'Security' },
   { value: 'marquees_tents',  label: 'Marquees & tent' },
   { value: 'transport',       label: 'Transport' },
+  { value: 'hair', label: 'Hair' },
+  { value: 'nails', label: 'Nails' },
+  { value: 'makeup', label: 'Makeup' },
+  { value: 'barber', label: 'Barber' },
+  { value: 'beauty_spa', label: 'Beauty Spa' },
+  { value: 'accommodation', label: 'Accommodation' },
+  { value: 'car_hire', label: 'Car Hire' },
+  { value: 'outfit_clothing', label: 'Outfit Clothing' },
+  { value: 'shoes', label: 'Shoes' },
+  { value: 'tour_guide', label: 'Tour Guide' },
+  { value: 'babysitting', label: 'Babysitting' },
   { value: 'other',           label: 'Other' },
 ] as const;
 
