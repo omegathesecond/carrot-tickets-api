@@ -8,6 +8,7 @@ import { EventQuestion } from '@models/eventQuestion.model';
 import { EventQuestionReply } from '@models/eventQuestionReply.model';
 import {
   listQuestions,
+  listTopicEvents,
   listRecent,
   getQuestion,
   createQuestion,
@@ -43,6 +44,39 @@ describe('eventQuestion.service', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  describe('listTopicEvents', () => {
+    it('groups all event topics, totals replies, excludes general posts and keeps memberships separate', async () => {
+      const first = await seedPublishedEvent();
+      const second = await seedPublishedEvent();
+      const buyer = await seedBuyer();
+      const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
+      const q = await createQuestion(first.eventId, actor, 'First topic');
+      const other = await createQuestion(first.eventId, actor, 'Separate topic');
+      await EventQuestion.updateOne({ _id: q.id }, { $set: { replyCount: 3 } });
+      await EventQuestion.updateOne({ _id: other.id }, { $set: { replyCount: 2 } });
+      // More than the recent-feed limit: the older event must remain discoverable.
+      await EventQuestion.insertMany(Array.from({ length: 22 }, (_, i) => ({
+        eventId: second.eventId, authorType: 'buyer', authorId: buyer._id,
+        body: `New topic ${i}`, replyCount: 1, likeCount: 0,
+      })));
+      await EventQuestion.create({ authorType: 'buyer', authorId: buyer._id, body: 'General chat', replyCount: 99 });
+      await leaveQuestion(other.id, actor);
+      const vendor = await seedVendor();
+      expect((await listTopicEvents({ type: 'vendor', id: String(vendor._id) })).every((g) => !g.viewerIsMember)).toBe(true);
+      const groups = await listTopicEvents(actor);
+      expect(groups).toHaveLength(2);
+      expect(groups.find((g) => g.event.id === first.eventId)).toMatchObject({ replyCount: 5, viewerIsMember: true, topicBodies: expect.arrayContaining(['First topic', 'Separate topic']) });
+      expect(groups.find((g) => g.event.id === second.eventId)).toMatchObject({ replyCount: 22, viewerIsMember: false, topicBodies: expect.arrayContaining(['New topic 0', 'New topic 21']) });
+      expect((await listQuestions(first.eventId, actor)).find((t) => t.id === other.id).viewerIsMember).toBe(false);
+      expect((await listTopicEvents(null)).every((g) => !g.viewerIsMember)).toBe(true);
+      await leaveQuestion(q.id, actor);
+      expect((await listTopicEvents(actor)).every((g) => !g.viewerIsMember)).toBe(true);
+    });
+    it('returns no fabricated event groups for an empty collection', async () => {
+      expect(await listTopicEvents(null)).toEqual([]);
+    });
+  });
 
   describe('createQuestion', () => {
     it('throws 400 for an empty body', async () => {
