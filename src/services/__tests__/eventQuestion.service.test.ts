@@ -9,6 +9,7 @@ import { EventQuestionReply } from '@models/eventQuestionReply.model';
 import {
   listQuestions,
   listTopicEvents,
+  listQuestionMembers,
   listRecent,
   getQuestion,
   createQuestion,
@@ -75,6 +76,33 @@ describe('eventQuestion.service', () => {
     });
     it('returns no fabricated event groups for an empty collection', async () => {
       expect(await listTopicEvents(null)).toEqual([]);
+    });
+  });
+
+  describe('topic member list', () => {
+    it('paginates beyond preview avatars, deduplicates event members and isolates topics', async () => {
+      const { eventId } = await seedPublishedEvent();
+      const buyer = await seedBuyer();
+      const actor: SocialActor = { type: 'buyer', id: String(buyer._id) };
+      const first = await createQuestion(eventId, actor, 'First');
+      const second = await createQuestion(eventId, actor, 'Second');
+      for (let i = 0; i < 5; i++) {
+        const other = await seedBuyer({ phone: `+2687800010${i}`, name: `Member ${i}` });
+        await joinQuestion(first.id, { type: 'buyer', id: String(other._id) });
+      }
+      const group = (await listTopicEvents(null))[0]!;
+      expect(group.memberCount).toBe(6);
+      expect(group.members).toHaveLength(4);
+      const page = await listQuestionMembers(first.id, 0, 4);
+      const rest = await listQuestionMembers(first.id, 4, 4);
+      expect(page.totalCount).toBe(6);
+      expect(rest.members).toHaveLength(2);
+      expect(new Set([...page.members, ...rest.members].map((m) => m.id)).size).toBe(6);
+      expect((await listQuestionMembers(second.id, 0, 50)).totalCount).toBe(1);
+    });
+    it('rejects invalid or missing topics', async () => {
+      await expect(listQuestionMembers('invalid', 0, 50)).rejects.toMatchObject({ statusCode: 400 });
+      await expect(listQuestionMembers(new mongoose.Types.ObjectId().toString(), 0, 50)).rejects.toMatchObject({ statusCode: 404 });
     });
   });
 
