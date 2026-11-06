@@ -4,6 +4,7 @@ import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import {
   listQuestions,
+  listQuestionMembers,
   listTopicEvents,
   listRecent,
   listRecentGeneral,
@@ -23,6 +24,19 @@ import {
  * anonymous view, writes 401 when no actor resolves.
  */
 export class EventQuestionController {
+  static async members(req: Request, res: Response): Promise<any> {
+    try {
+      const offset = Number(req.query['offset'] ?? 0);
+      const limit = Number(req.query['limit'] ?? 50);
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        return ApiResponseUtil.error(res, 'Invalid pagination', 400);
+      }
+      return ApiResponseUtil.success(res, await listQuestionMembers(req.params['questionId'] as string, offset, limit));
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load topic members');
+    }
+  }
+
   /** GET /api/public/question-events — event summaries, never merged conversations. */
   static async topicEvents(req: Request, res: Response): Promise<any> {
     try {

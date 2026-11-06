@@ -53,6 +53,7 @@ router.get('/questions/mine', optionalTicketsAuth, TopicsMineController.listMine
 router.post('/questions', optionalTicketsAuth, requireProfilePhoto, EventQuestionController.createGeneral);
 // Single topic (conversation page). After /questions/mine so the literal wins;
 // a 2-segment GET that never collides with the 3-segment POSTs below.
+router.get('/questions/:questionId/members', optionalTicketsAuth, EventQuestionController.members);
 router.get('/questions/:questionId', optionalTicketsAuth, EventQuestionController.get);
 router.post('/questions/:questionId/read', optionalTicketsAuth, TopicsMineController.markRead);
 

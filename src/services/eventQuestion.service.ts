@@ -169,6 +169,8 @@ export async function getQuestion(questionId: string, actor: SocialActor | null)
 /** Discovery summaries across all event topics. Membership remains per question;
  * the event badge only reports whether the viewer joined any of its topics. */
 interface EventTopicGroup {
+  members: AuthorDTO[];
+  memberCount: number;
   topicBodies: string[];
   event: { id: string; name: string; image: string | null };
   replyCount: number;
@@ -190,20 +192,27 @@ export async function listTopicEvents(actor: SocialActor | null): Promise<EventT
   ]);
   if (!groups.length) return [];
   const eventIds = groups.map((g) => g._id);
-  const [events, joinedEventIds] = await Promise.all([
+  const [events, memberRows] = await Promise.all([
     Event.find({ _id: { $in: eventIds } }).select('name posterUrl thumbnailUrl').lean(),
-    actor ? EventQuestionMember.distinct('eventId', {
-      eventId: { $in: eventIds }, buyerId: actor.id, actorType: actor.type,
-    }) : Promise.resolve([]),
+    EventQuestionMember.find({ eventId: { $in: eventIds } }).sort({ createdAt: -1, _id: -1 }).lean(),
   ]);
+  const maps = await loadAuthorMaps(memberRows.map((r) => ({ authorType: r.actorType, authorId: r.buyerId })));
+  const eventMembers = new Map<string, Map<string, AuthorDTO>>();
+  for (const r of memberRows) {
+    const id = String(r.eventId);
+    if (!eventMembers.has(id)) eventMembers.set(id, new Map());
+    eventMembers.get(id)!.set(`${r.actorType}:${r.buyerId}`, authorDto(r.actorType, r.buyerId, maps));
+  }
   const eventMap = new Map(events.map((e) => [String(e._id), e]));
-  const joined = new Set(joinedEventIds.map(String));
+  const joined = new Set(memberRows.filter((r) => actor && r.actorType === actor.type && String(r.buyerId) === String(actor.id)).map((r) => String(r.eventId)));
   return groups.flatMap((g) => {
     const event = eventMap.get(String(g._id));
     // Deleted events cannot own a discoverable event card.
     if (!event) return [];
     return [{
       event: { id: String(event._id), name: event.name, image: event.thumbnailUrl || event.posterUrl || null },
+      members: [...(eventMembers.get(String(g._id))?.values() ?? [])].slice(0, MAX_PREVIEW_MEMBERS),
+      memberCount: eventMembers.get(String(g._id))?.size ?? 0,
       topicBodies: g.topicBodies, replyCount: g.replyCount, likeCount: g.likeCount, createdAt: g.createdAt,
       viewerIsMember: joined.has(String(g._id)),
     }];
@@ -406,4 +415,17 @@ export async function leaveQuestion(questionId: string, actor: SocialActor): Pro
   if (!(await EventQuestion.exists({ _id: questionId }))) throw new HttpError(404, 'Topic not found');
   await EventQuestionMember.deleteOne({ questionId, actorType: actor.type, buyerId: actor.id });
   return (await loadMembershipInfo([questionId], actor)).get(questionId) ?? EMPTY_MEMBER_INFO;
+}
+
+/** Paginated complete membership, separate from the four-avatar preview. */
+export async function listQuestionMembers(questionId: string, offset: number, limit: number) {
+  if (!Types.ObjectId.isValid(questionId)) throw new HttpError(400, 'Invalid topic ID');
+  if (!await EventQuestion.exists({ _id: questionId })) throw new HttpError(404, 'Topic not found');
+  const filter = { questionId };
+  const [rows, totalCount] = await Promise.all([
+    EventQuestionMember.find(filter).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit).lean(),
+    EventQuestionMember.countDocuments(filter),
+  ]);
+  const maps = await loadAuthorMaps(rows.map((r) => ({ authorType: r.actorType, authorId: r.buyerId })));
+  return { members: rows.map((r) => authorDto(r.actorType, r.buyerId, maps)), totalCount };
 }

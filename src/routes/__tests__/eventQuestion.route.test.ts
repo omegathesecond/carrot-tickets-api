@@ -27,6 +27,22 @@ describe('event Q&A routes', () => {
     expect(res.body.data).toEqual([]);
   });
 
+  it('validates topic member pagination and returns the real joined members publicly', async () => {
+    const { eventId } = await seedPublishedEvent();
+    await seedBuyer();
+    const created = await request(app).post(`/api/community/${eventId}/questions`)
+      .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).send({ body: 'Member list topic' }).expect(201);
+    const url = `/api/community/questions/${created.body.data.id}/members`;
+    const list = await request(app).get(url).expect(200);
+    expect(list.body.data.totalCount).toBe(1);
+    expect(list.body.data.members[0].name).toBe('Test Buyer');
+    for (const query of ['offset=-1', 'offset=1.5', 'limit=0', 'limit=101', 'offset=nope']) {
+      await request(app).get(`${url}?${query}`).expect(400);
+    }
+    await request(app).get('/api/community/questions/invalid/members').expect(400);
+    await request(app).get('/api/community/questions/000000000000000000000000/members').expect(404);
+  });
+
   it('401s an anonymous attempt to post a question', async () => {
     const { eventId } = await seedPublishedEvent();
     await request(app).post(`/api/community/${eventId}/questions`).send({ body: 'Hello?' }).expect(401);
