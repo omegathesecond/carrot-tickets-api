@@ -53,16 +53,21 @@ export async function generateUniqueUsername(name?: string): Promise<string> {
   throw new Error('Could not generate a unique username, please try again');
 }
 
+export const LEGACY_GENERATED_USERNAME_PATTERN = /_[1-9][0-9]{2}$/;
+
+export function hasLegacyGeneratedUsername(buyer: Pick<IBuyer, 'username' | 'name' | 'usernameCustomizedAt'>): boolean {
+  return !buyer.usernameCustomizedAt
+    && LEGACY_GENERATED_USERNAME_PATTERN.test(buyer.username ?? '')
+    && buyer.username !== slugifyName(buyer.name ?? '');
+}
+
 /**
  * Lazily assign missing usernames and replace legacy generated numeric handles.
  * Explicitly customized handles remain unchanged, including numeric ones.
  * Retries the duplicate-key race so concurrent first requests both succeed.
  */
 export async function ensureUsername(buyer: IBuyer): Promise<IBuyer> {
-  const hasLegacyGeneratedUsername = !buyer.usernameCustomizedAt
-    && /_[1-9][0-9]{2}$/.test(buyer.username ?? '')
-    && buyer.username !== slugifyName(buyer.name ?? '');
-  if (buyer.username && !hasLegacyGeneratedUsername) return buyer;
+  if (buyer.username && !hasLegacyGeneratedUsername(buyer)) return buyer;
   for (let attempt = 0; attempt < 3; attempt++) {
     buyer.username = await generateUniqueUsername(buyer.name);
     try {
