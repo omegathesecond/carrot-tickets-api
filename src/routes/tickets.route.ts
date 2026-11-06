@@ -1,3 +1,4 @@
+import { PreparationController } from '@controllers/preparation.controller';
 import { EventCouponController } from '@controllers/eventCoupon.controller';
 import { requireSuperAdminOrAnyPermission } from '@middleware/ticketsAuth.middleware';
 import { MerchantOperator } from '@models/merchantOperator.model';
@@ -14,7 +15,6 @@ import { TicketPdfController } from '@controllers/ticketPdf.controller';
 import {
   authenticateTickets,
   requireTicketsPermission,
-  requireAnyPermission,
   requireSuperAdmin,
   requireSuperAdminOrPermission,
 } from '@middleware/ticketsAuth.middleware';
@@ -647,6 +647,8 @@ router.post('/gate-operators/:id/reset-pin', requireSuperAdminOrPermission(Ticke
  * Services business enquiry inbox — leads submitted via
  * POST /api/public/services/:businessId/enquiries.
  */
+router.get('/services/preparation', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), PreparationController.handle('providerList'));
+router.post('/services/preparation/:id/offers', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), PreparationController.handle('providerOffer'));
 router.get('/services/enquiries', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.list);
 router.patch('/services/enquiries/:id/status', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.setStatus);
 
