@@ -20,6 +20,7 @@ export interface CreateEventParams {
   name: string;
   description?: string;
   venue: string;
+  eventLocation?: { lat: number; lng: number } | null;
   eventDate: Date;
   startTime: Date;
   endTime: Date;
@@ -48,6 +49,7 @@ export interface UpdateEventParams {
   name?: string;
   description?: string;
   venue?: string;
+  eventLocation?: { lat: number; lng: number } | null;
   eventDate?: Date;
   startTime?: Date;
   endTime?: Date;
@@ -123,6 +125,7 @@ export class EventService {
         name: params.name,
         description: params.description,
         venue: params.venue,
+        eventLocation: params.eventLocation,
         eventDate: params.eventDate,
         startTime: params.startTime,
         endTime: params.endTime,
@@ -408,6 +411,8 @@ export class EventService {
           (updates.name !== undefined && updates.name !== event.name) ||
           (updates.description !== undefined && updates.description !== event.description) ||
           (updates.venue !== undefined && updates.venue !== event.venue) ||
+          (updates.eventLocation !== undefined &&
+            (updates.eventLocation?.lat !== event.eventLocation?.lat || updates.eventLocation?.lng !== event.eventLocation?.lng)) ||
           (updates.eventDate !== undefined && !sameInstant(updates.eventDate, event.eventDate)) ||
           (updates.startTime !== undefined && !sameInstant(updates.startTime, event.startTime)) ||
           (updates.endTime !== undefined && !sameInstant(updates.endTime, event.endTime)) ||
@@ -450,6 +455,7 @@ export class EventService {
       if (updates.name) event.name = updates.name;
       if (updates.description !== undefined) event.description = updates.description;
       if (updates.venue) event.venue = updates.venue;
+      if (updates.eventLocation !== undefined) event.eventLocation = updates.eventLocation;
       if (updates.eventDate) event.eventDate = updates.eventDate;
       if (updates.startTime) event.startTime = updates.startTime;
       if (updates.endTime) event.endTime = updates.endTime;

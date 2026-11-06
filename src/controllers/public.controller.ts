@@ -22,6 +22,7 @@ import { ContactMessage } from '@models/contactMessage.model';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { getViewerEventReactions } from '@services/eventReaction.service';
+import { NearbyEventsService } from '@services/nearbyEvents.service';
 import { CalendarService } from '@services/calendar.service';
 import { GoingService } from '@services/going.service';
 import { buildEventCards } from '@services/eventCards.service';
@@ -305,6 +306,29 @@ export class PublicController {
     } catch (error) {
       console.error('Resolve public organizer error:', error);
       return null;
+    }
+  }
+
+  /** Real distance-based discovery from organizer-selected event coordinates. */
+  static async getNearbyEvents(req: Request, res: Response): Promise<any> {
+    const { error, value } = Joi.object({
+      lat: Joi.number().min(-90).max(90).required(),
+      lng: Joi.number().min(-180).max(180).required(),
+      radiusKm: Joi.number().min(1).max(200).default(25),
+    }).validate(req.query);
+    if (error) return ApiResponseUtil.error(res, error.details[0]?.message || 'Invalid location', 400);
+    try {
+      const candidates = await NearbyEventsService.find(value.lat, value.lng, value.radiusKm);
+      const buyer = await resolveBuyerFromRequest(req);
+      const actor = buyer ? { type: 'buyer' as const, id: String(buyer._id) } : null;
+      const cards = await buildEventCards(candidates.map((e) => e.id), actor);
+      const distances = new Map(candidates.map((e) => [e.id, e.distanceKm]));
+      return ApiResponseUtil.success(res, {
+        events: cards.map((e) => ({ ...e, distanceKm: distances.get(String(e._id)) })),
+        radiusKm: value.radiusKm,
+      });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load nearby events');
     }
   }
 

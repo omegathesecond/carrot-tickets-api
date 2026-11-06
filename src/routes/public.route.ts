@@ -45,6 +45,7 @@ router.get('/payment-methods', PublicController.getPaymentMethods);
  * @access  Public
  * @query   page, limit, search, startDate, endDate
  */
+router.get('/events/nearby', optionalTicketsAuth, PublicController.getNearbyEvents);
 router.get('/events', PublicController.getPublicEvents);
 
 /**

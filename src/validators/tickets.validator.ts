@@ -205,7 +205,13 @@ export const resetPasswordSchema = Joi.object({
 /**
  * Event Validators
  */
+export const eventLocationSchema = Joi.object({
+  lat: Joi.number().min(-90).max(90).required(),
+  lng: Joi.number().min(-180).max(180).required(),
+}).allow(null);
+
 export const createEventSchema = Joi.object({
+  eventLocation: eventLocationSchema.optional(),
   name: Joi.string()
     .required()
     .trim()
@@ -337,6 +343,7 @@ export const createEventSchema = Joi.object({
 }).custom(priceRangeCheck);
 
 export const updateEventSchema = Joi.object({
+  eventLocation: eventLocationSchema.optional(),
   purchaseCharge: purchaseChargeSchema,
   name: Joi.string().trim().max(200).optional(),
   description: Joi.string().max(2000).optional(),
