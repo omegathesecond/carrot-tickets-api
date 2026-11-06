@@ -25,13 +25,17 @@ function slugifyName(name: string): string {
     .slice(0, 16);
 }
 
-function randomCandidate(name?: string): string {
-  const suffix = Math.floor(Math.random() * 900 + 100); // 100-999
+function randomCandidate(name?: string, disambiguate = false): string {
   const base = name ? slugifyName(name) : '';
-  if (base && base.length >= 3) return `${base}_${suffix}`;
+  if (base && base.length >= 3 && !disambiguate) return base;
   const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  return `${adj}_${noun}_${suffix}`;
+  const readableBase = base && base.length >= 3 ? base : `${adj}_${noun}`;
+  if (!disambiguate) return readableBase;
+  const suffix = Array.from({ length: 4 }, () =>
+    String.fromCharCode(97 + Math.floor(Math.random() * 26))
+  ).join('');
+  return `${readableBase.slice(0, 15)}_${suffix}`;
 }
 
 /**
@@ -41,7 +45,7 @@ function randomCandidate(name?: string): string {
  */
 export async function generateUniqueUsername(name?: string): Promise<string> {
   for (let attempt = 0; attempt < 10; attempt++) {
-    const candidate = randomCandidate(name);
+    const candidate = randomCandidate(name, attempt > 0);
     if (RESERVED_USERNAMES.includes(candidate)) continue;
     const taken = await Buyer.exists({ username: candidate });
     if (!taken) return candidate;
@@ -50,11 +54,15 @@ export async function generateUniqueUsername(name?: string): Promise<string> {
 }
 
 /**
- * Lazily backfill a username on a buyer that predates the social release.
+ * Lazily assign missing usernames and replace legacy generated numeric handles.
+ * Explicitly customized handles remain unchanged, including numeric ones.
  * Retries the duplicate-key race so concurrent first requests both succeed.
  */
 export async function ensureUsername(buyer: IBuyer): Promise<IBuyer> {
-  if (buyer.username) return buyer;
+  const hasLegacyGeneratedUsername = !buyer.usernameCustomizedAt
+    && /_[1-9][0-9]{2}$/.test(buyer.username ?? '')
+    && buyer.username !== slugifyName(buyer.name ?? '');
+  if (buyer.username && !hasLegacyGeneratedUsername) return buyer;
   for (let attempt = 0; attempt < 3; attempt++) {
     buyer.username = await generateUniqueUsername(buyer.name);
     try {

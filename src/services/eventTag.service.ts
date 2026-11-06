@@ -1,3 +1,4 @@
+import { mapConcurrent } from '@utils/mapConcurrent.util';
 // api/src/services/eventTag.service.ts
 import mongoose, { Types } from 'mongoose';
 import { EventTag } from '@models/eventTag.model';
@@ -109,23 +110,28 @@ export class EventTagService {
     // De-duplicate the INPUT so one line repeated twice in a pasted list is not
     // reported as both "registered" and "already registered".
     const seen = new Set<string>();
-    for (const raw of params.bandUids) {
-      const normalized = normalizeBandUid(raw);
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
-
+    const unique = params.bandUids.filter(raw => {
+      const uid = normalizeBandUid(raw);
+      if (seen.has(uid)) return false;
+      seen.add(uid);
+      return true;
+    });
+    const outcomes = await mapConcurrent(unique, 20, async raw => {
       try {
         const one = await EventTagService.registerTag({
-          eventId: params.eventId,
-          bandUid: raw,
+          eventId: params.eventId, bandUid: raw,
           ...(params.registeredBy ? { registeredBy: params.registeredBy } : {}),
         });
-        if (one.outcome === 'registered') result.registered.push(one.bandUid);
-        else if (one.outcome === 'reactivated') result.reactivated.push(one.bandUid);
-        else result.alreadyRegistered.push(one.bandUid);
+        return { one };
       } catch (err: any) {
-        result.rejected.push({ bandUid: String(raw), reason: err?.message || 'could not be registered' });
+        return { rejected: { bandUid: String(raw), reason: err?.message || 'could not be registered' } };
       }
+    });
+    for (const outcome of outcomes) {
+      if (outcome.rejected) result.rejected.push(outcome.rejected);
+      else if (outcome.one!.outcome === 'registered') result.registered.push(outcome.one!.bandUid);
+      else if (outcome.one!.outcome === 'reactivated') result.reactivated.push(outcome.one!.bandUid);
+      else result.alreadyRegistered.push(outcome.one!.bandUid);
     }
 
     return result;

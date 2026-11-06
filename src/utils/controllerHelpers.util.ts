@@ -1,9 +1,25 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { HttpError, OtpCooldownError } from '@utils/httpError.util';
 import { SecurityRateLimitError } from '@services/securityRateLimit.service';
 
 export const HEX24 = /^[0-9a-f]{24}$/i;
+
+/**
+ * A 24-hex id from a URL, lower-cased — or null when it is not one. HEX24 is
+ * case-insensitive but `String(ObjectId)` never is, so an id compared as a
+ * string must be normalised first or it silently matches nothing.
+ */
+export const hexId = (value: unknown): string | null =>
+  typeof value === 'string' && HEX24.test(value) ? value.toLowerCase() : null;
+
+/**
+ * Express 4 does not await a handler. Wrapped, a rejection reaches the error
+ * handler as a 500 — instead of hanging the request, or (unhandled) taking the
+ * process down.
+ */
+export const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler =>
+  (req, res, next) => { fn(req, res, next).catch(next); };
 
 /** Map service errors onto the response: HttpError keeps its status, anything
  *  else logs loudly and becomes a 500. */

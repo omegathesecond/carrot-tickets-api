@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { ProductCategory } from '@interfaces/stock.interface';
+import { applyTradingScope, VENUE_ONLY_INDEX } from '@models/tradingScope.schema';
 
 /**
  * A sellable catalogue item at ONE cashless event (design §4). Price is per
@@ -8,7 +9,9 @@ import { ProductCategory } from '@interfaces/stock.interface';
  * manufacturer EAN/UPC — unique per event, but optional (food/ice/cups have none).
  */
 export interface IProduct extends Document {
-  eventId: mongoose.Types.ObjectId;
+  /** Exactly one of eventId / venueId is set (applyTradingScope). */
+  eventId?: mongoose.Types.ObjectId;
+  venueId?: mongoose.Types.ObjectId;
   name: string;
   barcode?: string;
   category: ProductCategory;
@@ -20,13 +23,15 @@ export interface IProduct extends Document {
   packLabel?: string;
   imageUrl?: string;
   active: boolean;
+  /** False for made-to-order goods/services with no inventory count. Fixed at setup. */
+  stockTracked: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const productSchema = new Schema<IProduct>(
   {
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
+    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
     name: { type: String, required: true, trim: true },
     barcode: { type: String, trim: true },
     category: { type: String, enum: Object.values(ProductCategory), required: true },
@@ -43,6 +48,7 @@ const productSchema = new Schema<IProduct>(
     packLabel: { type: String, trim: true },
     imageUrl: { type: String, trim: true },
     active: { type: Boolean, default: true, index: true },
+    stockTracked: { type: Boolean, default: true, immutable: true },
   },
   { timestamps: true },
 );
@@ -54,13 +60,39 @@ productSchema.pre('validate', function (next) {
   next();
 });
 
-// Unique barcode per event, but ONLY for products that HAVE a barcode.
+applyTradingScope(productSchema);
+
+// Unique barcode per OWNER (event or venue), only for products that HAVE one.
+// The legacy `eventId_1_barcode_1` indexed a venue product's missing eventId as
+// null, so the same barcode at two venues collided. These replace it under NEW
+// names and a reversed key order, so they can be built beside the legacy index
+// on any MongoDB version (no same-name or same-key-pattern conflict);
+// scripts/migrate-product-barcode-index.ts then drops the legacy one.
 // partialFilterExpression (not sparse): a compound sparse index still indexes
-// every doc because eventId is always present, so barcode:null would collide
-// across barcodeless products in the same event (the E11000 {null} incident).
+// every document that has ANY of its keys, so the owner id alone would put
+// barcode:null into the index and barcodeless products of one owner would
+// collide (the E11000 {null} incident).
 productSchema.index(
-  { eventId: 1, barcode: 1 },
-  { unique: true, partialFilterExpression: { barcode: { $type: 'string' } } },
+  { barcode: 1, eventId: 1 },
+  {
+    name: 'event_barcode_unique',
+    unique: true,
+    partialFilterExpression: { barcode: { $type: 'string' }, eventId: { $exists: true } },
+  },
 );
+productSchema.index(
+  { barcode: 1, venueId: 1 },
+  {
+    name: 'venue_barcode_unique',
+    unique: true,
+    partialFilterExpression: { barcode: { $type: 'string' }, venueId: { $exists: true } },
+  },
+);
+
+// The catalogue list queries, one per owner kind. The unique-barcode indexes
+// above are barcode-led, so neither serves a `find({ eventId })` or
+// `find({ venueId })`.
+productSchema.index({ eventId: 1, active: 1 });
+productSchema.index({ venueId: 1, active: 1 }, VENUE_ONLY_INDEX);
 
 export const Product = mongoose.model<IProduct>('Product', productSchema);

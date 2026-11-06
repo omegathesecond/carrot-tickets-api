@@ -51,6 +51,12 @@ export enum TicketsPermission {
   // tag order from the dashboard without creating a desk account first.
   ISSUE_TAGS = 'tickets:issue_tags',
 
+  // Venue trading (venue trading spec) — the vendor's OWN day-to-day venue:
+  // its stalls, staff and settings. Events-vertical (a bus operator runs no
+  // bar), so it lives in EVENT_PERMISSIONS below. OWNER holds it by default;
+  // a sub-user gets it only by explicit grant.
+  MANAGE_VENUE = 'tickets:manage_venue',
+
   // Platform User Management (Carrot admins/team only) — see the platform-wide
   // list of registered buyers + signup analytics. Super-admins pass via
   // middleware; everyone else needs this assigned explicitly. NEVER part of any
@@ -176,6 +182,7 @@ export const EVENT_PERMISSIONS: TicketsPermission[] = [
   TicketsPermission.MANAGE_STOCK,
   TicketsPermission.MANAGE_MENU,
   TicketsPermission.ISSUE_TAGS,
+  TicketsPermission.MANAGE_VENUE,
 ];
 
 export interface TicketsUserToken {

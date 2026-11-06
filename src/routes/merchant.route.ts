@@ -1,8 +1,10 @@
 // api/src/routes/merchant.route.ts
 import { Router } from 'express';
 import { MerchantController } from '@controllers/merchant.controller';
+import { VenueTillController } from '@controllers/venueTill.controller';
 import { authenticateMerchant, requireMerchantPermission } from '@middleware/merchantAuth.middleware';
 import { MerchantPermission } from '@interfaces/merchant.interface';
+import { asyncHandler } from '@utils/controllerHelpers.util';
 
 const router = Router();
 
@@ -50,6 +52,13 @@ router.post(
   requireMerchantPermission(MerchantPermission.CHARGE),
   MerchantController.handOutTable,
 );
+
+// Venue tills: the rounds waiters send this stall (event tills use /tables above).
+router.get('/orders', requireMerchantPermission(MerchantPermission.CHARGE), asyncHandler(VenueTillController.orders));
+router.post('/tables/:tableId/orders/:orderId/hand-out', requireMerchantPermission(MerchantPermission.CHARGE), asyncHandler(VenueTillController.handOut));
+
+// A venue till's counter sale: cash / card, no tag (event tills use /charge).
+router.post('/sales', requireMerchantPermission(MerchantPermission.CHARGE), asyncHandler(VenueTillController.sale));
 
 router.get(
   '/stalls',

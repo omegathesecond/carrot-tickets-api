@@ -61,7 +61,7 @@ export class ChargeIdempotencyMismatchError extends Error {
 }
 
 /** The basket a request asked for, merged by product and sorted, so two spellings of one basket compare equal. */
-function basketKey(items: ReadonlyArray<{ productId: unknown; qty: number }>): string {
+export function basketKey(items: ReadonlyArray<{ productId: unknown; qty: number }>): string {
   const merged = new Map<string, number>();
   for (const line of items) merged.set(String(line.productId), (merged.get(String(line.productId)) ?? 0) + line.qty);
   return [...merged.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, qty]) => `${id}:${qty}`).join(',');
@@ -274,7 +274,7 @@ export class MerchantService {
         if (itemSnapshots) {
           try {
             for (const line of itemSnapshots) {
-              await StockService.applyMovement({
+              await StockService.applySaleMovement({
                 eventId, merchantId, productId: String(line.productId), delta: -line.qty,
                 reason: StockMovementReason.SALE, refType: 'merchant_charge', refId: clientTxnId,
                 byType: 'Merchant', by: merchantOperatorId, session,
@@ -359,6 +359,8 @@ export class MerchantService {
       : committedItems.length === 0 && requested.amount === charge.amount - charge.purchaseChargeAmount;
     if (!same) throw new ChargeIdempotencyMismatchError(charge.clientTxnId);
 
+    // A tag charge always has a wallet; only a venue (cash/card) charge lacks one.
+    if (!charge.walletId) throw new Error('charge has no wallet');
     const wallet = await Wallet.findById(charge.walletId);
     if (!wallet) throw new Error('wallet not found');
     return { wallet, charge };
@@ -381,7 +383,7 @@ export class MerchantService {
       purchaseChargeAmount: number;
       fee: number;
       netAmount: number;
-      bandUid: string;
+      bandUid: string | undefined;
       status: 'completed' | 'reversed';
       canReverse: boolean;
       reversalUnavailableReason: string | null;

@@ -19,6 +19,7 @@ const bundlePrice = Joi.object({
 });
 
 export const createProductSchema = Joi.object({
+  stockTracked: Joi.boolean().strict(),
   name: Joi.string().trim().min(1).required(),
   category: Joi.string().valid(...Object.values(ProductCategory)).required(),
   price: Joi.number().integer().min(0).max(MAX_PRICE_CENTS).required(),

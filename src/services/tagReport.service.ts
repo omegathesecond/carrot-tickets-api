@@ -1,3 +1,9 @@
+function withdrawalLabel(method: string): string {
+  const label = ({ office_cash: 'Office refund', cash: 'Cash-out', bank_transfer: 'Bank withdrawal', mobile_money: 'Mobile money withdrawal' } as Record<string, string>)[method];
+  if (!label) throw new Error('Unknown withdrawal method');
+  return label;
+}
+
 import mongoose from 'mongoose';
 import { Wallet } from '@models/wallet.model';
 import { Ticket } from '@models/ticket.model';
@@ -115,10 +121,13 @@ export class TagReportService {
 
   static async list(
     eventId: string,
-    opts: { limit?: number; cursor?: string; status?: TagStatus; q?: string },
+    opts: { limit?: number; cursor?: string; status?: TagStatus; q?: string; fundedOnly?: boolean },
   ): Promise<{ tags: TagRow[]; hasMore: boolean; nextCursor: string | null }> {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
     const match: Record<string, unknown> = { eventId: new mongoose.Types.ObjectId(eventId) };
+    // Filter before pagination: pre-registered empty tags must never push
+    // older wallets holding money beyond a client-side scan limit.
+    if (opts.fundedOnly) match['balance'] = { $gt: 0 };
     // _id desc + a strictly-less-than cursor: the same convention as the stock
     // movements feed, so a row can neither repeat nor be skipped at a boundary.
     if (opts.cursor) match['_id'] = { $lt: new mongoose.Types.ObjectId(opts.cursor) };
@@ -273,7 +282,7 @@ export class TagReportService {
       ...charges.filter(c => c.reversal).map(c => ({ kind: 'reversal' as const, amount: c.amount, at: c.reversal!.at, label: `Sale reversed by ${c.reversal!.staffName}: ${c.reversal!.reason}` })),
       ...withdrawals.map((w: any) => ({
         kind: 'cashout' as const, amount: w.amount, at: w.createdAt,
-        label: w.method === 'office_cash' ? 'Office refund' : 'Cash-out',
+        label: withdrawalLabel(w.method),
       })),
     ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 

@@ -81,7 +81,7 @@ describe('a granted cashier turns a blank tag into a funded wallet in one tap', 
     const res = await topup(token, eventId, { bandUid: TAG, amount: 3000, clientTxnId: 'x1' });
 
     expect(res.status).toBe(404);
-    expect(res.body.message).toMatch(/no wallet for that band/i);
+    expect(res.body.message).toMatch(/not registered for this event/i);
     expect(await Wallet.countDocuments({ eventId })).toBe(0);
     expect(await EventTag.countDocuments({ eventId })).toBe(0);
   });
@@ -134,5 +134,71 @@ describe('a granted cashier turns a blank tag into a funded wallet in one tap', 
       ticketId: String(new mongoose.Types.ObjectId()), amount: 1000, clientTxnId: 'x3',
     });
     expect(res.status).toBe(404);
+  });
+});
+
+
+describe('first reload of a bulk-registered tag', () => {
+  it('creates the wallet for a registered tag without requiring the tag-issuing grant', async () => {
+    const { eventId, token } = await seedDesk({ canIssue: false });
+    await EventTag.create({ eventId, bandUid: TAG, status: 'active' });
+    const body = { bandUid: TAG.toUpperCase(), amount: 5200, clientTxnId: 'registered-first-load' };
+    const first = await topup(token, eventId, body);
+    expect(first.status).toBe(200);
+    expect(first.body.data.newBalance).toBe(5200);
+    const wallet = await Wallet.findOne({ eventId, bandUid: TAG });
+    expect(wallet!.balance).toBe(5200);
+    expect(wallet!.ticketId).toBeUndefined();
+    expect(await EventTag.countDocuments({ eventId })).toBe(1);
+    expect(await BandBinding.countDocuments({ eventId, walletId: wallet!._id })).toBe(1);
+    const replay = await topup(token, eventId, body);
+    expect(replay.status).toBe(200);
+    expect(replay.body.data.newBalance).toBe(5200);
+    expect(await WalletTopup.countDocuments({ eventId })).toBe(1);
+  });
+
+  it('deduplicates concurrent first-load retries into one wallet and one top-up', async () => {
+    const { eventId, token } = await seedDesk({ canIssue: false });
+    await EventTag.create({ eventId, bandUid: TAG, status: 'active' });
+    const body = { bandUid: TAG, amount: 5200, clientTxnId: 'concurrent-first-load' };
+    const replies = await Promise.all([topup(token, eventId, body), topup(token, eventId, body)]);
+    expect(replies.map(r => r.status)).toEqual([200, 200]);
+    expect(await Wallet.countDocuments({ eventId, bandUid: TAG })).toBe(1);
+    expect((await Wallet.findOne({ eventId, bandUid: TAG }))!.balance).toBe(5200);
+    expect(await WalletTopup.countDocuments({ eventId })).toBe(1);
+    expect(await BandBinding.countDocuments({ eventId, bandUid: TAG })).toBe(1);
+  });
+
+  it('keeps another event’s wallet and balance separate when reusing a physical tag', async () => {
+    const old = await seedDesk({ canIssue: false });
+    const current = await seedDesk({ canIssue: false });
+    await EventTag.create([{ eventId: old.eventId, bandUid: TAG }, { eventId: current.eventId, bandUid: TAG }]);
+    const previous = await WalletService.ensureStandaloneWalletForBand({ eventId: old.eventId, bandUid: TAG });
+    await WalletService.topUpAtDesk({ walletId: String(previous.wallet._id), eventId: old.eventId,
+      amount: 700, method: 'cash', recordedBy: 'fixture', clientTxnId: 'old-event-balance' });
+    const response = await topup(current.token, current.eventId, { bandUid: TAG, amount: 5200, clientTxnId: 'current-event' });
+    expect(response.status).toBe(200);
+    expect((await Wallet.findById(previous.wallet._id))!.balance).toBe(700);
+    expect((await Wallet.findOne({ eventId: current.eventId, bandUid: TAG }))!.balance).toBe(5200);
+  });
+
+  it('does not reactivate retired tags without an issuing grant', async () => {
+    const { eventId, token } = await seedDesk({ canIssue: false });
+    await EventTag.create({ eventId, bandUid: TAG, status: 'retired' });
+    const response = await topup(token, eventId, { bandUid: TAG, amount: 5200, clientTxnId: 'retired' });
+    expect(response.status).toBe(404);
+    expect(await Wallet.countDocuments({ eventId })).toBe(0);
+    expect((await EventTag.findOne({ eventId, bandUid: TAG }))!.status).toBe('retired');
+  });
+
+  it('surfaces a registry outage without inventing a wallet or recording funds', async () => {
+    const { eventId, token } = await seedDesk({ canIssue: false });
+    const spy = jest.spyOn(EventTag, 'exists').mockImplementationOnce(() => { throw new Error('Tag registry unavailable'); });
+    try {
+      const response = await topup(token, eventId, { bandUid: TAG, amount: 5200, clientTxnId: 'registry-outage' });
+      expect(response.status).toBe(500);
+      expect(await Wallet.countDocuments({ eventId })).toBe(0);
+      expect(await WalletTopup.countDocuments({ eventId })).toBe(0);
+    } finally { spy.mockRestore(); }
   });
 });

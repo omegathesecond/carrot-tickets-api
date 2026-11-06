@@ -225,7 +225,7 @@ describe('a stall only ever sees its own half of a table', () => {
 describe('the waiter\'s three tabs', () => {
   it('reads an open table as New', async () => {
     const { table } = await twoStallTable();
-    const listed = await TableService.list(String(EVENT), { tab: 'new' });
+    const listed = await TableService.list({ eventId: String(EVENT) }, { tab: 'new' });
     expect(listed.map((t) => String(t._id))).toContain(String(table._id));
   });
 
@@ -234,7 +234,7 @@ describe('the waiter\'s three tabs', () => {
     const settled = await settle(table, '04a10012', 'f12');
     const id = String(settled._id);
     const ids = async (tab: 'new' | 'paid' | 'collected') =>
-      (await TableService.list(String(EVENT), { tab })).map((t) => String(t._id));
+      (await TableService.list({ eventId: String(EVENT) }, { tab })).map((t) => String(t._id));
 
     expect(await ids('new')).not.toContain(id);
     expect(await ids('paid')).toContain(id);
@@ -260,7 +260,7 @@ describe('the waiter\'s three tabs', () => {
       tableId: String(table._id), eventId: String(EVENT), reason: 'walked out', voidedBy: String(WAITER),
     });
     for (const tab of ['new', 'paid', 'collected'] as const) {
-      expect((await TableService.list(String(EVENT), { tab })).map((t) => String(t._id)))
+      expect((await TableService.list({ eventId: String(EVENT) }, { tab })).map((t) => String(t._id)))
         .not.toContain(String(table._id));
     }
   });
@@ -270,7 +270,7 @@ describe('the waiter\'s three tabs', () => {
       eventId: EVENT, label: 'LEGACY', status: 'settled', openedBy: String(WAITER),
       items: [], subtotal: 0, settledAt: new Date(),
     });
-    const ids = (await TableService.list(String(EVENT), { tab: 'collected' })).map((t) => String(t._id));
+    const ids = (await TableService.list({ eventId: String(EVENT) }, { tab: 'collected' })).map((t) => String(t._id));
     expect(ids).toContain(String(legacy._id));
   });
 });
@@ -282,7 +282,7 @@ describe('searching the floor', () => {
       { eventId: EVENT, label: '12', status: 'open', openedBy: 'w', items: [], subtotal: 0 },
     ]);
     const labels = async (q: string) =>
-      (await TableService.list(String(EVENT), { q })).map((t) => t.label);
+      (await TableService.list({ eventId: String(EVENT) }, { q })).map((t) => t.label);
 
     expect(await labels('mz')).toEqual(['Mza']);
     expect(await labels('12')).toEqual(['12']);
@@ -293,7 +293,7 @@ describe('searching the floor', () => {
       { eventId: EVENT, label: 'A.B', status: 'open', openedBy: 'w', items: [], subtotal: 0 },
       { eventId: EVENT, label: 'AXB', status: 'open', openedBy: 'w', items: [], subtotal: 0 },
     ]);
-    const found = await TableService.list(String(EVENT), { q: 'A.B' });
+    const found = await TableService.list({ eventId: String(EVENT) }, { q: 'A.B' });
     expect(found.map((t) => t.label)).toEqual(['A.B']);
   });
 });

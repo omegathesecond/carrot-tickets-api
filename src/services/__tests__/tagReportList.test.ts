@@ -83,4 +83,31 @@ describe('TagReportService.list', () => {
     const seen = [...first.tags, ...second.tags].map((t) => t.walletId);
     expect(new Set(seen).size).toBe(4);
   });
+
+  it('finds older funded tags beyond 5,000 newer empty registrations before applying the page limit', async () => {
+    const funded = await tagFor('Older funded tag', '+26876007777', { balance: 2500 });
+    await Wallet.collection.insertMany(Array.from({ length: 5001 }, (_, i) => ({
+      _id: new mongoose.Types.ObjectId(), eventId: EVENT, bandUid: `blank-${i}`,
+      status: 'active', balance: 0, cashFundedBalance: 0,
+    })));
+    const page = await TagReportService.list(String(EVENT), { fundedOnly: true, limit: 1 });
+    expect(page.tags.map(t => t.walletId)).toEqual([String(funded.wallet._id)]);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('combines funded filtering with search, status, event scope and cursor pagination', async () => {
+    await tagFor('Paid A', '+26876001111', { balance: 100 });
+    await tagFor('Paid B', '+26876002222', { balance: 200 });
+    await tagFor('Paid empty', '+26876003333', { balance: 0 });
+    await tagFor('Paid frozen', '+26876004444', { balance: 300, status: 'frozen' });
+    await tagFor('Paid elsewhere', '+26876005555', { balance: 400, eventId: new mongoose.Types.ObjectId() });
+    const options = { fundedOnly: true, status: 'active' as const, q: 'Paid', limit: 1 };
+    const first = await TagReportService.list(String(EVENT), options);
+    const second = await TagReportService.list(String(EVENT), { ...options, cursor: first.nextCursor! });
+    expect([...first.tags, ...second.tags].map(t => t.holder.name)).toEqual(['Paid B', 'Paid A']);
+    expect(first.hasMore).toBe(true);
+    expect(second.hasMore).toBe(false);
+    expect((await TagReportService.list(String(EVENT), { fundedOnly: false })).tags).toHaveLength(4);
+  });
 });

@@ -2,6 +2,8 @@ import mongoose, { ClientSession } from 'mongoose';
 import { ProductStock, IProductStock } from '@models/productStock.model';
 import { StockMovement, IStockMovement } from '@models/stockMovement.model';
 import { StockMovementReason, StockMovementByType } from '@interfaces/stock.interface';
+import { Product } from '@models/product.model';
+import { ScopeIds, scopeMatch } from '@utils/tradingScope.util';
 
 export class StockDeclinedError extends Error {
   readonly reason = 'insufficient_stock';
@@ -11,8 +13,8 @@ export class StockDeclinedError extends Error {
   }
 }
 
-export interface MovementInput {
-  eventId: string | mongoose.Types.ObjectId;
+/** Exactly one owner (ScopeIds) — event callers pass `eventId` exactly as before. */
+export type MovementInput = ScopeIds & {
   merchantId: string | mongoose.Types.ObjectId;
   productId: string | mongoose.Types.ObjectId;
   /** Signed base units, non-zero. > 0 adds (upserts the row), < 0 CAS-decrements. */
@@ -25,7 +27,7 @@ export interface MovementInput {
   note?: string;
   /** Join a caller transaction (e.g. the item-sale charge, Slice 2). */
   session?: ClientSession;
-}
+};
 
 /**
  * The ONLY writer of ProductStock.onHand and StockMovement (design §5). A
@@ -34,12 +36,33 @@ export interface MovementInput {
  * StockDeclinedError and writes nothing — hard-block-at-zero, no silent clamp.
  */
 export class StockService {
+  /** Sales and returns still use real catalogue prices and allocation checks,
+   * but explicitly uncounted products never create inventory movements. */
+  static async applySaleMovement(input: MovementInput): Promise<void> {
+    if (!Number.isSafeInteger(input.delta) || input.delta === 0) throw new Error('delta must be a non-zero whole number');
+    if (!input.session?.inTransaction()) throw new Error('applySaleMovement requires a transaction');
+    const product = await Product.findOne({ _id: input.productId, ...scopeMatch(input) })
+      .select('stockTracked').session(input.session).lean();
+    if (!product) throw new Error('product not found for this event');
+    if (product.stockTracked === false) {
+      if (input.delta < 0 && !await ProductStock.exists({ ...scopeMatch(input), merchantId: input.merchantId, productId: input.productId }).session(input.session)) {
+        throw new Error('product not sold at that stall');
+      }
+      return;
+    }
+    await StockService.applyMovement(input);
+  }
+
   static async applyMovement(input: MovementInput): Promise<{ onHand: number; movement: IStockMovement }> {
     const { delta, reason, refType, refId, byType, by, note } = input;
     if (!Number.isSafeInteger(delta) || delta === 0) {
       throw new Error(`delta must be a non-zero whole number of base units, got ${delta}`);
     }
-    const eventId = toId(input.eventId);
+    // The owner, written onto the row (on upsert-insert) and the journal entry.
+    const owner = scopeMatch(input);
+    const ownerField = 'venueId' in owner ? 'venueId' : 'eventId';
+    const otherOwnerField = ownerField === 'venueId' ? 'eventId' : 'venueId';
+    const ownerId = 'venueId' in owner ? owner.venueId : owner.eventId;
     const merchantId = toId(input.merchantId);
     const productId = toId(input.productId);
 
@@ -48,6 +71,9 @@ export class StockService {
     }
 
     const work = async (session: ClientSession) => {
+      if (await Product.exists({ _id: productId, ...owner, stockTracked: false }).session(session)) {
+        throw new Error('This product does not track inventory quantities');
+      }
       const decrement = delta < 0;
       const filter: Record<string, unknown> = { merchantId, productId };
       // CAS guard: a decrement matches only when there is enough on hand.
@@ -56,7 +82,7 @@ export class StockService {
       const stock = (await ProductStock.findOneAndUpdate(
         filter,
         // $ifNull covers the upsert-insert case where onHand doesn't exist yet.
-        [{ $set: { onHand: { $add: [{ $ifNull: ['$onHand', 0] }, delta] }, eventId: { $ifNull: ['$eventId', eventId] } } }],
+        [{ $set: { onHand: { $add: [{ $ifNull: ['$onHand', 0] }, delta] }, [ownerField]: { $ifNull: [`$${ownerField}`, ownerId] } } }],
         { new: true, upsert: !decrement, setDefaultsOnInsert: true, session },
       )) as IProductStock | null;
 
@@ -65,9 +91,18 @@ export class StockService {
         const existing = await ProductStock.findOne({ merchantId, productId }, { onHand: 1 }, { session });
         throw new StockDeclinedError(String(productId), existing?.onHand ?? 0);
       }
+      // The row must carry ONLY the input's owner kind. $ifNull above fills a
+      // missing owner field and never overwrites one, so an event row hit by a
+      // venue movement (or the reverse) would now carry both — a second owner.
+      // Throwing aborts the transaction, which rolls that write back.
+      if (stock[otherOwnerField] != null) {
+        throw new Error(
+          `stock row ${String(stock._id)} is owned by ${otherOwnerField} ${String(stock[otherOwnerField])}; refusing a movement for ${ownerField} ${String(ownerId)}`,
+        );
+      }
 
       const created = await StockMovement.create(
-        [{ eventId, merchantId, productId, delta, reason, balanceAfter: stock.onHand, refType, refId, byType, by, note, at: new Date() }],
+        [{ ...owner, merchantId, productId, delta, reason, balanceAfter: stock.onHand, refType, refId, byType, by, note, at: new Date() }],
         { session },
       );
       // create([oneDoc]) always resolves exactly one element; noUncheckedIndexedAccess

@@ -43,11 +43,16 @@ export class TagReportController {
       const status = req.query['status'] ? String(req.query['status']) : undefined;
       const allowed = ['active', 'unbound', 'frozen', 'closed'];
       if (status && !allowed.includes(status)) return ApiResponseUtil.badRequest(res, 'invalid status');
+      const fundedOnly = req.query['fundedOnly'];
+      if (fundedOnly !== undefined && fundedOnly !== 'true' && fundedOnly !== 'false') {
+        return ApiResponseUtil.badRequest(res, 'invalid fundedOnly');
+      }
 
       return ApiResponseUtil.success(res, await TagReportService.list(eventId, {
         ...(rawLimit !== undefined ? { limit: rawLimit } : {}),
         ...(cursor ? { cursor } : {}),
         ...(status ? { status: status as TagStatus } : {}),
+        ...(fundedOnly !== undefined ? { fundedOnly: fundedOnly === 'true' } : {}),
         ...(req.query['q'] ? { q: String(req.query['q']) } : {}),
       }));
     } catch (err: any) {

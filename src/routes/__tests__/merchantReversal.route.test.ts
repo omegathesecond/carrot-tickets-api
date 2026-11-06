@@ -101,9 +101,9 @@ it('concurrent retries refund and restock exactly once, with stock and earnings 
   expect(await ProductStock.findOne({ productId: s.product!._id })).toMatchObject({ onHand: 10, lowStockAlertedAt: null });
   expect(await StockMovement.countDocuments({ reason: 'sale_reversal' })).toBe(1);
   expect(await LedgerEntry.countDocuments({ refType: 'merchant_reversal' })).toBe(4);
-  expect((await StockReportService.board(s.eventId)).perBar[0]).toMatchObject({ onHand: 10, unitsSold: 0, revenue: 0 });
-  expect((await StockReportService.reconciliation(s.eventId, new Date(Date.now() + 60_000))).perBar[0]).toMatchObject({ sold: 0, expectedClosing: 10 });
-  expect((await StockReportService.dashboard(s.eventId)).salesByBar).toEqual([]);
+  expect((await StockReportService.board({ eventId: s.eventId })).perBar[0]).toMatchObject({ onHand: 10, unitsSold: 0, revenue: 0 });
+  expect((await StockReportService.reconciliation({ eventId: s.eventId }, { doorsAt: new Date(Date.now() + 60_000) })).perBar[0]).toMatchObject({ sold: 0, expectedClosing: 10 });
+  expect((await StockReportService.dashboard({ eventId: s.eventId })).salesByBar).toEqual([]);
   expect((await reverse(s, { reason: 'A different request', restock: true })).status).toBe(409);
 });
 

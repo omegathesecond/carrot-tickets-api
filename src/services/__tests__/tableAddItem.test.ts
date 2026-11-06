@@ -4,12 +4,25 @@ import { TableService } from '@services/table.service';
 import { Table } from '@models/table.model';
 import { Product } from '@models/product.model';
 import { Merchant } from '@models/merchant.model';
+import { ProductStock } from '@models/productStock.model';
+import { StockMovement } from '@models/stockMovement.model';
 
 beforeAll(connectLedgerTestDb, 60000); // StockService.applyMovement needs a replica set for its transaction
 afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 describe('TableService.addItem', () => {
+  it('adds and removes an uncounted product without stock movements', async () => {
+    const { table, merchantId } = await seedStallAndTable({ price: 3000, onHand: 10 });
+    const product = await Product.create({ eventId: EVENT, name: 'Fresh plate', category: 'food', price: 5000, stockTracked: false });
+    await ProductStock.create({ eventId: EVENT, merchantId, productId: product._id, onHand: 0 });
+    const after = await TableService.addItems({ tableId: String(table._id), eventId: String(EVENT), addedBy: 'w1', items: [{ merchantId, productId: String(product._id), qty: 2 }] });
+    expect(after.subtotal).toBe(10000);
+    const removed = await TableService.removeItem({ tableId: String(table._id), eventId: String(EVENT), lineId: String(after.items[0]!._id), removedBy: 'w1' });
+    expect(removed.subtotal).toBe(0);
+    expect(await StockMovement.countDocuments({ productId: product._id })).toBe(0);
+    expect((await ProductStock.findOne({ productId: product._id }))!.onHand).toBe(0);
+  });
   it('snapshots the price and moves the stall stock', async () => {
     const { table, merchantId, productId } = await seedStallAndTable({ price: 3000, onHand: 10 });
 

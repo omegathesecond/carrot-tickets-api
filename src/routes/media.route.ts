@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { MediaController } from '@controllers/media.controller';
 import { authenticateTickets, requireTicketsPermission, requireSuperAdminOrPermission } from '@middleware/ticketsAuth.middleware';
+import { venueScope } from '@middleware/tradingScope.middleware';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import {
   posterUpload,
@@ -144,6 +145,22 @@ router.post(
   handleMulterError,
   validateFileUpload,
   MediaController.uploadProductImage,
+);
+
+/**
+ * @route   POST /api/media/venue/product
+ * @desc    Upload a product image for the caller's own venue catalogue
+ * @access  Private (Vendor with a venue; tickets:manage_stock)
+ */
+router.post(
+  '/venue/product',
+  authenticateTickets,
+  requireTicketsPermission(TicketsPermission.MANAGE_STOCK),
+  venueScope,
+  itemImageUpload.single('image'),
+  handleMulterError,
+  validateFileUpload,
+  MediaController.uploadVenueProductImage,
 );
 
 /**
