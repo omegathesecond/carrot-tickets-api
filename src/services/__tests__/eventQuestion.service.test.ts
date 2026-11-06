@@ -66,8 +66,8 @@ describe('eventQuestion.service', () => {
       expect((await listTopicEvents({ type: 'vendor', id: String(vendor._id) })).every((g) => !g.viewerIsMember)).toBe(true);
       const groups = await listTopicEvents(actor);
       expect(groups).toHaveLength(2);
-      expect(groups.find((g) => g.event.id === first.eventId)).toMatchObject({ replyCount: 5, viewerIsMember: true });
-      expect(groups.find((g) => g.event.id === second.eventId)).toMatchObject({ replyCount: 22, viewerIsMember: false });
+      expect(groups.find((g) => g.event.id === first.eventId)).toMatchObject({ replyCount: 5, viewerIsMember: true, topicBodies: expect.arrayContaining(['First topic', 'Separate topic']) });
+      expect(groups.find((g) => g.event.id === second.eventId)).toMatchObject({ replyCount: 22, viewerIsMember: false, topicBodies: expect.arrayContaining(['New topic 0', 'New topic 21']) });
       expect((await listQuestions(first.eventId, actor)).find((t) => t.id === other.id).viewerIsMember).toBe(false);
       expect((await listTopicEvents(null)).every((g) => !g.viewerIsMember)).toBe(true);
       await leaveQuestion(q.id, actor);

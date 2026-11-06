@@ -169,6 +169,7 @@ export async function getQuestion(questionId: string, actor: SocialActor | null)
 /** Discovery summaries across all event topics. Membership remains per question;
  * the event badge only reports whether the viewer joined any of its topics. */
 interface EventTopicGroup {
+  topicBodies: string[];
   event: { id: string; name: string; image: string | null };
   replyCount: number;
   likeCount: number;
@@ -178,11 +179,11 @@ interface EventTopicGroup {
 
 export async function listTopicEvents(actor: SocialActor | null): Promise<EventTopicGroup[]> {
   const groups = await EventQuestion.aggregate<{
-    _id: Types.ObjectId; replyCount: number; likeCount: number; createdAt: Date;
+    _id: Types.ObjectId; replyCount: number; likeCount: number; createdAt: Date; topicBodies: string[];
   }>([
     { $match: { eventId: { $type: 'objectId' } } },
     { $group: {
-      _id: '$eventId', replyCount: { $sum: '$replyCount' },
+      _id: '$eventId', topicBodies: { $push: '$body' }, replyCount: { $sum: '$replyCount' },
       likeCount: { $sum: '$likeCount' }, createdAt: { $max: '$createdAt' },
     } },
     { $sort: { createdAt: -1, _id: 1 } },
@@ -203,7 +204,7 @@ export async function listTopicEvents(actor: SocialActor | null): Promise<EventT
     if (!event) return [];
     return [{
       event: { id: String(event._id), name: event.name, image: event.thumbnailUrl || event.posterUrl || null },
-      replyCount: g.replyCount, likeCount: g.likeCount, createdAt: g.createdAt,
+      topicBodies: g.topicBodies, replyCount: g.replyCount, likeCount: g.likeCount, createdAt: g.createdAt,
       viewerIsMember: joined.has(String(g._id)),
     }];
   });
