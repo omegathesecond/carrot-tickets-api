@@ -86,6 +86,13 @@ const eventSchema = new Schema<IEvent>({
     trim: true,
     maxlength: [2000, 'Description cannot exceed 2000 characters']
   },
+  eventLocation: {
+    type: new Schema({
+      lat: { type: Number, required: true, min: -90, max: 90 },
+      lng: { type: Number, required: true, min: -180, max: 180 },
+    }, { _id: false }),
+    default: undefined,
+  },
   venue: {
     type: String,
     required: [true, 'Venue is required'],

@@ -56,12 +56,13 @@ describe('POST /api/public/events/submit (community self-listing)', () => {
     const req = request(app)
       .post('/api/public/events/submit')
       .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`);
-    Object.entries(fields()).forEach(([k, v]) => req.field(k, v));
+    Object.entries(fields({ eventLocation: JSON.stringify({ lat: -26.3, lng: 31.1 }) })).forEach(([k, v]) => req.field(k, v));
     req.attach('poster', Buffer.from('fake-jpeg'), { filename: 'poster.jpg', contentType: 'image/jpeg' });
     req.attach('media', Buffer.from('fake-jpeg-2'), { filename: 'crowd.jpg', contentType: 'image/jpeg' });
 
     const res = await req.expect(201);
     expect(res.body.data.status).toBe(EventStatus.PUBLISHED);
+    expect(res.body.data.eventLocation).toEqual({ lat: -26.3, lng: 31.1 });
     expect(res.body.data.submittedByBuyerId).toBe(String(buyer._id));
     expect(res.body.data.vendorId).toBeFalsy();
     expect(res.body.data.posterUrl).toContain('/poster/');

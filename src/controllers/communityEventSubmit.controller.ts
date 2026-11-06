@@ -30,6 +30,11 @@ export class CommunityEventSubmitController {
 
       const body: Record<string, unknown> = { ...req.body };
 
+      if (typeof body['eventLocation'] === 'string') {
+        try { body['eventLocation'] = JSON.parse(body['eventLocation']); }
+        catch { return ApiResponseUtil.error(res, 'Invalid event coordinates', 400); }
+      }
+
       // Community self-listings are LISTINGS, not hosted events: they put the
       // event on the feed/calendar and nothing more. Selling through Carrot
       // requires a real organizer account (payouts, scanning, settlement), so
