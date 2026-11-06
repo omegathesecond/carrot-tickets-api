@@ -27,6 +27,7 @@ export function buildEventCardFields(event: any) {
     name: event.name,
     description: event.description,
     venue: event.venue,
+    eventLocation: event.eventLocation ?? null,
     eventDate: event.eventDate,
     startTime: event.startTime,
     endTime: event.endTime,

@@ -55,6 +55,7 @@ export interface IEvent extends Document {
   name: string;
   description?: string;
   venue: string;
+  eventLocation?: { lat: number; lng: number } | null;
   eventDate: Date; // For single-day: event date. For multi-day: start date
   startTime: Date; // For single-day: start time on eventDate. For multi-day: start datetime
   endTime: Date; // For single-day: end time on eventDate. For multi-day: end datetime
