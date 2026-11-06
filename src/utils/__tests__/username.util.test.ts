@@ -1,3 +1,4 @@
+import { backfillUsernames } from '../../scripts/backfillUsernames';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Buyer } from '@models/buyer.model';
 import {
@@ -103,6 +104,42 @@ describe('username.util', () => {
     expect(buyer.username).toBe('club_123');
     await ensureUsername(buyer);
     expect(buyer.username).toBe('club_123');
+  });
+
+  it('migrates inactive buyers in bulk, preserves custom handles and is idempotent', async () => {
+    const buyers = await Buyer.create([
+      { phone: '+26878000011', password: 'secret1', name: 'Laslie Georges', username: 'laslie_georges_123' },
+      { phone: '+26878000012', password: 'secret1', name: 'Laslie Georges', username: 'laslie_georges_456' },
+      { phone: '+26878000013', password: 'secret1', username: 'custom_123', usernameCustomizedAt: new Date() },
+      { phone: '+26878000014', password: 'secret1', name: 'Club 123', username: 'club_123' },
+      { phone: '+26878000015', password: 'secret1', username: 'cosmic_fox_999' },
+    ]);
+    expect(await backfillUsernames()).toEqual({ updated: 3 });
+    const results = await Buyer.find({ _id: { $in: buyers.map(b => b._id) } });
+    const handles = results.map(b => b.username);
+    expect(handles).toContain('laslie_georges');
+    expect(handles.some(u => /^laslie_georges_[a-z]{4}$/.test(u!))).toBe(true);
+    expect(handles).toContain('custom_123');
+    expect(handles).toContain('club_123');
+    expect(new Set(handles).size).toBe(5);
+    expect(await backfillUsernames()).toEqual({ updated: 0 });
+  });
+
+  it('does not overwrite a username customized while migration is generating a replacement', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878000016', password: 'secret1', name: 'Laslie Georges', username: 'laslie_georges_123',
+    });
+    const exists = jest.spyOn(Buyer, 'exists').mockImplementationOnce(() => {
+      return Buyer.updateOne({ _id: buyer._id }, {
+        $set: { username: 'chosen_123', usernameCustomizedAt: new Date() },
+      }).then(() => null) as ReturnType<typeof Buyer.exists>;
+    });
+    try {
+      expect(await backfillUsernames()).toEqual({ updated: 0 });
+      expect((await Buyer.findById(buyer._id))?.username).toBe('chosen_123');
+    } finally {
+      exists.mockRestore();
+    }
   });
 
   it('schema rejects a username that violates the pattern', async () => {
