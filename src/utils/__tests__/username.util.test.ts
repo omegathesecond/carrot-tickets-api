@@ -53,6 +53,58 @@ describe('username.util', () => {
     expect(second.username).toBe(assigned);
   });
 
+  it('replaces an existing generated numeric handle and persists it once', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878000005', password: 'secret1', name: 'Laslie Georges',
+      username: 'laslie_georges_123',
+    });
+    await ensureUsername(buyer);
+    expect(buyer.username).toBe('laslie_georges');
+    const reloaded = await Buyer.findById(buyer._id);
+    expect(reloaded?.username).toBe('laslie_georges');
+    await ensureUsername(reloaded!);
+    expect(reloaded?.username).toBe('laslie_georges');
+  });
+
+  it('keeps migrated usernames unique when the readable name is taken', async () => {
+    await Buyer.create({ phone: '+26878000006', password: 'secret1', username: 'laslie_georges' });
+    const buyer = await Buyer.create({
+      phone: '+26878000007', password: 'secret1', name: 'Laslie Georges',
+      username: 'laslie_georges_123',
+    });
+    await ensureUsername(buyer);
+    expect(buyer.username).toMatch(/^laslie_georges_[a-z]{4}$/);
+  });
+
+  it('preserves customized numeric handles', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878000008', password: 'secret1', name: 'Laslie Georges',
+      username: 'laslie_georges_123', usernameCustomizedAt: new Date(),
+    });
+    await ensureUsername(buyer);
+    expect(buyer.username).toBe('laslie_georges_123');
+    expect((await Buyer.findById(buyer._id))?.username).toBe('laslie_georges_123');
+  });
+
+  it('replaces legacy anonymous generated handles without adding numbers', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878000009', password: 'secret1', username: 'cosmic_fox_999',
+    });
+    await ensureUsername(buyer);
+    expect(buyer.username).toMatch(USERNAME_REGEX);
+    expect(buyer.username).not.toMatch(/\d/);
+  });
+
+  it('keeps numbers that are part of the display name on repeat calls', async () => {
+    const buyer = await Buyer.create({
+      phone: '+26878000010', password: 'secret1', name: 'Club 123', username: 'club_123_456',
+    });
+    await ensureUsername(buyer);
+    expect(buyer.username).toBe('club_123');
+    await ensureUsername(buyer);
+    expect(buyer.username).toBe('club_123');
+  });
+
   it('schema rejects a username that violates the pattern', async () => {
     await expect(
       Buyer.create({ phone: '+26878000003', password: 'secret1', username: 'bad name!' })

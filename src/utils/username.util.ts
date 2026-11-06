@@ -54,11 +54,15 @@ export async function generateUniqueUsername(name?: string): Promise<string> {
 }
 
 /**
- * Lazily backfill a username on a buyer that predates the social release.
+ * Lazily assign missing usernames and replace legacy generated numeric handles.
+ * Explicitly customized handles remain unchanged, including numeric ones.
  * Retries the duplicate-key race so concurrent first requests both succeed.
  */
 export async function ensureUsername(buyer: IBuyer): Promise<IBuyer> {
-  if (buyer.username) return buyer;
+  const hasLegacyGeneratedUsername = !buyer.usernameCustomizedAt
+    && /_[1-9][0-9]{2}$/.test(buyer.username ?? '')
+    && buyer.username !== slugifyName(buyer.name ?? '');
+  if (buyer.username && !hasLegacyGeneratedUsername) return buyer;
   for (let attempt = 0; attempt < 3; attempt++) {
     buyer.username = await generateUniqueUsername(buyer.name);
     try {
