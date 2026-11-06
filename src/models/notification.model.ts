@@ -13,6 +13,7 @@ export type NotificationType =
   | 'meetup_request'
   | 'meetup_accepted'
   | 'enquiry_received'
+  | 'preparation_update'
   | 'story_like'
   | 'low_stock'
   | 'plan_invite'
@@ -97,6 +98,7 @@ const notificationSchema = new Schema<INotification>(
         'meetup_request',
         'meetup_accepted',
         'enquiry_received',
+        'preparation_update',
         'story_like',
         'low_stock',
         'plan_invite',

@@ -1,3 +1,4 @@
+import { PreparationController } from '@controllers/preparation.controller';
 import { EventCouponController } from '@controllers/eventCoupon.controller';
 import { Router } from 'express';
 import { PublicController } from '@controllers/public.controller';
@@ -423,6 +424,15 @@ router.post('/auth/reset-password', PublicController.resetPasswordBuyer);
  * @desc    List the signed-in buyer's tickets (Bearer buyer token)
  * @access  Buyer
  */
+// Ticket-holder preparation marketplace. Every operation rechecks ownership.
+router.get('/events/:eventId/preparation', authenticateBuyer, PreparationController.handle('mine'));
+router.post('/events/:eventId/preparation', authenticateBuyer, PreparationController.handle('create'));
+router.patch('/events/:eventId/preparation/:id', authenticateBuyer, PreparationController.handle('update'));
+router.delete('/events/:eventId/preparation/:id', authenticateBuyer, PreparationController.handle('remove'));
+router.post('/events/:eventId/preparation/:id/accept', authenticateBuyer, PreparationController.handle('accept'));
+router.get('/events/:eventId/companions', authenticateBuyer, PreparationController.handle('companions'));
+router.post('/preparation/:id/interest', authenticateBuyer, PreparationController.handle('interest'));
+
 router.get('/my-tickets', authenticateBuyer, PublicController.getMyTickets);
 
 /**

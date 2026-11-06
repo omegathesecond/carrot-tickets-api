@@ -27,6 +27,7 @@ import { requireTextQuery } from '@middleware/queryParams.middleware';
 import { startBackgroundTasks } from '@/tasks/backgroundTasks';
 import { migrateReviewIndexes } from '@/scripts/migrate-review-indexes';
 import { migrateWalletIndexes } from '@/scripts/migrate-wallet-indexes';
+import { ensurePreparationCategories } from '@/scripts/ensurePreparationCategories';
 import { migrateServiceCategories } from '@/scripts/migrateServiceCategories';
 import { migrateLegacyEventCategories } from '@/scripts/migrateLegacyEventCategories';
 import { migrateWeekendIndexes } from '@/scripts/migrate-weekend-indexes';
@@ -240,6 +241,7 @@ if (process.env['NODE_ENV'] !== 'test') {
  */
 async function initAfterConnect(): Promise<void> {
   await migrateServiceCategories();
+  await ensurePreparationCategories();
   console.log(`📦 Database: ${mongoose.connection.name}`);
   // Log detailed database configuration
   logDatabaseConfig();
