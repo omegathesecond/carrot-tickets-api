@@ -16,7 +16,9 @@ export const preparationInput = Joi.object({
   location: text(300).required(),
   note: text(1000).allow('').default(''),
   mode: Joi.string().valid('open', 'invite').required(),
-  providerIds: Joi.array().items(id.required()).unique().max(20).default([]),
+  providerIds: Joi.array().items(id).unique().max(20).when('mode', {
+    is: 'invite', then: Joi.array().min(1).required(), otherwise: Joi.array().default([]),
+  }),
 });
 export const preparationOfferInput = Joi.object({
   price: Joi.number().min(0).max(100000000).precision(2).required(),
