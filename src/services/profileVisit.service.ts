@@ -28,7 +28,13 @@ export class ProfileVisitService {
     let visitorKey: string;
     if (actor) {
       visitorKey = `${actor.type}:${actor.id}`;
-      await ProfileVisitor.updateOne({ guestKey }, { $set: { actorKey: visitorKey } }, { upsert: true });
+      // Resolve anonymous history once. A later account on a shared browser
+      // records its own visits, but must never take ownership of earlier ones.
+      try {
+        await ProfileVisitor.updateOne({ guestKey }, { $setOnInsert: { actorKey: visitorKey } }, { upsert: true });
+      } catch (error: any) {
+        if (error?.code !== 11000) throw error;
+      }
     } else {
       const known = await ProfileVisitor.findOne({ guestKey }).lean();
       visitorKey = known?.actorKey ?? guestKey;
