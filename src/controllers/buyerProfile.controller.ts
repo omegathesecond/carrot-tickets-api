@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import { publishProfilePicture } from '@services/profilePicturePost.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { Buyer } from '@models/buyer.model';
 import { R2Service } from '@utils/r2.service';
@@ -55,9 +57,8 @@ export class BuyerProfileController {
 
   /**
    * POST /api/public/profile/avatar (multipart 'avatar')
-   * Uploads the buyer's profile picture to R2 and saves its public URL. The
-   * previous avatar, if any, is deleted best-effort so R2 doesn't accumulate
-   * orphaned images.
+   * Uploads the picture, then commits its profile URL and regular photo post
+   * together. Retain old avatar files: existing posts still reference them.
    */
   static async uploadAvatar(req: Request, res: Response): Promise<any> {
     try {
@@ -80,14 +81,14 @@ export class BuyerProfileController {
       await R2Service.uploadBufferToR2(key, file.buffer, file.mimetype);
       const url = R2Service.getPublicUrl(key);
 
-      const previous = buyer.avatarUrl;
-      buyer.avatarUrl = url;
-      await buyer.save();
-
-      if (previous) {
-        R2Service.deleteEventMediaByUrl(previous).catch((err) =>
-          console.warn('Failed to delete previous avatar (non-fatal):', err?.message),
-        );
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          await Buyer.updateOne({ _id: buyer._id }, { $set: { avatarUrl: url } }, { session });
+          await publishProfilePicture(buyer._id, url, session);
+        });
+      } finally {
+        await session.endSession();
       }
 
       return ApiResponseUtil.success(res, { avatarUrl: url }, 'Profile picture updated');
@@ -99,8 +100,8 @@ export class BuyerProfileController {
 
   /**
    * DELETE /api/public/profile/avatar
-   * Removes the buyer's profile picture (reverts to initials). The stored file
-   * is deleted from R2 best-effort.
+   * Removes the buyer's profile picture (reverts to initials). Retains the
+   * stored file so previously published photo posts remain intact.
    */
   static async deleteAvatar(req: Request, res: Response): Promise<any> {
     try {
@@ -112,14 +113,7 @@ export class BuyerProfileController {
         return ApiResponseUtil.notFound(res, 'Account not found');
       }
 
-      const previous = buyer.avatarUrl;
       await Buyer.updateOne({ _id: buyer._id }, { $unset: { avatarUrl: '' } });
-
-      if (previous) {
-        R2Service.deleteEventMediaByUrl(previous).catch((err) =>
-          console.warn('Failed to delete avatar from R2 (non-fatal):', err?.message),
-        );
-      }
 
       return ApiResponseUtil.success(res, { avatarUrl: null }, 'Profile picture removed');
     } catch (error: any) {
