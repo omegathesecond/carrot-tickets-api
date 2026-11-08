@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
-import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { resolveActorFromRequest, isActorAuthorOf } from '@utils/socialActor.util';
 import { OnboardingService } from '@services/onboarding.service';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
+import { Update } from '@models/update.model';
+import { HEX24 } from '@utils/controllerHelpers.util';
 
 /** Applied before API routers so public/optional-auth reads cannot bypass the
  * signed-in account's requirements. Writes, account recovery, checkout and
@@ -42,6 +44,14 @@ export async function enforceOnboarding(req: Request, res: Response, next: NextF
           return;
         }
       } else if (!status.canBrowse) {
+        // The composer polls this read while uploaded videos are processing.
+        // Keep owner recovery independent of follows; never exempt other posts
+        // or nested browse surfaces (comments, etc.).
+        const singleUpdate = path.match(/^\/api\/public\/updates\/([^/]+)$/);
+        if (singleUpdate && HEX24.test(singleUpdate[1]!)) {
+          const update = await Update.findById(singleUpdate[1]).select('authorType authorId').lean();
+          if (update && isActorAuthorOf(update.authorType, update.authorId, actor)) return next();
+        }
         ApiResponseUtil.error(res, 'Follow at least 10 Carrot users to browse the platform', 403, 'FOLLOWING_REQUIRED');
         return;
       }

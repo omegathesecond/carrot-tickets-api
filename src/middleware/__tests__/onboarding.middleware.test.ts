@@ -3,10 +3,12 @@ import request from 'supertest';
 import { enforceOnboarding } from '@middleware/onboarding.middleware';
 import { TicketsAuthService } from '@services/ticketsAuth.service';
 import { resolveActorFromRequest } from '@utils/socialActor.util';
+import { Update } from '@models/update.model';
 import { OnboardingService } from '@services/onboarding.service';
 
-jest.mock('@utils/socialActor.util', () => ({ resolveActorFromRequest: jest.fn() }));
+jest.mock('@utils/socialActor.util', () => ({ ...jest.requireActual('@utils/socialActor.util'), resolveActorFromRequest: jest.fn() }));
 jest.mock('@services/onboarding.service', () => ({ OnboardingService: { status: jest.fn() } }));
+jest.mock('@models/update.model', () => ({ Update: { findById: jest.fn() } }));
 const app = express();
 app.use(enforceOnboarding);
 app.use((_req, res) => { res.json({ reached: true }); });
@@ -44,6 +46,35 @@ describe.each(['buyer', 'vendor'] as const)('%s server onboarding', (type) => {
   });
   it.each([`${social}/me/onboarding`, `${social}/me`, `${social}/suggestions/people`, '/api/public/my-tickets', '/api/public/profile', '/api/media/upload-url', '/api/public/events/event-id/preparation', `/api/public/updates/by/${type}/own-id`])('keeps recovery available %s', async (path) => {
     expect((await request(app).get(path).set('Authorization', 'Bearer valid')).status).toBe(200);
+  });
+  it('allows three owner video polls without follows and unlocks profiles independently', async () => {
+    const lean = jest.fn().mockResolvedValue({ authorType: type, authorId: 'own-id' });
+    const select = jest.fn().mockReturnValue({ lean });
+    jest.mocked(Update.findById).mockReturnValue({ select } as never);
+    for (const id of ['111111111111111111111111', '222222222222222222222222', '333333333333333333333333']) {
+      expect((await request(app).get(`/api/public/updates/${id}`).set('Authorization', 'Bearer valid')).status).toBe(200);
+    }
+    status.mockResolvedValue({ ...await OnboardingService.status({ type, id: 'own-id' }), mediaCount: 3, canViewProfiles: true });
+    expect((await request(app).get(`${social}/users/other`).set('Authorization', 'Bearer valid')).status).toBe(200);
+    expect((await request(app).get('/api/public/feed').set('Authorization', 'Bearer valid')).status).toBe(403);
+  });
+  it.each([
+    { authorType: type, authorId: 'other-id' },
+    { authorType: type === 'buyer' ? 'vendor' : 'buyer', authorId: 'own-id' },
+    null,
+  ])('keeps non-owner or missing update reads gated: %j', async (update) => {
+    jest.mocked(Update.findById).mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(update) }) } as never);
+    const res = await request(app).get('/api/public/updates/111111111111111111111111').set('Authorization', 'Bearer valid');
+    expect(res.status).toBe(403); expect(res.body.error).toBe('FOLLOWING_REQUIRED');
+  });
+  it('keeps comments gated even on an owned update', async () => {
+    const res = await request(app).get('/api/public/updates/111111111111111111111111/comments').set('Authorization', 'Bearer valid');
+    expect(res.status).toBe(403); expect(res.body.error).toBe('FOLLOWING_REQUIRED');
+    expect(Update.findById).not.toHaveBeenCalled();
+  });
+  it('surfaces owner lookup failures', async () => {
+    jest.mocked(Update.findById).mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockRejectedValue(new Error('database unavailable')) }) } as never);
+    expect((await request(app).get('/api/public/updates/111111111111111111111111').set('Authorization', 'Bearer valid')).status).toBe(500);
   });
   it('keeps follow and upload writes available', async () => {
     for (const path of [`${social}/follow`, '/api/public/updates', '/api/tickets/updates', '/api/media/upload']) {
