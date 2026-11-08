@@ -5,6 +5,7 @@ import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/h
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { VerificationStatus } from '@interfaces/vendor.interface';
@@ -20,19 +21,6 @@ async function makeVendor(businessName: string, extra: Record<string, unknown> =
     verificationStatus: VerificationStatus.VERIFIED,
     ...extra,
   });
-}
-
-// Seed real buyer targets so allowed browsing exercises the onboarding middleware.
-async function seedBuyerFollows(vendorId: string, count = 10) {
-  const buyers = await Buyer.create(Array.from({ length: count }, (_, i) => ({
-    phone: `+268781000${String(i).padStart(2, '0')}`,
-    password: 'secret1',
-    name: `Followed buyer ${i}`,
-    username: `followed_buyer_${i}`,
-  })));
-  await Follow.insertMany(buyers.map((buyer) => ({
-    followerType: 'vendor', followerId: vendorId, targetType: 'buyer', targetId: buyer._id,
-  })));
 }
 
 describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendations,nearby,me/location}', () => {
@@ -124,7 +112,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
     '/api/tickets/social/nearby/people?lat=200&lng=0',
   ])('requires 10 buyer follows before browsing %s', async (path) => {
     const me = await makeVendor('Onboarding Brand');
-    await seedBuyerFollows(String(me._id), 9);
+    await seedBuyerFollows('vendor', String(me._id), 9);
     const res = await request(app)
       .get(path)
       .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
@@ -135,7 +123,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
   describe('GET /recommendations', () => {
     it('returns soonest-upcoming events with a null basis (a brand has no saved list)', async () => {
       const me = await makeVendor('Reco Brand');
-      await seedBuyerFollows(String(me._id));
+      await seedBuyerFollows('vendor', String(me._id));
       const host = await makeVendor('Host Brand');
       await Event.create({ vendorId: host._id, name: 'Upcoming Show', venue: 'V', eventDate: soon(120), startTime: soon(120), endTime: soon(180), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
 
@@ -165,7 +153,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
     it('GET /nearby/people returns nearby buyers with a distance', async () => {
       const me = await makeVendor('Nearby Brand');
-      await seedBuyerFollows(String(me._id));
+      await seedBuyerFollows('vendor', String(me._id));
       await Buyer.create({
         phone: '+26878000041', password: 'secret1', name: 'Close', username: 'close_a',
         location: { type: 'Point', coordinates: [0, 0.01] }, locationUpdatedAt: new Date(),
@@ -184,7 +172,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
     it('400s on out-of-range lat', async () => {
       const me = await makeVendor('Bad Geo Brand');
-      await seedBuyerFollows(String(me._id));
+      await seedBuyerFollows('vendor', String(me._id));
       await request(app)
         .get('/api/tickets/social/nearby/people')
         .query({ lat: 200, lng: 0 })
