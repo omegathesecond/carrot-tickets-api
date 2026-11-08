@@ -1,3 +1,4 @@
+import { OnboardingController } from '@controllers/onboarding.controller';
 import { Router } from 'express';
 import { authenticateBuyer, optionalTicketsAuth } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
@@ -9,6 +10,8 @@ import { MeetupController } from '@controllers/meetup.controller';
 import { AccountActivityController } from '@controllers/accountActivity.controller';
 
 const router = Router();
+
+router.get('/me/onboarding', authenticateBuyer, OnboardingController.status);
 
 router.get('/me', authenticateBuyer, SocialProfileController.me);
 router.get('/me/saved', authenticateBuyer, ConsumerReadsController.mySaved);
