@@ -1,3 +1,4 @@
+import { ProfileVisitController } from '@controllers/profileVisit.controller';
 import { PreparationController } from '@controllers/preparation.controller';
 import { EventCouponController } from '@controllers/eventCoupon.controller';
 import { Router } from 'express';
@@ -28,6 +29,12 @@ const router = Router();
  * Public Routes - No authentication required
  * These endpoints allow public access to browse events and purchase tickets
  */
+
+// Reject invalid supplied credentials rather than recording an authenticated visitor as a guest.
+router.post('/profiles/:targetType/:targetId/views', (req, res, next) => {
+  if (req.headers.authorization) return authenticateBuyerOrOrganizer(req, res, next);
+  return next();
+}, ProfileVisitController.visit);
 
 /**
  * @route   GET /api/public/payment-methods

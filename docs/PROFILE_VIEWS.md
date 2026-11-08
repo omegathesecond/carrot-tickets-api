@@ -1,0 +1,13 @@
+# Unique profile views
+
+`POST /api/public/profiles/:targetType/:targetId/views` accepts `{ visitorId: <UUID v4> }` and returns `{ profileViewCount }` in the normal API envelope. `targetType` is `buyer` or `vendor`; the vendor identity is shared by organizer, venue, service-provider, transport and other operator profiles. Requests with credentials must authenticate successfully. Invalid or inactive targets cannot collect visits.
+
+Counts are lifetime unique visitors beginning with this release; no historical visits are fabricated. Signed-in visitors use their verified buyer/vendor identity, including across devices. Guests use a persistent random browser UUID (no IP address or fingerprint). Clearing storage or using another anonymous browser creates a separate unidentified visitor. This is browser-level uniqueness for guests, not a claim to identify humans across anonymous devices or detect bots.
+
+A guest's previous profile visits are reconciled when their browser next visits a profile signed in. The known browser keeps its resolved identity after sign-out to avoid another guest count. Visits from the profile's own identity are excluded, including exclusion of that browser's earlier anonymous view when recognized. The first resolved identity of anonymous history is permanent. A later account on a shared browser records its own signed-in visits without reassigning earlier history; signed-out visits retain the first resolved identity.
+
+The new `profilevisits` and `profilevisitors` collections use unique indexes, awaited before collecting visits. No existing collections or indexes are replaced. Concurrent page loads use upserts, with only duplicate-key races treated as already recorded. Read-time identity grouping prevents an anonymous request racing sign-in from adding a duplicate. Other failures return errors; the UI shows “Unavailable” instead of zero. Deploy the API before the website. No environment variables, secrets, or historical data migration are required.
+
+The website's `ProfileHero` uses `ProfileViewStat` for every profile page and the buyer ticket header, alongside the existing statistics. Small screens use two columns to accommodate the extra statistic without squeezing labels. Both public brand routes use the same vendor target and therefore the same count.
+
+Validation: API integration tests in `profileVisit.route.test.ts` cover concurrent visits, account/browser deduplication, guest promotion/sign-out, both self-view types, input/credential/visibility rejection and database failures. Website tests in `ProfileViewStat.test.tsx` cover shared statistics, persistent visitor identity, stale-response protection and visible errors.
