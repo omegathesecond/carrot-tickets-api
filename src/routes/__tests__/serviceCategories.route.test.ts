@@ -3,6 +3,7 @@ import app from '@/app';
 import { connectTestDb, disconnectTestDb, clearTestDb } from '../../__tests__/helpers/mongo';
 import { signAdminSessionToken, seedVendorSessionToken } from '../../__tests__/helpers/auth';
 import { ServiceCategory } from '@models/serviceCategory.model';
+import { SERVICE_CATEGORIES } from '@/constants/serviceCategories';
 import { seedServiceCategories } from '../../scripts/seed-service-categories';
 
 beforeAll(connectTestDb);
@@ -15,7 +16,7 @@ describe('GET /api/public/service-categories', () => {
 
     const res = await request(app).get('/api/public/service-categories');
     expect(res.status).toBe(200);
-    expect(res.body.data.categories).toHaveLength(11);
+    expect(res.body.data.categories.map(({ value, label }: { value: string; label: string }) => ({ value, label }))).toEqual(SERVICE_CATEGORIES);
     expect(res.body.data.categories[0]).toMatchObject({ value: 'sound_hire', label: 'Sound hire' });
   });
 
@@ -25,9 +26,8 @@ describe('GET /api/public/service-categories', () => {
 
     const res = await request(app).get('/api/public/service-categories');
     expect(res.status).toBe(200);
-    const values = res.body.data.categories.map((c: any) => c.value);
-    expect(values).not.toContain('sound_hire');
-    expect(values).toHaveLength(10);
+    const values = res.body.data.categories.map((category: { value: string }) => category.value);
+    expect(values).toEqual(SERVICE_CATEGORIES.filter(category => category.value !== 'sound_hire').map(category => category.value));
   });
 });
 

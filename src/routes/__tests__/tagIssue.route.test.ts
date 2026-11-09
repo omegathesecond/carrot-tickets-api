@@ -224,15 +224,26 @@ describe('scanning a tag at the desk makes it ready in one tap', () => {
     expect(await Wallet.countDocuments({ eventId })).toBe(1);
   });
 
-  it('leaves the bulk paste box as a stocking tool — no wallets', async () => {
-    // A pasted tag order is 500 tags nobody is holding yet. Minting wallets for
-    // them would fill the Balances screen with tags in a box.
+  it('prepares exactly one empty wallet per pasted tag, including on repeat registration', async () => {
+    // Pasted tags must be ready for a first reload, just like scanned tags.
     const { eventId, organizerToken } = await seedCashlessEvent();
 
     const res = await register(eventId, organizerToken, { bandUids: ['04a22b01', '04a22b02'] });
 
     expect(res.status).toBe(200);
     expect(res.body.data.registered).toEqual(['04a22b01', '04a22b02']);
-    expect(await Wallet.countDocuments({ eventId })).toBe(0);
+    const wallets = await Wallet.find({ eventId }).sort({ bandUid: 1 }).lean();
+    expect(wallets).toHaveLength(2);
+    expect(wallets.map(wallet => wallet.bandUid)).toEqual(['04a22b01', '04a22b02']);
+    for (const wallet of wallets) {
+      expect(wallet.ticketId).toBeUndefined();
+      expect(wallet.balance).toBe(0);
+    }
+
+    const again = await register(eventId, organizerToken, { bandUids: ['04a22b01', '04a22b02'] });
+    expect(again.status).toBe(200);
+    expect(again.body.data.alreadyRegistered).toEqual(['04a22b01', '04a22b02']);
+    expect((await Wallet.find({ eventId }).sort({ bandUid: 1 }).lean()).map(wallet => String(wallet._id)))
+      .toEqual(wallets.map(wallet => String(wallet._id)));
   });
 });
