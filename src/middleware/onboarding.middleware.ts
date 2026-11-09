@@ -23,6 +23,11 @@ export async function enforceOnboarding(req: Request, res: Response, next: NextF
     || /^\/api\/(?:tickets\/)?social\/(recommendations|nearby|stories|users\/search|me\/following\/events|plans|weekend)(\/|$)/.test(path)
     || /^\/api\/(marketplace|community)(\/|$)/.test(path);
   if (!userProfile && !author && !browse) return next();
+  // Buyers must be able to find an event, read its ticket/menu details and
+  // complete checkout without qualifying for the separate social features.
+  const ticketingRead = /^\/api\/public\/(events(?:\/[^/]+(?:\/(menu|reviews|share-earn))?)?|calendar|activity)$/.test(path)
+    || /^\/api\/(?:tickets\/)?social\/me\/following\/events$/.test(path);
+  if (ticketingRead) return next();
   // Ticket preparation is a recovery flow, not a platform browse surface.
   if (/^\/api\/public\/events\/[^/]+\/(preparation|companions)(\/|$)/.test(path)) return next();
   await authenticateTickets(req, res, async (authError?: unknown) => {
