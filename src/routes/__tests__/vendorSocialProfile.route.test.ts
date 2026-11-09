@@ -2,12 +2,13 @@ import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/helpers/auth';
+import { seedReadyMedia } from '../../__tests__/helpers/onboarding';
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
 
 let vseq = 0;
-const makeVendor = (name?: string) => {
+const makeVendor = (name?: string, mediaCount = 3) => {
   vseq += 1;
   return Vendor.create({
     businessName: name ?? `Brand ${vseq}`,
@@ -15,6 +16,9 @@ const makeVendor = (name?: string) => {
     phoneNumber: `+2687${8000100 + vseq}`,
     password: 'secret123',
     logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg',
+  }).then(async (vendor) => {
+    await seedReadyMedia('vendor', String(vendor._id), mediaCount);
+    return vendor;
   });
 };
 
@@ -53,6 +57,18 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
     expect(JSON.stringify(res.body.data)).not.toContain('+26878000301');
   });
 
+  it('requires three ready uploads independently of follows', async () => {
+    const vendor = await makeVendor('Uploading brand', 2);
+    await Buyer.create({ phone: '+26878000305', password: 'secret1', username: 'media_target' });
+    const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
+    const blocked = await request(app).get('/api/tickets/social/users/media_target')
+      .set('Authorization', token).expect(403);
+    expect(blocked.body.error).toBe('MEDIA_REQUIRED');
+    await seedReadyMedia('vendor', String(vendor._id), 1);
+    await request(app).get('/api/tickets/social/users/media_target')
+      .set('Authorization', token).expect(200);
+  });
+
   it('404s an unknown username', async () => {
     const vendor = await makeVendor();
     const token = `Bearer ${await seedVendorSessionToken(String(vendor._id))}`;
@@ -61,7 +77,8 @@ describe('GET /api/tickets/social/users/:username (vendor viewer)', () => {
   });
 
   it('401s a buyer token (no vendorId)', async () => {
-    await Buyer.create({ phone: '+26878000302', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'plain_buyer' });
+    const buyer = await Buyer.create({ phone: '+26878000302', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username: 'plain_buyer' });
+    await seedReadyMedia('buyer', String(buyer._id));
     await request(app).get('/api/tickets/social/users/plain_buyer')
       .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000302')}`).expect(401);
   });

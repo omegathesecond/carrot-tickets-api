@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
+import { seedReadyMedia } from '../../__tests__/helpers/onboarding';
 import { Update } from '@models/update.model';
 
 jest.mock('@services/transcode.client', () => ({ triggerTranscode: jest.fn(), reconcileStuckUpdates: jest.fn() }));
@@ -92,6 +93,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
   it("includes the caller's viewerReactions when a vendor token is present", async () => {
     const authorId = new mongoose.Types.ObjectId();
     const viewerId = new mongoose.Types.ObjectId().toHexString();
+    await seedReadyMedia('vendor', viewerId);
     const update = await Update.create({ authorType: 'vendor', authorId, kind: 'image', caption: 'x', media: [readyImageMedia] });
     await request(app)
       .post(`/api/tickets/updates/${update.id}/like`)
@@ -108,6 +110,19 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
   it('400s on a malformed cursor rather than silently returning an empty page', async () => {
     const res = await request(app).get('/api/public/updates/by/vendor/507f1f77bcf86cd799439011?cursor=not-a-date');
     expect(res.status).toBe(400);
+  });
+
+  it('unlocks other author reads at three media without requiring follows', async () => {
+    const viewerId = new mongoose.Types.ObjectId().toHexString();
+    const authorId = new mongoose.Types.ObjectId().toHexString();
+    const token = `Bearer ${await seedVendorSessionToken(viewerId)}`;
+    await seedReadyMedia('vendor', viewerId, 2);
+    const blocked = await request(app).get(`/api/public/updates/by/vendor/${authorId}`)
+      .set('Authorization', token).expect(403);
+    expect(blocked.body.error).toBe('MEDIA_REQUIRED');
+    await seedReadyMedia('vendor', viewerId, 1);
+    await request(app).get(`/api/public/updates/by/vendor/${authorId}`)
+      .set('Authorization', token).expect(200);
   });
 
   // viewerIsAuthor is what lets the client offer delete only on your own post.
@@ -131,6 +146,7 @@ describe('GET /api/public/updates/by/:authorType/:authorId', () => {
   it('sets viewerIsAuthor false for a different vendor', async () => {
     const author = new mongoose.Types.ObjectId();
     const other = new mongoose.Types.ObjectId();
+    await seedReadyMedia('vendor', other.toHexString());
     await Update.create({
       authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
       media: [readyImageMedia],
