@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -23,6 +24,7 @@ async function seedWorld() {
   const general = (await Channel.findOne({ communityId: community._id, slug: 'general' }))!;
 
   const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Reporter Buyer' });
+  await seedBuyerFollows('buyer', buyer.id);
   const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
   const adminAuth = `Bearer ${await signStaffSessionToken(String(vendor._id), [TicketsPermission.MODERATE_SOCIAL])}`;
   const superAdminAuth = `Bearer ${await signAdminSessionToken()}`;

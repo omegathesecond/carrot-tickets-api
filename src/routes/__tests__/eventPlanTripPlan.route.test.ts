@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -37,7 +38,9 @@ async function makeEvent(overrides: Partial<any> = {}) {
 }
 
 async function makeBuyer(phone: string, name: string, username: string) {
-  return Buyer.create({ phone, password: 'secret1', avatarUrl: AVATAR, name, username });
+  const buyer = await Buyer.create({ phone, password: 'secret1', avatarUrl: AVATAR, name, username });
+  await seedBuyerFollows('buyer', buyer.id);
+  return buyer;
 }
 
 function createPlan(headers: Record<string, string>, body: Record<string, unknown>) {

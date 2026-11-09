@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -25,7 +26,8 @@ describe('GET /api/public/feed — event viewer reactions', () => {
   afterAll(disconnectTestDb);
 
   beforeEach(async () => {
-    await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester' });
+    const buyer = await Buyer.create({ phone: BUYER_PHONE, password: 'secret123', username: 'tester' });
+    await seedBuyerFollows('buyer', buyer.id);
   });
 
   it('marks viewerReactions.liked=true for an event the viewing buyer liked', async () => {

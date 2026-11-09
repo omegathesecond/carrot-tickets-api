@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -34,6 +35,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
 
   it('returns upcoming published events from organizers the BRAND follows, soonest first', async () => {
     const brandId = new mongoose.Types.ObjectId();
+    await seedBuyerFollows('vendor', String(brandId));
     const followedVendor = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'vendor', followerId: brandId, targetType: 'organizer', targetId: followedVendor });
 
@@ -51,6 +53,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
 
   it('excludes unfollowed organizers, drafts, and finished events', async () => {
     const brandId = new mongoose.Types.ObjectId();
+    await seedBuyerFollows('vendor', String(brandId));
     const followedVendor = new mongoose.Types.ObjectId();
     const otherVendor = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'vendor', followerId: brandId, targetType: 'organizer', targetId: followedVendor });
@@ -74,6 +77,7 @@ describe('GET /api/tickets/social/me/following/events', () => {
   // Following tab.
   it("ignores a buyer's follow row that shares the brand's id", async () => {
     const sharedId = new mongoose.Types.ObjectId();
+    await seedBuyerFollows('vendor', String(sharedId));
     const followedVendor = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'buyer', followerId: sharedId, targetType: 'organizer', targetId: followedVendor });
 
@@ -88,15 +92,18 @@ describe('GET /api/tickets/social/me/following/events', () => {
   });
 
   it('returns an empty list when the brand follows no organizers', async () => {
+    const brandId = new mongoose.Types.ObjectId();
+    await seedBuyerFollows('vendor', String(brandId));
     const res = await request(app)
       .get('/api/tickets/social/me/following/events')
-      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(new mongoose.Types.ObjectId()))}`)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(brandId))}`)
       .expect(200);
     expect(res.body.data.events).toEqual([]);
   });
 
   it('401s a buyer token and an anonymous request', async () => {
-    await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', name: 'Buyer' });
+    const buyer = await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', name: 'Buyer' });
+    await seedBuyerFollows('buyer', buyer.id);
     await request(app)
       .get('/api/tickets/social/me/following/events')
       .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)

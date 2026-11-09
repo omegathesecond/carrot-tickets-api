@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -12,6 +13,7 @@ describe('vendor reactions end-to-end via feed + getOne', () => {
 
   it('like via API is visible in getOne and the feed for that vendor', async () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
+    await seedBuyerFollows('vendor', vendorId);
     const token = `Bearer ${await seedVendorSessionToken(vendorId)}`;
     const u = await Update.create({
       authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),

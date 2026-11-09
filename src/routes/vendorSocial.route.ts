@@ -1,3 +1,4 @@
+import { OnboardingController } from '@controllers/onboarding.controller';
 import { Router } from 'express';
 import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
 import { requireProfilePhoto } from '@middleware/requirePhoto.middleware';
@@ -10,6 +11,8 @@ import { AccountActivityController } from '@controllers/accountActivity.controll
 // /api/tickets/social — see src/app.ts, placed before the broader
 // /api/tickets mount so these specific paths aren't shadowed.
 const router = Router();
+
+router.get('/me/onboarding', authenticateTickets, OnboardingController.status);
 
 router.get('/me', authenticateTickets, VendorSocialController.me);
 // Brand nearby opt-in — exact path, registered before the '/users/:username'

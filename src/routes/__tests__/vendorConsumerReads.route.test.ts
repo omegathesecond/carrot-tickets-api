@@ -5,6 +5,7 @@ import { seedVendorSessionToken, signBuyerSessionToken } from '../../__tests__/h
 import { Vendor } from '@models/vendor.model';
 import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
 import { VerificationStatus } from '@interfaces/vendor.interface';
@@ -105,9 +106,24 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
     });
   });
 
+  it.each([
+    '/api/tickets/social/recommendations',
+    '/api/tickets/social/nearby/people?lat=0&lng=0',
+    '/api/tickets/social/nearby/people?lat=200&lng=0',
+  ])('requires 10 buyer follows before browsing %s', async (path) => {
+    const me = await makeVendor('Onboarding Brand');
+    await seedBuyerFollows('vendor', String(me._id), 9);
+    const res = await request(app)
+      .get(path)
+      .set('Authorization', `Bearer ${await seedVendorSessionToken(String(me._id))}`)
+      .expect(403);
+    expect(res.body.error).toBe('FOLLOWING_REQUIRED');
+  });
+
   describe('GET /recommendations', () => {
     it('returns soonest-upcoming events with a null basis (a brand has no saved list)', async () => {
       const me = await makeVendor('Reco Brand');
+      await seedBuyerFollows('vendor', String(me._id));
       const host = await makeVendor('Host Brand');
       await Event.create({ vendorId: host._id, name: 'Upcoming Show', venue: 'V', eventDate: soon(120), startTime: soon(120), endTime: soon(180), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
 
@@ -137,6 +153,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
     it('GET /nearby/people returns nearby buyers with a distance', async () => {
       const me = await makeVendor('Nearby Brand');
+      await seedBuyerFollows('vendor', String(me._id));
       await Buyer.create({
         phone: '+26878000041', password: 'secret1', name: 'Close', username: 'close_a',
         location: { type: 'Point', coordinates: [0, 0.01] }, locationUpdatedAt: new Date(),
@@ -155,6 +172,7 @@ describe('Vendor consumer-reads: /api/tickets/social/{suggestions,recommendation
 
     it('400s on out-of-range lat', async () => {
       const me = await makeVendor('Bad Geo Brand');
+      await seedBuyerFollows('vendor', String(me._id));
       await request(app)
         .get('/api/tickets/social/nearby/people')
         .query({ lat: 200, lng: 0 })

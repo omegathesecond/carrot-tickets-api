@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { Types } from 'mongoose';
@@ -16,6 +17,7 @@ jest.mock('@services/push.service', () => ({ PushService: { sendToBuyer: jest.fn
 async function provider(email = 'provider@example.com') {
   const vendor = await Vendor.create({ email, password: 'secret123', businessName: email,
     operatorType: OperatorType.SERVICES, serviceCategories: ['photography'], logoUrl: 'https://example.com/photo.jpg' });
+  await seedBuyerFollows('vendor', vendor.id);
   return { vendor, token: signVendorToken(String(vendor._id), { authVersion: vendor.authVersion }) };
 }
 
@@ -88,6 +90,7 @@ describe('Service-provider plans and Share&Earn', () => {
 
   it('keeps normal buyer tab access and rejects expired/revoked provider sessions', async () => {
     const buyer = await Buyer.create({ email: 'buyer@example.com', password: 'secret123' });
+    await seedBuyerFollows('buyer', buyer.id);
     const buyerToken = jwt.sign({ app: 'tickets', userType: 'buyer', buyerId: String(buyer._id), authVersion: buyer.authVersion }, process.env['JWT_SECRET']!);
     for (const path of ['/api/social/plans/mine', '/api/public/my-share-earn']) {
       await request(app).get(path).set('Authorization', `Bearer ${buyerToken}`).expect(200);

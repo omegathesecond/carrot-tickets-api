@@ -1,3 +1,4 @@
+import { enforceOnboarding } from '@middleware/onboarding.middleware';
 import { publicTagWithdrawalRoutes, adminTagWithdrawalRoutes } from '@routes/tagWithdrawal.route';
 import dotenv from 'dotenv';
 
@@ -178,6 +179,7 @@ if (process.env['API_DOCS_ENABLED'] === 'true') {
 }
 
 // API Routes
+app.use(enforceOnboarding);
 app.use('/api/tickets/updates', vendorUpdateRoutes);   // Vendor-authored updates (organizer dashboard) - mounted before the broader /api/tickets below so this specific path isn't shadowed
 app.use('/api/tickets/transport', transportRoutes);    // Vendor bus/shuttle inventory - before the broad /api/tickets
 app.use('/api/tickets/social', vendorSocialRoutes);   // Vendor (brand) social graph — before the broad /api/tickets

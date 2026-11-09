@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -84,6 +85,7 @@ describe('GET /api/public/calendar', () => {
 
   it('marks the signed-in viewer’s going and saved rows without filtering', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const saved = await makeEvent({ name: 'Saved', eventDate: new Date('2026-04-01') });
     await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
     const going = await makeEvent({ name: 'Going', eventDate: new Date('2026-05-01') });
