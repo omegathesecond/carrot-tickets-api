@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -29,15 +30,17 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
   afterAll(disconnectTestDb);
 
   let vseq = 0;
-  const makeVendor = (name?: string) => {
+  const makeVendor = async (name?: string) => {
     vseq += 1;
-    return Vendor.create({
+    const vendor = await Vendor.create({
       businessName: name ?? `Brand ${vseq}`,
       email: `vendor${vseq}-${Date.now()}@example.com`,
       phoneNumber: `+2687${8100000 + vseq}`,
       password: 'secret123',
       logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg',
     });
+    await seedBuyerFollows('vendor', vendor.id);
+    return vendor;
   };
 
   /** A ready-to-play image story by (authorType, authorId), active for 24h. */
@@ -166,7 +169,8 @@ describe('Brand stories API (/api/tickets/social/stories)', () => {
     });
 
     it('401s a buyer token', async () => {
-      await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
+      const buyer = await Buyer.create({ phone: BUYER_PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Buyer' });
+      await seedBuyerFollows('buyer', buyer.id);
       await request(app)
         .get('/api/tickets/social/stories')
         .set('Authorization', `Bearer ${await signBuyerSessionToken(BUYER_PHONE)}`)

@@ -3,7 +3,10 @@ import mongoose from 'mongoose';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { seedVendorSessionToken } from '../../__tests__/helpers/auth';
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import { Update } from '@models/update.model';
+import { Follow } from '@models/follow.model';
+import { Buyer } from '@models/buyer.model';
 import { toggleReaction } from '@services/update.service';
 
 describe('GET /api/public/feed — vendor viewer reactions', () => {
@@ -13,6 +16,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
 
   it('marks viewerReactions.liked=true for an update the viewing vendor liked', async () => {
     const vendorId = new mongoose.Types.ObjectId().toString();
+    await seedBuyerFollows('vendor', vendorId);
     const u = await Update.create({
       authorType: 'vendor', authorId: new mongoose.Types.ObjectId(),
       kind: 'image', caption: 'x', media: [{ rawKey: 'k', status: 'ready' }], status: 'active',
@@ -29,11 +33,24 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
     expect(slide.viewerReactions).toEqual({ liked: true, saved: false });
   });
 
+  it('unlocks feed at ten follows without requiring media', async () => {
+    const vendorId = new mongoose.Types.ObjectId().toHexString();
+    const token = `Bearer ${await seedVendorSessionToken(vendorId)}`;
+    await seedBuyerFollows('vendor', vendorId, 9);
+    const blocked = await request(app).get('/api/public/feed?tab=for-you')
+      .set('Authorization', token).expect(403);
+    expect(blocked.body.error).toBe('FOLLOWING_REQUIRED');
+    const buyer = await Buyer.create({ phone: '+26878999999', password: 'secret1', username: 'tenth_buyer' });
+    await Follow.create({ followerType: 'vendor', followerId: vendorId, targetType: 'buyer', targetId: buyer._id });
+    await request(app).get('/api/public/feed?tab=for-you').set('Authorization', token).expect(200);
+  });
+
   // The feed renames a vendor author to author.type:'organizer', while a
   // SocialActor says 'vendor'. A naive compare would mean a brand NEVER owns
   // its own post and the ⋯ delete would never appear in the feed.
   it('marks viewerIsAuthor=true on the viewing vendor\'s own post', async () => {
     const vendorId = new mongoose.Types.ObjectId().toHexString();
+    await seedBuyerFollows('vendor', vendorId);
     const u = await Update.create({
       authorType: 'vendor', authorId: vendorId, kind: 'image', caption: 'mine',
       media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],
@@ -53,6 +70,7 @@ describe('GET /api/public/feed — vendor viewer reactions', () => {
   it("marks viewerIsAuthor=false on another brand's post", async () => {
     const author = new mongoose.Types.ObjectId().toHexString();
     const viewer = new mongoose.Types.ObjectId().toHexString();
+    await seedBuyerFollows('vendor', viewer);
     const u = await Update.create({
       authorType: 'vendor', authorId: author, kind: 'image', caption: 'theirs',
       media: [{ rawKey: 'k', status: 'ready', image: { url: 'u', width: 1, height: 1 } }],

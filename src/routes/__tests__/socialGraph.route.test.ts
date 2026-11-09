@@ -1,3 +1,4 @@
+import { seedBuyerFollows, seedReadyMedia } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -33,6 +34,7 @@ describe('social graph routes', () => {
 
   it('follow -> counts + viewer flags on public profile; mutual = friends', async () => {
     const { a, b, authA, authB } = await seedBuyers();
+    await seedReadyMedia('buyer', (await Buyer.findOne({ phone: PHONE_A }))!.id);
 
     await request(app).post('/api/social/follow').set('Authorization', authA)
       .send({ targetType: 'buyer', targetId: String(b._id) }).expect(200);
@@ -82,6 +84,7 @@ describe('social graph routes', () => {
 
   it('user search matches username prefix, excludes self and blocked (either way)', async () => {
     const { b, authA, authB } = await seedBuyers();
+    await seedBuyerFollows('buyer', (await Buyer.findOne({ phone: PHONE_A }))!.id);
     // C blocks nobody; B blocks A -> A's search must not show B
     await request(app).post('/api/social/block').set('Authorization', authB)
       .send({ userId: String((await Buyer.findOne({ phone: PHONE_A }))!._id) }).expect(200);
@@ -99,6 +102,7 @@ describe('social graph routes', () => {
 
   it('user search matches display name and includes usernameless buyers', async () => {
     const { authA } = await seedBuyers();
+    await seedBuyerFollows('buyer', (await Buyer.findOne({ phone: PHONE_A }))!.id);
     // A buyer who never had a social touch: has a name, no username at all.
     const noHandle = await Buyer.create({ phone: '+26878000044', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Sipho Dlamini' });
 
@@ -111,6 +115,7 @@ describe('social graph routes', () => {
 
   it('resolves a usernameless buyer profile by id (the /u/<id> fallback)', async () => {
     const { authA } = await seedBuyers();
+    await seedReadyMedia('buyer', (await Buyer.findOne({ phone: PHONE_A }))!.id);
     const noHandle = await Buyer.create({ phone: '+26878000045', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Thandi' });
 
     const res = await request(app).get(`/api/social/users/${String(noHandle._id)}`).set('Authorization', authA).expect(200);
@@ -121,6 +126,7 @@ describe('social graph routes', () => {
 
   it('community members list: public roster, excludes banned, newest first', async () => {
     const { a, b, c, authA, authB } = await seedBuyers();
+    await seedBuyerFollows('buyer', (await Buyer.findOne({ phone: PHONE_A }))!.id);
     const seeded = await seedPublishedEvent();
     const { community } = await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
     await Membership.create({ buyerId: a._id, communityId: community._id });
@@ -143,7 +149,8 @@ describe('social graph routes', () => {
     // The who's-going roster is public social proof (optionalCommunityViewer):
     // a non-member — and a signed-out visitor — reads the same list. Joining
     // and messaging stay gated on the write routes.
-    await Buyer.create({ phone: '+26878000044', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
+    const outsider = await Buyer.create({ phone: '+26878000044', password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
+    await seedBuyerFollows('buyer', outsider.id);
     const nonMember = await request(app)
       .get(`/api/community/${seeded.eventId}/members`)
       .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000044')}`)

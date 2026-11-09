@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -10,7 +11,9 @@ import { EventQuestion } from '@models/eventQuestion.model';
 const PHONE = '+26878422613';
 
 async function seedBuyer(phone = PHONE, name = 'Test Buyer') {
-  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name });
+  const buyer = await Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name });
+  await seedBuyerFollows('buyer', buyer.id);
+  return buyer;
 }
 
 describe('GET /api/public/questions', () => {

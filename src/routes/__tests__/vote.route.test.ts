@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -12,7 +13,9 @@ const PHONE = '+26878422613';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 async function seedBuyer(phone = PHONE, name = 'Test Buyer') {
-  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name });
+  const buyer = await Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name });
+  await seedBuyerFollows('buyer', buyer.id);
+  return buyer;
 }
 
 /** A published event whose Vote window is already OPEN and not yet closed:

@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -17,7 +18,9 @@ async function seedCommunityEvent() {
 }
 
 async function seedBuyer(phone = PHONE) {
-  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Test Buyer' });
+  const buyer = await Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Test Buyer' });
+  await seedBuyerFollows('buyer', buyer.id);
+  return buyer;
 }
 
 describe('community routes', () => {

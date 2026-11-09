@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
@@ -22,6 +23,7 @@ describe('GET /api/social/nearby/people meetup status', () => {
       phone: ME, password: 'secret1', name: 'Me', username: 'me_one',
       location: { type: 'Point', coordinates: [31.13, -26.31] }, locationUpdatedAt: new Date(),
     });
+    await seedBuyerFollows('buyer', me.id);
     const near = await Buyer.create({
       phone: '+26878000001', password: 'secret1', name: 'Near', username: 'near_a',
       location: { type: 'Point', coordinates: [31.131, -26.311] }, locationUpdatedAt: new Date(),

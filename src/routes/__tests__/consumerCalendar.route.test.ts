@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -100,6 +101,7 @@ describe('GET /api/social/me/following/events', () => {
 
   it('returns upcoming published events from followed organizers, soonest first', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const vendorId = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: vendorId });
 
@@ -114,6 +116,7 @@ describe('GET /api/social/me/following/events', () => {
 
   it('excludes events from organizers the buyer does not follow', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const followedVendor = new mongoose.Types.ObjectId();
     const otherVendor = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: followedVendor });
@@ -128,6 +131,7 @@ describe('GET /api/social/me/following/events', () => {
 
   it('excludes non-published events and past events from a followed organizer', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const vendorId = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: vendorId });
 
@@ -142,13 +146,15 @@ describe('GET /api/social/me/following/events', () => {
   });
 
   it('returns an empty list when the buyer follows no organizers', async () => {
-    await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const res = await request(app).get('/api/social/me/following/events').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
     expect(res.body.data.events).toEqual([]);
   });
 
   it('still includes an in-progress event (started but not yet ended) from a followed organizer', async () => {
     const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const vendorId = new mongoose.Types.ObjectId();
     await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: 'organizer', targetId: vendorId });
 

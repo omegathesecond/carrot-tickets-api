@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -60,7 +61,8 @@ describe('event Q&A routes', () => {
 
   it('posts a question as a buyer, and it appears in GET with author + viewerHasLiked:false', async () => {
     const { eventId } = await seedPublishedEvent();
-    await seedBuyer();
+    const viewer = await seedBuyer();
+      await seedBuyerFollows('buyer', viewer.id);
     const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
     const created = await request(app)
@@ -177,7 +179,8 @@ describe('event Q&A routes', () => {
 
   it('toggles a like on then off, flipping likeCount and viewerHasLiked', async () => {
     const { eventId } = await seedPublishedEvent();
-    await seedBuyer();
+    const viewer = await seedBuyer();
+      await seedBuyerFollows('buyer', viewer.id);
     const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
     const created = await request(app)
       .post(`/api/community/${eventId}/questions`)
@@ -241,7 +244,8 @@ describe('event Q&A routes', () => {
     });
 
     it('posts a general question with eventId: null, appears in the cross-event feed the same way', async () => {
-      await seedBuyer();
+      const viewer = await seedBuyer();
+      await seedBuyerFollows('buyer', viewer.id);
       const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
       const created = await request(app)
@@ -270,7 +274,8 @@ describe('event Q&A routes', () => {
     });
 
     it('supports reply and like on a general post, same as an event-scoped one', async () => {
-      await seedBuyer();
+      const viewer = await seedBuyer();
+      await seedBuyerFollows('buyer', viewer.id);
       const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       const created = await request(app)
         .post('/api/community/questions')
@@ -300,7 +305,8 @@ describe('event Q&A routes', () => {
 
     it('GET /api/public/questions/general returns only general posts, never an event-scoped one', async () => {
       const { eventId } = await seedPublishedEvent();
-      await seedBuyer();
+      const viewer = await seedBuyer();
+      await seedBuyerFollows('buyer', viewer.id);
       const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
 
       await request(app).post(`/api/community/${eventId}/questions`).set('Authorization', auth).send({ body: 'Event-scoped post' }).expect(201);
@@ -436,7 +442,8 @@ describe('event Q&A routes', () => {
 
     it("auto-joins the topic's creator: the author is already a member and reports viewerIsMember true", async () => {
       const { eventId } = await seedPublishedEvent();
-      await seedBuyer();
+      const viewer = await seedBuyer();
+      await seedBuyerFollows('buyer', viewer.id);
       const auth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
       const created = await request(app)
         .post(`/api/community/${eventId}/questions`)

@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import app from '@/app';
@@ -25,6 +26,7 @@ async function seedWorld() {
   const { community } = await CommunityService.ensureForEvent(seeded.eventId, String(vendor._id));
   const announcements = await Channel.findOne({ communityId: community._id, slug: 'announcements' });
   const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', username: 'listener_one' });
+  await seedBuyerFollows('buyer', buyer.id);
   await Membership.create({ buyerId: buyer._id, communityId: community._id });
   return { vendor, seeded, community, announcements: announcements!, buyerAuth: `Bearer ${await signBuyerSessionToken(PHONE)}` };
 }
@@ -66,7 +68,8 @@ describe('organizer announcements', () => {
       .expect(201);
 
     // A second buyer with no Membership row at all for this community.
-    await Buyer.create({ phone: '+26878422614', password: 'secret1', username: 'outsider_listener' });
+    const outsider = await Buyer.create({ phone: '+26878422614', password: 'secret1', username: 'outsider_listener' });
+    await seedBuyerFollows('buyer', outsider.id);
     const outsiderAuth = `Bearer ${await signBuyerSessionToken('+26878422614')}`;
 
     const res = await request(app)

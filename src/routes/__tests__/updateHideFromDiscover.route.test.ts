@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import { seedVendorSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import mongoose from 'mongoose';
@@ -74,6 +75,7 @@ describe('Discover moderation — /api/tickets/updates/:id/hide-from-discover', 
     const anon = await request(app).get('/api/public/feed?tab=for-you').expect(200);
     expect(anon.body.data.items.find((i: any) => i.type === 'update').viewerCanModerate).toBeFalsy();
 
+    await seedBuyerFollows('vendor', superId);
     const mod = await request(app).get('/api/public/feed?tab=for-you').set('Authorization', await superAdmin()).expect(200);
     expect(mod.body.data.items.find((i: any) => i.type === 'update').viewerCanModerate).toBe(true);
   });

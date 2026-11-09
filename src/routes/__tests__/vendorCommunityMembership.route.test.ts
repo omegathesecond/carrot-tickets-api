@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -21,7 +22,9 @@ describe('vendor community membership (non-owner brand)', () => {
 
   let seq = 0;
   async function makeBrand(name: string) {
-    return Vendor.create({ logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', businessName: name, email: `brand${++seq}@example.com`, password: 'secret123' });
+    const vendor = await Vendor.create({ logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', businessName: name, email: `brand${++seq}@example.com`, password: 'secret123' });
+    await seedBuyerFollows('vendor', vendor.id);
+    return vendor;
   }
 
   async function seedForeignCommunity() {

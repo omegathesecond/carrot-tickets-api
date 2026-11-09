@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import app from '@/app';
@@ -23,6 +24,7 @@ async function seedOwnedCommunity() {
     password: 'secret123',
     logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg',
   });
+  await seedBuyerFollows('vendor', vendor.id);
   const seeded = await seedPublishedEvent({ vendorId: vendor._id });
   await CommunityService.ensureForEvent(seeded.eventId, seeded.vendorId);
   return seeded; // vendorId === the community owner
@@ -54,6 +56,7 @@ describe('community organizer read-only peek', () => {
   it("lets a non-managing brand view a community it can join (true parity — no longer 403)", async () => {
     const { eventId } = await seedOwnedCommunity();
     const otherVendorId = new mongoose.Types.ObjectId().toString();
+    await seedBuyerFollows('vendor', otherVendorId);
 
     const res = await request(app)
       .get(`/api/community/${eventId}`)

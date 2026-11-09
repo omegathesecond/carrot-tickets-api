@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -47,6 +48,7 @@ describe('GET /api/public/activity-feed', () => {
 
   it('serves the following tab with a session', async () => {
     const { buyer } = await seedLike();
+    await seedBuyerFollows('buyer', buyer.id);
     const res = await request(app)
       .get('/api/public/activity-feed?tab=following')
       .set('Authorization', `Bearer ${await signBuyerSessionToken(buyer.phone!)}`);
@@ -62,6 +64,7 @@ describe('GET /api/public/activity-feed', () => {
     // viewers on this tab.
     const { event } = await seedLike();
     const vendor = await Vendor.create({ businessName: 'Follower Org', password: 'password123', slug: 'follower-org' });
+    await seedBuyerFollows('vendor', vendor.id);
     const res = await request(app)
       .get('/api/public/activity-feed?tab=following')
       .set('Authorization', `Bearer ${await seedVendorSessionToken(String(vendor._id))}`);

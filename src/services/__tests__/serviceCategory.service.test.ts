@@ -9,18 +9,21 @@ afterAll(disconnectTestDb);
 afterEach(clearTestDb);
 
 describe('seedServiceCategories', () => {
-  it('upserts all 11 categories from the constant', async () => {
+  it('upserts every category from the constant', async () => {
     await seedServiceCategories();
     const count = await ServiceCategory.countDocuments({});
     expect(count).toBe(SERVICE_CATEGORIES.length);
-    expect(count).toBe(11);
+    const rows = await ServiceCategory.find({}).sort({ order: 1 }).lean();
+    expect(rows.map(({ value, label }) => ({ value, label }))).toEqual(SERVICE_CATEGORIES);
   });
 
-  it('is idempotent — running it twice still leaves 11 rows', async () => {
+  it('is idempotent — running it twice preserves the exact seed rows', async () => {
     await seedServiceCategories();
     await seedServiceCategories();
     const count = await ServiceCategory.countDocuments({});
-    expect(count).toBe(11);
+    expect(count).toBe(SERVICE_CATEGORIES.length);
+    const rows = await ServiceCategory.find({}).sort({ order: 1 }).lean();
+    expect(rows.map(({ value, label }) => ({ value, label }))).toEqual(SERVICE_CATEGORIES);
   });
 
   it('never reactivates a category an admin has disabled', async () => {

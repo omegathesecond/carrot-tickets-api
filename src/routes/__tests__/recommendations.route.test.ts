@@ -1,3 +1,5 @@
+import { Follow } from '@models/follow.model';
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -13,9 +15,10 @@ describe('GET /api/social/recommendations', () => {
 
   it('recommends other upcoming events by the organizer of a saved event', async () => {
     const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret1' });
     const saved = await Event.create({ vendorId: v._id, name: 'Saved', venue: 'V', eventDate: new Date(Date.now() + 8.64e7), startTime: new Date(), endTime: new Date(Date.now() + 8.64e7), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
-    const rec = await Event.create({ vendorId: v._id, name: 'Recommended', venue: 'V', eventDate: new Date(Date.now() + 1.7e8), startTime: new Date(), endTime: new Date(Date.now() + 1.7e8), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
+    await Event.create({ vendorId: v._id, name: 'Recommended', venue: 'V', eventDate: new Date(Date.now() + 1.7e8), startTime: new Date(), endTime: new Date(Date.now() + 1.7e8), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 100, quantity: 10, available: 10 }] });
     await EventReaction.create({ eventId: saved._id, buyerId: buyer._id, actorType: 'buyer', type: 'save' });
 
     const res = await request(app).get('/api/social/recommendations').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
@@ -25,12 +28,28 @@ describe('GET /api/social/recommendations', () => {
     expect(names).not.toContain('Saved'); // never recommend the basis itself
   });
 
+  it('unlocks browsing at ten follows without requiring uploads', async () => {
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
+    const follow = await Follow.findOne({ followerId: buyer._id });
+    expect(follow).not.toBeNull();
+    await Follow.deleteOne({ _id: follow!._id });
+    const auth = `Bearer ${await signBuyerSessionToken('+26878422613')}`;
+    const blocked = await request(app).get('/api/social/recommendations').set('Authorization', auth).expect(403);
+    expect(blocked.body.error).toBe('FOLLOWING_REQUIRED');
+    await Follow.create({ followerType: 'buyer', followerId: buyer._id, targetType: follow!.targetType, targetId: follow!.targetId });
+    await request(app).get('/api/social/recommendations').set('Authorization', auth).expect(200);
+    const profile = await request(app).get('/api/social/users/other').set('Authorization', auth).expect(403);
+    expect(profile.body.error).toBe('MEDIA_REQUIRED');
+  });
+
   it('401s when anonymous', async () => {
     await request(app).get('/api/social/recommendations').expect(401);
   });
 
   it('returns a null basisEvent and empty events when the buyer has saved nothing', async () => {
-    await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const res = await request(app).get('/api/social/recommendations').set('Authorization', `Bearer ${await signBuyerSessionToken('+26878422613')}`).expect(200);
     expect(res.body.data.basisEvent).toBeNull();
     expect(res.body.data.events).toEqual([]);
@@ -38,6 +57,7 @@ describe('GET /api/social/recommendations', () => {
 
   it('still recommends an in-progress event (started but not yet ended) by the same organizer', async () => {
     const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret1' });
     const past = new Date(Date.now() - 60 * 60 * 1000);
     const future = new Date(Date.now() + 60 * 60 * 1000);
@@ -52,6 +72,7 @@ describe('GET /api/social/recommendations', () => {
 
   it('with a seed, keeps the same-organizer picks while varying the generic fill', async () => {
     const buyer = await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Me' });
+    await seedBuyerFollows('buyer', buyer.id);
     const v = await Vendor.create({ businessName: 'MTN Bushfire', password: 'secret1' });
     const soon = (mins: number) => new Date(Date.now() + mins * 60000);
     const evt = (vendorId: any, name: string, mins: number) =>
