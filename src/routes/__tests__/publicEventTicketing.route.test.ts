@@ -5,11 +5,29 @@ import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/he
 import { seedPublishedEvent } from '../../__tests__/helpers/fixtures';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
+import { Buyer } from '@models/buyer.model';
+import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 
 describe('public events expose ticketing + externalTicketUrl', () => {
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  it('lets a signed-in buyer with zero follows, media or profile photo reach ticket buying', async () => {
+    await Buyer.create({ phone: '+26878422613', password: 'secret1', name: 'Ticket buyer', username: 'ticket_buyer' });
+    const authorization = `Bearer ${await signBuyerSessionToken('+26878422613')}`;
+    const seeded = await seedPublishedEvent();
+    const progress = await request(app).get('/api/social/me/onboarding').set('Authorization', authorization).expect(200);
+    expect(progress.body.data).toMatchObject({ followingCount: 0, mediaCount: 0, canBrowse: false, canViewProfiles: false, hasProfilePhoto: false });
+    const list = await request(app).get('/api/public/events').set('Authorization', authorization).expect(200);
+    expect(list.body.data.events.some((event: { _id: string }) => event._id === seeded.eventId)).toBe(true);
+    const detail = await request(app).get(`/api/public/events/${seeded.eventId}`).set('Authorization', authorization).expect(200);
+    expect(detail.body.data.ticketTypes.length).toBeGreaterThan(0);
+    // Deliberately incomplete: prove purchase validation is reachable without
+    // creating an order or calling any payment provider.
+    const purchase = await request(app).post('/api/public/purchase').set('Authorization', authorization).send({}).expect(400);
+    expect(JSON.stringify(purchase.body)).not.toMatch(/FOLLOWING_REQUIRED|MEDIA_REQUIRED|PHOTO_REQUIRED/);
+  });
 
   it('detail includes ticketing:"external" + externalTicketUrl for an externally-sold event', async () => {
     const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
