@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -12,6 +13,7 @@ describe('vendor discovers, follows, then sees it in following', () => {
   it('search → follow → following reflects the followed brand', async () => {
     const me = await Vendor.create({ logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', businessName: 'Alpha Events', email: 'alpha@example.com', phoneNumber: '+26878000801', password: 'secret123' });
     const target = await Vendor.create({ logoUrl: 'https://cdn.carrottickets.com/test/logo.jpg', businessName: 'Alpine Sound', email: 'alpine@example.com', phoneNumber: '+26878000802', password: 'secret123' });
+    await seedBuyerFollows('vendor', me.id);
     const token = `Bearer ${await seedVendorSessionToken(String(me._id))}`;
 
     const search = await request(app).get('/api/tickets/social/users/search?q=alpine').set('Authorization', token).expect(200);

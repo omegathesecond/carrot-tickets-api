@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -23,6 +24,7 @@ async function seedWorld() {
   const bySlug = Object.fromEntries(channels.map((c) => [c.slug, c]));
 
   const buyer = await Buyer.create({ phone: PHONE, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', name: 'Chatty Buyer' });
+  await seedBuyerFollows('buyer', buyer.id);
   const buyerAuth = `Bearer ${await signBuyerSessionToken(PHONE)}`;
   const vendorAuth = `Bearer ${await signVendorSessionToken(String(vendor._id))}`;
 
@@ -458,7 +460,8 @@ describe('organizer moderation routes', () => {
       const general = String(bySlug['general']!._id);
 
       const OUTSIDER = '+26878000060';
-      await Buyer.create({ phone: OUTSIDER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
+      const outsider = await Buyer.create({ phone: OUTSIDER, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg' });
+      await seedBuyerFollows('buyer', outsider.id);
       const outsiderAuth = `Bearer ${await signBuyerSessionToken(OUTSIDER)}`;
 
       await request(app)

@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 // api/src/routes/__tests__/businessAuth.route.test.ts
 import request from 'supertest';
 import mongoose from 'mongoose';
@@ -44,6 +45,7 @@ describe('POST /api/tickets/auth/business/register', () => {
       ...validBody, phoneNumber: '+26878422613', serviceCategories: ['sound_hire', 'catering'],
     });
     expect(signup.status).toBe(201);
+    await seedBuyerFollows('vendor', signup.body.data.user._id);
     const opportunities = await MarketOpportunity.create(
       ['Sound hire', 'Catering', 'Photography'].map((category) => ({
         organiserId: new mongoose.Types.ObjectId(), name: category + ' opportunity',

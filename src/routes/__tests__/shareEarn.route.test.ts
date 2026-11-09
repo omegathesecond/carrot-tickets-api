@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import { seedVendorSessionToken, signAdminSessionToken } from '@/__tests__/helpers/auth';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -39,7 +40,9 @@ async function makeEvent(vendorId = VENDOR_ID) {
 }
 
 async function makeBuyer(phone: string) {
-  return Buyer.create({ phone, password: 'secret123', name: 'Route Buyer', dmPrivacy: 'community', notificationPrefs: { announcements: true, dms: true, mentions: true, social: true, reminders: true } });
+  const buyer = await Buyer.create({ phone, password: 'secret123', name: 'Route Buyer', dmPrivacy: 'community', notificationPrefs: { announcements: true, dms: true, mentions: true, social: true, reminders: true } });
+  await seedBuyerFollows('buyer', buyer.id);
+  return buyer;
 }
 
 describe('Share&Earn routes', () => {

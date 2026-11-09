@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
@@ -36,7 +37,9 @@ describe('GET /api/social/nearby/people', () => {
   afterAll(disconnectTestDb);
 
   async function seedBuyer(phone: string, extra: Record<string, unknown> = {}) {
-    return Buyer.create({ phone, password: 'secret1', name: 'Buyer', ...extra });
+    const buyer = await Buyer.create({ phone, password: 'secret1', name: 'Buyer', ...extra });
+    if (phone === PHONE) await seedBuyerFollows('buyer', buyer.id);
+    return buyer;
   }
 
   function nearPoint(deltaLatDeg: number) {

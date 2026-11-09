@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request, { Response } from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -15,7 +16,9 @@ import { Buyer } from '@models/buyer.model';
 const PHONE = '+26878422613';
 
 async function seedBuyer(phone = PHONE, username = 'weekend_route_buyer') {
-  return Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username });
+  const buyer = await Buyer.create({ phone, password: 'secret1', avatarUrl: 'https://cdn.carrottickets.com/test/avatar.jpg', username });
+  await seedBuyerFollows('buyer', buyer.id);
+  return buyer;
 }
 
 describe('Weekend routes', () => {
@@ -38,6 +41,7 @@ describe('Weekend routes', () => {
       const tokens = [buyerToken];
       for (const [index, operatorType] of [OperatorType.SERVICES, OperatorType.EVENTS, OperatorType.EVENTS].entries()) {
         const vendor = await Vendor.create({ email: `weekend${index}@example.com`, password: 'secret1', businessName: `Weekend ${index}`, operatorType, serviceCategories: ['photography'], isSuperAdmin: index === 2, apps: { tickets: { enabled: true } } });
+        await seedBuyerFollows('vendor', vendor.id);
         tokens.push(signVendorToken(String(vendor._id), { authVersion: vendor.authVersion }));
       }
       for (const token of tokens) {
@@ -67,6 +71,7 @@ describe('Weekend routes', () => {
   it.each([OperatorType.EVENTS, OperatorType.BOTH, OperatorType.SERVICES])('lets %s owners upload images/videos and manage only their own weekend posts', async operatorType => {
     const vendor = await Vendor.create({ businessName: 'Weekend brand', password: 'secret1', operatorType, serviceCategories: ['photography'],
       logoUrl: 'https://cdn.carrottickets.com/logo.jpg', apps: { tickets: { enabled: true } } });
+    await seedBuyerFollows('vendor', vendor.id);
     const token = await signVendorSessionToken(String(vendor._id));
     const auth = { Authorization: `Bearer ${token}` };
     const oldBase = process.env['UPDATES_R2_PUBLIC_URL'];

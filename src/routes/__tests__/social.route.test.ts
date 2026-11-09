@@ -1,3 +1,4 @@
+import { seedReadyMedia } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -152,7 +153,8 @@ describe('social profile routes', () => {
 
   it('public profile by username hides the phone', async () => {
     await seedBuyer(PHONE, { username: 'partygoer', bio: 'hey' });
-    await seedBuyer('+26878000051'); // the viewer
+    const viewer = await seedBuyer('+26878000051'); // the viewer
+    await seedReadyMedia('buyer', viewer.id);
     const res = await request(app)
       .get('/api/social/users/partygoer')
       .set('Authorization', `Bearer ${await signBuyerSessionToken('+26878000051')}`)
@@ -164,8 +166,22 @@ describe('social profile routes', () => {
     expect(res.body.data.dmPrivacy).toBeUndefined(); // own-profile field only
   });
 
+  it('unlocks another profile at three ready media without requiring follows', async () => {
+    await seedBuyer(PHONE, { username: 'partygoer' });
+    const viewer = await seedBuyer('+26878000051');
+    const auth = `Bearer ${await signBuyerSessionToken('+26878000051')}`;
+    await seedReadyMedia('buyer', viewer.id, 2);
+    const blocked = await request(app).get('/api/social/users/partygoer').set('Authorization', auth).expect(403);
+    expect(blocked.body.error).toBe('MEDIA_REQUIRED');
+    await seedReadyMedia('buyer', viewer.id, 1);
+    await request(app).get('/api/social/users/partygoer').set('Authorization', auth).expect(200);
+    const browse = await request(app).get('/api/social/recommendations').set('Authorization', auth).expect(403);
+    expect(browse.body.error).toBe('FOLLOWING_REQUIRED');
+  });
+
   it('unknown username is 404', async () => {
-    await seedBuyer();
+    const viewer = await seedBuyer();
+    await seedReadyMedia('buyer', viewer.id);
     await request(app)
       .get('/api/social/users/ghost_user')
       .set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`)

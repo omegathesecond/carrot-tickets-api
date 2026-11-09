@@ -1,3 +1,4 @@
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request from 'supertest';
 import mongoose from 'mongoose';
 import app from '@/app';
@@ -133,6 +134,7 @@ describe('GET /api/public/topics/:tag/posts', () => {
 
   it("includes the caller's viewerReactions when a token is present", async () => {
     const viewerId = new mongoose.Types.ObjectId().toHexString();
+    await seedBuyerFollows('vendor', viewerId);
     const update = await Update.create(makeUpdate(['music']));
     await request(app)
       .post(`/api/tickets/updates/${update.id}/like`)
