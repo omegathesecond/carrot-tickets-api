@@ -1,4 +1,7 @@
 import { Types } from 'mongoose';
+import { EventPlanComment } from '@models/eventPlanComment.model';
+import { EventPlanCommentReaction } from '@models/eventPlanCommentReaction.model';
+import { EventPlanMessageReaction } from '@models/eventPlanMessageReaction.model';
 import { EventPlan, IEventPlan, PlanVisibility, PlanJoinPolicy } from '@models/eventPlan.model';
 import { EventPlanMember, IEventPlanMember, PlanAttendanceStatus } from '@models/eventPlanMember.model';
 import { EventPlanReaction } from '@models/eventPlanReaction.model';
@@ -693,6 +696,23 @@ export class EventPlanService {
       );
     }
     return plan;
+  }
+
+  /** Remove the hangout and its social records atomically; event/tickets are untouched. */
+  static async remove(admin: IBuyer, planId: string): Promise<void> {
+    const plan = await EventPlanService.loadPlan(planId);
+    await EventPlanService.assertAdmin(plan, admin);
+    await EventPlan.db.transaction(async (session) => {
+      const removed = await EventPlan.deleteOne({ _id: planId, adminId: admin._id }, { session });
+      if (!removed.deletedCount) throw new HttpError(404, 'Plan not found');
+      const comments = await EventPlanComment.find({ planId }).select('_id').session(session);
+      await EventPlanCommentReaction.deleteMany({ commentId: { $in: comments.map((c) => c._id) } }, { session });
+      await EventPlanComment.deleteMany({ planId }, { session });
+      await EventPlanMessageReaction.deleteMany({ planId }, { session });
+      await EventPlanMessage.deleteMany({ planId }, { session });
+      await EventPlanReaction.deleteMany({ planId }, { session });
+      await EventPlanMember.deleteMany({ planId }, { session });
+    });
   }
 
   static async cancel(admin: IBuyer, planId: string): Promise<void> {
