@@ -552,7 +552,13 @@ export class WeekendService {
   static async visiblePlan(id: string, viewerId: string | null): Promise<IWeekendStatus> {
     if (!HEX24.test(id)) throw new HttpError(400, 'Invalid plan id');
     const following = viewerId ? await FollowService.followingIds(viewerId, 'buyer') : [];
-    const doc = await WeekendStatus.findOne({ _id: id, activeUntil: { $gt: new Date() }, $and: [PLAN_HAS_MEDIA],
+    const doc = await WeekendStatus.findOne({ _id: id, activeUntil: { $gt: new Date() }, $and: [{ $or: [
+      PLAN_HAS_MEDIA,
+      // Looking-for-plans cards remain listed without media. Their detail and
+      // engagement endpoints must accept the same cards as that rail.
+      WeekendService.feedStatusClause(LOOKING_FOR_PLANS_STATUS_TYPES),
+      { $nor: [WeekendService.feedStatusClause(HAS_PLANS_STATUS_TYPES)] },
+    ] }],
       $or: [...WeekendService.audienceOrClause(viewerId, following.map(String)), ...(viewerId ? [{ buyerId: viewerId }] : [])] });
     if (!doc || (viewerId && await BlockService.isBlockedEitherWay(viewerId, String(doc.buyerId)))) throw new HttpError(404, 'Plan not found');
     return doc;

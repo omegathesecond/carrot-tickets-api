@@ -374,6 +374,23 @@ describe('WeekendService', () => {
     });
   });
 
+  describe('media-less Looking for Plans access', () => {
+    it.each(['bored', 'feel_like_going_out', 'looking_for_plans'] as const)(
+      'keeps listed %s cards accessible through shared detail and engagement checks', async (statusType) => {
+        const owner = await seedBuyer('looking_owner');
+        const viewer = await seedBuyer('looking_viewer');
+        const status = await WeekendService.upsertStatus(owner, { statusType, audience: 'public' });
+        const cards = await WeekendService.getLookingForPlansCards(viewer, 10, []);
+        expect(cards.map((card) => card.id)).toContain(status.id);
+        expect((await WeekendService.getCard(status.id, null)).id).toBe(status.id);
+        expect(String((await WeekendService.visiblePlan(status.id, String(viewer._id)))._id)).toBe(status.id);
+        expect((await WeekendService.getWhoHasPlansCards(viewer, 10, [])).map((card) => card.id)).not.toContain(status.id);
+        await BlockService.block(owner, String(viewer._id));
+        await expect(WeekendService.visiblePlan(status.id, String(viewer._id))).rejects.toMatchObject({ statusCode: 404 });
+      },
+    );
+  });
+
   describe('getWhoHasPlansPage (See All)', () => {
     const oldBase = process.env['UPDATES_R2_PUBLIC_URL'];
     beforeEach(() => { process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com'; });

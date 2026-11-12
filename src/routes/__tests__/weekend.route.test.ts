@@ -139,6 +139,20 @@ describe('Weekend routes', () => {
     await request(app).get(base).expect(200).expect(r => expect(r.body.data.card.commentCount).toBe(0));
   });
 
+  it('allows shared links, views and likes for media-less cards listed in Looking for Plans', async () => {
+    const owner = await seedBuyer();
+    const plan = await WeekendService.upsertStatus(owner, { statusType: 'looking_for_plans', audience: 'public' });
+    const viewer = await seedBuyer('+26878422614', 'looking_viewer');
+    const token = await signBuyerSessionToken(viewer.phone!);
+    const base = `/api/social/weekend/cards/${plan.id}`;
+    await request(app).get('/api/social/weekend/feed/looking-for-plans').expect(200)
+      .expect(r => expect(r.body.data.cards.map((card: any) => card.id)).toContain(plan.id));
+    await request(app).get(base).expect(200);
+    await request(app).post(`${base}/view`).expect(200);
+    await request(app).post(`${base}/like`).set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data).toMatchObject({ active: true, likeCount: 1 }));
+  });
+
   it('rejects engagement and shared links when the viewer cannot see a plan', async () => {
     const owner = await seedBuyer();
     const plan = await WeekendService.upsertStatus(owner, { statusType: 'have_plans', audience: 'only_me', media: { url: 'https://cdn.carrottickets.com/plan.jpg' } });
