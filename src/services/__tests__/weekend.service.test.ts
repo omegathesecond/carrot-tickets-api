@@ -264,11 +264,14 @@ describe('WeekendService', () => {
   });
 
   describe('feed ranking (getWhoHasPlansCards / getLookingForPlansCards)', () => {
+    const oldBase = process.env['UPDATES_R2_PUBLIC_URL'];
+    beforeEach(() => { process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com'; });
+    afterEach(() => { if (oldBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL']; else process.env['UPDATES_R2_PUBLIC_URL'] = oldBase; });
     it('prepends the viewer\'s own active status first, flagged isOwner, in "Who Has Plans"', async () => {
       const viewer = await seedBuyer('u_feed_self');
       const other = await seedBuyer('u_feed_self_other');
-      await WeekendService.upsertStatus(other, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(other, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(viewer, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
       expect(cards[0]?.user.id).toBe(String(viewer._id));
       expect(cards[0]?.isOwner).toBe(true);
@@ -278,14 +281,14 @@ describe('WeekendService', () => {
 
     it('does not re-prepend the viewer\'s own card on a loadMore continuation (non-empty excludeIds)', async () => {
       const viewer = await seedBuyer('u_feed_self_lm');
-      await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(viewer, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, ['507f1f77bcf86cd799439011']);
       expect(cards.find((c) => c.user.id === String(viewer._id))).toBeUndefined();
     });
 
     it('shows the owner\'s own card in "Who Has Plans" even when their status type belongs to the "Looking for Plans" bucket', async () => {
       const viewer = await seedBuyer('u_feed_self_lfp_type');
-      await WeekendService.upsertStatus(viewer, { statusType: 'bored', audience: 'public' });
+      await WeekendService.upsertStatus(viewer, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'bored', audience: 'public' });
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
       expect(cards[0]?.user.id).toBe(String(viewer._id));
       expect(cards[0]?.isOwner).toBe(true);
@@ -296,9 +299,9 @@ describe('WeekendService', () => {
       const blockedByMe = await seedBuyer('u_feed_i_blocked');
       const blockedMe = await seedBuyer('u_feed_blocked_me');
       const visible = await seedBuyer('u_feed_visible');
-      await WeekendService.upsertStatus(blockedByMe, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(blockedMe, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(visible, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(blockedByMe, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(blockedMe, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(visible, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
       await BlockService.block(viewer, String(blockedByMe._id));
       await BlockService.block(blockedMe, String(viewer._id));
 
@@ -315,9 +318,9 @@ describe('WeekendService', () => {
       const unrelatedPoster = await seedBuyer('u_feed_aud_unrel');
       const selectedPoster = await seedBuyer('u_feed_aud_selected');
 
-      await WeekendService.upsertStatus(followedPoster, { statusType: 'have_plans', audience: 'followers' });
-      await WeekendService.upsertStatus(unrelatedPoster, { statusType: 'have_plans', audience: 'followers' });
-      await WeekendService.upsertStatus(selectedPoster, { statusType: 'have_plans', audience: 'selected', selectedViewerIds: [String(viewer._id)] });
+      await WeekendService.upsertStatus(followedPoster, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'followers' });
+      await WeekendService.upsertStatus(unrelatedPoster, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'followers' });
+      await WeekendService.upsertStatus(selectedPoster, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'selected', selectedViewerIds: [String(viewer._id)] });
       await FollowService.follow(viewer, 'buyer', String(followedPoster._id));
 
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
@@ -330,7 +333,7 @@ describe('WeekendService', () => {
     it('only_me statuses never appear in either feed rail', async () => {
       const viewer = await seedBuyer('u_feed_only_me_vw');
       const owner = await seedBuyer('u_feed_only_me_owner');
-      await WeekendService.upsertStatus(owner, { statusType: 'have_plans', audience: 'only_me' });
+      await WeekendService.upsertStatus(owner, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'only_me' });
       const cards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
       expect(cards.map((c) => c.user.id)).not.toContain(String(owner._id));
     });
@@ -342,7 +345,7 @@ describe('WeekendService', () => {
       const other1 = await seedBuyer('u_feed_tier_o1');
       const other2 = await seedBuyer('u_feed_tier_o2');
       for (const b of [followed1, followed2, other1, other2]) {
-        await WeekendService.upsertStatus(b, { statusType: 'have_plans', audience: 'public' });
+        await WeekendService.upsertStatus(b, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
       }
       await FollowService.follow(viewer, 'buyer', String(followed1._id));
       await FollowService.follow(viewer, 'buyer', String(followed2._id));
@@ -358,8 +361,8 @@ describe('WeekendService', () => {
       const viewer = await seedBuyer('u_feed_sep_viewer');
       const hasPlans = await seedBuyer('u_feed_sep_has');
       const lookingForPlans = await seedBuyer('u_feed_sep_look');
-      await WeekendService.upsertStatus(hasPlans, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(lookingForPlans, { statusType: 'bored', audience: 'public' });
+      await WeekendService.upsertStatus(hasPlans, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(lookingForPlans, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'bored', audience: 'public' });
 
       const hasPlansCards = await WeekendService.getWhoHasPlansCards(viewer, 10, []);
       expect(hasPlansCards.map((c) => c.user.id)).toContain(String(hasPlans._id));
@@ -372,12 +375,15 @@ describe('WeekendService', () => {
   });
 
   describe('getWhoHasPlansPage (See All)', () => {
+    const oldBase = process.env['UPDATES_R2_PUBLIC_URL'];
+    beforeEach(() => { process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com'; });
+    afterEach(() => { if (oldBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL']; else process.env['UPDATES_R2_PUBLIC_URL'] = oldBase; });
     it('pages through every eligible status without duplicates or gaps, in stable updatedAt order', async () => {
       const viewer = await seedBuyer('u_seeall_viewer');
       const posters = [];
       for (let i = 0; i < 5; i += 1) {
         const poster = await seedBuyer(`u_seeall_${i}`);
-        await WeekendService.upsertStatus(poster, { statusType: 'have_plans', audience: 'public' });
+        await WeekendService.upsertStatus(poster, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
         posters.push(poster);
       }
 
@@ -404,11 +410,11 @@ describe('WeekendService', () => {
       const lookingForPlans = await seedBuyer('u_seeall_lfp');
       const other1 = await seedBuyer('u_seeall_other1');
       const other2 = await seedBuyer('u_seeall_other2');
-      await WeekendService.upsertStatus(viewer, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(blocked, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(lookingForPlans, { statusType: 'bored', audience: 'public' });
-      await WeekendService.upsertStatus(other1, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(other2, { statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(viewer, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(blocked, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(lookingForPlans, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'bored', audience: 'public' });
+      await WeekendService.upsertStatus(other1, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(other2, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
       await BlockService.block(viewer, String(blocked._id));
 
       const page1 = await WeekendService.getWhoHasPlansPage(viewer, null, 1);
@@ -431,13 +437,58 @@ describe('WeekendService', () => {
     it('respects the audience clause for a signed-out viewer (public only)', async () => {
       const publicPoster = await seedBuyer('u_seeall_pub');
       const followersPoster = await seedBuyer('u_seeall_fol');
-      await WeekendService.upsertStatus(publicPoster, { statusType: 'have_plans', audience: 'public' });
-      await WeekendService.upsertStatus(followersPoster, { statusType: 'have_plans', audience: 'followers' });
+      await WeekendService.upsertStatus(publicPoster, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'public' });
+      await WeekendService.upsertStatus(followersPoster, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'have_plans', audience: 'followers' });
 
       const { cards } = await WeekendService.getWhoHasPlansPage(null, null, 10);
       const ids = cards.map((c) => c.user.id);
       expect(ids).toContain(String(publicPoster._id));
       expect(ids).not.toContain(String(followersPoster._id));
+    });
+  });
+
+
+  describe('plans needing media', () => {
+    const oldBase = process.env['UPDATES_R2_PUBLIC_URL'];
+    beforeEach(() => { process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com'; });
+    afterEach(() => { if (oldBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL']; else process.env['UPDATES_R2_PUBLIC_URL'] = oldBase; });
+
+    it('hides legacy text plans from owners and visitors, then restores after adding media', async () => {
+      const owner = await seedBuyer('needs_media');
+      const visitor = await seedBuyer('visitor_media');
+      const status = await WeekendService.upsertStatus(owner, { statusType: 'have_plans' });
+      for (const viewer of [owner, visitor, null]) {
+        expect(await WeekendService.getWhoHasPlansCards(viewer, 10, [])).toEqual([]);
+        expect((await WeekendService.getWhoHasPlansPage(viewer, null, 10)).cards).toEqual([]);
+      }
+      await expect(WeekendService.getCard(status.id, String(owner._id))).rejects.toMatchObject({ statusCode: 404 });
+      await expect(WeekendService.getCard(status.id, null)).rejects.toMatchObject({ statusCode: 404 });
+      expect((await WeekendService.getOwnPlansNeedingMedia(owner)).map(c => c.id)).toEqual([status.id]);
+      expect(await WeekendService.getOwnPlansNeedingMedia(visitor)).toEqual([]);
+      await WeekendService.upsertStatus(owner, { statusType: 'have_plans', media: { url: 'https://cdn.carrottickets.com/upload.jpg' } });
+      expect(await WeekendService.getOwnPlansNeedingMedia(owner)).toEqual([]);
+      expect((await WeekendService.getWhoHasPlansPage(visitor, null, 10)).cards.map(c => c.id)).toEqual([status.id]);
+      await WeekendService.upsertStatus(owner, { statusType: 'have_plans', media: null });
+      expect((await WeekendService.getWhoHasPlansPage(visitor, null, 10)).cards).toEqual([]);
+    });
+
+    it('filters media-less rows before pagination, accepts videos, and repairs only the selected plan', async () => {
+      const owner = await seedBuyer('old_plans');
+      const input = { statusType: 'have_plans', media: PLAN_MEDIA };
+      const broken = await WeekendService.createPlan(owner, input);
+      const photo = await WeekendService.createPlan(owner, input);
+      const video = await WeekendService.createPlan(owner, { ...input, media: [{ url: 'https://cdn.carrottickets.com/clip.mp4', type: 'video' }] });
+      await WeekendStatus.updateOne({ _id: broken.id }, { $set: { planMedia: [], updatedAt: new Date(Date.now() + 1000) } });
+      expect((await WeekendService.getOwnPlansNeedingMedia(owner)).map(c => c.id)).toEqual([broken.id]);
+      const first = await WeekendService.getWhoHasPlansPage(null, null, 1);
+      const second = await WeekendService.getWhoHasPlansPage(null, first.nextCursor, 1);
+      expect(new Set([...first.cards, ...second.cards].map(c => c.id))).toEqual(new Set([photo.id, video.id]));
+      expect(second.nextCursor).toBeNull();
+      await expect(WeekendService.updatePlan(owner, broken.id, { statusType: 'have_plans', media: [] })).rejects.toMatchObject({ statusCode: 400 });
+      expect((await WeekendService.getOwnPlansNeedingMedia(owner))).toHaveLength(1);
+      await WeekendService.updatePlan(owner, broken.id, input);
+      expect(await WeekendService.getOwnPlansNeedingMedia(owner)).toEqual([]);
+      expect((await WeekendService.getWhoHasPlansCards(null, 10, [])).map(c => c.id)).toContain(broken.id);
     });
   });
 
@@ -772,7 +823,7 @@ describe('WeekendService', () => {
 
     it('prepends ALL of the viewer\'s own active plans (plus their profile-widget status), newest first, none hidden or replaced', async () => {
       const viewer = await seedBuyer('u_multi_feed_viewer');
-      await WeekendService.upsertStatus(viewer, { statusType: 'staying_in', audience: 'public' });
+      await WeekendService.upsertStatus(viewer, { media: { url: 'https://cdn.carrottickets.com/plan.jpg' }, statusType: 'staying_in', audience: 'public' });
       const older = await WeekendService.createPlan(viewer, { media: PLAN_MEDIA, statusType: 'have_plans', audience: 'public' });
       await new Promise((r) => setTimeout(r, 5));
       const newer = await WeekendService.createPlan(viewer, { media: PLAN_MEDIA, statusType: 'bored', audience: 'public' });

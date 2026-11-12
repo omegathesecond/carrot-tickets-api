@@ -66,6 +66,8 @@ router.get('/plans/:id', authenticateWeekendParticipant, WeekendController.getPl
 router.put('/plans/:id', authenticateWeekendParticipant, requireProfilePhoto, WeekendController.updatePlan);
 router.delete('/plans/:id', authenticateWeekendParticipant, WeekendController.removePlan);
 
+router.get('/plans-needing-media', authenticateWeekendParticipant, WeekendController.plansNeedingMedia);
+
 router.get('/feed', optionalTicketsAuth, WeekendController.feed);
 router.get('/feed/all', optionalTicketsAuth, WeekendController.feedAll);
 router.get('/feed/looking-for-plans', optionalTicketsAuth, WeekendController.lookingForPlansFeed);

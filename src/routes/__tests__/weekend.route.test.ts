@@ -1,3 +1,4 @@
+import { WeekendStatus } from '@models/weekendStatus.model';
 import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request, { Response } from 'supertest';
 import mongoose from 'mongoose';
@@ -148,6 +149,22 @@ describe('Weekend routes', () => {
     }
   });
 
+  it('keeps media repair notices private and excludes expired plans', async () => {
+    await request(app).get('/api/social/weekend/plans-needing-media').expect(401);
+    const owner = await seedBuyer();
+    const token = await signBuyerSessionToken(PHONE);
+    const status = await WeekendService.upsertStatus(owner, { statusType: 'have_plans' });
+    await request(app).get('/api/social/weekend/plans-needing-media').set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data.cards.map((c: any) => c.id)).toEqual([status.id]));
+    const other = await Buyer.create({ phone: '+26878422614', password: 'secret1', username: 'other_media', avatarUrl: 'https://cdn.carrottickets.com/me.jpg' });
+    const otherToken = await signBuyerSessionToken(other.phone!);
+    await request(app).get('/api/social/weekend/plans-needing-media').set('Authorization', `Bearer ${otherToken}`).expect(200)
+      .expect(r => expect(r.body.data.cards).toEqual([]));
+    await WeekendStatus.updateOne({ _id: status.id }, { $set: { activeUntil: new Date(0) } });
+    await request(app).get('/api/social/weekend/plans-needing-media').set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data.cards).toEqual([]));
+  });
+
   describe('auth guards', () => {
     it('401s GET /me when signed out', async () => {
       await request(app).get('/api/social/weekend/me').expect(401);
@@ -281,7 +298,7 @@ describe('Weekend routes', () => {
       await request(app)
         .put('/api/social/weekend/me')
         .set('Authorization', auth)
-        .send({ statusType: 'have_plans', audience: 'public' })
+        .send({ statusType: 'have_plans', audience: 'public', media: { url: 'https://cdn.carrottickets.com/plan.jpg' } })
         .expect(200);
 
       const feed = await request(app).get('/api/social/weekend/feed').set('Authorization', auth).expect(200);

@@ -49,6 +49,13 @@ const displayName = (b: IBuyer): string => b.username ?? b.name ?? 'Someone';
  */
 const PROFILE_WIDGET_FILTER = { $or: [{ source: 'profile_widget' }, { source: { $exists: false } }] };
 
+// Use the same predicate before pagination and for the owner's repair notices.
+// Event posters and profile avatars are not uploads attached to this plan.
+const PLAN_HAS_MEDIA = { $or: [
+  { 'media.url': { $type: 'string', $regex: /\S/ } },
+  { planMedia: { $elemMatch: { url: { $type: 'string', $regex: /\S/ }, type: { $in: ['image', 'video'] } } } },
+] };
+
 export interface WeekendEventSummary {
   id: string;
   name: string;
@@ -545,7 +552,7 @@ export class WeekendService {
   static async visiblePlan(id: string, viewerId: string | null): Promise<IWeekendStatus> {
     if (!HEX24.test(id)) throw new HttpError(400, 'Invalid plan id');
     const following = viewerId ? await FollowService.followingIds(viewerId, 'buyer') : [];
-    const doc = await WeekendStatus.findOne({ _id: id, activeUntil: { $gt: new Date() },
+    const doc = await WeekendStatus.findOne({ _id: id, activeUntil: { $gt: new Date() }, $and: [PLAN_HAS_MEDIA],
       $or: [...WeekendService.audienceOrClause(viewerId, following.map(String)), ...(viewerId ? [{ buyerId: viewerId }] : [])] });
     if (!doc || (viewerId && await BlockService.isBlockedEitherWay(viewerId, String(doc.buyerId)))) throw new HttpError(404, 'Plan not found');
     return doc;
@@ -670,7 +677,7 @@ export class WeekendService {
 
     const query: any = {
       activeUntil: { $gt: now },
-      $and: [WeekendService.feedStatusClause(statusTypes)],
+      $and: [WeekendService.feedStatusClause(statusTypes), ...(statusTypes === HAS_PLANS_STATUS_TYPES ? [PLAN_HAS_MEDIA] : [])],
       $or: WeekendService.audienceOrClause(viewerId, followingIds.map(String)),
     };
     const excludeBuyerIds = [...(viewerId ? [viewerId] : []), ...excludedBlocked];
@@ -774,15 +781,20 @@ export class WeekendService {
    * normally route to "Looking for Plans" or neither rail for anyone else
    * viewing it). Newest first (spec: "keep the newly created owner's card
    * first") — a buyer can now have any number of `plan_post` rows plus at
-   * most one `profile_widget` row, and none of them are ever hidden or
-   * replaced by another (spec: "do not replace or remove the user's other
-   * active plans"). `rankedCandidates`/the See-All query always exclude the
+   * most one `profile_widget` row. Rows without attached media stay out of
+   * this public list and appear in the owner-only repair notices instead. `rankedCandidates`/the See-All query always exclude the
    * viewer's own buyerId, so these are assembled separately and prepended by
    * the caller.
    */
   private static async ownCardsIfActive(viewer: IBuyer): Promise<WeekendFeedCardDto[]> {
-    const docs = await WeekendStatus.find({ buyerId: viewer._id, activeUntil: { $gt: new Date() } }).sort({ createdAt: -1 });
+    const docs = await WeekendStatus.find({ buyerId: viewer._id, activeUntil: { $gt: new Date() }, $and: [PLAN_HAS_MEDIA] }).sort({ createdAt: -1 });
     if (docs.length === 0) return [];
+    return WeekendService.toFeedCards(docs, String(viewer._id));
+  }
+
+  /** Private repair notices, never included in another viewer's feed. */
+  static async getOwnPlansNeedingMedia(viewer: IBuyer): Promise<WeekendFeedCardDto[]> {
+    const docs = await WeekendStatus.find({ buyerId: viewer._id, activeUntil: { $gt: new Date() }, $nor: [PLAN_HAS_MEDIA] }).sort({ createdAt: -1 });
     return WeekendService.toFeedCards(docs, String(viewer._id));
   }
 
@@ -830,7 +842,7 @@ export class WeekendService {
 
     const query: any = {
       activeUntil: { $gt: now },
-      $and: [WeekendService.feedStatusClause(HAS_PLANS_STATUS_TYPES)],
+      $and: [WeekendService.feedStatusClause(HAS_PLANS_STATUS_TYPES), PLAN_HAS_MEDIA],
       $or: WeekendService.audienceOrClause(viewerId, followingIds.map(String)),
     };
     const excludeBuyerIds = [...(viewerId ? [viewerId] : []), ...excludedBlocked];
