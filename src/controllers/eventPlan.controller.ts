@@ -155,6 +155,18 @@ export class EventPlanController {
     }
   }
 
+  /** DELETE /api/social/plans/:id — creator only. */
+  static async remove(req: Request, res: Response): Promise<any> {
+    try {
+      const buyer = await resolvePlanParticipant(req);
+      if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      await EventPlanService.remove(buyer, String(req.params['id'] || ''));
+      return ApiResponseUtil.success(res, { ok: true }, 'Hangout deleted');
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to delete hangout');
+    }
+  }
+
   /** POST /api/social/plans/:id/cancel */
   static async cancel(req: Request, res: Response): Promise<any> {
     try {

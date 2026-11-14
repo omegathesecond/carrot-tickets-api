@@ -28,6 +28,7 @@ router.delete('/plan-comments/:commentId', authenticatePlanParticipant, EventPla
 
 router.get('/:id', optionalTicketsAuth, EventPlanController.detail);
 router.get('/:id/pending', authenticatePlanParticipant, EventPlanController.pending);
+router.delete('/:id', authenticatePlanParticipant, EventPlanController.remove);
 router.patch('/:id', authenticatePlanParticipant, EventPlanController.update);
 router.patch('/:id/visibility', authenticatePlanParticipant, EventPlanController.changeVisibility);
 // Cover photo (Home-feed card + detail header) — presign/finalize mirrors

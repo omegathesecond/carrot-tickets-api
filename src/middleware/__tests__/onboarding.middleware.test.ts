@@ -23,9 +23,19 @@ describe.each(['buyer', 'vendor'] as const)('%s server onboarding', (type) => {
   });
   afterEach(() => { jest.restoreAllMocks(); jest.clearAllMocks(); });
   const social = type === 'buyer' ? '/api/social' : '/api/tickets/social';
-  it.each(['/api/public/feed', '/API/PUBLIC/FEED', '/api/public/%66eed', '/api/public/events', '/api/public/activity-feed', '/api/public/updates/post-id', '/api/public/services', '/api/marketplace/opportunities', `${social}/recommendations`, `${social}/stories`])('blocks direct browse read %s', async (path) => {
+  it.each(['/api/public/feed', '/API/PUBLIC/FEED', '/api/public/%66eed', '/api/public/activity-feed', '/api/public/updates/post-id', '/api/public/services', '/api/marketplace/opportunities', `${social}/recommendations`, `${social}/stories`])('blocks direct browse read %s', async (path) => {
     const res = await request(app).get(path).set('Authorization', 'Bearer valid');
     expect(res.status).toBe(403); expect(res.body.error).toBe('FOLLOWING_REQUIRED');
+  });
+  it.each(['/api/public/events', '/api/public/events?search=show', '/api/public/events/live', '/api/public/events/nearby', '/api/public/events/event-id', '/api/public/events/event-id/menu', '/api/public/events/event-id/reviews', '/api/public/events/event-id/share-earn', '/api/public/calendar', '/api/public/activity', `${social}/me/following/events`, '/API/PUBLIC/%65VENTS/event-id/'])('keeps ticket buying independent of social requirements and failures: %s', async (path) => {
+    status.mockRejectedValue(new Error('Social onboarding unavailable'));
+    const res = await request(app).get(path).set('Authorization', 'Bearer valid');
+    expect(res.status).toBe(200);
+    expect(res.body.reached).toBe(true);
+    expect(status).not.toHaveBeenCalled();
+  });
+  it('does not exempt event social votes from the follow requirement', async () => {
+    expect((await request(app).get('/api/public/events/event-id/vote').set('Authorization', 'Bearer valid')).status).toBe(403);
   });
   it.each([`${social}/users/other`, '/api/public/organizers/other', '/api/public/services/other', '/api/public/services/other/reviews', '/api/public/updates/by/buyer/other'])('blocks profile/media read %s', async (path) => {
     const res = await request(app).get(path).set('Authorization', 'Bearer valid');
