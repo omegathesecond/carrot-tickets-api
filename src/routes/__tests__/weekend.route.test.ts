@@ -1,3 +1,4 @@
+import { WeekendStatus } from '@models/weekendStatus.model';
 import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import request, { Response } from 'supertest';
 import mongoose from 'mongoose';
@@ -22,6 +23,9 @@ async function seedBuyer(phone = PHONE, username = 'weekend_route_buyer') {
 }
 
 describe('Weekend routes', () => {
+  const oldMediaBase = process.env['UPDATES_R2_PUBLIC_URL'];
+  beforeEach(() => { process.env['UPDATES_R2_PUBLIC_URL'] = 'https://cdn.carrottickets.com'; });
+  afterEach(() => { if (oldMediaBase === undefined) delete process.env['UPDATES_R2_PUBLIC_URL']; else process.env['UPDATES_R2_PUBLIC_URL'] = oldMediaBase; });
   beforeAll(connectTestDb);
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
@@ -113,7 +117,7 @@ describe('Weekend routes', () => {
 
   it('persists weekend views, likes and comment threads on the selected card', async () => {
     const buyer = await seedBuyer();
-    const plan = await WeekendService.upsertStatus(buyer, { statusType: 'have_plans' });
+    const plan = await WeekendService.upsertStatus(buyer, { statusType: 'have_plans', media: { url: 'https://cdn.carrottickets.com/plan.jpg' } });
     const token = await signBuyerSessionToken(PHONE);
     const base = `/api/social/weekend/cards/${plan.id}`;
     await request(app).post(`${base}/view`).expect(200).expect(r => expect(r.body.data.viewCount).toBe(1));
@@ -135,9 +139,23 @@ describe('Weekend routes', () => {
     await request(app).get(base).expect(200).expect(r => expect(r.body.data.card.commentCount).toBe(0));
   });
 
+  it('allows shared links, views and likes for media-less cards listed in Looking for Plans', async () => {
+    const owner = await seedBuyer();
+    const plan = await WeekendService.upsertStatus(owner, { statusType: 'looking_for_plans', audience: 'public' });
+    const viewer = await seedBuyer('+26878422614', 'looking_viewer');
+    const token = await signBuyerSessionToken(viewer.phone!);
+    const base = `/api/social/weekend/cards/${plan.id}`;
+    await request(app).get('/api/social/weekend/feed/looking-for-plans').expect(200)
+      .expect(r => expect(r.body.data.cards.map((card: any) => card.id)).toContain(plan.id));
+    await request(app).get(base).expect(200);
+    await request(app).post(`${base}/view`).expect(200);
+    await request(app).post(`${base}/like`).set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data).toMatchObject({ active: true, likeCount: 1 }));
+  });
+
   it('rejects engagement and shared links when the viewer cannot see a plan', async () => {
     const owner = await seedBuyer();
-    const plan = await WeekendService.upsertStatus(owner, { statusType: 'have_plans', audience: 'only_me' });
+    const plan = await WeekendService.upsertStatus(owner, { statusType: 'have_plans', audience: 'only_me', media: { url: 'https://cdn.carrottickets.com/plan.jpg' } });
     const viewer = await seedBuyer('+26878422614', 'private_viewer');
     const token = await signBuyerSessionToken(viewer.phone!);
     const base = `/api/social/weekend/cards/${plan.id}`;
@@ -146,6 +164,22 @@ describe('Weekend routes', () => {
     for (const action of ['view', 'like', 'comments']) {
       await request(app).post(`${base}/${action}`).set('Authorization', `Bearer ${token}`).send({ body: 'Hidden' }).expect(404);
     }
+  });
+
+  it('keeps media repair notices private and excludes expired plans', async () => {
+    await request(app).get('/api/social/weekend/plans-needing-media').expect(401);
+    const owner = await seedBuyer();
+    const token = await signBuyerSessionToken(PHONE);
+    const status = await WeekendService.upsertStatus(owner, { statusType: 'have_plans' });
+    await request(app).get('/api/social/weekend/plans-needing-media').set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data.cards.map((c: any) => c.id)).toEqual([status.id]));
+    const other = await seedBuyer('+26878422614', 'other_media');
+    const otherToken = await signBuyerSessionToken(other.phone!);
+    await request(app).get('/api/social/weekend/plans-needing-media').set('Authorization', `Bearer ${otherToken}`).expect(200)
+      .expect(r => expect(r.body.data.cards).toEqual([]));
+    await WeekendStatus.updateOne({ _id: status.id }, { $set: { activeUntil: new Date(0) } });
+    await request(app).get('/api/social/weekend/plans-needing-media').set('Authorization', `Bearer ${token}`).expect(200)
+      .expect(r => expect(r.body.data.cards).toEqual([]));
   });
 
   describe('auth guards', () => {
@@ -281,7 +315,7 @@ describe('Weekend routes', () => {
       await request(app)
         .put('/api/social/weekend/me')
         .set('Authorization', auth)
-        .send({ statusType: 'have_plans', audience: 'public' })
+        .send({ statusType: 'have_plans', audience: 'public', media: { url: 'https://cdn.carrottickets.com/plan.jpg' } })
         .expect(200);
 
       const feed = await request(app).get('/api/social/weekend/feed').set('Authorization', auth).expect(200);
