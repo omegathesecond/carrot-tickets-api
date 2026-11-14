@@ -18,6 +18,7 @@ async function seedServicesVendor() {
     serviceCategories: ['furniture_decor'],
     verificationStatus: VerificationStatus.VERIFIED,
     bio: 'Elegant furniture & styling',
+    logoUrl: 'https://cdn.carrottickets.com/provider.jpg',
   });
 }
 

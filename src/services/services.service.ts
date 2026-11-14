@@ -30,7 +30,8 @@ export interface BusinessProfile {
 export class ServicesService {
   static async listDirectory(opts: { category?: string; search?: string; before?: string; limit?: number } = {}): Promise<ServiceCard[]> {
     const limit = Math.min(Math.max(opts.limit ?? 24, 1), 50);
-    const query: Record<string, unknown> = { ...VISIBLE_BUSINESS_FILTER };
+    // Filter before pagination so incomplete profiles never consume directory slots.
+    const query: Record<string, unknown> = { ...VISIBLE_BUSINESS_FILTER, logoUrl: { $regex: /\S/ } };
     if (opts.category) query['serviceCategories'] = opts.category;
     if (opts.search) query['businessName'] = { $regex: opts.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
     if (opts.before && HEX24.test(opts.before)) query['_id'] = { $lt: opts.before };

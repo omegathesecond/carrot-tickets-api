@@ -13,13 +13,14 @@ async function mkBiz(over: any = {}) {
     businessName: over.businessName ?? 'Luxe Decor', phoneNumber: over.phoneNumber ?? '+2687650' + Math.floor(Math.random()*100000),
     password: 'secret1', operatorType: OperatorType.SERVICES, serviceCategories: over.serviceCategories ?? ['furniture_decor'],
     verificationStatus: over.verificationStatus ?? VerificationStatus.VERIFIED, bio: over.bio ?? 'Elegant furniture & styling',
+    logoUrl: Object.prototype.hasOwnProperty.call(over, 'logoUrl') ? over.logoUrl : 'https://cdn.carrottickets.com/provider.jpg',
     address: over.address, startingPrice: over.startingPrice, isActive: over.isActive,
   });
 }
 
 describe('ServicesService.listDirectory', () => {
   // Verification is a TRUST BADGE, not a visibility gate: a business that has
-  // just signed up (PENDING) is listed and reachable immediately, it simply
+  // just signed up (PENDING) with a photo is listed and reachable immediately, it simply
   // carries no verified sign until an admin flips it.
   it('lists pending businesses alongside verified ones', async () => {
     await mkBiz({ businessName: 'Verified Co' });
@@ -27,6 +28,21 @@ describe('ServicesService.listDirectory', () => {
     const names = (await ServicesService.listDirectory({})).map((c) => c.businessName);
     expect(names).toContain('Verified Co');
     expect(names).toContain('Pending Co');
+  });
+
+  it('excludes missing, empty and whitespace photos before applying the page limit', async () => {
+    const visible = await mkBiz({ businessName: 'With photo' });
+    for (const logoUrl of [undefined, null, '', '   ']) await mkBiz({ logoUrl });
+    const cards = await ServicesService.listDirectory({ limit: 1 });
+    expect(cards.map(card => card.id)).toEqual([String(visible._id)]);
+  });
+
+  it('lists an incomplete provider only after a photo is saved', async () => {
+    const vendor = await mkBiz({ logoUrl: undefined, verificationStatus: VerificationStatus.PENDING });
+    expect(await ServicesService.listDirectory()).toEqual([]);
+    vendor.logoUrl = 'https://cdn.carrottickets.com/new-photo.jpg';
+    await vendor.save();
+    expect((await ServicesService.listDirectory()).map(card => card.id)).toEqual([String(vendor._id)]);
   });
 
   // ...but admin takedown still has to work, so the two "no" statuses and the

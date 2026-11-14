@@ -1,10 +1,10 @@
 import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 
 /**
- * Which services businesses the public can SEE.
+ * Which services business profiles the public can access.
  *
- * Verification is a TRUST BADGE, not a visibility gate: a business is listed
- * and reachable the moment it signs up (PENDING) and simply carries no
+ * Verification is a TRUST BADGE, not a visibility gate: a business profile is
+ * reachable the moment it signs up (PENDING) and simply carries no
  * verified sign until an admin flips it to VERIFIED.
  *
  * Gating visibility on VERIFIED is what produced the original bug — business
@@ -15,6 +15,7 @@ import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
  * only AdminOrganizersController.updateVerification ever flips it, so that
  * dead end was guaranteed, not incidental.
  *
+ * The directory additionally requires a profile photo (ServicesService).
  * REJECTED and SUSPENDED stay hidden so admin takedown still works, as does
  * the isActive kill-switch.
  *
