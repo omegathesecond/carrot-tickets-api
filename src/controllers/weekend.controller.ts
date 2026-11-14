@@ -175,6 +175,17 @@ export class WeekendController {
     }
   }
 
+  static async plansNeedingMedia(req: Request, res: Response): Promise<any> {
+    try {
+      const viewer = await resolveWeekendParticipant(req);
+      if (!viewer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const cards = await WeekendService.getOwnPlansNeedingMedia(viewer);
+      return ApiResponseUtil.success(res, { cards });
+    } catch (error) {
+      return failWithHttpError(res, error, 'Failed to load plans needing media');
+    }
+  }
+
   /** GET /api/social/weekend/feed — "Who Has Plans This Weekend" */
   static async feed(req: Request, res: Response): Promise<any> {
     try {
