@@ -44,6 +44,7 @@ router.get('/following/:targetType/:targetId', optionalTicketsAuth, SocialProfil
 router.post('/block', authenticateBuyer, SocialProfileController.blockUser);
 router.post('/presence', authenticateBuyer, SocialProfileController.presence);
 router.delete('/block/:userId', authenticateBuyer, SocialProfileController.unblockUser);
+router.get('/onboarding/people', authenticateBuyer, ConsumerReadsController.onboardingPeople);
 router.get('/suggestions/people', authenticateBuyer, ConsumerReadsController.suggestedPeople);
 router.get('/suggestions/organizers', authenticateBuyer, ConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateBuyer, ConsumerReadsController.recommendations);

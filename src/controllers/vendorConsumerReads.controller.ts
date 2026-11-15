@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
 import { resolveActorFromRequest, type SocialActor } from '@utils/socialActor.util';
-import { SuggestionsService } from '@services/suggestions.service';
+import { SuggestionsService, suggestedPerson } from '@services/suggestions.service';
 import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
 import { FollowService } from '@services/follow.service';
@@ -42,16 +42,7 @@ export class VendorConsumerReadsController {
       if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
       const { page, limit, seed } = VendorConsumerReadsController.parsePageLimit(req);
       const rows = await SuggestionsService.peopleYouMayKnow(actor, { page, limit, seed });
-      const data = rows.map(({ buyer: b, mutualCount }) => ({
-        id: String(b._id),
-        name: b.name ?? null,
-        username: b.username ?? null,
-        avatarUrl: b.avatarUrl ?? null,
-        bio: b.bio ?? null,
-        city: b.city ?? null,
-        mutualCount,
-        isFollowing: false,
-      }));
+      const data = rows.map(({ buyer, mutualCount }) => suggestedPerson(buyer, mutualCount));
       return ApiResponseUtil.success(res, data);
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load suggestions');

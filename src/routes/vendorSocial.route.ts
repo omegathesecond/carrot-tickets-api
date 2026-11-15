@@ -1,3 +1,4 @@
+import { ConsumerReadsController } from '@controllers/consumerReads.controller';
 import { OnboardingController } from '@controllers/onboarding.controller';
 import { Router } from 'express';
 import { authenticateTickets } from '@middleware/ticketsAuth.middleware';
@@ -40,6 +41,7 @@ router.delete('/block/:userId', authenticateTickets, VendorSocialController.unbl
 
 // Brand "who to follow / what's near me / for you" surfaces — the organizer
 // equivalents of the buyer /api/social/{suggestions,recommendations,nearby}.
+router.get('/onboarding/people', authenticateTickets, ConsumerReadsController.onboardingPeople);
 router.get('/suggestions/people', authenticateTickets, VendorConsumerReadsController.suggestedPeople);
 router.get('/suggestions/organizers', authenticateTickets, VendorConsumerReadsController.suggestedOrganizers);
 router.get('/recommendations', authenticateTickets, VendorConsumerReadsController.recommendations);
