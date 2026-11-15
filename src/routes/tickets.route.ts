@@ -82,6 +82,15 @@ router.post('/auth/handoff/exchange', TicketsController.socialHandoffExchange);
  * - Service key (x-service-key header) for proxied app requests from main Keshless API
  */
 router.use(dualAuth);
+
+router.get('/preparation/events', requireTicketsPermission(TicketsPermission.EDIT_EVENT), PreparationController.handle('organizer:events'));
+// Organizer preparation shares provider delivery and offer handling with attendee requests.
+router.get('/events/:eventId/preparation', requireTicketsPermission(TicketsPermission.EDIT_EVENT), PreparationController.handle('organizer:mine'));
+router.post('/events/:eventId/preparation', requireTicketsPermission(TicketsPermission.EDIT_EVENT), PreparationController.handle('organizer:create'));
+router.patch('/events/:eventId/preparation/:id', requireTicketsPermission(TicketsPermission.EDIT_EVENT), PreparationController.handle('organizer:update'));
+router.delete('/events/:eventId/preparation/:id', requireTicketsPermission(TicketsPermission.EDIT_EVENT), PreparationController.handle('organizer:remove'));
+router.post('/events/:eventId/preparation/:id/accept', requireTicketsPermission(TicketsPermission.EDIT_EVENT), PreparationController.handle('organizer:accept'));
+
 router.get('/events/:eventId/cash-collections', requireSuperAdminOrPermission(TicketsPermission.VIEW_REVENUE), CashCollectionController.report);
 
 /**

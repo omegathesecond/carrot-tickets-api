@@ -1,9 +1,12 @@
 import { Schema, model } from 'mongoose';
 
-export const PREPARATION_CATEGORIES = [
+export const ORGANIZER_PREPARATION_CATEGORIES = ['toilet_rental', 'furniture_decor', 'catering', 'lighting', 'security', 'marquees_tents', 'sound_hire', 'transport', 'photography', 'other'] as const;
+
+export const PREPARATION_CATEGORIES = [...new Set([
+  ...ORGANIZER_PREPARATION_CATEGORIES,
   'hair', 'nails', 'makeup', 'barber', 'beauty_spa', 'accommodation', 'transport',
   'car_hire', 'outfit_clothing', 'shoes', 'photography', 'tour_guide', 'babysitting', 'event_companion', 'other',
-] as const;
+] as const)];
 
 const offerSchema = new Schema({
   actorId: { type: Schema.Types.ObjectId, required: true },
@@ -20,7 +23,8 @@ const offerSchema = new Schema({
 }, { timestamps: true });
 
 const schema = new Schema({
-  buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer', required: true },
+  buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer' },
+  organizerId: { type: Schema.Types.ObjectId, ref: 'Vendor' },
   eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
   category: { type: String, enum: PREPARATION_CATEGORIES, required: true },
   budget: { type: Number, min: 0, required: true },
@@ -33,6 +37,10 @@ const schema = new Schema({
   acceptedOfferId: Schema.Types.ObjectId,
   offers: { type: [offerSchema], default: [] },
 }, { timestamps: true, optimisticConcurrency: true });
+schema.pre('validate', function () {
+  if (Boolean(this.buyerId) === Boolean(this.organizerId)) this.invalidate('buyerId', 'Exactly one buyer or organizer must own a preparation request');
+});
+schema.index({ organizerId: 1, eventId: 1, status: 1 });
 schema.index({ buyerId: 1, eventId: 1, status: 1 });
 schema.index({ category: 1, status: 1, preferredDate: 1 });
 schema.index({ providerIds: 1, status: 1 });

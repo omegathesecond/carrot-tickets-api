@@ -5,6 +5,8 @@ import { PREPARATION_CATEGORIES } from '@models/preparation.model';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
+import { Event } from '@models/event.model';
+import { Vendor } from '@models/vendor.model';
 import { HttpError } from '@utils/httpError.util';
 
 const id = Joi.string().pattern(HEX24);
@@ -54,15 +56,23 @@ export class PreparationController {
             ? await PreparationService.list(String(vendorId), validate(filters, req.query))
             : await PreparationService.offer(requestId, { id: String(vendorId), type: 'vendor', name: '' }, validate(preparationOfferInput, req.body));
         } else {
-          const buyer = await resolveBuyerFromRequest(req);
+          const vendorId = (req as Request & { ticketsUser?: { vendorId?: string } }).ticketsUser?.vendorId;
+          const buyer = action.startsWith('organizer:') && vendorId
+            ? { _id: String(vendorId), requesterType: 'vendor' as const }
+            : action.startsWith('organizer:') ? null : await resolveBuyerFromRequest(req);
           if (!buyer) throw new HttpError(401, 'Please sign in as a ticket holder');
-          switch (action) {
+          switch (action.replace('organizer:', '')) {
+            case 'events': {
+              if (!('requesterType' in buyer) || !await Vendor.exists({ _id: buyer._id, operatorType: { $in: ['events', 'both'] } })) throw new HttpError(403, 'Organizer account required');
+              data = await Event.find({ vendorId: buyer._id }).select('name eventDate currency posterUrl status').sort({ eventDate: -1 });
+              break;
+            }
             case 'mine': data = await PreparationService.mine(eventId, buyer); break;
             case 'create': case 'update': data = await PreparationService.save(eventId, buyer, validate(preparationInput, req.body), requestId || undefined); break;
             case 'remove': data = await PreparationService.remove(eventId, buyer, requestId); break;
             case 'accept': data = await PreparationService.accept(eventId, buyer, requestId, String(validate(Joi.object({ offerId: id.required() }), req.body).offerId)); break;
             case 'companions': data = await PreparationService.companions(eventId, buyer); break;
-            case 'interest': data = await PreparationService.offer(requestId, { id: String(buyer._id), type: 'buyer', name: buyer.name || 'Attendee', buyer }, validate(preparationOfferInput, req.body)); break;
+            case 'interest': data = await PreparationService.offer(requestId, { id: String(buyer._id), type: 'buyer', name: ('name' in buyer ? buyer.name : '') || 'Attendee', buyer: 'requesterType' in buyer ? undefined : buyer }, validate(preparationOfferInput, req.body)); break;
             default: throw new HttpError(400, 'Unknown action');
           }
         }
