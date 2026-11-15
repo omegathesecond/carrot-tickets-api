@@ -75,7 +75,37 @@ export function suggestionCompositeScore(input: {
   return mutual * MUTUAL_WEIGHT + events * EVENT_WEIGHT + (input.sameCity ? CITY_WEIGHT : 0) + recencyScore(input.lastLoginAt);
 }
 
+export function suggestedPerson(b: IBuyer, mutualCount = 0) {
+  return { id: String(b._id), name: b.name ?? null, username: b.username ?? null,
+    avatarUrl: b.avatarUrl ?? null, bio: b.bio ?? null, city: b.city ?? null,
+    mutualCount, isFollowing: false };
+}
+
 export class SuggestionsService {
+  /** Shuffle IDs only; hydrate one page. No ranked-pool cap. Follow changes
+   * must not shift page boundaries, so exclude follows after slicing IDs. */
+  static async onboardingPeople(actor: SocialActor, { page = 1, limit = 20, seed = 0 }: SuggestionsPageOptions) {
+    const ids = await Buyer.find({
+      ...(actor.type === 'buyer' ? { _id: { $ne: actor.id } } : {}),
+      socialSuspendedAt: null,
+      username: { $exists: true, $ne: null },
+      ...GENUINE_AVATAR_FILTER,
+    }).select('_id').sort({ _id: 1 }).lean();
+    const ordered = seededShuffle(ids.map((b) => String(b._id)), seed);
+    const offset = (page - 1) * limit;
+    const following = await FollowService.followingIds(actor.id, 'buyer', actor.type);
+    const buyers = await Buyer.find({
+      _id: { $in: ordered.slice(offset, offset + limit), $nin: following },
+      socialSuspendedAt: null,
+    });
+    const byId = new Map(buyers.map((b) => [String(b._id), b]));
+    const people = ordered.slice(offset, offset + limit).flatMap((id) => {
+      const b = byId.get(id);
+      return b ? [suggestedPerson(b)] : [];
+    });
+    return { people, hasMore: offset + limit < ordered.length };
+  }
+
   /** Friends-of-friends the buyer doesn't already follow, ranked by a
    *  composite score: mutual-connection count (primary) blended with shared
    *  event attendance, same city, and recency (in that priority order — see
