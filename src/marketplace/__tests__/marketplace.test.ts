@@ -66,11 +66,9 @@ const opportunity = {
   scope: 'date',
   applicationDeadline: '2099-11-10T12:00:00Z',
   paymentDeadline: '2099-11-12T12:00:00Z',
-  capacity: 1,
-  stallSizes: ['2 × 2 m', '3 × 3 m'],
+  stallTypes: [{ name: 'Standard Stall', price: 100, spaces: 1 }],
   stall: profile.stall,
   currency: 'SZL',
-  stallFee: 100,
   feeTiers: [],
   optionalCharges: [],
   cancellationTerms: 'Refund before deadline.',
@@ -113,7 +111,7 @@ const apply = (
   auth(
     request(app).post(endpoint + '/opportunities/' + marketId + '/apply'),
     who,
-  ).send({ profileId, date, ...extra });
+  ).send({ profileId, date, stallType: 'Standard Stall', ...extra });
 const upload = (profileId: string, expiresAt = '2099-11-19', who = provider) =>
   auth(
     request(app).post(endpoint + '/profiles/' + profileId + '/certificates'),
@@ -164,7 +162,7 @@ it('publishes, searches literal text, filters fees and dates and sorts by the ne
     dates: ['2099-10-10'],
     applicationDeadline: '2099-10-01',
     paymentDeadline: '2099-10-02',
-    stallFee: 50,
+    stallTypes: [{ name: 'Standard Stall', price: 50, spaces: 1 }],
   });
   const list = await request(app).get(endpoint + '/opportunities');
   expect(list.status).toBe(200);
@@ -427,7 +425,7 @@ it('enforces pause, close, deadlines, regular trader scope and immutable terms a
   const edit = await auth(
     request(app).put(endpoint + '/manage/opportunities/' + marketId),
     organiser,
-  ).send({ ...opportunity, scope: 'regular', stallFee: 999 });
+  ).send({ ...opportunity, scope: 'regular', stallTypes: [{ name: 'Standard Stall', price: 999, spaces: 1 }] });
   expect(edit.status).toBe(409);
   const permittedEdit = await auth(
     request(app).put(endpoint + '/manage/opportunities/' + marketId),
@@ -854,4 +852,31 @@ it('lets buyers use private profiles, certificates and applications without gran
   const reviewed = await auth(request(app).patch(endpoint + '/manage/applications/' + submitted.body.data._id), organiser).send({ status: 'approved' });
   expect(reviewed.status).toBe(200);
   expect(await Notification.findOne({ recipientType: 'buyer', recipientId: String(buyer), type: 'market_application' })).not.toBeNull();
+});
+
+it('tracks approval capacity separately per stall type and date without reserving pending applications', async () => {
+  const marketId = await createOpportunity({ stallTypes: [
+    { name: 'Food Stall', price: 250, spaces: 1 },
+    { name: 'Clothing Stall', price: 75, spaces: 2 },
+  ] });
+  const profiles = await Promise.all([createProfile(), createProfile(provider, { businessName: 'Second' }), createProfile(provider, { businessName: 'Third' })]);
+  const food = await apply(marketId, profiles[0]!, '2099-11-18', provider, { stallType: 'Food Stall' });
+  const food2 = await apply(marketId, profiles[1]!, '2099-11-18', provider, { stallType: 'Food Stall' });
+  const clothing = await apply(marketId, profiles[2]!, '2099-11-18', provider, { stallType: 'Clothing Stall' });
+  expect([food.status, food2.status, clothing.status]).toEqual([200, 200, 200]);
+  expect(food.body.data.terms.stallFee).toBe(250);
+  expect(clothing.body.data.terms.stallFee).toBe(75);
+  let detail = await request(app).get(endpoint + '/opportunities/' + marketId);
+  expect(detail.body.data.approvedByType).toEqual([]);
+  const decide = (a: any) => auth(request(app).patch(endpoint + '/manage/applications/' + a.body.data._id), organiser).send({ status: 'approved' });
+  const concurrent = await Promise.all([decide(food), decide(food2), decide(clothing)]);
+  expect(concurrent.slice(0, 2).map((r) => r.status).sort()).toEqual([200, 409]);
+  expect(concurrent[2]!.status).toBe(200);
+  detail = await request(app).get(endpoint + '/opportunities/' + marketId);
+  expect(detail.body.data.approvedByType).toEqual(expect.arrayContaining([
+    { scope: '2099-11-18', type: 'Food Stall', count: 1 },
+    { scope: '2099-11-18', type: 'Clothing Stall', count: 1 },
+  ]));
+  expect((await apply(marketId, profiles[0]!, '2099-11-25', provider, { stallType: 'Food Stall' })).status).toBe(200);
+  expect((await apply(marketId, profiles[0]!, '2099-11-25', provider, { stallType: 'Unknown' })).status).toBe(400);
 });
