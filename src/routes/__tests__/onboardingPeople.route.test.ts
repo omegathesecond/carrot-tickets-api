@@ -11,7 +11,7 @@ describe('onboarding people pagination', () => {
   afterAll(disconnectTestDb);
   it('reaches beyond 200 candidates, rotates by seed, and does not skip people after follows', async () => {
     const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', username: 'viewer', avatarUrl: 'photo' });
-    await Buyer.insertMany(Array.from({ length: 225 }, (_, i) => ({ phone: `+26879${String(i).padStart(6, '0')}`, username: `person_${i}`, avatarUrl: 'photo' })));
+    await Buyer.insertMany(Array.from({ length: 225 }, (_, i) => ({ phone: `+26879${String(i).padStart(6, '0')}`, username: `person_${i}`, password: 'test-password', avatarUrl: 'photo' })));
     const token = await signBuyerSessionToken('+26878422613');
     const page = async (n: number, seed = 123) => (await request(app).get(`/api/social/onboarding/people?page=${n}&limit=20&seed=${seed}`).set('Authorization', `Bearer ${token}`).expect(200)).body.data;
     const first = await page(1);
