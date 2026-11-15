@@ -22,6 +22,20 @@ export interface CreateCouponsInput {
 }
 
 export class EventCouponService {
+  /** Public availability only: never expose codes or redemption details. */
+  static async availability(eventId: string): Promise<boolean> {
+    if (!HEX24.test(eventId)) throw new HttpError(400, 'Invalid event ID');
+    const eligible = await EventCoupon.aggregate([
+      { $match: { eventId: new mongoose.Types.ObjectId(eventId), disabled: false,
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] } },
+      { $lookup: { from: TicketSale.collection.name, localField: 'saleId', foreignField: '_id', as: 'sale' } },
+      { $match: { $or: [{ saleId: null }, { 'sale.0.paymentStatus': PaymentStatus.FAILED }] } },
+      { $limit: 1 },
+      { $project: { _id: 1 } },
+    ]);
+    return eligible.length > 0;
+  }
+
   private static async accessibleEvent(eventId: string, vendorId: string, isSuperAdmin: boolean) {
     if (!HEX24.test(eventId)) throw new HttpError(400, 'Invalid event ID');
     // Match the event dashboard's existing admin-or-owner access policy.

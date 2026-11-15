@@ -390,6 +390,7 @@ router.post('/services/:businessId/reviews', authenticateBuyerOrOrganizer, Servi
  * @access  Buyer (Bearer buyer token). Keshless card number + PIN for >= E50.
  * @body    eventId, ticketTypeId, quantity, customerName?, keshlessCardNumber, keshlessPin?
  */
+router.get('/events/:eventId/coupons/availability', EventCouponController.availability);
 router.post('/coupons/quote', authenticateBuyer, EventCouponController.quote);
 
 router.post('/purchase', authenticateBuyer, PublicController.purchaseTickets);
