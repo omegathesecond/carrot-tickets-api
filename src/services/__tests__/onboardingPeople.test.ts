@@ -12,15 +12,15 @@ it('paginates the entire seeded pool without shifting when follows change', asyn
   }) as any);
   try {
     const actor = { type: 'buyer' as const, id: 'self' };
-    const first = await SuggestionsService.onboardingPeople(actor, { seed: 123 });
+    const first = await SuggestionsService.onboardingPeople(actor, { category: 'users', seed: 123 });
     expect(first.people).toHaveLength(20);
-    expect((await SuggestionsService.onboardingPeople(actor, { seed: 456 })).people).not.toEqual(first.people);
+    expect((await SuggestionsService.onboardingPeople(actor, { category: 'users', seed: 456 })).people).not.toEqual(first.people);
     following = [first.people[0]!.id];
-    expect((await SuggestionsService.onboardingPeople(actor, { seed: 123 })).people.map((p) => p.id)).not.toContain(following[0]);
+    expect((await SuggestionsService.onboardingPeople(actor, { category: 'users', seed: 123 })).people.map((p) => p.id)).not.toContain(following[0]);
     const collected = first.people.map((p) => p.id);
     let more = first.hasMore;
     for (let page = 2; more; page++) {
-      const result = await SuggestionsService.onboardingPeople(actor, { page, seed: 123 });
+      const result = await SuggestionsService.onboardingPeople(actor, { category: 'users', page, seed: 123 });
       collected.push(...result.people.map((p) => p.id));
       more = result.hasMore;
       expect(page).toBeLessThan(20);
