@@ -3,6 +3,9 @@ import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
+import { Vendor } from '@models/vendor.model';
+import { Venue } from '@models/venue.model';
+import { OnboardingService } from '@services/onboarding.service';
 import { Follow } from '@models/follow.model';
 
 describe('onboarding people pagination', () => {
@@ -13,7 +16,7 @@ describe('onboarding people pagination', () => {
     const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', username: 'viewer', avatarUrl: 'photo' });
     await Buyer.insertMany(Array.from({ length: 225 }, (_, i) => ({ phone: `+26879${String(i).padStart(6, '0')}`, username: `person_${i}`, password: 'test-password', avatarUrl: 'photo' })));
     const token = await signBuyerSessionToken('+26878422613');
-    const page = async (n: number, seed = 123) => (await request(app).get(`/api/social/onboarding/people?page=${n}&limit=20&seed=${seed}`).set('Authorization', `Bearer ${token}`).expect(200)).body.data;
+    const page = async (n: number, seed = 123) => (await request(app).get(`/api/social/onboarding/people?category=users&page=${n}&limit=20&seed=${seed}`).set('Authorization', `Bearer ${token}`).expect(200)).body.data;
     const first = await page(1);
     expect(first.people).toHaveLength(20);
     expect((await page(1, 456)).people.map((p: { id: string }) => p.id)).not.toEqual(first.people.map((p: { id: string }) => p.id));
@@ -31,4 +34,41 @@ describe('onboarding people pagination', () => {
     expect(new Set(ids).size).toBe(225);
     expect(ids).not.toContain(String(me._id));
   });
+  it('filters all four categories, excludes self/follows, and combines progress', async () => {
+    const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', username: 'viewer', avatarUrl: 'photo' });
+    const user = await Buyer.create({ phone: '+26878000001', password: 'secret1', username: 'other', avatarUrl: 'photo' });
+    const makeVendor = (slug: string, extra = {}) => Vendor.create({ businessName: slug, slug, password: 'secret1',
+      isActive: true, verificationStatus: 'verified', operatorType: 'events', ...extra });
+    const organizer = await makeVendor('organizer');
+    const provider = await makeVendor('provider', { operatorType: 'services', serviceCategories: ['furniture_decor'] });
+    const venue = await makeVendor('venue', { businessType: 'venue' });
+    const activatedVenue = await makeVendor('activated-venue');
+    await Venue.create({ vendorId: activatedVenue._id, name: 'Hall', currency: 'SZL', status: 'active', activatedAt: new Date(), activatedBy: me._id });
+    await makeVendor('inactive', { isActive: false });
+    await makeVendor('unverified', { verificationStatus: 'pending' });
+    await makeVendor('admin', { isSuperAdmin: true });
+    const token = await signBuyerSessionToken('+26878422613');
+    const page = async (category: string) => (await request(app).get(`/api/social/onboarding/people?category=${category}&seed=123`)
+      .set('Authorization', `Bearer ${token}`).expect(200)).body.data.people;
+    expect((await page('users')).map((p: any) => p.id)).toEqual([String(user._id)]);
+    expect((await page('organizers')).map((p: any) => p.id)).toEqual([String(organizer._id)]);
+    expect((await page('providers'))).toMatchObject([{ id: String(provider._id), type: 'organizer' }]);
+    expect(new Set((await page('venues')).map((p: any) => p.id))).toEqual(new Set([String(venue._id), String(activatedVenue._id)]));
+    for (const [targetType, targetId] of [['buyer', user._id], ['organizer', organizer._id], ['organizer', provider._id], ['organizer', venue._id]]) {
+      await Follow.create({ followerType: 'buyer', followerId: me._id, targetType, targetId });
+    }
+    for (const category of ['users', 'organizers', 'providers']) expect(await page(category)).toEqual([]);
+    expect((await page('venues')).map((p: any) => p.id)).toEqual([String(activatedVenue._id)]);
+    expect(await OnboardingService.status({ type: 'buyer', id: String(me._id) })).toMatchObject({ followingCount: 4, canBrowse: false });
+    for (let i = 0; i < 6; i++) {
+      const brand = await makeVendor(`extra-${i}`);
+      await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'organizer', targetId: brand._id });
+    }
+    expect(await OnboardingService.status({ type: 'buyer', id: String(me._id) })).toMatchObject({ followingCount: 10, canBrowse: true });
+    // Vendor actors cannot be suggested their own brand.
+    expect((await (await import('@services/suggestions.service')).SuggestionsService.onboardingPeople(
+      { type: 'vendor', id: String(provider._id) }, { category: 'providers', seed: 1 })).people).toEqual([]);
+    await request(app).get('/api/social/onboarding/people?category=invalid&seed=123').set('Authorization', `Bearer ${token}`).expect(400);
+  });
+
 });

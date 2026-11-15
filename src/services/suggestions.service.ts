@@ -4,11 +4,16 @@ import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
 import { Event } from '@models/event.model';
 import { EventStatus } from '@interfaces/event.interface';
-import { VerificationStatus } from '@interfaces/vendor.interface';
+import { Venue } from '@models/venue.model';
+import type { FollowPersonRow } from '@services/follow.service';
+import { OperatorType, VerificationStatus } from '@interfaces/vendor.interface';
 import { FollowService } from '@services/follow.service';
 import { GoingService } from '@services/going.service';
 import { seededShuffle } from '@utils/seededShuffle.util';
 import type { SocialActor } from '@utils/socialActor.util';
+
+export const ONBOARDING_CATEGORIES = ['users', 'organizers', 'providers', 'venues'] as const;
+export type OnboardingCategory = typeof ONBOARDING_CATEGORIES[number];
 
 export interface SuggestionsPageOptions {
   limit?: number;
@@ -84,24 +89,42 @@ export function suggestedPerson(b: IBuyer, mutualCount = 0) {
 export class SuggestionsService {
   /** Shuffle IDs only; hydrate one page. No ranked-pool cap. Follow changes
    * must not shift page boundaries, so exclude follows after slicing IDs. */
-  static async onboardingPeople(actor: SocialActor, { page = 1, limit = 20, seed = 0 }: SuggestionsPageOptions) {
-    const ids = await Buyer.find({
+  static async onboardingPeople(actor: SocialActor, { page = 1, limit = 20, seed = 0, category }: SuggestionsPageOptions & { category: OnboardingCategory }): Promise<{ people: FollowPersonRow[]; hasMore: boolean }> {
+    const type = category === 'users' ? 'buyer' : 'organizer';
+    const filter: Record<string, unknown> = type === 'buyer' ? {
       ...(actor.type === 'buyer' ? { _id: { $ne: actor.id } } : {}),
       socialSuspendedAt: null,
       username: { $exists: true, $ne: null },
       ...GENUINE_AVATAR_FILTER,
-    }).select('_id').sort({ _id: 1 }).lean();
+    } : {
+      isActive: true, verificationStatus: VerificationStatus.VERIFIED, isSuperAdmin: { $ne: true },
+      ...(actor.type === 'vendor' ? { _id: { $ne: actor.id } } : {}),
+    };
+    if (category === 'providers') filter.operatorType = OperatorType.SERVICES;
+    if (category === 'venues' || category === 'organizers') {
+      const venueIds = await Venue.distinct('vendorId', { status: 'active' });
+      const venueMatch = [{ businessType: 'venue' }, { _id: { $in: venueIds } }];
+      if (category === 'venues') filter.$or = venueMatch;
+      else {
+        filter.operatorType = { $in: [OperatorType.EVENTS, OperatorType.BOTH] };
+        filter.$nor = venueMatch;
+      }
+    }
+    const ids = type === 'buyer'
+      ? await Buyer.find(filter).select('_id').sort({ _id: 1 }).lean()
+      : await Vendor.find(filter).select('_id').sort({ _id: 1 }).lean();
     const ordered = seededShuffle(ids.map((b) => String(b._id)), seed);
     const offset = (page - 1) * limit;
-    const following = await FollowService.followingIds(actor.id, 'buyer', actor.type);
-    const buyers = await Buyer.find({
-      _id: { $in: ordered.slice(offset, offset + limit), $nin: following },
-      socialSuspendedAt: null,
-    });
-    const byId = new Map(buyers.map((b) => [String(b._id), b]));
+    const following = await FollowService.followingIds(actor.id, type, actor.type);
+    const pageFilter = { ...filter, _id: { $in: ordered.slice(offset, offset + limit), $nin: following } };
+    const rows: FollowPersonRow[] = type === 'buyer'
+      ? (await Buyer.find(pageFilter)).map((b) => ({ ...suggestedPerson(b), type: 'buyer' }))
+      : (await Vendor.find(pageFilter)).map((v) => ({ id: String(v._id), type: 'organizer', name: v.businessName,
+        username: v.slug ?? null, avatarUrl: v.logoUrl ?? null, isFollowing: false }));
+    const byId = new Map(rows.map((row) => [row.id, row]));
     const people = ordered.slice(offset, offset + limit).flatMap((id) => {
-      const b = byId.get(id);
-      return b ? [suggestedPerson(b)] : [];
+      const row = byId.get(id);
+      return row ? [row] : [];
     });
     return { people, hasMore: offset + limit < ordered.length };
   }

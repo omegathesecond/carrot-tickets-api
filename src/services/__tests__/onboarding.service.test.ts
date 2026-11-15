@@ -15,7 +15,7 @@ describe('independent onboarding permissions', () => {
       const aggregate = jest.spyOn(Update, 'aggregate').mockResolvedValue(media ? [{ count: media }] : []);
       const result = await OnboardingService.status(actor);
       expect(result).toMatchObject({ followingCount: follows, mediaCount: media, canBrowse: browse, canViewProfiles: profiles });
-      expect(Follow.countDocuments).toHaveBeenCalledWith({ followerType: 'vendor', followerId: actor.id, targetType: 'buyer' });
+      expect(Follow.countDocuments).toHaveBeenCalledWith({ followerType: 'vendor', followerId: actor.id });
       const pipeline = aggregate.mock.calls[0]![0]!;
       expect(pipeline).toContainEqual({ $unwind: '$media' });
       expect(pipeline[0]).toEqual({ $match: { authorType: 'vendor', authorId: new mongoose.Types.ObjectId(actor.id), status: 'active' } });
