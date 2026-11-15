@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveActorFromRequest } from '@utils/socialActor.util';
 import { resolveBuyerFromRequest } from '@/utils/buyerRequest.util';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { failWithHttpError } from '@utils/controllerHelpers.util';
@@ -8,7 +9,7 @@ import { buildEventCards } from '@services/eventCards.service';
 import { GoingService } from '@services/going.service';
 import { CalendarService } from '@services/calendar.service';
 import { FollowService } from '@services/follow.service';
-import { SuggestionsService } from '@services/suggestions.service';
+import { SuggestionsService, suggestedPerson } from '@services/suggestions.service';
 import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
 import { MeetupService } from '@services/meetup.service';
@@ -19,6 +20,18 @@ import { notEndedFilter } from '@utils/eventVisibility.util';
 import { parseSeed } from '@utils/seededShuffle.util';
 
 export class ConsumerReadsController {
+  static async onboardingPeople(req: Request, res: Response): Promise<any> {
+    try {
+      const actor = await resolveActorFromRequest(req);
+      if (!actor) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const options = ConsumerReadsController.parsePageLimit(req);
+      if (options.seed === undefined) return ApiResponseUtil.error(res, 'A suggestion seed is required', 400);
+      return ApiResponseUtil.success(res, await SuggestionsService.onboardingPeople(actor, options));
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load suggestions');
+    }
+  }
+
   /** GET /api/social/me/saved */
   static async mySaved(req: Request, res: Response): Promise<any> {
     try {
@@ -100,16 +113,7 @@ export class ConsumerReadsController {
       if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
       const { page, limit, seed } = ConsumerReadsController.parsePageLimit(req);
       const rows = await SuggestionsService.peopleYouMayKnow({ type: 'buyer', id: String(buyer._id) }, { page, limit, seed });
-      const data = rows.map(({ buyer: b, mutualCount }) => ({
-        id: String(b._id),
-        name: b.name ?? null,
-        username: b.username ?? null,
-        avatarUrl: b.avatarUrl ?? null,
-        bio: b.bio ?? null,
-        city: b.city ?? null,
-        mutualCount,
-        isFollowing: false,
-      }));
+      const data = rows.map(({ buyer, mutualCount }) => suggestedPerson(buyer, mutualCount));
       return ApiResponseUtil.success(res, data);
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load suggestions');
