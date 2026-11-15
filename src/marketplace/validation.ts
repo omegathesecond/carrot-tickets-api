@@ -119,15 +119,18 @@ export const opportunitySchema = Joi.object({
   scope: Joi.string().valid('date', 'regular').required(),
   applicationDeadline: Joi.date().iso().required(),
   paymentDeadline: Joi.date().iso().required(),
-  capacity: Joi.number().integer().min(1).max(100000).allow(null).default(null),
-  stallSizes: Joi.array().items(text(80)).unique().min(1).max(30).required(),
+  stallTypes: Joi.array().items(Joi.object({
+    name: text(100).required(),
+    price: Joi.number().min(0).max(10000000).precision(2).required(),
+    spaces: Joi.number().integer().min(1).max(100000).required(),
+  })).unique('name').min(1).required(),
   stall: stallSchema,
   currency: Joi.string()
     .length(3)
     .uppercase()
     .pattern(/^[A-Z]{3}$/)
     .required(),
-  stallFee: Joi.number().min(0).max(10000000).precision(2).required(),
+
   feeTiers: Joi.array().items(fee).max(30).default([]),
   optionalCharges: Joi.array().items(fee).max(30).default([]),
   cancellationTerms: text(4000).required(),
@@ -174,8 +177,8 @@ export function validateOpportunity(input: unknown) {
       'Application deadline must precede payment deadline and the first trading date',
     );
   }
-  if (!value.stallSizes.includes(value.stall.size))
-    throw new HttpError(400, 'Select a configured stall size');
+  value.capacity = value.stallTypes.reduce((sum: number, t: { spaces: number }) => sum + t.spaces, 0);
+  value.stallFee = Math.min(...value.stallTypes.map((t: { price: number }) => t.price));
   return value;
 }
 export function certificateProblems(
@@ -189,8 +192,6 @@ export function certificateProblems(
     problems.push(
       'categories: choose at least one product or service category',
     );
-  if (!opportunity.stallSizes.includes(profile.stall.size))
-    problems.push('stall.size: select an available stall size');
   const required = new Set<string>([
     ...opportunity.requiredCertificates,
     ...(profile.sellsFood ? opportunity.foodCertificates : []),

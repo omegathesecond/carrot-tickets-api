@@ -104,6 +104,26 @@ async function transaction<T>(
     await session.endSession();
   }
 }
+// Call only inside a transaction that also writes the opportunity revision.
+// That shared write fence makes competing approvals retry with fresh counts.
+async function ensureStallSpace(
+  opportunity: Awaited<ReturnType<typeof managedOpportunity>>,
+  name: string | undefined,
+  scopeKey: string | undefined,
+  session: mongoose.ClientSession,
+) {
+  const type = opportunity.stallTypes.find((t) => t.name === name);
+  if (!type) throw new HttpError(400, 'Select an available stall type');
+  const approved = await MarketApplication.countDocuments({
+    opportunityId: opportunity._id,
+    scopeKey,
+    stallType: name,
+    status: 'approved',
+  }).session(session);
+  if (approved >= type.spaces!)
+    throw new HttpError(409, 'This stall type is full for the selected trading date or regular listing');
+  return type;
+}
 router.get(
   '/options',
   wrap(async (_req, res) =>
@@ -175,10 +195,10 @@ const listOpportunities = wrap(async (req, res) => {
   if (q.maxFee !== undefined || q.minFee !== undefined) {
     if (!q.currency)
       throw new HttpError(400, 'Select a currency when filtering stall fees');
-    filter.stallFee = {
+    filter.stallTypes = { $elemMatch: { price: {
       ...(q.maxFee !== undefined ? { $lte: q.maxFee } : {}),
       ...(q.minFee !== undefined ? { $gte: q.minFee } : {}),
-    };
+    } } };
   }
   const today = new Date().toISOString().slice(0, 10);
   filter.dates = q.date || { $gte: today };
@@ -322,13 +342,17 @@ router.get(
       status: { $in: ['published', 'paused', 'closed'] },
     }).lean();
     if (!opportunity) throw new HttpError(404, 'Opportunity not found');
-    const counts = await MarketApplication.aggregate([
+    if (!opportunity.stallTypes?.length) throw new HttpError(409, 'The organiser must configure stall types before this listing can accept applications');
+    const typeCounts = await MarketApplication.aggregate([
       { $match: { opportunityId: opportunity._id, status: 'approved' } },
-      { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
+      { $group: { _id: { scope: '$scopeKey', type: '$stallType' }, count: { $sum: 1 } } },
     ]);
+    const approvedByScope: Record<string, number> = {};
+    for (const c of typeCounts) approvedByScope[c._id.scope] = (approvedByScope[c._id.scope] || 0) + c.count;
     return ok(res, {
       ...opportunity,
-      approvedByScope: Object.fromEntries(counts.map((c) => [c._id, c.count])),
+      approvedByType: typeCounts.map((c) => ({ scope: c._id.scope, type: c._id.type, count: c.count })),
+      approvedByScope,
     });
   }),
 );
@@ -592,6 +616,7 @@ router.post(
     const body = validate(
       Joi.object({
         profileId: idSchema,
+        stallType: Joi.string().trim().max(100).required(),
         date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/),
         overrides: profileSchema.optional(),
         note: Joi.string().trim().max(2000).allow('').default(''),
@@ -647,13 +672,7 @@ router.post(
         .lean();
       const problems = certificateProblems(profile, certificates, opportunity);
       if (problems.length) throw new HttpError(422, problems.join('; '));
-      const approved = await MarketApplication.countDocuments({
-        opportunityId: opportunity._id,
-        scopeKey,
-        status: 'approved',
-      }).session(session);
-      if (opportunity.capacity && approved >= opportunity.capacity)
-        throw new HttpError(409, 'This trading date is full');
+      const selectedType = await ensureStallSpace(opportunity, body.stallType, scopeKey, session);
       const relevant = new Set([
         ...opportunity.requiredCertificates,
         ...(profile.sellsFood ? opportunity.foodCertificates : []),
@@ -667,13 +686,15 @@ router.post(
             opportunityId: opportunity._id,
             organiserId: opportunity.organiserId,
             scopeKey,
+            stallType: body.stallType,
             profile,
             certificates: certificates
               .filter((c) => relevant.has(c.type))
               .map((c) => c._id),
             note: body.note,
             terms: {
-              stallFee: opportunity.stallFee,
+              stallType: selectedType.name,
+              stallFee: selectedType.price,
               currency: opportunity.currency,
               feeTiers: opportunity.feeTiers,
               optionalCharges: opportunity.optionalCharges,
@@ -785,13 +806,12 @@ router.put(
             'eventId',
             'dates',
             'scope',
-            'stallFee',
             'currency',
             'feeTiers',
             'optionalCharges',
             'paymentDeadline',
             'cancellationTerms',
-            'stallSizes',
+            'stallTypes',
             'stall',
             'requiredCertificates',
             'foodCertificates',
@@ -803,19 +823,6 @@ router.put(
               throw new HttpError(
                 409,
                 `${key} cannot change after applications have been submitted. Create another opportunity for different terms.`,
-              );
-          }
-          if (value.capacity) {
-            const counts = await MarketApplication.aggregate([
-              {
-                $match: { opportunityId: opportunity._id, status: 'approved' },
-              },
-              { $group: { _id: '$scopeKey', count: { $sum: 1 } } },
-            ]).session(session);
-            if (counts.some((c) => c.count > value.capacity))
-              throw new HttpError(
-                409,
-                'Capacity cannot be lower than the approved provider count',
               );
           }
         }
@@ -935,14 +942,8 @@ router.patch(
           opportunity,
         );
         if (problems.length) throw new HttpError(422, problems.join('; '));
-        const count = await MarketApplication.countDocuments({
-          opportunityId: opportunity._id,
-          scopeKey: app.scopeKey,
-          status: 'approved',
-        }).session(session);
-        if (opportunity.capacity && count >= opportunity.capacity)
-          throw new HttpError(409, 'This trading date is full');
-        app.paymentStatus = opportunity.stallFee ? 'due' : 'waived';
+        await ensureStallSpace(opportunity, app.stallType, app.scopeKey, session);
+        app.paymentStatus = app.terms.stallFee ? 'due' : 'waived';
       }
       const changed =
         (body.status && body.status !== app.status) ||
