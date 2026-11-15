@@ -8,7 +8,7 @@ import type { SocialActor } from '@utils/socialActor.util';
 export class OnboardingService {
   static async status(actor: SocialActor) {
     const [followingCount, media, buyer, vendor] = await Promise.all([
-      Follow.countDocuments({ followerType: actor.type, followerId: actor.id, targetType: 'buyer' }),
+      Follow.countDocuments({ followerType: actor.type, followerId: actor.id }),
       Update.aggregate<{ count: number }>([
         { $match: { authorType: actor.type, authorId: new mongoose.Types.ObjectId(actor.id), status: 'active' } },
         { $unwind: '$media' },

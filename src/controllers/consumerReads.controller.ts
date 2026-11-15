@@ -9,7 +9,7 @@ import { buildEventCards } from '@services/eventCards.service';
 import { GoingService } from '@services/going.service';
 import { CalendarService } from '@services/calendar.service';
 import { FollowService } from '@services/follow.service';
-import { SuggestionsService, suggestedPerson } from '@services/suggestions.service';
+import { SuggestionsService, suggestedPerson, ONBOARDING_CATEGORIES, OnboardingCategory } from '@services/suggestions.service';
 import { NearbyService } from '@services/nearby.service';
 import { RecommendationsService } from '@services/recommendations.service';
 import { MeetupService } from '@services/meetup.service';
@@ -24,9 +24,11 @@ export class ConsumerReadsController {
     try {
       const actor = await resolveActorFromRequest(req);
       if (!actor) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+      const category = req.query.category;
+      if (!ONBOARDING_CATEGORIES.includes(category as OnboardingCategory)) return ApiResponseUtil.error(res, 'Choose users, organizers, providers or venues', 400);
       const options = ConsumerReadsController.parsePageLimit(req);
       if (options.seed === undefined) return ApiResponseUtil.error(res, 'A suggestion seed is required', 400);
-      return ApiResponseUtil.success(res, await SuggestionsService.onboardingPeople(actor, options));
+      return ApiResponseUtil.success(res, await SuggestionsService.onboardingPeople(actor, { ...options, category: category as OnboardingCategory }));
     } catch (error: any) {
       return failWithHttpError(res, error, 'Failed to load suggestions');
     }
