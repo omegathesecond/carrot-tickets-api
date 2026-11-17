@@ -9,6 +9,7 @@ import {
   MarketCertificate,
   MarketOpportunity,
   MarketProfile,
+  MarketExperiencePhoto,
 } from '../models';
 import { Notification } from '@models/notification.model';
 import { NotificationService } from '@services/notification.service';
@@ -77,9 +78,13 @@ const opportunity = {
 };
 const auth = (req: request.Test, who: mongoose.Types.ObjectId = provider) =>
   req.set('Authorization', 'Bearer ' + who);
+const photosFor = (who: mongoose.Types.ObjectId) => Array.from({ length: 6 }, (_, index) => `https://cdn.example.com/${who}/${index}.jpg`);
 const createProfile = async (who = provider, overrides = {}) => {
+  const experiencePhotos = photosFor(who);
+  for (const url of experiencePhotos) await MarketExperiencePhoto.updateOne({ url }, { ownerId: who, url }, { upsert: true });
   const res = await auth(request(app).post(endpoint + '/profiles'), who).send({
     ...profile,
+    experiencePhotos,
     ...overrides,
   });
   expect(res.status).toBe(200);
@@ -258,7 +263,7 @@ it('enforces profile ownership and private document access, including authorised
       await auth(
         request(app).put(endpoint + '/profiles/' + profileId),
         organiser,
-      ).send(profile)
+      ).send({ ...profile, experiencePhotos: photosFor(provider) })
     ).status,
   ).toBe(404);
   const profiles = await auth(request(app).get(endpoint + '/profiles'));
@@ -272,7 +277,7 @@ it('uses an immutable application snapshot, permits per-market adjustments and b
   const profileId = await createProfile();
   const marketId = await createOpportunity();
   const response = await apply(marketId, profileId, '2099-11-18', provider, {
-    overrides: { ...profile, contactName: 'Market contact' },
+    overrides: { ...profile, experiencePhotos: photosFor(provider), contactName: 'Market contact' },
   });
   expect(response.status).toBe(200);
   expect(response.body.data.profile.contactName).toBe('Market contact');
@@ -694,6 +699,30 @@ it('uploads organiser posters through existing storage and surfaces storage fail
     expect((await post(provider)).status).toBe(403);
     storage.mockRejectedValueOnce(new Error('Storage unavailable'));
     expect((await post()).status).toBe(500);
+  } finally {
+    if (previous === undefined) delete process.env['R2_PUBLIC_URL'];
+    else process.env['R2_PUBLIC_URL'] = previous;
+  }
+});
+it('accepts only six successfully stored experience photos belonging to the provider', async () => {
+  const previous = process.env['R2_PUBLIC_URL'];
+  process.env['R2_PUBLIC_URL'] = 'https://cdn.example.com';
+  try {
+    const storage = jest.spyOn(R2Service, 'uploadBufferToR2').mockResolvedValue({});
+    const uploadPhoto = () => auth(request(app).post(endpoint + '/experience-photos')).attach('poster', Buffer.from('image'), { filename: 'stall.png', contentType: 'image/png' });
+    const urls: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const result = await uploadPhoto();
+      expect(result.status).toBe(200);
+      urls.push(result.body.data.posterUrl);
+    }
+    expect((await auth(request(app).post(endpoint + '/profiles')).send({ ...profile, experiencePhotos: urls.slice(0, 5) })).status).toBe(400);
+    expect((await auth(request(app).post(endpoint + '/profiles')).send({ ...profile, experiencePhotos: [...urls.slice(0, 5), 'https://example.com/forged.jpg'] })).status).toBe(400);
+    expect((await auth(request(app).post(endpoint + '/profiles'), organiser).send({ ...profile, experiencePhotos: urls })).status).toBe(400);
+    expect((await auth(request(app).post(endpoint + '/profiles')).send({ ...profile, experiencePhotos: urls })).status).toBe(200);
+    storage.mockRejectedValueOnce(new Error('Storage unavailable'));
+    expect((await uploadPhoto()).status).toBe(500);
+    expect(await MarketExperiencePhoto.countDocuments({ ownerId: provider })).toBe(6);
   } finally {
     if (previous === undefined) delete process.env['R2_PUBLIC_URL'];
     else process.env['R2_PUBLIC_URL'] = previous;

@@ -24,6 +24,7 @@ export const profileFields = {
   availability: [String],
   stall,
   sellsFood: Boolean,
+  experiencePhotos: [String],
 };
 const profile = new Schema(
   { ownerId: ref, revision: { type: Number, default: 0 }, ...profileFields },
@@ -31,6 +32,7 @@ const profile = new Schema(
 );
 profile.index({ ownerId: 1, _id: 1 });
 export const MarketProfile = model('MarketProfile', profile);
+export const MarketExperiencePhoto = model('MarketExperiencePhoto', new Schema({ ownerId: ref, url: { type: String, required: true, unique: true } }, { timestamps: true }));
 export const MarketPreference = model(
   'MarketPreference',
   new Schema({ ownerId: { ...ref, unique: true }, defaultProfileId: ref }),

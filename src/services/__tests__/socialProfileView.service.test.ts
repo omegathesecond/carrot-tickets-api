@@ -3,6 +3,7 @@ import { Buyer } from '@models/buyer.model';
 import { Follow } from '@models/follow.model';
 import { MeetupRequest } from '@models/meetupRequest.model';
 import { SocialProfileViewService } from '@services/socialProfileView.service';
+import { MarketProfile } from '../../marketplace/models';
 
 const seed = (phone: string, username: string) =>
   Buyer.create({ phone, password: 'secret1', name: username, username });
@@ -14,6 +15,17 @@ describe('SocialProfileViewService canDm/meetup fields', () => {
   });
   afterEach(clearTestDb);
   afterAll(disconnectTestDb);
+
+  it('includes only the buyer’s business experience photos for buyer and vendor viewers', async () => {
+    const target = await seed('+26878030008', 'provider');
+    const other = await seed('+26878030009', 'other');
+    await MarketProfile.create({ ownerId: target._id, businessName: 'Stall', experiencePhotos: ['https://example.com/stall.jpg'] });
+    await MarketProfile.create({ ownerId: other._id, businessName: 'Other', experiencePhotos: ['https://example.com/other.jpg'] });
+    for (const viewer of [{ type: 'buyer' as const, id: String(other._id) }, { type: 'vendor' as const, id: '507f1f77bcf86cd799439011' }]) {
+      const profile = await SocialProfileViewService.forViewer('provider', viewer);
+      expect(profile!.experiencePhotos).toEqual([{ businessName: 'Stall', photos: ['https://example.com/stall.jpg'] }]);
+    }
+  });
 
   it('buyer viewer: stranger => canDm true (no connection required), meetupStatus none', async () => {
     const viewer = await seed('+26878030001', 'viewer_a');

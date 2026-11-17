@@ -83,6 +83,7 @@ export const profileSchema = Joi.object({
     .default([]),
   stall: stallSchema,
   sellsFood: Joi.boolean().required(),
+  experiencePhotos: Joi.array().items(Joi.string().uri({ scheme: ['https'] }).max(2000)).unique().min(6).max(12).required().messages({ 'array.min': 'Upload at least 6 experience photos' }),
 });
 const fee = Joi.object({
   label: text(100).required(),

@@ -23,6 +23,7 @@ import { vapidConfigured, VAPID_PUBLIC_KEY } from '@config/vapid.config';
 import { totalStoryPoints } from '@services/storyPoints.service';
 import { totalShareEarnPoints } from '@services/shareEarn.service';
 import { NAME_CHANGE_COOLDOWN_MS } from '@models/buyer.model';
+import { getExperiencePhotos } from '@services/experiencePhotos.service';
 
 /** Human-readable form of the message the spec requires verbatim:
  *  "You can change your profile name again on [date]." */
@@ -67,7 +68,7 @@ export class SocialProfileController {
       await ensureUsername(buyer);
 
       const myId = String(buyer._id);
-      const [followerCount, followingCount, friendIds, attendedEventIds, postCount, storyPoints, shareEarnPoints] = await Promise.all([
+      const [followerCount, followingCount, friendIds, attendedEventIds, postCount, storyPoints, shareEarnPoints, experiencePhotos] = await Promise.all([
         FollowService.followerCount('buyer', myId),
         FollowService.followingCount(myId),
         FollowService.friendIds(myId),
@@ -84,9 +85,11 @@ export class SocialProfileController {
         // Same ledger reasoning as storyPoints — a Share&Earn points reward is
         // an event with no other durable record (see @services/shareEarn.service).
         totalShareEarnPoints(myId),
+        getExperiencePhotos(myId),
       ]);
       return ApiResponseUtil.success(res, {
         ...SocialProfileController.toOwnProfile(buyer),
+        experiencePhotos,
         followerCount,
         followingCount,
         friendCount: friendIds.length,
