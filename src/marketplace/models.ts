@@ -32,6 +32,7 @@ const profile = new Schema(
 );
 profile.index({ ownerId: 1, _id: 1 });
 export const MarketProfile = model('MarketProfile', profile);
+export const MarketExperiencePhoto = model('MarketExperiencePhoto', new Schema({ ownerId: ref, url: { type: String, required: true, unique: true } }, { timestamps: true }));
 export const MarketPreference = model(
   'MarketPreference',
   new Schema({ ownerId: { ...ref, unique: true }, defaultProfileId: ref }),

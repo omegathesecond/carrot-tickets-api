@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { MarketProfile } from '../marketplace/models';
 import { Update } from '@models/update.model';
 import { Event } from '@models/event.model';
 import { Vendor } from '@models/vendor.model';
@@ -293,7 +294,17 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   const buyers = await Buyer.find({ _id: { $in: buyerIds } }).select('username name avatarUrl').lean();
   const buyerMap = new Map(buyers.map((b) => [String(b._id), b]));
 
+  const experienceProfiles = await MarketProfile.find({ ownerId: { $in: updates.map(u => u.authorId) }, 'experiencePhotos.0': { $exists: true } }).select('ownerId businessName experiencePhotos').lean();
+  const photosByOwner = new Map<string, { businessName: string; photos: string[] }[]>();
+  for (const profile of experienceProfiles) {
+    const owner = String(profile.ownerId);
+    const groups = photosByOwner.get(owner) || [];
+    groups.push({ businessName: profile.businessName || '', photos: profile.experiencePhotos || [] });
+    photosByOwner.set(owner, groups);
+  }
+
   const updateSlides: FeedSlide[] = updates.map((u) => ({
+    experiencePhotos: photosByOwner.get(String(u.authorId)) || [],
     type: 'update', id: String(u._id), sortAt: u.createdAt.toISOString(),
     kind: u.kind, category: u.category ?? 'general', caption: u.caption, location: u.location ?? null,
     editedAt: u.editedAt ? new Date(u.editedAt).toISOString() : null, media: u.media,

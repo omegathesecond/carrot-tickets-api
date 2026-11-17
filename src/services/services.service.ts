@@ -5,6 +5,7 @@ import { ReviewService } from '@services/review.service';
 import { FollowService } from '@services/follow.service';
 import { HttpError } from '@utils/httpError.util';
 import { VISIBLE_BUSINESS_FILTER } from '@utils/businessVisibility.util';
+import { MarketProfile } from '../marketplace/models';
 
 const HEX24 = /^[a-f0-9]{24}$/i;
 
@@ -25,6 +26,7 @@ export interface BusinessProfile {
   startingPrice: { amountCents: number; unit: string } | null;
   contact: { email: string | null; phone: string | null };
   verified: boolean;
+  experiencePhotos: { businessName: string; photos: string[] }[];
 }
 
 export class ServicesService {
@@ -55,11 +57,12 @@ export class ServicesService {
     const v = await Vendor.findOne({ _id: businessId, ...VISIBLE_BUSINESS_FILTER })
       .select('businessName slug logoUrl serviceCategories address bio startingPrice email phoneNumber verificationStatus');
     if (!v) throw new HttpError(404, 'Business not found');
-    const [rating, followerCount, followingCount, portfolioCount] = await Promise.all([
+    const [rating, followerCount, followingCount, portfolioCount, experienceProfiles] = await Promise.all([
       ReviewService.vendorAggregate(businessId),
       FollowService.followerCount('organizer', businessId),
       FollowService.followingCount(businessId, 'vendor'),
       Update.countDocuments({ authorType: 'vendor', authorId: businessId, status: 'active', 'media.status': 'ready' }),
+      MarketProfile.find({ ownerId: businessId, 'experiencePhotos.0': { $exists: true } }).select('businessName experiencePhotos').lean(),
     ]);
     return {
       id: String(v._id), businessName: v.businessName, slug: (v as any).slug ?? null,
@@ -68,6 +71,7 @@ export class ServicesService {
       rating, followerCount, followingCount, portfolioCount, startingPrice: (v as any).startingPrice ?? null,
       contact: { email: (v as any).email ?? null, phone: (v as any).phoneNumber ?? null },
       verified: v.verificationStatus === VerificationStatus.VERIFIED,
+      experiencePhotos: experienceProfiles.map(p => ({ businessName: p.businessName || '', photos: p.experiencePhotos || [] })),
     };
   }
 }

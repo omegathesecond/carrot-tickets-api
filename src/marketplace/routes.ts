@@ -24,6 +24,7 @@ import {
   MarketOpportunity,
   MarketPreference,
   MarketProfile,
+  MarketExperiencePhoto,
   ensureMarketplaceIndexes,
 } from './models';
 import {
@@ -443,7 +444,16 @@ router.post(
   }),
 );
 
-router.post('/experience-photos', posterUpload.single('poster'), handleMulterError, wrap(uploadMarketplacePhoto));
+router.post('/experience-photos', posterUpload.single('poster'), handleMulterError, wrap(async (req, res) => {
+  const posterUrl = await storeMarketplacePhoto(req);
+  await MarketExperiencePhoto.create({ ownerId: actor(req), url: posterUrl });
+  return ok(res, { posterUrl });
+}));
+
+async function requireStoredExperiencePhotos(req: Request, photos: string[]) {
+  const count = await MarketExperiencePhoto.countDocuments({ ownerId: actor(req), url: { $in: photos } });
+  if (count !== photos.length) throw new HttpError(400, 'Upload each experience photo before saving your business');
+}
 
 router.get(
   '/profiles',
@@ -466,6 +476,7 @@ router.post(
   '/profiles',
   wrap(async (req, res) => {
     const value = validateProfile(req.body);
+    await requireStoredExperiencePhotos(req, value.experiencePhotos);
     return ok(
       res,
       await MarketProfile.create({ ...value, ownerId: actor(req) }),
@@ -477,6 +488,7 @@ router.put(
   wrap(async (req, res) => {
     const value = validateProfile(req.body);
     const profile = await ownedProfile(req, req.params['id']);
+    await requireStoredExperiencePhotos(req, value.experiencePhotos);
     profile.set(value);
     await profile.save();
     return ok(res, profile);
@@ -634,6 +646,7 @@ router.post(
       ]),
     );
     const profile = validateProfile(body.overrides || savedFields);
+    await requireStoredExperiencePhotos(req, profile.experiencePhotos);
     const application = await transaction(async (session) => {
       const opportunity = await MarketOpportunity.findOneAndUpdate(
         {
@@ -739,7 +752,7 @@ async function validateLinkedEvent(value: { eventId?: string | null }) {
   )
     throw new HttpError(400, 'Choose a published Carrot event');
 }
-async function uploadMarketplacePhoto(req: Request, res: Response) {
+async function storeMarketplacePhoto(req: Request): Promise<string> {
   if (!req.file) throw new HttpError(400, 'Choose a photo');
   if (!process.env['R2_PUBLIC_URL'])
     throw new HttpError(503, 'Photo storage is not configured');
@@ -748,7 +761,10 @@ async function uploadMarketplacePhoto(req: Request, res: Response) {
     req.file.originalname,
   );
   await R2Service.uploadBufferToR2(key, req.file.buffer, req.file.mimetype);
-  return ok(res, { posterUrl: R2Service.getPublicUrl(key) });
+  return R2Service.getPublicUrl(key);
+}
+async function uploadMarketplacePhoto(req: Request, res: Response) {
+  return ok(res, { posterUrl: await storeMarketplacePhoto(req) });
 }
 router.post(
   '/manage/poster',
