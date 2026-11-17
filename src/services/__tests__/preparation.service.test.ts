@@ -128,8 +128,9 @@ it('concurrent offers from the same provider persist once and filters escape use
 it('lets the event owner request organizer services and receive provider offers without a ticket', async () => {
   const { buyer, eventId, provider } = await setup();
   const event = await (await import('@models/event.model')).Event.findById(eventId);
-  const owner = { _id: String(event!.vendorId), requesterType: 'vendor' as const };
-  await Vendor.updateOne({ _id: owner._id }, { operatorType: 'events' });
+  const organizer = await Vendor.create({ _id: event!.vendorId, businessName: 'Organizer', phoneNumber: '+26878000002', password: 'secret123', operatorType: 'events' });
+  const owner = { _id: String(organizer._id), requesterType: 'vendor' as const };
+  const otherOrganizer = await Vendor.create({ businessName: 'Other organizer', phoneNumber: '+26878000003', password: 'secret123', operatorType: 'events' });
   await Vendor.updateOne({ _id: provider._id }, { serviceCategories: ['catering'] });
   await Ticket.deleteMany({});
   const request = await service.save(eventId, owner, { ...input, category: 'catering' });
@@ -138,6 +139,7 @@ it('lets the event owner request organizer services and receive provider offers 
   expect((await service.mine(eventId, owner)).requests).toHaveLength(1);
   await expect(service.mine(eventId, buyer)).rejects.toMatchObject({ statusCode: 403 });
   await expect(service.mine(eventId, { _id: String(provider._id), requesterType: 'vendor' })).rejects.toMatchObject({ statusCode: 403 });
+  await expect(service.mine(eventId, { _id: String(otherOrganizer._id), requesterType: 'vendor' })).rejects.toMatchObject({ statusCode: 403, message: 'Only the event organizer can prepare this event' });
   await expect(service.save(eventId, owner, { ...input, category: 'event_companion' })).rejects.toMatchObject({ statusCode: 400 });
   expect(await service.list(String(provider._id), {})).toHaveLength(1);
   await service.offer(String(request._id), { id: String(provider._id), type: 'vendor', name: '' }, offer);
