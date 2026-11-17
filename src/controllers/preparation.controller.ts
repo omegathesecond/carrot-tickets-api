@@ -49,11 +49,12 @@ export class PreparationController {
         const eventId = String(req.params.eventId || '');
         const requestId = String(req.params.id || '');
         let data: unknown;
-        if (action === 'providerList' || action === 'providerOffer') {
+        if (action === 'providerList' || action === 'providerOffer' || action === 'providerRead') {
           const vendorId = (req as Request & { ticketsUser?: { vendorId?: string } }).ticketsUser?.vendorId;
           if (!vendorId) throw new HttpError(403, 'Service-provider account required');
           data = action === 'providerList'
             ? await PreparationService.list(String(vendorId), validate(filters, req.query))
+            : action === 'providerRead' ? await PreparationService.markProviderRead(requestId, String(vendorId))
             : await PreparationService.offer(requestId, { id: String(vendorId), type: 'vendor', name: '' }, validate(preparationOfferInput, req.body));
         } else {
           const vendorId = (req as Request & { ticketsUser?: { vendorId?: string } }).ticketsUser?.vendorId;

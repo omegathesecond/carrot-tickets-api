@@ -76,7 +76,12 @@ export class PreparationService {
       const providers = await Vendor.find({ _id: { $in: input.providerIds }, ...VISIBLE_BUSINESS_FILTER, serviceCategories: input.category }).select('_id');
       if (!input.providerIds.length || providers.length !== input.providerIds.length) throw new HttpError(400, 'Select eligible providers for this service');
     } else input.providerIds = [];
-    if (!id) return this.persist(new Preparation({ ...input, ...(isOrganizer(buyer) ? { organizerId: buyer._id } : { buyerId: buyer._id }), eventId }), input.providerIds.map((id: string) => ({ type: 'vendor' as const, id })));
+    if (!id) {
+      const providers = input.mode === 'open' && input.category !== 'event_companion'
+        ? await Vendor.find({ ...VISIBLE_BUSINESS_FILTER, serviceCategories: input.category }).select('_id').lean()
+        : input.providerIds.map(id => ({ _id: id }));
+      return this.persist(new Preparation({ ...input, ...(isOrganizer(buyer) ? { organizerId: buyer._id } : { buyerId: buyer._id }), eventId }), providers.map(provider => ({ type: 'vendor' as const, id: String(provider._id) })));
+    }
     const request = await Preparation.findOne({ _id: id, ...ownerFilter(buyer), eventId, status: 'looking' });
     if (!request) throw new HttpError(409, 'Only an unbooked request can be edited');
     const recipients = request.offers.map(o => ({ type: o.actorType as 'buyer' | 'vendor', id: String(o.actorId) }));
@@ -112,9 +117,17 @@ export class PreparationService {
     if (filters.location) query.location = { $regex: filters.location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
     if (filters.budget !== undefined) query.budget = { $gte: filters.budget };
     if (filters.date) query.preferredDate = { $gte: new Date(filters.date), $lt: new Date(new Date(filters.date).getTime() + 86400000) };
-    const rows = await Preparation.find(query).populate('eventId', 'name eventDate currency').sort({ createdAt: -1 }).limit(100).lean();
+    const rows = await Preparation.find(query).select('+readByProviders').populate('eventId', 'name eventDate currency').sort({ createdAt: -1 }).limit(100).lean();
     // Never expose other providers' offers, invite lists or buyer contact handles.
-    return rows.map(row => ({ ...row, providerIds: undefined, buyerId: undefined, organizerId: undefined, offers: row.offers.filter(o => String(o.actorId) === vendorId) }));
+    return rows.map(row => ({ ...row, isUnread: !row.readByProviders?.some(id => String(id) === vendorId), readByProviders: undefined, providerIds: undefined, buyerId: undefined, organizerId: undefined, offers: row.offers.filter(o => String(o.actorId) === vendorId) }));
+  }
+
+  static async markProviderRead(id: string, vendorId: string) {
+    const provider = await this.provider(vendorId);
+    const request = await Preparation.findById(id);
+    if (!request || request.status === 'removed' || !this.eligible(request, provider)) throw new HttpError(404, 'Request not found');
+    await Preparation.updateOne({ _id: id }, { $addToSet: { readByProviders: provider._id } });
+    return { read: true };
   }
 
   static async offer(id: string, actor: { id: string; type: 'vendor' | 'buyer'; name: string; buyer?: IBuyer }, input: OfferInput) {
