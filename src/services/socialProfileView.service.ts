@@ -7,6 +7,7 @@ import { BlockService } from '@services/block.service';
 import { MeetupService } from '@services/meetup.service';
 import { MeetupStatus } from '@models/meetupRequest.model';
 import type { SocialActor } from '@utils/socialActor.util';
+import { getExperiencePhotos } from '@services/experiencePhotos.service';
 
 /** The one public shape for "a buyer's profile page", shared by every viewer type. */
 export interface PublicBuyerProfile {
@@ -15,6 +16,7 @@ export interface PublicBuyerProfile {
   name: string | null;
   avatarUrl: string | null;
   bio: string | null;
+  experiencePhotos: { businessName: string; photos: string[] }[];
   joinedAt: Date;
   followerCount: number;
   followingCount: number;
@@ -55,13 +57,14 @@ export class SocialProfileViewService {
     // on the Follow model (@models/follow.model.ts).
     const viewerTargetType = viewer.type === 'vendor' ? 'organizer' : 'buyer';
 
-    const [followerCount, followingCount, attendedEventIds, isFollowing, isFollowedBy, isBlocked] = await Promise.all([
+    const [followerCount, followingCount, attendedEventIds, isFollowing, isFollowedBy, isBlocked, experiencePhotos] = await Promise.all([
       FollowService.followerCount('buyer', targetId),
       FollowService.followingCount(targetId),
       Ticket.distinct('eventId', { customerPhone: buyer.phone, status: TicketStatus.CHECKED_IN }),
       Follow.exists({ followerType: viewer.type, followerId: viewer.id, targetType: 'buyer', targetId }).then(Boolean),
       Follow.exists({ followerType: 'buyer', followerId: targetId, targetType: viewerTargetType, targetId: viewer.id }).then(Boolean),
       BlockService.isBlockedEitherWay(viewer.id, targetId),
+      getExperiencePhotos(targetId),
     ]);
 
     // canDm no longer depends on viewer type or a meetup/follow connection —
@@ -82,6 +85,7 @@ export class SocialProfileViewService {
       name: buyer.name ?? null,
       avatarUrl: buyer.avatarUrl ?? null,
       bio: buyer.bio ?? null,
+      experiencePhotos,
       joinedAt: buyer.createdAt,
       followerCount,
       followingCount,
