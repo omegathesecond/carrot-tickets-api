@@ -24,6 +24,12 @@ const quoteSchema = Joi.object({
 });
 
 export class EventCouponController {
+  static async availability(req: Request, res: Response) {
+    try {
+      return ApiResponseUtil.success(res, { available: await EventCouponService.availability(requireRouteParam(req, 'eventId')) });
+    } catch (error) { return failWithHttpError(res, error, 'Could not check coupon availability'); }
+  }
+
   static async create(req: Request, res: Response): Promise<any> {
     const { error, value } = createSchema.validate(req.body);
     if (error) return ApiResponseUtil.badRequest(res, error.message);
