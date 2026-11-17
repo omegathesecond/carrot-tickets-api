@@ -880,3 +880,27 @@ it('tracks approval capacity separately per stall type and date without reservin
   expect((await apply(marketId, profiles[0]!, '2099-11-25', provider, { stallType: 'Food Stall' })).status).toBe(200);
   expect((await apply(marketId, profiles[0]!, '2099-11-25', provider, { stallType: 'Unknown' })).status).toBe(400);
 });
+
+it('retains private payment proof on an approved application for its applicant and organiser', async () => {
+  const outsider = new mongoose.Types.ObjectId();
+  const marketId = await createOpportunity();
+  const profileId = await createProfile();
+  const applicationId = (await apply(marketId, profileId)).body.data._id;
+  const proof = { name: 'receipt.pdf', mime: 'application/pdf', file: Buffer.from('%PDF-1.7 receipt').toString('base64') };
+  const post = (who = provider, body = proof) => auth(request(app).post(endpoint + '/applications/' + applicationId + '/payment-proof'), who).send(body);
+  expect((await post()).status).toBe(409);
+  expect((await auth(request(app).patch(endpoint + '/manage/applications/' + applicationId), organiser).send({ status: 'approved' })).status).toBe(200);
+  expect((await post(outsider)).status).toBe(409);
+  expect((await post(provider, { ...proof, file: Buffer.from('fake').toString('base64') })).status).toBe(400);
+  expect((await post()).status).toBe(200);
+  const list = await auth(request(app).get(endpoint + '/applications'));
+  expect(list.body.data.items[0].paymentProof.name).toBe('receipt.pdf');
+  expect(list.body.data.items[0].paymentProof.file).toBeUndefined();
+  const get = (who: mongoose.Types.ObjectId) => auth(request(app).get(endpoint + '/applications/' + applicationId + '/payment-proof'), who);
+  expect((await get(outsider)).status).toBe(404);
+  expect((await get(provider)).status).toBe(200);
+  expect((await get(organiser)).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/applications/' + applicationId), organiser).send({ paymentStatus: 'paid' })).status).toBe(200);
+  expect((await post()).status).toBe(409);
+  expect((await get(organiser)).status).toBe(200);
+});

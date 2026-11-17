@@ -115,6 +115,7 @@ const application = new Schema(
       enum: ['not_due', 'due', 'paid', 'refunded', 'waived'],
       default: 'not_due',
     },
+    paymentProof: { name: String, mime: String, file: { type: Buffer, select: false }, uploadedAt: Date },
     // Immutable commercial terms accepted at submission, unaffected by listing edits.
     terms: Schema.Types.Mixed,
   },
