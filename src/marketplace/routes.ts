@@ -69,6 +69,25 @@ const admin = (req: Request) => (req as any).ticketsUser.isSuperAdmin === true;
 const id = (value: unknown): string => validate(idSchema, value);
 const ok = (res: Response, data: unknown) =>
   ApiResponseUtil.success(res, data, 'Marketplace');
+function validatedDocument(value: { file: string; mime: string }): Buffer {
+  const file = Buffer.from(value.file, 'base64');
+    if (file.length > 5 * 1024 * 1024 || file.length === 0)
+      throw new HttpError(400, 'File must be between 1 byte and 5 MB');
+    const matches =
+      value.mime === 'application/pdf'
+        ? file.subarray(0, 5).toString() === '%PDF-'
+        : value.mime === 'image/png'
+          ? file
+              .subarray(0, 8)
+              .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          : file[0] === 255 && file[1] === 216 && file[2] === 255;
+    if (!matches)
+      throw new HttpError(
+        400,
+        'The file does not match the selected PDF, JPEG or PNG format',
+      );
+    return file;
+}
 async function ownedProfile(req: Request, profileId: unknown) {
   const profile = await MarketProfile.findOne({
     _id: id(profileId),
@@ -516,22 +535,7 @@ router.post(
       }),
       req.body,
     );
-    const file = Buffer.from(value.file, 'base64');
-    if (file.length > 5 * 1024 * 1024 || file.length === 0)
-      throw new HttpError(400, 'Certificate must be between 1 byte and 5 MB');
-    const matches =
-      value.mime === 'application/pdf'
-        ? file.subarray(0, 5).toString() === '%PDF-'
-        : value.mime === 'image/png'
-          ? file
-              .subarray(0, 8)
-              .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-          : file[0] === 255 && file[1] === 216 && file[2] === 255;
-    if (!matches)
-      throw new HttpError(
-        400,
-        'The file does not match the selected PDF, JPEG or PNG format',
-      );
+    const file = validatedDocument(value);
     const certificate = await transaction(async (session) => {
       await MarketProfile.updateOne(
         { _id: profile._id },
@@ -598,6 +602,36 @@ router.get(
       `attachment; filename="${(doc.name || 'certificate').replace(/[^a-zA-Z0-9._-]/g, '_')}"`,
     );
     return res.send(doc.file);
+  }),
+);
+router.post(
+  '/applications/:id/payment-proof',
+  wrap(async (req, res) => {
+    const value = validate(Joi.object({
+      name: Joi.string().trim().max(180).required(),
+      mime: Joi.string().valid('application/pdf', 'image/jpeg', 'image/png').required(),
+      file: Joi.string().base64().max(7 * 1024 * 1024).required(),
+    }), req.body);
+    const file = validatedDocument(value);
+    const app = await MarketApplication.findOneAndUpdate(
+      { _id: id(req.params['id']), ownerId: actor(req), status: 'approved', paymentStatus: 'due' },
+      { $set: { paymentProof: { name: value.name, mime: value.mime, file, uploadedAt: new Date() } }, $inc: { __v: 1 } },
+      { new: true },
+    );
+    if (!app) throw new HttpError(409, 'Only the applicant can upload proof for an approved application with payment due');
+    return ok(res, { name: value.name, uploadedAt: app.paymentProof?.uploadedAt });
+  }),
+);
+router.get(
+  '/applications/:id/payment-proof',
+  wrap(async (req, res) => {
+    const app = await MarketApplication.findById(id(req.params['id'])).select('+paymentProof.file');
+    if (!app || (!admin(req) && String(app.ownerId) !== actor(req) && String(app.organiserId) !== actor(req)) || !app.paymentProof?.file)
+      throw new HttpError(404, 'Payment proof not found');
+    res.set('Cache-Control', 'private, no-store');
+    res.set('Content-Type', app.paymentProof.mime || 'application/octet-stream');
+    res.set('Content-Disposition', `attachment; filename="${(app.paymentProof.name || 'payment-proof').replace(/[^a-zA-Z0-9._-]/g, '_')}"`);
+    return res.send(app.paymentProof.file);
   }),
 );
 router.get(
