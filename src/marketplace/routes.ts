@@ -443,6 +443,8 @@ router.post(
   }),
 );
 
+router.post('/experience-photos', posterUpload.single('poster'), handleMulterError, wrap(uploadMarketplacePhoto));
+
 router.get(
   '/profiles',
   wrap(async (req, res) => {

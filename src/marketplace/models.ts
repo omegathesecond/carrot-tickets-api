@@ -24,6 +24,7 @@ export const profileFields = {
   availability: [String],
   stall,
   sellsFood: Boolean,
+  experiencePhotos: [String],
 };
 const profile = new Schema(
   { ownerId: ref, revision: { type: Number, default: 0 }, ...profileFields },
