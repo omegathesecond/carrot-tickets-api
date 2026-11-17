@@ -77,3 +77,24 @@ it("lets a verified Carrot admin manage another organizer's coupons while retain
   await request(app).post(`${base}/${coupon._id}/disable`).set('Authorization', `Bearer ${token}`).expect(200);
   expect((await EventCoupon.findById(coupon._id))!.disabled).toBe(true);
 });
+
+it('exposes only event-specific active coupon availability, excluding expired, disabled and reserved codes', async () => {
+  const f = await fixture();
+  const path = `/api/public/events/${f.eventId}/coupons/availability`;
+  const check = async (available: boolean) => {
+    const response = await request(app).get(path).expect(200);
+    expect(response.body.data).toEqual({ available });
+  };
+  await check(false);
+  const coupon = await EventCoupon.create({ eventId: f.eventId, vendorId: f.vendorId, code: 'PRIVATE-CODE', discountType: 'fixed', discountValue: 10 });
+  await check(true);
+  const other = await request(app).get('/api/public/events/012345678901234567890123/coupons/availability').expect(200);
+  expect(other.body.data).toEqual({ available: false });
+  await EventCoupon.updateOne({ _id: coupon._id }, { disabled: true });
+  await check(false);
+  await EventCoupon.updateOne({ _id: coupon._id }, { disabled: false, expiresAt: new Date(Date.now() - 1000) });
+  await check(false);
+  await EventCoupon.updateOne({ _id: coupon._id }, { $unset: { expiresAt: 1 }, $set: { saleId: '012345678901234567890123' } });
+  await check(false);
+  await request(app).get('/api/public/events/invalid/coupons/availability').expect(400);
+});
