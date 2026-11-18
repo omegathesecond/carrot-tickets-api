@@ -54,7 +54,7 @@ it('keeps competing offers private and allows only one booking', async () => {
   const accepted = await service.accept(eventId, buyer, String(request._id), String(stored!.offers[0]!._id));
   expect(accepted.status).toBe('booked');
   await expect(service.accept(eventId, buyer, String(request._id), String(stored!.offers[0]!._id))).rejects.toMatchObject({ statusCode: 409 });
-  expect(await Notification.countDocuments({ type: 'preparation_update' })).toBe(2);
+  expect(await Notification.countDocuments({ type: 'preparation_update' })).toBe(3);
 });
 
 it('does not allow another buyer to edit, remove or book a request', async () => {
@@ -146,4 +146,18 @@ it('lets the event owner request organizer services and receive provider offers 
   expect(await Notification.countDocuments({ recipientType: 'vendor', recipientId: owner._id, type: 'preparation_update' })).toBe(1);
   const stored = await Preparation.findById(request._id);
   expect((await service.accept(eventId, owner, String(request._id), String(stored!.offers[0]!._id))).status).toBe('booked');
+});
+
+
+it('notifies eligible providers of open requests and tracks read state per provider', async () => {
+  const { buyer, eventId, provider } = await setup();
+  const second = await Vendor.create({ businessName: 'Second', phoneNumber: '+26878000111', password: 'secret123', operatorType: 'services', serviceCategories: ['hair'] });
+  const other = await Vendor.create({ businessName: 'Other', phoneNumber: '+26878000112', password: 'secret123', operatorType: 'services', serviceCategories: ['transport'] });
+  const request = await service.save(eventId, buyer, { ...input });
+  expect(await Notification.countDocuments({ recipientId: provider._id, type: 'preparation_update' })).toBe(1);
+  expect((await service.list(String(provider._id), {}))[0]!.isUnread).toBe(true);
+  await expect(service.markProviderRead(String(request._id), String(other._id))).rejects.toMatchObject({ statusCode: 404 });
+  await service.markProviderRead(String(request._id), String(provider._id));
+  expect((await service.list(String(provider._id), {}))[0]!.isUnread).toBe(false);
+  expect((await service.list(String(second._id), {}))[0]!.isUnread).toBe(true);
 });

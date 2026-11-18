@@ -33,6 +33,7 @@ const schema = new Schema({
   note: { type: String, maxlength: 1000 },
   mode: { type: String, enum: ['open', 'invite'], required: true },
   providerIds: [{ type: Schema.Types.ObjectId, ref: 'Vendor' }],
+  readByProviders: { type: [{ type: Schema.Types.ObjectId, ref: 'Vendor' }], select: false },
   status: { type: String, enum: ['looking', 'booked', 'removed'], default: 'looking', required: true },
   acceptedOfferId: Schema.Types.ObjectId,
   offers: { type: [offerSchema], default: [] },
