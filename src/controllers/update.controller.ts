@@ -192,14 +192,16 @@ export class UpdateController {
       const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
       const filter: any = { authorType, authorId, status: 'active', 'media.status': 'ready' };
       if (cursor) {
-        const d = new Date(cursor);
-        if (Number.isNaN(d.getTime())) return ApiResponseUtil.error(res, 'Invalid cursor', 400);
-        filter.createdAt = { $lt: d };
+        const [date, id, extra] = cursor.split('|');
+        const d = new Date(date || '');
+        if (Number.isNaN(d.getTime()) || !id || !HEX24.test(id) || extra !== undefined) return ApiResponseUtil.error(res, 'Invalid cursor', 400);
+        filter.$or = [{ createdAt: { $lt: d } }, { createdAt: d, _id: { $lt: id } }];
       }
 
-      const docs = await Update.find(filter).sort({ createdAt: -1 }).limit(PAGE_SIZE + 1);
+      const docs = await Update.find(filter).sort({ createdAt: -1, _id: -1 }).limit(PAGE_SIZE + 1);
       const page = docs.slice(0, PAGE_SIZE);
-      const nextCursor = docs.length > PAGE_SIZE ? new Date(page[page.length - 1]!.createdAt).toISOString() : null;
+      const last = page[page.length - 1];
+      const nextCursor = docs.length > PAGE_SIZE && last ? `${new Date(last.createdAt).toISOString()}|${last.id}` : null;
 
       const actor = await resolveActorFromRequest(req).catch(() => null);
       const reactions = actor && page.length ? await getViewerReactions(page.map((d) => d.id), actor) : undefined;

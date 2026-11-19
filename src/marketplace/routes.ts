@@ -17,6 +17,7 @@ import { posterUpload, handleMulterError } from '@middleware/media.middleware';
 import { ServiceCategoryService } from '@services/serviceCategory.service';
 import { ServiceCategory } from '@models/serviceCategory.model';
 import { NotificationService } from '@services/notification.service';
+import { publishApplicationPhotos } from '@services/applicationPhotoPosts.service';
 import {
   MarketServiceListing,
   MarketApplication,
@@ -755,6 +756,7 @@ router.post(
         ],
         { session },
       );
+      await publishApplicationPhotos((req as any).ticketsUser.userType === 'buyer' ? 'buyer' : 'vendor', new mongoose.Types.ObjectId(actor(req)), profile.experiencePhotos, new Date(), session);
       return doc!;
     });
     return ok(res, application);
