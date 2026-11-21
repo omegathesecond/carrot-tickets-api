@@ -818,6 +818,7 @@ export class PublicController {
         ...toPublicEventCard(event, { organizer }),
         isMultiDay: event.isMultiDay,
         cashless: event.cashless,
+        tagWithdrawalsEnabled: event.tagWithdrawalsEnabled === true,
         galleryImages: event.galleryImages,
         // Per-account ticket cap ("one ticket per person"). Exposed only on the
         // detail payload (not list cards) so the buyer UI can show the limit and

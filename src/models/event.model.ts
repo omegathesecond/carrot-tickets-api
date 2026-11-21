@@ -124,6 +124,7 @@ const eventSchema = new Schema<IEvent>({
     default: null,
     validate: { validator: (v: any) => !purchaseChargeSchema.validate(v == null ? null : v.toObject(), { convert: false }).error, message: 'Invalid purchase charge' },
   },
+  tagWithdrawalsEnabled: { type: Boolean, default: false },
   cashless: {
     type: Boolean,
     default: false
