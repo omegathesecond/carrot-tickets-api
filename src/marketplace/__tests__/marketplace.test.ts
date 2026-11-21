@@ -516,7 +516,7 @@ it('reopens after the first trading date while preserving existing application t
   const marketId = await createOpportunity();
   const submitted = await apply(marketId, profileId);
   expect(submitted.status).toBe(200);
-  await MarketOpportunity.updateOne({ _id: marketId }, { dates: ['2000-01-01', '2099-11-25'], applicationDeadline: new Date('2000-01-01'), paymentDeadline: new Date('2000-01-01') });
+  await MarketOpportunity.updateOne({ _id: marketId }, { dates: ['2000-01-01', '2099-11-18', '2099-11-25'], applicationDeadline: new Date('2000-01-01'), paymentDeadline: new Date('2000-01-01') });
   const path = endpoint + '/manage/opportunities/' + marketId + '/application-deadline';
   expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-20T12:00:00Z', paymentDeadline: '2099-11-26T00:00:00Z' })).status).toBe(400);
   expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-20T12:00:00Z', paymentDeadline: '2099-11-24T12:00:00Z' })).status).toBe(200);

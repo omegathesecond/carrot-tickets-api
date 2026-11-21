@@ -900,7 +900,8 @@ router.patch(
       const opportunity = await managedOpportunity(req, req.params['id'], session);
       if (opportunity.status === 'closed')
         throw new HttpError(409, 'Closed opportunities cannot be reopened');
-      if (applicationDeadline <= new Date())
+      const now = new Date();
+      if (applicationDeadline <= now)
         throw new HttpError(400, 'Choose a future application deadline');
       validateDeadlineTradingDates(applicationDeadline, opportunity.dates);
       validatePaymentDeadline(applicationDeadline, paymentDeadline, opportunity.dates);
