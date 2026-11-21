@@ -491,6 +491,8 @@ it('updates an expired application deadline without changing submitted applicati
   const path = endpoint + '/manage/opportunities/' + marketId + '/application-deadline';
   expect((await auth(request(app).patch(path), provider).send({ applicationDeadline: '2099-11-11T12:00:00Z' })).status).toBe(403);
   expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2000-01-01' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-26T00:00:00Z' })).status).toBe(400);
+  expect((await MarketOpportunity.findById(marketId).lean())?.applicationDeadline?.toISOString()).toBe('2000-01-01T00:00:00.000Z');
   expect((await auth(request(app).patch(path), stranger).send({ applicationDeadline: '2099-11-13T12:00:00Z' })).status).toBe(200);
   expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'paused' })).status).toBe(200);
   expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'published' })).status).toBe(200);

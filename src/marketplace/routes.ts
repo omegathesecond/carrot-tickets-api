@@ -39,6 +39,7 @@ import {
   profileSchema,
   opportunitySchema,
   validate,
+  validateDeadlineTradingDates,
   validateOpportunity,
   validateProfile,
 } from './validation';
@@ -900,6 +901,7 @@ router.patch(
         throw new HttpError(409, 'Closed opportunities cannot be reopened');
       if (applicationDeadline <= new Date())
         throw new HttpError(400, 'Choose a future application deadline');
+      validateDeadlineTradingDates(applicationDeadline, opportunity.dates);
       opportunity.applicationDeadline = applicationDeadline;
       opportunity.revision += 1;
       await opportunity.save({ session });

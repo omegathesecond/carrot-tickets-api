@@ -162,6 +162,11 @@ export function validateProfile(input: unknown) {
   }
   return value;
 }
+export function validateDeadlineTradingDates(deadline: Date, dates: string[]) {
+  const lastDate = [...dates].sort().at(-1);
+  if (!lastDate || deadline > new Date(lastDate + 'T23:59:59.999Z'))
+    throw new HttpError(400, 'Application deadline cannot be after the last trading date');
+}
 export function validateOpportunity(input: unknown, allowDeadlineAfterPayment = false) {
   const value = validate(opportunitySchema, input);
   value.dates = value.dates
@@ -169,6 +174,7 @@ export function validateOpportunity(input: unknown, allowDeadlineAfterPayment = 
     .sort();
   if (new Set(value.dates).size !== value.dates.length)
     throw new HttpError(400, 'Trading dates must be distinct');
+  validateDeadlineTradingDates(value.applicationDeadline, value.dates);
   if (
     (!allowDeadlineAfterPayment && value.applicationDeadline > value.paymentDeadline) ||
     value.paymentDeadline > new Date(value.dates[0] + 'T23:59:59.999Z')
