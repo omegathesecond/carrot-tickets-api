@@ -899,11 +899,15 @@ router.patch(
       const opportunity = await managedOpportunity(req, req.params['id'], session);
       if (opportunity.status === 'closed')
         throw new HttpError(409, 'Closed opportunities cannot be reopened');
-      if (applicationDeadline <= new Date())
+      const now = new Date();
+      if (applicationDeadline <= now)
         throw new HttpError(400, 'Choose a future application deadline');
       validateDeadlineTradingDates(applicationDeadline, opportunity.dates);
-      if (paymentDeadline <= new Date() || paymentDeadline < applicationDeadline || paymentDeadline > new Date([...opportunity.dates].sort()[0] + 'T23:59:59.999Z'))
-        throw new HttpError(400, 'Payment deadline must be in the future, on or after the application deadline, and no later than the first trading date');
+      const nextTradingDateEnd = [...opportunity.dates].sort()
+        .map((date) => new Date(date + 'T23:59:59.999Z'))
+        .find((date) => date >= now);
+      if (!nextTradingDateEnd || paymentDeadline <= now || paymentDeadline < applicationDeadline || paymentDeadline > nextTradingDateEnd)
+        throw new HttpError(400, 'Payment deadline must be in the future, on or after the application deadline, and no later than the next trading date');
       opportunity.applicationDeadline = applicationDeadline;
       opportunity.paymentDeadline = paymentDeadline;
       opportunity.revision += 1;
