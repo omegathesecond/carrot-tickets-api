@@ -162,6 +162,16 @@ export function validateProfile(input: unknown) {
   }
   return value;
 }
+export function validateDeadlineTradingDates(deadline: Date, dates: string[]) {
+  const lastDate = [...dates].sort().at(-1);
+  if (!lastDate || deadline > new Date(lastDate + 'T23:59:59.999Z'))
+    throw new HttpError(400, 'Application deadline cannot be after the last trading date');
+}
+export function validatePaymentDeadline(applicationDeadline: Date, paymentDeadline: Date, dates: string[]) {
+  const nextTradingDate = [...dates].sort().find((date) => new Date(date + 'T23:59:59.999Z') >= applicationDeadline);
+  if (!nextTradingDate || paymentDeadline < applicationDeadline || paymentDeadline > new Date(nextTradingDate + 'T23:59:59.999Z'))
+    throw new HttpError(400, 'Payment deadline must be on or after the application deadline and no later than the next trading date');
+}
 export function validateOpportunity(input: unknown) {
   const value = validate(opportunitySchema, input);
   value.dates = value.dates
@@ -169,15 +179,8 @@ export function validateOpportunity(input: unknown) {
     .sort();
   if (new Set(value.dates).size !== value.dates.length)
     throw new HttpError(400, 'Trading dates must be distinct');
-  if (
-    value.applicationDeadline > value.paymentDeadline ||
-    value.paymentDeadline > new Date(value.dates[0] + 'T23:59:59.999Z')
-  ) {
-    throw new HttpError(
-      400,
-      'Application deadline must precede payment deadline and the first trading date',
-    );
-  }
+  validateDeadlineTradingDates(value.applicationDeadline, value.dates);
+  validatePaymentDeadline(value.applicationDeadline, value.paymentDeadline, value.dates);
   value.capacity = value.stallTypes.reduce((sum: number, t: { spaces: number }) => sum + t.spaces, 0);
   value.stallFee = Math.min(...value.stallTypes.map((t: { price: number }) => t.price));
   return value;
