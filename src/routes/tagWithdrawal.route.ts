@@ -63,6 +63,19 @@ async function eventScope(req: Request, eventId?: string) {
   const events = await Event.find({ vendorId: user.vendorId, ...(eventId ? { _id: eventId } : {}) }).select('_id');
   return { eventId: { $in: events.map(event => event._id) } };
 }
+adminTagWithdrawalRoutes.put('/events/:eventId/setting', requireTicketsOwner, handle(async (req, res) => {
+  const { error, value } = Joi.object({ enabled: Joi.boolean().strict().required() }).unknown(false).validate(req.body);
+  if (error || !/^[a-fA-F0-9]{24}$/.test(String(req.params['eventId']))) throw new HttpError(400, 'Invalid withdrawal setting');
+  const user = (req as any).ticketsUser;
+  const query: any = { _id: req.params['eventId'] };
+  if (!user.isSuperAdmin) {
+    if (!user.vendorId) throw new HttpError(403, 'Organizer account required');
+    query.vendorId = user.vendorId;
+  }
+  const event = await Event.findOneAndUpdate(query, { $set: { tagWithdrawalsEnabled: value.enabled } }, { new: true });
+  if (!event) throw new HttpError(404, 'Event not found');
+  ApiResponseUtil.success(res, { enabled: event.tagWithdrawalsEnabled }, 'Tag withdrawal setting updated');
+}));
 adminTagWithdrawalRoutes.get('/', handle(async (req, res) => {
   const { error, value } = Joi.object({
     status: Joi.string().valid(...TAG_WITHDRAWAL_STATUSES),
