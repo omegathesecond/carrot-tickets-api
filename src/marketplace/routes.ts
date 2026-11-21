@@ -40,6 +40,7 @@ import {
   opportunitySchema,
   validate,
   validateDeadlineTradingDates,
+  validatePaymentDeadline,
   validateOpportunity,
   validateProfile,
 } from './validation';
@@ -902,8 +903,7 @@ router.patch(
       if (applicationDeadline <= new Date())
         throw new HttpError(400, 'Choose a future application deadline');
       validateDeadlineTradingDates(applicationDeadline, opportunity.dates);
-      if (paymentDeadline <= new Date() || paymentDeadline < applicationDeadline || paymentDeadline > new Date([...opportunity.dates].sort()[0] + 'T23:59:59.999Z'))
-        throw new HttpError(400, 'Payment deadline must be in the future, on or after the application deadline, and no later than the first trading date');
+      validatePaymentDeadline(applicationDeadline, paymentDeadline, opportunity.dates);
       opportunity.applicationDeadline = applicationDeadline;
       opportunity.paymentDeadline = paymentDeadline;
       opportunity.revision += 1;
