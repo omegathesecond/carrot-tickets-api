@@ -167,7 +167,7 @@ export function validateDeadlineTradingDates(deadline: Date, dates: string[]) {
   if (!lastDate || deadline > new Date(lastDate + 'T23:59:59.999Z'))
     throw new HttpError(400, 'Application deadline cannot be after the last trading date');
 }
-export function validateOpportunity(input: unknown, allowDeadlineAfterPayment = false) {
+export function validateOpportunity(input: unknown) {
   const value = validate(opportunitySchema, input);
   value.dates = value.dates
     .map((d: string) => new Date(d).toISOString().slice(0, 10))
@@ -176,7 +176,7 @@ export function validateOpportunity(input: unknown, allowDeadlineAfterPayment = 
     throw new HttpError(400, 'Trading dates must be distinct');
   validateDeadlineTradingDates(value.applicationDeadline, value.dates);
   if (
-    (!allowDeadlineAfterPayment && value.applicationDeadline > value.paymentDeadline) ||
+    value.applicationDeadline > value.paymentDeadline ||
     value.paymentDeadline > new Date(value.dates[0] + 'T23:59:59.999Z')
   ) {
     throw new HttpError(

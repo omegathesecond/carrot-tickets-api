@@ -840,7 +840,7 @@ router.post(
 router.put(
   '/manage/opportunities/:id',
   wrap(async (req, res) => {
-    const value = validateOpportunity(req.body, true);
+    const value = validateOpportunity(req.body);
     await validateLinkedEvent(value);
     return ok(
       res,
@@ -892,8 +892,8 @@ router.put(
 router.patch(
   '/manage/opportunities/:id/application-deadline',
   wrap(async (req, res) => {
-    const { applicationDeadline } = validate<{ applicationDeadline: Date }>(
-      Joi.object({ applicationDeadline: Joi.date().iso().required() }), req.body,
+    const { applicationDeadline, paymentDeadline } = validate<{ applicationDeadline: Date; paymentDeadline: Date }>(
+      Joi.object({ applicationDeadline: Joi.date().iso().required(), paymentDeadline: Joi.date().iso().required() }), req.body,
     );
     return ok(res, await transaction(async (session) => {
       const opportunity = await managedOpportunity(req, req.params['id'], session);
@@ -902,7 +902,10 @@ router.patch(
       if (applicationDeadline <= new Date())
         throw new HttpError(400, 'Choose a future application deadline');
       validateDeadlineTradingDates(applicationDeadline, opportunity.dates);
+      if (paymentDeadline <= new Date() || paymentDeadline < applicationDeadline || paymentDeadline > new Date([...opportunity.dates].sort()[0] + 'T23:59:59.999Z'))
+        throw new HttpError(400, 'Payment deadline must be in the future, on or after the application deadline, and no later than the first trading date');
       opportunity.applicationDeadline = applicationDeadline;
+      opportunity.paymentDeadline = paymentDeadline;
       opportunity.revision += 1;
       await opportunity.save({ session });
       return opportunity;
@@ -939,7 +942,6 @@ router.patch(
                   : (fields as any)[key],
               ]),
             ),
-            true,
           );
           if (
             !opportunity.applicationDeadline ||
