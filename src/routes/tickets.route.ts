@@ -657,6 +657,7 @@ router.post('/gate-operators/:id/reset-pin', requireSuperAdminOrPermission(Ticke
  * POST /api/public/services/:businessId/enquiries.
  */
 router.get('/services/preparation', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), PreparationController.handle('providerList'));
+router.post('/services/preparation/:id/read', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), PreparationController.handle('providerRead'));
 router.post('/services/preparation/:id/offers', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), PreparationController.handle('providerOffer'));
 router.get('/services/enquiries', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.list);
 router.patch('/services/enquiries/:id/status', requireTicketsPermission(TicketsPermission.MANAGE_ENQUIRIES), EnquiryController.setStatus);

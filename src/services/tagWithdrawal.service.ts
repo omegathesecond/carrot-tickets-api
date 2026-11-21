@@ -35,12 +35,12 @@ export class TagWithdrawalService {
     const id = oid(eventId);
     const [wallet, event, registered] = await Promise.all([
       Wallet.findOne({ bandUid, eventId: id }).lean(),
-      Event.findOne({ _id: id, cashless: true }).select('name endTime currency').lean(),
+      Event.findOne({ _id: id, cashless: true }).select('name endTime currency tagWithdrawalsEnabled').lean(),
       EventTag.exists({ bandUid, eventId: id, status: 'active' }),
     ]);
     if (!wallet || !event || !registered) throw new HttpError(404, 'No registered wallet was found for that tag code in this event');
     const ended = event.endTime.getTime() < Date.now();
-    const reason = !ended ? 'Withdrawals open after this event ends' : wallet.status !== 'active'
+    const reason = !event.tagWithdrawalsEnabled ? 'Tag withdrawals are disabled for this event' : !ended ? 'Withdrawals open after this event ends' : wallet.status !== 'active'
       ? 'This tag is unavailable or already has a withdrawal in progress'
       : wallet.balance <= 0 ? 'There is no remaining balance to withdraw'
       : !['SZL', 'ZAR'].includes(wallet.currency) ? 'This wallet currency is not supported; contact Carrot support' : null;
@@ -72,8 +72,11 @@ export class TagWithdrawalService {
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
-        const event = await Event.findOne({ _id: eventId, cashless: true }).session(session);
-        if (!event) throw new HttpError(404, 'Cashless event not found');
+        const event = await Event.findOneAndUpdate({ _id: eventId, cashless: true, tagWithdrawalsEnabled: true }, { $inc: { __v: 1 } }, { new: true, session });
+        if (!event) {
+          if (!await Event.exists({ _id: eventId, cashless: true }).session(session)) throw new HttpError(404, 'Cashless event not found');
+          throw new HttpError(409, 'Tag withdrawals are disabled for this event');
+        }
         if (event.endTime.getTime() >= Date.now()) throw new HttpError(409, 'Withdrawals open after the event ends');
         const registered = await EventTag.exists({ eventId, bandUid, status: 'active' }).session(session);
         if (!registered) throw new HttpError(404, 'This tag is not registered for that event');

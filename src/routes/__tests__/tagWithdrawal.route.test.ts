@@ -17,11 +17,13 @@ import { ReconciliationService } from '@services/reconciliation.service';
 import { TicketsPermission } from '@interfaces/ticketsPermission.interface';
 import { EventStatus } from '@interfaces/event.interface';
 import { SecurityRateLimitService } from '@services/securityRateLimit.service';
+import { PublicController } from '@controllers/public.controller';
 
 const app = express();
 app.use(express.json());
 app.use('/public', publicTagWithdrawalRoutes);
 app.use('/admin', adminTagWithdrawalRoutes);
+app.get('/events/:eventId', PublicController.getPublicEvent);
 app.use((err: any, _req: any, res: any, _next: any) => res.status(500).json({ message: err.message }));
 let admin: string;
 let customer: string;
@@ -43,7 +45,7 @@ beforeEach(async () => {
   customer = await signBuyerSessionToken('+26878422613');
   const past = new Date(Date.now() - 864e5);
   event = await Event.create({ vendorId: new mongoose.Types.ObjectId(), name: 'Withdrawal test event', venue: 'Test',
-    eventDate: past, startTime: past, endTime: past, cashless: true, status: EventStatus.PUBLISHED, currency: 'SZL', ticketTypes: [] });
+    eventDate: past, startTime: past, endTime: past, cashless: true, tagWithdrawalsEnabled: true, status: EventStatus.PUBLISHED, currency: 'SZL', ticketTypes: [] });
   await EventTag.create({ eventId: event._id, bandUid: '0ae98d36' });
   wallet = await Wallet.create({ eventId: event._id, bandUid: '0ae98d36', currency: 'ZAR' });
   await WalletService.topUpAtDesk({ walletId: String(wallet._id), eventId: String(event._id), amount: 12345,
@@ -343,4 +345,16 @@ it('checks event ownership again before a claimed request is updated', async () 
   expect((await decision(id, { status: 'paid', paymentCompleted: true, paymentReference: 'CHANGED-OWNER' }, owner)).status).toBe(404);
   expect((await Wallet.findById(wallet._id))).toMatchObject({ balance: 12345, status: 'frozen' });
   expect(await WalletWithdrawal.countDocuments()).toBe(0);
+});
+
+it('disables new requests for one event while preserving existing tracking', async () => {
+  const created = await post();
+  expect(created.status).toBe(200);
+  expect((await request(app).get(`/events/${event._id}`)).body.data.tagWithdrawalsEnabled).toBe(true);
+  expect((await request(app).put(`/admin/events/${event._id}/setting`).set(auth()).send({ enabled: false })).status).toBe(200);
+  expect((await request(app).get(`/events/${event._id}`)).body.data.tagWithdrawalsEnabled).toBe(false);
+  const lookup = await request(app).post('/public/lookup').set(auth(customer)).send({ bandUid: input.bandUid, eventId: input.eventId });
+  expect(lookup.body.data).toMatchObject({ eligible: false, reason: 'Tag withdrawals are disabled for this event' });
+  expect((await post({ ...input, clientTxnId: randomUUID() })).status).toBe(409);
+  expect((await request(app).post(`/public/${created.body.data.id}/track`).set(auth(customer)).send({ token: input.trackingToken, eventId: input.eventId })).status).toBe(200);
 });
