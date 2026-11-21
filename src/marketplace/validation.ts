@@ -162,7 +162,7 @@ export function validateProfile(input: unknown) {
   }
   return value;
 }
-export function validateOpportunity(input: unknown) {
+export function validateOpportunity(input: unknown, allowDeadlineAfterPayment = false) {
   const value = validate(opportunitySchema, input);
   value.dates = value.dates
     .map((d: string) => new Date(d).toISOString().slice(0, 10))
@@ -170,7 +170,7 @@ export function validateOpportunity(input: unknown) {
   if (new Set(value.dates).size !== value.dates.length)
     throw new HttpError(400, 'Trading dates must be distinct');
   if (
-    value.applicationDeadline > value.paymentDeadline ||
+    (!allowDeadlineAfterPayment && value.applicationDeadline > value.paymentDeadline) ||
     value.paymentDeadline > new Date(value.dates[0] + 'T23:59:59.999Z')
   ) {
     throw new HttpError(

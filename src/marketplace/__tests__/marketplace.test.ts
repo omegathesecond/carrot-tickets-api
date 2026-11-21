@@ -482,6 +482,26 @@ it('enforces pause, close, deadlines, regular trader scope and immutable terms a
     ).status,
   ).toBe(409);
 });
+it('updates an expired application deadline without changing submitted applications', async () => {
+  const profileId = await createProfile();
+  const marketId = await createOpportunity();
+  const submitted = await apply(marketId, profileId);
+  expect(submitted.status).toBe(200);
+  await MarketOpportunity.updateOne({ _id: marketId }, { applicationDeadline: new Date('2000-01-01') });
+  const path = endpoint + '/manage/opportunities/' + marketId + '/application-deadline';
+  expect((await auth(request(app).patch(path), provider).send({ applicationDeadline: '2099-11-11T12:00:00Z' })).status).toBe(403);
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2000-01-01' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), stranger).send({ applicationDeadline: '2099-11-13T12:00:00Z' })).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'paused' })).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'published' })).status).toBe(200);
+  const saved = await MarketApplication.findById(submitted.body.data._id).lean();
+  expect(saved?.status).toBe(submitted.body.data.status);
+  expect(String(saved?.opportunityId)).toBe(marketId);
+  const listing = await request(app).get(endpoint + '/opportunities');
+  expect(listing.body.data.items[0].applicationDeadline).toBe('2099-11-13T12:00:00.000Z');
+  const nextProfile = await createProfile(provider, { businessName: 'Another studio' });
+  expect((await apply(marketId, nextProfile)).status).toBe(200);
+});
 it('rejects unknown input, invalid regions, forged file types, missing authentication and sub-user tokens', async () => {
   expect(
     (

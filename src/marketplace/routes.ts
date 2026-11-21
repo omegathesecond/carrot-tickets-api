@@ -839,7 +839,7 @@ router.post(
 router.put(
   '/manage/opportunities/:id',
   wrap(async (req, res) => {
-    const value = validateOpportunity(req.body);
+    const value = validateOpportunity(req.body, true);
     await validateLinkedEvent(value);
     return ok(
       res,
@@ -889,6 +889,25 @@ router.put(
   }),
 );
 router.patch(
+  '/manage/opportunities/:id/application-deadline',
+  wrap(async (req, res) => {
+    const { applicationDeadline } = validate<{ applicationDeadline: Date }>(
+      Joi.object({ applicationDeadline: Joi.date().iso().required() }), req.body,
+    );
+    return ok(res, await transaction(async (session) => {
+      const opportunity = await managedOpportunity(req, req.params['id'], session);
+      if (opportunity.status === 'closed')
+        throw new HttpError(409, 'Closed opportunities cannot be reopened');
+      if (applicationDeadline <= new Date())
+        throw new HttpError(400, 'Choose a future application deadline');
+      opportunity.applicationDeadline = applicationDeadline;
+      opportunity.revision += 1;
+      await opportunity.save({ session });
+      return opportunity;
+    }));
+  }),
+);
+router.patch(
   '/manage/opportunities/:id/status',
   wrap(async (req, res) => {
     const body = validate(
@@ -918,6 +937,7 @@ router.patch(
                   : (fields as any)[key],
               ]),
             ),
+            true,
           );
           if (
             !opportunity.applicationDeadline ||
