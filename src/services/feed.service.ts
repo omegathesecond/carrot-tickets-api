@@ -250,7 +250,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   }
 
   // ---- fetch each source (over-fetch `limit`) ----
-  const updateQuery: any = { status: 'active', 'media.status': 'ready' };
+  const updateQuery: any = { status: 'active' };
   if (opts.surface !== 'home') updateQuery['activitySource.id'] = { $exists: false };
   else if (opts.actor) {
     const blocked = [...await BlockService.listBlockedIds(opts.actor.id), ...await BlockService.listBlockerIds(opts.actor.id)].map(id => new Types.ObjectId(id));
@@ -286,14 +286,15 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
       ...(opts.tab === 'for-you' ? { hiddenFromDiscoverAt: null } : {}) };
     updates = await Update.aggregate([
       { $match: opts.surface === 'home'
-        ? { ...updateQuery, 'activitySource.id': { $exists: false } }
-        : updateQuery },
+        ? { ...updateQuery, 'activitySource.id': { $exists: false }, 'media.status': 'ready' }
+        : { ...updateQuery, 'media.status': 'ready' } },
       // Only generated cards need the identity/source joins. Sample the complete
       // union so every eligible post keeps the same chance of appearing.
       ...(opts.surface === 'home' ? [{ $unionWith: {
         coll: Update.collection.name,
         pipeline: [
-          { $match: { ...updateQuery, 'activitySource.id': { $exists: true } } },
+          { $match: { ...updateQuery, 'activitySource.id': { $exists: true },
+            $and: [{ $or: [{ 'media.status': 'ready' }, { media: { $size: 0 } }] }] } },
           // Match Activity feed actor eligibility before sampling; ordinary posts
           // and suspended follow targets retain their existing visibility.
           { $lookup: { from: Buyer.collection.name, localField: 'authorId', foreignField: '_id',
@@ -353,7 +354,7 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
   const updateSlides: FeedSlide[] = updates.map((u) => ({
     experiencePhotos: photosByOwner.get(String(u.authorId)) || [],
     type: 'update', id: String(u._id), sortAt: u.createdAt.toISOString(),
-    kind: u.kind, category: u.category ?? 'general', caption: u.caption, location: u.location ?? null,
+    kind: u.kind, activityType: u.activitySource?.type ?? null, category: u.category ?? 'general', caption: u.caption, location: u.location ?? null,
     editedAt: u.editedAt ? new Date(u.editedAt).toISOString() : null, media: u.media,
     likeCount: u.likeCount, saveCount: u.saveCount, shareCount: u.shareCount, viewCount: u.viewCount ?? 0,
     // `?? 0`: posts created before the counter existed have no stored field,
