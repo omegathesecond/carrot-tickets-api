@@ -865,7 +865,8 @@ router.put(
         if (existing) {
           // Ticket corrections apply to future applications; submitted terms stay unchanged.
           const stallTerms = (types: any[]) => types.map((type) => {
-            const { ticketsIncluded: _ticketsIncluded, ...terms } = type.toObject ? type.toObject() : type;
+            const terms = { ...(type.toObject ? type.toObject() : type) };
+            delete terms.ticketsIncluded;
             return terms;
           });
           for (const key of [
