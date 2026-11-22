@@ -23,6 +23,7 @@ export class FeedController {
     // spec §1) — see FeedOpts.promoteHot's doc comment for why this can't be
     // derived server-side.
     const promoteHot = req.query['promoteHot'] === 'true';
+    if (req.query['surface'] !== undefined && req.query['surface'] !== 'home') return ApiResponseUtil.validationError(res, 'Invalid feed surface');
     const actor = await resolveActorFromRequest(req).catch(() => null);
     try {
       const { items, nextCursor } = await getFeed({ tab, cursor, actor: actor ?? undefined, category, promoteHot, surface: req.query['surface'] === 'home' ? 'home' : undefined });

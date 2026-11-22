@@ -18,6 +18,18 @@ describe('GET /api/public/feed', () => {
     expect(res.body.data).toHaveProperty('nextCursor');
   });
 
+  it('includes real activity posts only when the Home surface is requested', async () => {
+    const sourceId = new mongoose.Types.ObjectId();
+    const post = await Update.create({ authorType: 'buyer', authorId: new mongoose.Types.ObjectId(), kind: 'image', caption: 'A now follows B.',
+      activitySource: { type: 'follow', id: sourceId, targetType: 'buyer', targetId: new mongoose.Types.ObjectId(), subjectId: new mongoose.Types.ObjectId() },
+      media: [{ rawKey: 'b.jpg', status: 'ready', image: { url: 'https://cdn.example/b.jpg', width: 10, height: 10 } }] });
+    const home = await request(app).get('/api/public/feed?tab=for-you&surface=home').expect(200);
+    expect(home.body.data.items.some((i: { id: string }) => i.id === post.id)).toBe(true);
+    const discover = await request(app).get('/api/public/feed?tab=for-you').expect(200);
+    expect(discover.body.data.items.some((i: { id: string }) => i.id === post.id)).toBe(false);
+    await request(app).get('/api/public/feed?tab=for-you&surface=bogus').expect(400);
+  });
+
   it('rejects an unknown tab', async () => {
     await request(app).get('/api/public/feed?tab=bogus').expect(400);
   });
