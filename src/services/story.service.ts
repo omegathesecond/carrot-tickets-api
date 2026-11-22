@@ -1,3 +1,5 @@
+import { BuyerPresence } from '@models/buyerPresence.model';
+import { PRESENCE_STALE_MS } from '@utils/buyerOnline.util';
 import { Story, IStory } from '@models/story.model';
 import { StorySeen } from '@models/storySeen.model';
 import { StoryLike } from '@models/storyLike.model';
@@ -543,4 +545,17 @@ export async function listForViewer(actor: SocialActor): Promise<StoryGroupDto[]
   const unseen = all.filter((g) => !g.isOwn && !g.seen);
   const seen = all.filter((g) => !g.isOwn && g.seen);
   return [...own, ...unseen, ...seen].map(({ latestCreatedAt, ...g }) => g);
+}
+
+/** Currently connected buyers visible to this actor, deduplicated across sockets. */
+export async function listOnlineForViewer(actor: SocialActor) {
+  const [blocked, blockers, ids] = await Promise.all([
+    BlockService.listBlockedIds(actor.id),
+    BlockService.listBlockerIds(actor.id),
+    BuyerPresence.distinct('buyerId', { lastSeenAt: { $gt: new Date(Date.now() - PRESENCE_STALE_MS) } }),
+  ]);
+  const excluded = new Set([...blocked, ...blockers, ...(actor.type === 'buyer' ? [actor.id] : [])]);
+  const visible = ids.filter((id) => !excluded.has(String(id)));
+  const buyers = await Buyer.find({ _id: { $in: visible } }).select('name username avatarUrl').lean();
+  return buyers.map((buyer) => ({ type: 'buyer' as const, id: String(buyer._id), name: buyer.name ?? null, username: buyer.username ?? null, avatarUrl: buyer.avatarUrl ?? null }));
 }

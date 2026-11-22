@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { resolveBuyerFromRequest } from '@utils/buyerRequest.util';
 import { failWithHttpError, HEX24 } from '@utils/controllerHelpers.util';
-import { createStory, deleteStory, finalizeStory, listForViewer, listLikers, listViewers, markSeen, toggleLike } from '@services/story.service';
+import { createStory, deleteStory, finalizeStory, listForViewer, listOnlineForViewer, listLikers, listViewers, markSeen, toggleLike } from '@services/story.service';
 import { deleteIfIGoStory } from '@services/ifIGo.service';
 import { Buyer } from '@models/buyer.model';
 import { assertNotSuspended } from '@utils/socialSuspension.util';
@@ -120,6 +120,26 @@ export class StoryController {
     const actor = StoryController.vendorActor(req);
     if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
     return StoryController.listFor(actor, res);
+  }
+
+  static async online(req: Request, res: Response): Promise<any> {
+    const buyer = await resolveBuyerFromRequest(req);
+    if (!buyer) return ApiResponseUtil.unauthorized(res, 'Please sign in first');
+    return StoryController.onlineFor({ type: 'buyer', id: String(buyer._id) }, res);
+  }
+
+  static async onlineAsVendor(req: Request, res: Response): Promise<any> {
+    const actor = StoryController.vendorActor(req);
+    if (!actor) return ApiResponseUtil.unauthorized(res, 'Vendor sign-in required');
+    return StoryController.onlineFor(actor, res);
+  }
+
+  private static async onlineFor(actor: SocialActor, res: Response): Promise<any> {
+    try {
+      return ApiResponseUtil.success(res, { users: await listOnlineForViewer(actor) });
+    } catch (error: any) {
+      return failWithHttpError(res, error, 'Failed to load online users');
+    }
   }
 
   private static async listFor(actor: SocialActor, res: Response): Promise<any> {

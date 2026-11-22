@@ -58,6 +58,7 @@ router.get('/me/following/events', authenticateTickets, VendorConsumerReadsContr
 // actor-shaped already, so nothing below the controller changed.
 router.post('/stories', authenticateTickets, requireProfilePhoto, StoryController.createAsVendor);
 router.post('/stories/:id/finalize', authenticateTickets, requireProfilePhoto, StoryController.finalizeAsVendor);
+router.get('/stories/online', authenticateTickets, StoryController.onlineAsVendor);
 router.get('/stories', authenticateTickets, StoryController.listAsVendor);
 router.post('/stories/:id/seen', authenticateTickets, StoryController.seenAsVendor);
 router.post('/stories/:id/like', authenticateTickets, StoryController.likeAsVendor);

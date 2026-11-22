@@ -1,8 +1,10 @@
 import request from 'supertest';
+import { seedBuyerFollows } from '../../__tests__/helpers/onboarding';
 import app from '@/app';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { signBuyerSessionToken } from '../../__tests__/helpers/auth';
 import { Buyer } from '@models/buyer.model';
+import { Block } from '@models/block.model';
 import { BuyerPresence } from '@models/buyerPresence.model';
 import { PRESENCE_STALE_MS } from '@utils/buyerOnline.util';
 
@@ -44,6 +46,19 @@ describe('POST /api/social/presence', () => {
       .expect(200);
 
     expect(res.body.data.online).toEqual([String(online._id)]);
+  });
+
+  it('lists distinct fresh online buyers while excluding self and blocks in either direction', async () => {
+    const me = await seedBuyer(PHONE);
+    await seedBuyerFollows('buyer', me.id);
+    const online = await seedBuyer('+26878000045', { username: 'onlineperson' });
+    const blocked = await seedBuyer('+26878000046');
+    const blocker = await seedBuyer('+26878000047');
+    const stale = await seedBuyer('+26878000048');
+    await Block.create([{ blockerId: me._id, blockedId: blocked._id }, { blockerId: blocker._id, blockedId: me._id }]);
+    await BuyerPresence.create([me, online, online, blocked, blocker, stale].map((buyer, i) => ({ buyerId: buyer._id, socketId: `rail-${i}`, instanceId: 'test', lastSeenAt: new Date(Date.now() - (buyer.id === stale.id ? PRESENCE_STALE_MS + 1000 : 0)) })));
+    const res = await request(app).get('/api/social/stories/online').set('Authorization', `Bearer ${await signBuyerSessionToken(PHONE)}`).expect(200);
+    expect(res.body.data.users).toEqual([expect.objectContaining({ id: online.id, username: 'onlineperson' })]);
   });
 
   it('rejects more than 50 buyerIds', async () => {
