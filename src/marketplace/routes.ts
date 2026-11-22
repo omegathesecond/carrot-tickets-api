@@ -895,6 +895,23 @@ router.put(
   }),
 );
 router.patch(
+  '/manage/opportunities/:id/contact',
+  wrap(async (req, res) => {
+    const value = validate(Joi.object({
+      contactName: opportunitySchema.extract('contactName').required(),
+      contactPhone: opportunitySchema.extract('contactPhone').required(),
+      contactEmail: opportunitySchema.extract('contactEmail').required(),
+    }), req.body);
+    return ok(res, await transaction(async (session) => {
+      const opportunity = await managedOpportunity(req, req.params['id'], session);
+      opportunity.set(value);
+      opportunity.revision += 1;
+      await opportunity.save({ session });
+      return opportunity;
+    }));
+  }),
+);
+router.patch(
   '/manage/opportunities/:id/application-deadline',
   wrap(async (req, res) => {
     const { applicationDeadline, paymentDeadline } = validate<{ applicationDeadline: Date; paymentDeadline: Date }>(
