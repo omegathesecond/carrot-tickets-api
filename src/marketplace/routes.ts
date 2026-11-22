@@ -39,6 +39,8 @@ import {
   profileSchema,
   opportunitySchema,
   validate,
+  validateDeadlineTradingDates,
+  validatePaymentDeadline,
   validateOpportunity,
   validateProfile,
 } from './validation';
@@ -886,6 +888,29 @@ router.put(
         return opportunity;
       }),
     );
+  }),
+);
+router.patch(
+  '/manage/opportunities/:id/application-deadline',
+  wrap(async (req, res) => {
+    const { applicationDeadline, paymentDeadline } = validate<{ applicationDeadline: Date; paymentDeadline: Date }>(
+      Joi.object({ applicationDeadline: Joi.date().iso().required(), paymentDeadline: Joi.date().iso().required() }), req.body,
+    );
+    return ok(res, await transaction(async (session) => {
+      const opportunity = await managedOpportunity(req, req.params['id'], session);
+      if (opportunity.status === 'closed')
+        throw new HttpError(409, 'Closed opportunities cannot be reopened');
+      const now = new Date();
+      if (applicationDeadline <= now)
+        throw new HttpError(400, 'Choose a future application deadline');
+      validateDeadlineTradingDates(applicationDeadline, opportunity.dates);
+      validatePaymentDeadline(applicationDeadline, paymentDeadline, opportunity.dates);
+      opportunity.applicationDeadline = applicationDeadline;
+      opportunity.paymentDeadline = paymentDeadline;
+      opportunity.revision += 1;
+      await opportunity.save({ session });
+      return opportunity;
+    }));
   }),
 );
 router.patch(

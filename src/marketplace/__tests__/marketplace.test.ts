@@ -482,6 +482,53 @@ it('enforces pause, close, deadlines, regular trader scope and immutable terms a
     ).status,
   ).toBe(409);
 });
+it('updates an expired application deadline without changing submitted applications', async () => {
+  const profileId = await createProfile();
+  const marketId = await createOpportunity();
+  const submitted = await apply(marketId, profileId);
+  expect(submitted.status).toBe(200);
+  await MarketOpportunity.updateOne({ _id: marketId }, { applicationDeadline: new Date('2000-01-01'), paymentDeadline: new Date('2000-01-02') });
+  const path = endpoint + '/manage/opportunities/' + marketId + '/application-deadline';
+  expect((await auth(request(app).patch(path), provider).send({ paymentDeadline: '2099-11-16T12:00:00Z', applicationDeadline: '2099-11-11T12:00:00Z' })).status).toBe(403);
+  expect((await auth(request(app).patch(path), organiser).send({ paymentDeadline: '2099-11-16T12:00:00Z', applicationDeadline: '2000-01-01' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), organiser).send({ paymentDeadline: '2099-11-16T12:00:00Z', applicationDeadline: '2099-11-26T00:00:00Z' })).status).toBe(400);
+  expect((await MarketOpportunity.findById(marketId).lean())?.applicationDeadline?.toISOString()).toBe('2000-01-01T00:00:00.000Z');
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-13T12:00:00Z', paymentDeadline: '2000-01-02' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-13T12:00:00Z', paymentDeadline: '2099-11-12T12:00:00Z' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-13T12:00:00Z', paymentDeadline: '2099-11-19T12:00:00Z' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), stranger).send({ paymentDeadline: '2099-11-16T12:00:00Z', applicationDeadline: '2099-11-13T12:00:00Z' })).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'paused' })).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'published' })).status).toBe(200);
+  const saved = await MarketApplication.findById(submitted.body.data._id).lean();
+  expect(saved?.terms.paymentDeadline?.toISOString()).toBe('2099-11-12T12:00:00.000Z');
+  expect(saved?.status).toBe(submitted.body.data.status);
+  expect(String(saved?.opportunityId)).toBe(marketId);
+  const listing = await request(app).get(endpoint + '/opportunities');
+  expect(listing.body.data.items[0].applicationDeadline).toBe('2099-11-13T12:00:00.000Z');
+  const nextProfile = await createProfile(provider, { businessName: 'Another studio' });
+  const next = await apply(marketId, nextProfile);
+  expect(next.status).toBe(200);
+  expect(next.body.data.terms.paymentDeadline).toBe('2099-11-16T12:00:00.000Z');
+  expect(listing.body.data.items[0].paymentDeadline).toBe('2099-11-16T12:00:00.000Z');
+});
+it('reopens after the first trading date while preserving existing application terms', async () => {
+  const profileId = await createProfile(provider);
+  const marketId = await createOpportunity();
+  const submitted = await apply(marketId, profileId);
+  expect(submitted.status).toBe(200);
+  await MarketOpportunity.updateOne({ _id: marketId }, { dates: ['2000-01-01', '2099-11-18', '2099-11-25'], applicationDeadline: new Date('2000-01-01'), paymentDeadline: new Date('2000-01-01') });
+  const path = endpoint + '/manage/opportunities/' + marketId + '/application-deadline';
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-20T12:00:00Z', paymentDeadline: '2099-11-26T00:00:00Z' })).status).toBe(400);
+  expect((await auth(request(app).patch(path), organiser).send({ applicationDeadline: '2099-11-20T12:00:00Z', paymentDeadline: '2099-11-24T12:00:00Z' })).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'paused' })).status).toBe(200);
+  expect((await auth(request(app).patch(endpoint + '/manage/opportunities/' + marketId + '/status'), organiser).send({ status: 'published' })).status).toBe(200);
+  const saved = await MarketApplication.findById(submitted.body.data._id).lean();
+  expect(saved?.status).toBe(submitted.body.data.status);
+  expect(saved?.terms.paymentDeadline?.toISOString()).toBe('2099-11-12T12:00:00.000Z');
+  const next = await apply(marketId, await createProfile(provider, { businessName: 'Next studio' }));
+  expect(next.status).toBe(200);
+  expect(next.body.data.terms.paymentDeadline).toBe('2099-11-24T12:00:00.000Z');
+});
 it('rejects unknown input, invalid regions, forged file types, missing authentication and sub-user tokens', async () => {
   expect(
     (
