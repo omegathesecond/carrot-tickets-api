@@ -86,7 +86,7 @@ const opportunity = new Schema(
     foodCertificates: [String],
     status: {
       type: String,
-      enum: ['draft', 'published', 'paused', 'closed'],
+      enum: ['draft', 'published', 'paused', 'closed', 'deleted'],
       default: 'draft',
     },
     // A write fence shared by submission/edit/review transactions prevents stale
