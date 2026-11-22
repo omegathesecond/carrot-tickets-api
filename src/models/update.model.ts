@@ -7,6 +7,8 @@ import { mediaSchema } from '@models/shared/media.schema';
 export interface IUpdate extends Document {
   authorType: UpdateAuthorType;
   authorId: Types.ObjectId;
+  /** The social event that generated this update, when it is an activity post. */
+  activitySource?: { type: 'follow' | 'like_post'; id: Types.ObjectId; targetType: 'buyer' | 'vendor' | 'update'; targetId: Types.ObjectId; subjectId: Types.ObjectId };
   kind: UpdateKind;
   /** 'general' (default) or 'weekend_recap' — see UpdateCategory's doc comment. */
   category: UpdateCategory;
@@ -57,6 +59,13 @@ export interface IUpdate extends Document {
 const updateSchema = new Schema<IUpdate>({
   authorType: { type: String, enum: ['vendor', 'buyer'], required: true },
   authorId: { type: Schema.Types.ObjectId, required: true },
+  activitySource: {
+    type: { type: String, enum: ['follow', 'like_post'] },
+    id: { type: Schema.Types.ObjectId },
+    targetType: { type: String, enum: ['buyer', 'vendor', 'update'] },
+    targetId: { type: Schema.Types.ObjectId },
+    subjectId: { type: Schema.Types.ObjectId },
+  },
   kind: { type: String, enum: ['video', 'image'], required: true },
   category: { type: String, enum: UPDATE_CATEGORIES, default: 'general', index: true },
   caption: { type: String, default: '', maxlength: 500 },
@@ -94,6 +103,10 @@ const updateSchema = new Schema<IUpdate>({
 }, { timestamps: true });
 
 updateSchema.index({ createdAt: -1 });
+updateSchema.index({ 'activitySource.type': 1, 'activitySource.id': 1 }, {
+  unique: true,
+  partialFilterExpression: { 'activitySource.id': { $type: 'objectId' } },
+});
 updateSchema.index({ authorType: 1, authorId: 1, createdAt: -1 });
 updateSchema.index({ 'media.status': 1, status: 1, createdAt: -1 });
 // Multikey: serves "recent visible updates for hashtag X" (future trending query).
