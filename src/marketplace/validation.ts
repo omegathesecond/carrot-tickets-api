@@ -125,6 +125,7 @@ export const opportunitySchema = Joi.object({
     name: text(100).required(),
     price: Joi.number().min(0).max(10000000).precision(2).required(),
     spaces: Joi.number().integer().min(1).max(100000).required(),
+    ticketsIncluded: Joi.number().integer().min(0).max(100000).required(),
   })).unique('name').min(1).required(),
   stall: stallSchema,
   currency: Joi.string()
