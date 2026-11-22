@@ -11,6 +11,7 @@ import { FollowService } from '@services/follow.service';
 import { GoingService } from '@services/going.service';
 import { seededShuffle } from '@utils/seededShuffle.util';
 import type { SocialActor } from '@utils/socialActor.util';
+import { VISIBLE_BUSINESS_FILTER } from '@utils/businessVisibility.util';
 
 export const ONBOARDING_CATEGORIES = ['users', 'organizers', 'providers', 'venues'] as const;
 export type OnboardingCategory = typeof ONBOARDING_CATEGORIES[number];
@@ -97,7 +98,7 @@ export class SuggestionsService {
       username: { $exists: true, $ne: null },
       ...GENUINE_AVATAR_FILTER,
     } : {
-      isActive: true, verificationStatus: VerificationStatus.VERIFIED, isSuperAdmin: { $ne: true },
+      isActive: true, verificationStatus: VISIBLE_BUSINESS_FILTER.verificationStatus, isSuperAdmin: { $ne: true },
       ...(actor.type === 'vendor' ? { _id: { $ne: actor.id } } : {}),
     };
     if (category === 'providers') filter.operatorType = OperatorType.SERVICES;

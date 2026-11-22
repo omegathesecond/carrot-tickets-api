@@ -45,29 +45,33 @@ describe('onboarding people pagination', () => {
     const activatedVenue = await makeVendor('activated-venue');
     await Venue.create({ vendorId: activatedVenue._id, name: 'Hall', currency: 'SZL', status: 'active', activatedAt: new Date(), activatedBy: me._id });
     await makeVendor('inactive', { isActive: false });
-    await makeVendor('unverified', { verificationStatus: 'pending' });
+    const pendingOrganizer = await makeVendor('pending-organizer', { verificationStatus: 'pending' });
+    const pendingProvider = await makeVendor('pending-provider', { verificationStatus: 'pending', operatorType: 'services', serviceCategories: ['furniture_decor'] });
+    const pendingVenue = await makeVendor('pending-venue', { verificationStatus: 'pending', businessType: 'venue' });
+    await makeVendor('rejected', { verificationStatus: 'rejected' });
+    await makeVendor('suspended', { verificationStatus: 'suspended' });
     await makeVendor('admin', { isSuperAdmin: true });
     const token = await signBuyerSessionToken('+26878422613');
     const page = async (category: string) => (await request(app).get(`/api/social/onboarding/people?category=${category}&seed=123`)
       .set('Authorization', `Bearer ${token}`).expect(200)).body.data.people;
     expect((await page('users')).map((p: any) => p.id)).toEqual([String(user._id)]);
-    expect((await page('organizers')).map((p: any) => p.id)).toEqual([String(organizer._id)]);
-    expect((await page('providers'))).toMatchObject([{ id: String(provider._id), type: 'organizer' }]);
-    expect(new Set((await page('venues')).map((p: any) => p.id))).toEqual(new Set([String(venue._id), String(activatedVenue._id)]));
-    for (const [targetType, targetId] of [['buyer', user._id], ['organizer', organizer._id], ['organizer', provider._id], ['organizer', venue._id]]) {
+    expect(new Set((await page('organizers')).map((p: any) => p.id))).toEqual(new Set([String(organizer._id), String(pendingOrganizer._id)]));
+    expect(new Set((await page('providers')).map((p: any) => p.id))).toEqual(new Set([String(provider._id), String(pendingProvider._id)]));
+    expect(new Set((await page('venues')).map((p: any) => p.id))).toEqual(new Set([String(venue._id), String(activatedVenue._id), String(pendingVenue._id)]));
+    for (const [targetType, targetId] of [['buyer', user._id], ['organizer', organizer._id], ['organizer', provider._id], ['organizer', venue._id], ['organizer', pendingOrganizer._id], ['organizer', pendingProvider._id], ['organizer', pendingVenue._id]]) {
       await Follow.create({ followerType: 'buyer', followerId: me._id, targetType, targetId });
     }
     for (const category of ['users', 'organizers', 'providers']) expect(await page(category)).toEqual([]);
     expect((await page('venues')).map((p: any) => p.id)).toEqual([String(activatedVenue._id)]);
-    expect(await OnboardingService.status({ type: 'buyer', id: String(me._id) })).toMatchObject({ followingCount: 4, canBrowse: false });
-    for (let i = 0; i < 6; i++) {
+    expect(await OnboardingService.status({ type: 'buyer', id: String(me._id) })).toMatchObject({ followingCount: 7, canBrowse: false });
+    for (let i = 0; i < 3; i++) {
       const brand = await makeVendor(`extra-${i}`);
       await Follow.create({ followerType: 'buyer', followerId: me._id, targetType: 'organizer', targetId: brand._id });
     }
     expect(await OnboardingService.status({ type: 'buyer', id: String(me._id) })).toMatchObject({ followingCount: 10, canBrowse: true });
     // Vendor actors cannot be suggested their own brand.
     expect((await (await import('@services/suggestions.service')).SuggestionsService.onboardingPeople(
-      { type: 'vendor', id: String(provider._id) }, { category: 'providers', seed: 1 })).people).toEqual([]);
+      { type: 'vendor', id: String(provider._id) }, { category: 'providers', seed: 1 })).people.map((p) => p.id)).not.toContain(String(provider._id));
     await request(app).get('/api/social/onboarding/people?category=invalid&seed=123').set('Authorization', `Bearer ${token}`).expect(400);
   });
 
