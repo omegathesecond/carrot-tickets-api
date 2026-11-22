@@ -103,6 +103,9 @@ export const opportunitySchema = Joi.object({
     .pattern(/^[A-Z]{2}$/)
     .required(),
   description: text(6000).required(),
+  contactName: text().allow('').default(''),
+  contactPhone: text(40).allow('').default(''),
+  contactEmail: text().email().allow('').default(''),
   marketType: Joi.string()
     .valid(...MARKET_TYPES)
     .required(),
