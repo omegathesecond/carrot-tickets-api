@@ -1001,3 +1001,17 @@ it('exposes current payment details only to approved applicants and the organise
   expect(updated.status).toBe(200);
   expect((await mine()).opportunityId.paymentDetails).toBe('Mobile money 456');
 });
+
+it('allows only the owner to remove contact details from a closed opportunity', async () => {
+  const marketId = await createOpportunity();
+  await MarketOpportunity.updateOne({ _id: marketId }, { status: 'closed', contactName: 'Jane', contactPhone: '123', contactEmail: 'jane@example.com', applicationDeadline: new Date('2000-01-01') });
+  const url = endpoint + '/manage/opportunities/' + marketId + '/contact';
+  expect((await auth(request(app).patch(url), provider).send({ contactName: '', contactPhone: '', contactEmail: '' })).status).toBe(403);
+  expect((await auth(request(app).patch(url), organiser).send({ contactName: '', contactPhone: '', contactEmail: '', name: 'Changed' })).status).toBe(400);
+  expect((await auth(request(app).patch(url), organiser).send({ contactName: '', contactPhone: '', contactEmail: '' })).status).toBe(200);
+  const saved = await MarketOpportunity.findById(marketId);
+  expect(saved!.contactName).toBe('');
+  expect(saved!.contactPhone).toBe('');
+  expect(saved!.contactEmail).toBe('');
+  expect(saved!.status).toBe('closed');
+});
