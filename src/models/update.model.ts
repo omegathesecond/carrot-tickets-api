@@ -76,8 +76,11 @@ const updateSchema = new Schema<IUpdate>({
     type: [mediaSchema],
     required: true,
     validate: {
-      validator: (v: unknown[]) => Array.isArray(v) && v.length >= 1 && v.length <= 5,
-      message: 'media must have between 1 and 5 items',
+      validator: function (this: any, v: unknown[]) {
+        const activity = this.activitySource?.id || this.getUpdate?.()?.$setOnInsert?.activitySource?.id;
+        return Array.isArray(v) && v.length <= 5 && (v.length >= 1 || !!activity);
+      },
+      message: 'media must have between 1 and 5 items for ordinary posts',
     },
   },
   likeCount: { type: Number, default: 0 },

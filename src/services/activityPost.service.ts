@@ -11,14 +11,14 @@ const actorKind = (type: SocialActor['type']) => type === 'vendor' ? 'organizer'
 
 /** Activity cards are real Updates, sharing the existing post actions and counters.
  * A source's unique identity makes repeated follow requests safe to repair/retry.
- * Missing profile photos are ineligible content, not invented media. DB failures throw.
+ * Missing profile photos produce text-only cards. DB failures throw.
  */
 async function publish(candidate: ActivityCandidate, actor: SocialActor,
   targetType: 'buyer' | 'vendor' | 'update', targetId: string, subjectId: string) {
   if (actor.id === subjectId || await BlockService.isBlockedEitherWay(actor.id, subjectId)) return;
   const [item] = await hydrate([candidate]);
   const name = item?.actor.username || item?.actor.name;
-  if (!item?.target?.imageUrl || !item.target.name || !name) return;
+  if (!item?.target?.name || !name) return;
   const source = { type: candidate.type, id: new Types.ObjectId(candidate.sourceId),
     targetType, targetId: new Types.ObjectId(targetId), subjectId: new Types.ObjectId(subjectId) };
   const caption = candidate.type === 'follow'
@@ -27,8 +27,8 @@ async function publish(candidate: ActivityCandidate, actor: SocialActor,
   await Update.updateOne({ 'activitySource.type': source.type, 'activitySource.id': source.id }, {
     $setOnInsert: { authorType: actor.type, authorId: actor.id, activitySource: source,
       kind: 'image', caption, createdAt: candidate.sortAt, updatedAt: candidate.sortAt,
-      media: [{ rawKey: decodeURIComponent(new URL(item.target.imageUrl).pathname.slice(1)), status: 'ready',
-        image: { url: item.target.imageUrl, width: 0, height: 0 } }] },
+      media: item.target.imageUrl ? [{ rawKey: decodeURIComponent(new URL(item.target.imageUrl).pathname.slice(1)), status: 'ready',
+        image: { url: item.target.imageUrl, width: 0, height: 0 } }] : [] },
   }, { upsert: true, runValidators: true, timestamps: false });
 }
 

@@ -162,9 +162,17 @@ describe('Home activity posts use the existing post rails', () => {
   it('does not invent photos and respects blocked actors/subjects in Home', async () => {
     const a = await buyer('Alice'); const b = await buyer('Bob', false); const c = await buyer('Carol');
     await FollowService.follow(a, 'buyer', b.id);
-    expect(await Update.countDocuments({ 'activitySource.type': 'follow' })).toBe(0);
+    const noPhoto = await Update.findOne({ 'activitySource.targetId': b._id });
+    expect(noPhoto?.media).toHaveLength(0);
+    await expect(Update.create({ authorType: 'buyer', authorId: a.id, kind: 'image', media: [] })).rejects.toThrow();
+    expect(noPhoto?.caption).toBe('alice now follows Bob.');
+    expect((await getFeed({ tab: 'for-you', surface: 'home', limit: 30 })).items.map(i => i.id)).toContain(noPhoto!.id);
+    await toggleReaction(noPhoto!.id, { type: 'buyer', id: c.id }, 'like');
+    await toggleReaction(noPhoto!.id, { type: 'buyer', id: c.id }, 'save');
+    await createComment(noPhoto!.id, { type: 'buyer', id: c.id }, 'Nice!');
+    await recordShare(noPhoto!.id);
     await FollowService.follow(a, 'buyer', c.id);
-    const activity = await Update.findOne({ 'activitySource.type': 'follow' });
+    const activity = await Update.findOne({ 'activitySource.targetId': c._id });
     const viewer = await buyer('Viewer');
     await BlockService.blockActor(viewer.id, c.id);
     const home = await getFeed({ tab: 'for-you', surface: 'home', actor: { type: 'buyer', id: viewer.id }, limit: 30 });
