@@ -67,7 +67,7 @@ const opportunity = {
   scope: 'date',
   applicationDeadline: '2099-11-10T12:00:00Z',
   paymentDeadline: '2099-11-12T12:00:00Z',
-  stallTypes: [{ name: 'Standard Stall', price: 100, spaces: 1 }],
+  stallTypes: [{ name: 'Standard Stall', price: 100, spaces: 1, ticketsIncluded: 0 }],
   stall: profile.stall,
   currency: 'SZL',
   feeTiers: [],
@@ -167,7 +167,7 @@ it('publishes, searches literal text, filters fees and dates and sorts by the ne
     dates: ['2099-10-10'],
     applicationDeadline: '2099-10-01',
     paymentDeadline: '2099-10-02',
-    stallTypes: [{ name: 'Standard Stall', price: 50, spaces: 1 }],
+    stallTypes: [{ name: 'Standard Stall', price: 50, spaces: 1, ticketsIncluded: 0 }],
   });
   const list = await request(app).get(endpoint + '/opportunities');
   expect(list.status).toBe(200);
@@ -430,7 +430,7 @@ it('enforces pause, close, deadlines, regular trader scope and immutable terms a
   const edit = await auth(
     request(app).put(endpoint + '/manage/opportunities/' + marketId),
     organiser,
-  ).send({ ...opportunity, scope: 'regular', stallTypes: [{ name: 'Standard Stall', price: 999, spaces: 1 }] });
+  ).send({ ...opportunity, scope: 'regular', stallTypes: [{ name: 'Standard Stall', price: 999, spaces: 1, ticketsIncluded: 0 }] });
   expect(edit.status).toBe(409);
   const permittedEdit = await auth(
     request(app).put(endpoint + '/manage/opportunities/' + marketId),
@@ -481,6 +481,28 @@ it('enforces pause, close, deadlines, regular trader scope and immutable terms a
       ).send({ status: 'published' })
     ).status,
   ).toBe(409);
+});
+it('allows ticket quantity corrections while preserving submitted application terms', async () => {
+  const marketId = await createOpportunity();
+  const profileId = await createProfile();
+  await MarketOpportunity.updateOne({ _id: marketId }, { $unset: { 'stallTypes.0.ticketsIncluded': 1 } });
+  const submitted = await apply(marketId, profileId);
+  expect(submitted.status).toBe(200);
+  const edit = (ticketsIncluded: number, price = 100) => auth(
+    request(app).put(endpoint + '/manage/opportunities/' + marketId), organiser,
+  ).send({ ...opportunity, description: 'Updated description', stallTypes: [{ name: 'Standard Stall', price, spaces: 1, ticketsIncluded }] });
+  expect((await edit(2, 999)).status).toBe(409);
+  const result = await edit(2);
+  expect(result.status).toBe(200);
+  expect(result.body.data.stallTypes[0].ticketsIncluded).toBe(2);
+  const existing = await MarketApplication.findById(submitted.body.data._id).lean();
+  expect(existing!.terms.ticketsIncluded).toBeUndefined();
+  const nextProfile = await createProfile(provider, { businessName: 'Another studio' });
+  const next = await apply(marketId, nextProfile);
+  expect(next.status).toBe(200);
+  expect(next.body.data.terms.ticketsIncluded).toBe(2);
+  expect((await edit(0)).status).toBe(200);
+  expect((await MarketApplication.findById(next.body.data._id).lean())!.terms.ticketsIncluded).toBe(2);
 });
 it('updates an expired application deadline without changing submitted applications', async () => {
   const profileId = await createProfile();
@@ -930,10 +952,27 @@ it('lets buyers use private profiles, certificates and applications without gran
   expect(await Notification.findOne({ recipientType: 'buyer', recipientId: String(buyer), type: 'market_application' })).not.toBeNull();
 });
 
+it('stores and exposes included tickets and rejects invalid quantities', async () => {
+  for (const ticketsIncluded of [-1, 1.5, null]) {
+    const res = await auth(request(app).post(endpoint + '/manage/opportunities'), organiser)
+      .send({ ...opportunity, stallTypes: [{ name: 'Stall', price: 75, spaces: 1, ticketsIncluded }] });
+    expect(res.status).toBe(400);
+  }
+  const marketId = await createOpportunity({ stallTypes: [
+    { name: 'Free tickets', price: 75, spaces: 1, ticketsIncluded: 0 },
+    { name: 'Two tickets', price: 150, spaces: 2, ticketsIncluded: 2 },
+  ] });
+  const detail = await request(app).get(endpoint + '/opportunities/' + marketId);
+  expect(detail.body.data.stallTypes).toEqual([
+    expect.objectContaining({ name: 'Free tickets', price: 75, ticketsIncluded: 0 }),
+    expect.objectContaining({ name: 'Two tickets', price: 150, ticketsIncluded: 2 }),
+  ]);
+});
+
 it('tracks approval capacity separately per stall type and date without reserving pending applications', async () => {
   const marketId = await createOpportunity({ stallTypes: [
-    { name: 'Food Stall', price: 250, spaces: 1 },
-    { name: 'Clothing Stall', price: 75, spaces: 2 },
+    { name: 'Food Stall', price: 250, spaces: 1, ticketsIncluded: 0 },
+    { name: 'Clothing Stall', price: 75, spaces: 2, ticketsIncluded: 0 },
   ] });
   const profiles = await Promise.all([createProfile(), createProfile(provider, { businessName: 'Second' }), createProfile(provider, { businessName: 'Third' })]);
   const food = await apply(marketId, profiles[0]!, '2099-11-18', provider, { stallType: 'Food Stall' });

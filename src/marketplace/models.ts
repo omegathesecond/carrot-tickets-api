@@ -75,7 +75,7 @@ const opportunity = new Schema(
     paymentDeadline: Date,
     paymentDetails: { type: String, select: false },
     capacity: Number,
-    stallTypes: [new Schema({ name: String, price: Number, spaces: Number }, { _id: false })],
+    stallTypes: [new Schema({ name: String, price: Number, spaces: Number, ticketsIncluded: Number }, { _id: false })],
     stall,
     currency: String,
     stallFee: Number,
