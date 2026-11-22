@@ -285,34 +285,39 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     const sourceVisibility = { status: 'active', 'media.status': 'ready',
       ...(opts.tab === 'for-you' ? { hiddenFromDiscoverAt: null } : {}) };
     updates = await Update.aggregate([
-      { $match: updateQuery },
-      // Validate the source before sampling, so deleted or moderated posts cannot
-      // leave visible like cards or consume slots in the random feed.
-      ...(opts.surface === 'home' ? [
-        // Match Activity feed actor eligibility before sampling; ordinary posts
-        // and suspended follow targets retain their existing visibility.
-        { $lookup: { from: Buyer.collection.name, localField: 'authorId', foreignField: '_id',
-          pipeline: [{ $match: { socialSuspendedAt: null } }], as: '_eligibleActivityBuyer' } },
-        { $lookup: { from: Vendor.collection.name, localField: 'authorId', foreignField: '_id', as: '_eligibleActivityVendor' } },
-        { $match: { $or: [
-          { 'activitySource.id': { $exists: false } },
-          { authorType: 'buyer', '_eligibleActivityBuyer.0': { $exists: true } },
-          { authorType: 'vendor', '_eligibleActivityVendor.0': { $exists: true } },
-        ] } },
-        { $unset: ['_eligibleActivityBuyer', '_eligibleActivityVendor'] },
-        { $lookup: { from: Buyer.collection.name, localField: 'activitySource.targetId', foreignField: '_id', as: '_activityTargetBuyer' } },
-        { $lookup: { from: Vendor.collection.name, localField: 'activitySource.targetId', foreignField: '_id', as: '_activityTargetVendor' } },
-        { $match: { $or: [
-          { 'activitySource.type': { $ne: 'follow' } },
-          { 'activitySource.targetType': 'buyer', '_activityTargetBuyer.0': { $exists: true } },
-          { 'activitySource.targetType': 'vendor', '_activityTargetVendor.0': { $exists: true } },
-        ] } },
-        { $unset: ['_activityTargetBuyer', '_activityTargetVendor'] },
-        { $lookup: { from: Update.collection.name, localField: 'activitySource.targetId', foreignField: '_id',
-          pipeline: [{ $match: sourceVisibility }], as: '_visibleActivitySource' } },
-        { $match: { $or: [{ 'activitySource.type': { $ne: 'like_post' } }, { '_visibleActivitySource.0': { $exists: true } }] } },
-        { $unset: '_visibleActivitySource' },
-      ] : []),
+      { $match: opts.surface === 'home'
+        ? { ...updateQuery, 'activitySource.id': { $exists: false } }
+        : updateQuery },
+      // Only generated cards need the identity/source joins. Sample the complete
+      // union so every eligible post keeps the same chance of appearing.
+      ...(opts.surface === 'home' ? [{ $unionWith: {
+        coll: Update.collection.name,
+        pipeline: [
+          { $match: { ...updateQuery, 'activitySource.id': { $exists: true } } },
+          // Match Activity feed actor eligibility before sampling; ordinary posts
+          // and suspended follow targets retain their existing visibility.
+          { $lookup: { from: Buyer.collection.name, localField: 'authorId', foreignField: '_id',
+            pipeline: [{ $match: { socialSuspendedAt: null } }], as: '_eligibleActivityBuyer' } },
+          { $lookup: { from: Vendor.collection.name, localField: 'authorId', foreignField: '_id', as: '_eligibleActivityVendor' } },
+          { $match: { $or: [
+            { authorType: 'buyer', '_eligibleActivityBuyer.0': { $exists: true } },
+            { authorType: 'vendor', '_eligibleActivityVendor.0': { $exists: true } },
+          ] } },
+          { $unset: ['_eligibleActivityBuyer', '_eligibleActivityVendor'] },
+          { $lookup: { from: Buyer.collection.name, localField: 'activitySource.targetId', foreignField: '_id', as: '_activityTargetBuyer' } },
+          { $lookup: { from: Vendor.collection.name, localField: 'activitySource.targetId', foreignField: '_id', as: '_activityTargetVendor' } },
+          { $match: { $or: [
+            { 'activitySource.type': { $ne: 'follow' } },
+            { 'activitySource.targetType': 'buyer', '_activityTargetBuyer.0': { $exists: true } },
+            { 'activitySource.targetType': 'vendor', '_activityTargetVendor.0': { $exists: true } },
+          ] } },
+          { $unset: ['_activityTargetBuyer', '_activityTargetVendor'] },
+          { $lookup: { from: Update.collection.name, localField: 'activitySource.targetId', foreignField: '_id',
+            pipeline: [{ $match: sourceVisibility }], as: '_visibleActivitySource' } },
+          { $match: { $or: [{ 'activitySource.type': { $ne: 'like_post' } }, { '_visibleActivitySource.0': { $exists: true } }] } },
+          { $unset: '_visibleActivitySource' },
+        ],
+      } }] : []),
       { $sample: { size: limit } },
     ]);
   }
