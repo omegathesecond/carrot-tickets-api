@@ -36,4 +36,27 @@ describe('weekend attendance', () => {
     expect(res.body.data.events[0]).toMatchObject({ name: 'Weekend', count: 2 });
     expect(res.body.data.events[0].attendees).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'A', avatarUrl: a.avatarUrl }), expect.objectContaining({ name: 'B' })]));
   });
+  it('counts guest purchasers once and merges them with registered Going accounts', async () => {
+    const { start } = currentWeekendWindow();
+    const vendorId = new mongoose.Types.ObjectId();
+    const common = { vendorId, venue: 'Venue', eventDate: start, startTime: start, endTime: new Date(start.getTime() + 3600000), status: EventStatus.PUBLISHED, ticketTypes: [{ name: 'GA', price: 0, quantity: 10 }] };
+    const guestEvent = await Event.create({ ...common, name: 'Guests' });
+    const mixedEvent = await Event.create({ ...common, name: 'Mixed' });
+    const buyer = await Buyer.create({ phone: '+26878422613', email: 'buyer@example.com', password: 'secret1', name: 'Registered' });
+    const community = await Community.create({ eventId: mixedEvent._id, vendorId });
+    await Membership.create({ communityId: community._id, buyerId: buyer._id });
+    const ticket = { vendorId, ticketType: 'GA', price: 0, status: TicketStatus.SOLD };
+    await Ticket.create({ ...ticket, eventId: guestEvent._id, customerEmail: 'guest@example.com' });
+    await Ticket.create({ ...ticket, eventId: guestEvent._id, customerEmail: 'guest@example.com' });
+    await Ticket.create({ ...ticket, eventId: mixedEvent._id, customerPhone: buyer.phone });
+    await Ticket.create({ ...ticket, eventId: mixedEvent._id, customerEmail: buyer.email });
+    await Ticket.create({ ...ticket, eventId: mixedEvent._id, customerEmail: 'guest@example.com' });
+    const res = await request(app).get('/api/social/weekend/attendance').expect(200);
+    expect(res.body.data.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Guests', count: 1, attendees: [] }),
+      expect.objectContaining({ name: 'Mixed', count: 2, attendees: [expect.objectContaining({ name: 'Registered' })] }),
+    ]));
+    expect(JSON.stringify(res.body)).not.toContain('guest@example.com');
+  });
+
 });
