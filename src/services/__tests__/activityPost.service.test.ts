@@ -73,6 +73,11 @@ describe('Home activity posts use the existing post rails', () => {
     expect((await Update.findById(activity!.id))?.commentCount).toBe(1);
     expect(await recordShare(activity!.id)).toMatchObject({ shareCount: 1 });
     expect(await Update.countDocuments({ 'activitySource.id': { $exists: true } })).toBe(1);
+    const ordinary = await regularPost(b.id);
+    await toggleReaction(ordinary.id, actor, 'like');
+    const feed = await getActivityFeed({ tab: 'everyone', limit: 50 });
+    expect(feed.items.some(i => i.type === 'like_post' && i.target?.id === activity!.id)).toBe(false);
+    expect(feed.items.some(i => i.type === 'like_post' && i.target?.id === ordinary.id)).toBe(true);
   });
 
   it('publishes post likes with the author photo and removes activity after unlike/unfollow', async () => {
