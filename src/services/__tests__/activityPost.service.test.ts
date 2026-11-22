@@ -111,6 +111,24 @@ describe('Home activity posts use the existing post rails', () => {
     expect(await ids()).not.toContain(activity!.id);
   });
 
+  it('filters suspended and deleted activity actors before sampling, and restores them without hiding ordinary posts or suspended targets', async () => {
+    const a = await buyer('Alice'); const b = await buyer('Bob');
+    const ordinary = await regularPost(a.id);
+    await FollowService.follow(a, 'buyer', b.id);
+    const activity = await Update.findOne({ 'activitySource.type': 'follow' });
+    const ids = async () => (await getFeed({ tab: 'for-you', surface: 'home', limit: 30 })).items.map(i => i.id);
+    await Buyer.updateOne({ _id: b.id }, { $set: { socialSuspendedAt: new Date() } });
+    expect(await ids()).toContain(activity!.id);
+    await Buyer.updateOne({ _id: a.id }, { $set: { socialSuspendedAt: new Date() } });
+    expect(await ids()).not.toContain(activity!.id);
+    expect(await ids()).toContain(ordinary.id);
+    await Buyer.updateOne({ _id: a.id }, { $set: { socialSuspendedAt: null } });
+    expect(await ids()).toContain(activity!.id);
+    await Buyer.deleteOne({ _id: a.id });
+    expect(await ids()).not.toContain(activity!.id);
+    expect(await ids()).toContain(ordinary.id);
+  });
+
   it('supports organizer actors and leaves ordinary saves unchanged', async () => {
     const a = await buyer('Alice');
     const brand = await Vendor.create({ businessName: 'Events', slug: 'events', password: 'test-only-password', logoUrl: 'https://cdn.example/brand.jpg' });

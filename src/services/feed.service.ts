@@ -289,6 +289,17 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
       // Validate the source before sampling, so deleted or moderated posts cannot
       // leave visible like cards or consume slots in the random feed.
       ...(opts.surface === 'home' ? [
+        // Match Activity feed actor eligibility before sampling; ordinary posts
+        // and suspended follow targets retain their existing visibility.
+        { $lookup: { from: Buyer.collection.name, localField: 'authorId', foreignField: '_id',
+          pipeline: [{ $match: { socialSuspendedAt: null } }], as: '_eligibleActivityBuyer' } },
+        { $lookup: { from: Vendor.collection.name, localField: 'authorId', foreignField: '_id', as: '_eligibleActivityVendor' } },
+        { $match: { $or: [
+          { 'activitySource.id': { $exists: false } },
+          { authorType: 'buyer', '_eligibleActivityBuyer.0': { $exists: true } },
+          { authorType: 'vendor', '_eligibleActivityVendor.0': { $exists: true } },
+        ] } },
+        { $unset: ['_eligibleActivityBuyer', '_eligibleActivityVendor'] },
         { $lookup: { from: Update.collection.name, localField: 'activitySource.targetId', foreignField: '_id',
           pipeline: [{ $match: sourceVisibility }], as: '_visibleActivitySource' } },
         { $match: { $or: [{ 'activitySource.type': { $ne: 'like_post' } }, { '_visibleActivitySource.0': { $exists: true } }] } },
