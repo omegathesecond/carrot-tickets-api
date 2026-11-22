@@ -121,7 +121,7 @@ export async function followCandidates(opts: SourceOpts): Promise<SourceResult> 
 }
 
 export async function postCandidates(opts: SourceOpts): Promise<SourceResult> {
-  const query = windowed({ status: 'active', 'media.status': 'ready' }, opts);
+  const query = windowed({ status: 'active', 'media.status': 'ready', 'activitySource.id': { $exists: false } }, opts);
   if (opts.actorIds) query.authorId = { $in: opts.actorIds };
   const rows = await Update.find(query).sort({ createdAt: -1 }).limit(opts.limit).select('authorType authorId createdAt').lean();
   const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);

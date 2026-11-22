@@ -25,7 +25,7 @@ export class FeedController {
     const promoteHot = req.query['promoteHot'] === 'true';
     const actor = await resolveActorFromRequest(req).catch(() => null);
     try {
-      const { items, nextCursor } = await getFeed({ tab, cursor, actor: actor ?? undefined, category, promoteHot });
+      const { items, nextCursor } = await getFeed({ tab, cursor, actor: actor ?? undefined, category, promoteHot, surface: req.query['surface'] === 'home' ? 'home' : undefined });
       if (actor) {
         // Platform-staff moderator? Same rule as requireSuperAdminOrPermission
         // (MODERATE_SOCIAL) — computed once from the token, identical for every

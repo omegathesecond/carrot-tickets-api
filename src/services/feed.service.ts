@@ -1,3 +1,4 @@
+import { BlockService } from '@services/block.service';
 import { Types } from 'mongoose';
 import { MarketProfile } from '../marketplace/models';
 import { Update } from '@models/update.model';
@@ -46,6 +47,7 @@ interface FeedOpts {
    *  in the shuffled window when true, so the section surfaces more often
    *  without ever pinning it to a fixed position. */
   promoteHot?: boolean;
+  surface?: 'home';
 }
 /** `e` is the $skip-based event cursor. `s` ("seen") covers update ids already
  *  served THIS random walk — every tab with update slides ('for-you' and
@@ -249,6 +251,14 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
 
   // ---- fetch each source (over-fetch `limit`) ----
   const updateQuery: any = { status: 'active', 'media.status': 'ready' };
+  if (opts.surface !== 'home') updateQuery['activitySource.id'] = { $exists: false };
+  else if (opts.actor) {
+    const blocked = [...await BlockService.listBlockedIds(opts.actor.id), ...await BlockService.listBlockerIds(opts.actor.id)].map(id => new Types.ObjectId(id));
+    if (blocked.length) updateQuery.$or = [
+      { 'activitySource.id': { $exists: false } },
+      { authorId: { $nin: blocked }, 'activitySource.subjectId': { $nin: blocked } },
+    ];
+  }
   if (opts.tab === 'following') updateQuery.authorId = { $in: [...followedAuthorIds, ...followedOrgIds] };
   // Discover ('for-you') hides admin-moderated posts; `: null` also matches
   // posts predating the field (Mongo null-equality). The 'following' tab and

@@ -1,3 +1,4 @@
+import { publishFollowActivity, removeActivity } from '@services/activityPost.service';
 import { Follow, FollowTargetType, FollowerType } from '@models/follow.model';
 import { Buyer, IBuyer } from '@models/buyer.model';
 import { Vendor } from '@models/vendor.model';
@@ -90,6 +91,7 @@ export class FollowService {
     // on the pure-duplicate (already-following) path, since `created` stays
     // false there.
     const created = await FollowService.createEdge('buyer', String(buyer._id), targetType, targetId);
+    await publishFollowActivity({ type: 'buyer', id: String(buyer._id) }, targetType, targetId);
     if (created && targetType === 'organizer') {
       await FollowService.notifyOrganizerFollowed(targetId, 'buyer', String(buyer._id));
     }
@@ -111,6 +113,7 @@ export class FollowService {
 
   static async unfollow(buyer: IBuyer, targetType: FollowTargetType, targetId: string): Promise<void> {
     const { deletedCount } = await Follow.deleteOne({ followerType: 'buyer', followerId: buyer._id, targetType, targetId });
+    await removeActivity({ type: 'buyer', id: String(buyer._id) }, 'follow', targetType === 'organizer' ? 'vendor' : 'buyer', targetId);
     // My Account insight (spec §1) — buyer-owned targets only ("organizer"
     // targets have their own follower-analytics surface, out of scope here).
     // Only on an actual unfollow (deletedCount>0), never on a no-op
@@ -150,6 +153,7 @@ export class FollowService {
   /** The brand follows a buyer or another organizer. No suspension, no friend concept. */
   static async followAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
     const created = await FollowService.createEdge('vendor', String(vendorId), targetType, targetId);
+    await publishFollowActivity({ type: 'vendor', id: String(vendorId) }, targetType, targetId);
     if (created && targetType === 'organizer') {
       await FollowService.notifyOrganizerFollowed(targetId, 'vendor', String(vendorId));
     }
@@ -157,6 +161,7 @@ export class FollowService {
 
   static async unfollowAsVendor(vendorId: string, targetType: FollowTargetType, targetId: string): Promise<void> {
     await Follow.deleteOne({ followerType: 'vendor', followerId: vendorId, targetType, targetId });
+    await removeActivity({ type: 'vendor', id: vendorId }, 'follow', targetType === 'organizer' ? 'vendor' : 'buyer', targetId);
   }
 
   /** Mutual buyer-follow. */

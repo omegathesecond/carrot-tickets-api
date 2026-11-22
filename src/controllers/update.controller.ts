@@ -190,7 +190,7 @@ export class UpdateController {
         return ApiResponseUtil.validationError(res, 'Invalid author');
       }
       const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
-      const filter: any = { authorType, authorId, status: 'active', 'media.status': 'ready' };
+      const filter: any = { authorType, authorId, status: 'active', 'media.status': 'ready', 'activitySource.id': { $exists: false } };
       if (cursor) {
         const [date, id, extra] = cursor.split('|');
         const d = new Date(date || '');
