@@ -70,6 +70,7 @@ const opportunity = new Schema(
     scope: String,
     applicationDeadline: Date,
     paymentDeadline: Date,
+    paymentDetails: { type: String, select: false },
     capacity: Number,
     stallTypes: [new Schema({ name: String, price: Number, spaces: Number }, { _id: false })],
     stall,

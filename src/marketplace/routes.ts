@@ -107,7 +107,7 @@ async function managedOpportunity(
 ) {
   const query: any = { _id: id(opportunityId) };
   if (!admin(req)) query.organiserId = actor(req);
-  const opportunity = await MarketOpportunity.findOne(query).session(
+  const opportunity = await MarketOpportunity.findOne(query).select('+paymentDetails').session(
     session ?? null,
   );
   if (!opportunity) throw new HttpError(404, 'Opportunity not found');
@@ -349,7 +349,7 @@ const listOpportunities = wrap(async (req, res) => {
           },
         ]
       : []),
-    { $unset: ['approvals', '__v', 'revision'] },
+    { $unset: ['approvals', '__v', 'revision', 'paymentDetails'] },
     { $sort: { nextTradingDate: 1, _id: 1 } },
     { $skip: (q.page - 1) * 30 },
     { $limit: 31 },
@@ -655,9 +655,12 @@ router.get(
   '/applications',
   wrap(async (req, res) => {
     const items = await MarketApplication.find({ ownerId: actor(req) })
-      .populate('opportunityId', 'name dates scope location status')
+      .populate('opportunityId', 'name dates scope location status +paymentDetails')
       .sort({ createdAt: -1 })
       .lean();
+    for (const item of items) {
+      if (item.status !== 'approved' && item.opportunityId) delete (item.opportunityId as any).paymentDetails;
+    }
     return ok(res, { items });
   }),
 );
@@ -816,6 +819,7 @@ router.get(
     const items = await MarketOpportunity.find(
       admin(req) ? {} : { organiserId: actor(req) },
     )
+      .select('+paymentDetails')
       .sort({ createdAt: -1 })
       .lean();
     return ok(res, { items });

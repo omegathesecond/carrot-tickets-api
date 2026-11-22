@@ -980,3 +980,24 @@ it('retains private payment proof on an approved application for its applicant a
   expect((await post()).status).toBe(409);
   expect((await get(organiser)).status).toBe(200);
 });
+
+it('exposes current payment details only to approved applicants and the organiser', async () => {
+  const marketId = await createOpportunity({ paymentDetails: 'Bank account 123' });
+  const profileId = await createProfile();
+  const submitted = await apply(marketId, profileId);
+  expect(submitted.status).toBe(200);
+  const applicationId = submitted.body.data._id;
+  const mine = async () => (await auth(request(app).get(endpoint + '/applications'))).body.data.items[0];
+  expect((await request(app).get(endpoint + '/opportunities')).body.data.items[0].paymentDetails).toBeUndefined();
+  expect((await request(app).get(endpoint + '/opportunities/' + marketId)).body.data.paymentDetails).toBeUndefined();
+  expect((await mine()).opportunityId.paymentDetails).toBeUndefined();
+  expect((await auth(request(app).get(endpoint + '/applications'), stranger)).body.data.items).toHaveLength(0);
+  expect((await auth(request(app).get(endpoint + '/manage/opportunities'), organiser)).body.data.items[0].paymentDetails).toBe('Bank account 123');
+  await MarketApplication.updateOne({ _id: applicationId }, { status: 'declined' });
+  expect((await mine()).opportunityId.paymentDetails).toBeUndefined();
+  await MarketApplication.updateOne({ _id: applicationId }, { status: 'approved' });
+  expect((await mine()).opportunityId.paymentDetails).toBe('Bank account 123');
+  const updated = await auth(request(app).put(endpoint + '/manage/opportunities/' + marketId), organiser).send({ ...opportunity, paymentDetails: 'Mobile money 456' });
+  expect(updated.status).toBe(200);
+  expect((await mine()).opportunityId.paymentDetails).toBe('Mobile money 456');
+});
