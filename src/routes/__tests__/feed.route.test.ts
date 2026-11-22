@@ -22,8 +22,9 @@ describe('GET /api/public/feed', () => {
   it('includes real activity posts only when the Home surface is requested', async () => {
     const sourceId = new mongoose.Types.ObjectId();
     const actor = await Buyer.create({ phone: '+26878000001', password: 'test-only-password', username: 'actor', name: 'Actor' });
+    const target = await Buyer.create({ phone: '+26878000002', password: 'test-only-password', username: 'target', name: 'Target' });
     const post = await Update.create({ authorType: 'buyer', authorId: actor._id, kind: 'image', caption: 'A now follows B.',
-      activitySource: { type: 'follow', id: sourceId, targetType: 'buyer', targetId: new mongoose.Types.ObjectId(), subjectId: new mongoose.Types.ObjectId() },
+      activitySource: { type: 'follow', id: sourceId, targetType: 'buyer', targetId: target._id, subjectId: target._id },
       media: [{ rawKey: 'b.jpg', status: 'ready', image: { url: 'https://cdn.example/b.jpg', width: 10, height: 10 } }] });
     const home = await request(app).get('/api/public/feed?tab=for-you&surface=home').expect(200);
     expect(home.body.data.items.some((i: { id: string }) => i.id === post.id)).toBe(true);

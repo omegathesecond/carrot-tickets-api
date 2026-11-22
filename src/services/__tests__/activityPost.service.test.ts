@@ -129,6 +129,24 @@ describe('Home activity posts use the existing post rails', () => {
     expect(await ids()).toContain(ordinary.id);
   });
 
+  it('excludes deleted buyer and organizer follow targets before sampling', async () => {
+    const a = await buyer('Alice'); const b = await buyer('Bob');
+    const brand = await Vendor.create({ businessName: 'Events', slug: 'events', password: 'test-only-password', logoUrl: 'https://cdn.example/brand.jpg' });
+    const ordinary = await regularPost(a.id);
+    await FollowService.follow(a, 'buyer', b.id);
+    await FollowService.follow(a, 'organizer', brand.id);
+    const buyerCard = await Update.findOne({ 'activitySource.targetId': b._id });
+    const vendorCard = await Update.findOne({ 'activitySource.targetId': brand._id });
+    const ids = async () => (await getFeed({ tab: 'for-you', surface: 'home', limit: 30 })).items.map(i => i.id);
+    expect(await ids()).toEqual(expect.arrayContaining([ordinary.id, buyerCard!.id, vendorCard!.id]));
+    await Buyer.deleteOne({ _id: b.id });
+    expect(await ids()).toEqual(expect.arrayContaining([ordinary.id, vendorCard!.id]));
+    expect(await ids()).not.toContain(buyerCard!.id);
+    await Vendor.deleteOne({ _id: brand.id });
+    expect(await ids()).toContain(ordinary.id);
+    expect(await ids()).not.toContain(vendorCard!.id);
+  });
+
   it('supports organizer actors and leaves ordinary saves unchanged', async () => {
     const a = await buyer('Alice');
     const brand = await Vendor.create({ businessName: 'Events', slug: 'events', password: 'test-only-password', logoUrl: 'https://cdn.example/brand.jpg' });
