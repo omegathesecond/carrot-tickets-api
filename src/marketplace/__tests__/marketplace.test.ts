@@ -482,6 +482,21 @@ it('enforces pause, close, deadlines, regular trader scope and immutable terms a
     ).status,
   ).toBe(409);
 });
+it('allows explicit zero tickets on a legacy stall with applications without changing its terms', async () => {
+  const marketId = await createOpportunity();
+  const profileId = await createProfile();
+  await MarketOpportunity.updateOne({ _id: marketId }, { $unset: { 'stallTypes.0.ticketsIncluded': 1 } });
+  expect((await apply(marketId, profileId)).status).toBe(200);
+  const edit = (ticketsIncluded: number, price = 100) => auth(
+    request(app).put(endpoint + '/manage/opportunities/' + marketId), organiser,
+  ).send({ ...opportunity, description: 'Updated description', stallTypes: [{ name: 'Standard Stall', price, spaces: 1, ticketsIncluded }] });
+  expect((await edit(2)).status).toBe(409);
+  expect((await edit(0, 999)).status).toBe(409);
+  const result = await edit(0);
+  expect(result.status).toBe(200);
+  expect(result.body.data.stallTypes[0].ticketsIncluded).toBe(0);
+  expect((await edit(2)).status).toBe(409);
+});
 it('updates an expired application deadline without changing submitted applications', async () => {
   const profileId = await createProfile();
   const marketId = await createOpportunity();

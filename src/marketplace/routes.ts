@@ -862,6 +862,13 @@ router.put(
         }).session(session);
         // Accepted dates, scope and terms cannot be silently rewritten beneath applicants.
         if (existing) {
+          // Older listings have no ticket quantity. An explicitly entered zero
+          // records that no tickets were promised without changing existing terms.
+          const previousStallTypes = opportunity.get('stallTypes').map((type: any) => {
+            const plain = type.toObject ? type.toObject() : { ...type };
+            if (plain.ticketsIncluded === undefined) plain.ticketsIncluded = 0;
+            return plain;
+          });
           for (const key of [
             'eventId',
             'dates',
@@ -877,7 +884,7 @@ router.put(
             'foodCertificates',
           ]) {
             if (
-              JSON.stringify(opportunity.get(key)) !==
+              JSON.stringify(key === 'stallTypes' ? previousStallTypes : opportunity.get(key)) !==
               JSON.stringify(value[key])
             )
               throw new HttpError(
