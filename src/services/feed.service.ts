@@ -1,3 +1,4 @@
+import { BlockService } from '@services/block.service';
 import { Types } from 'mongoose';
 import { MarketProfile } from '../marketplace/models';
 import { Update } from '@models/update.model';
@@ -46,6 +47,7 @@ interface FeedOpts {
    *  in the shuffled window when true, so the section surfaces more often
    *  without ever pinning it to a fixed position. */
   promoteHot?: boolean;
+  surface?: 'home';
 }
 /** `e` is the $skip-based event cursor. `s` ("seen") covers update ids already
  *  served THIS random walk — every tab with update slides ('for-you' and
@@ -249,6 +251,14 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
 
   // ---- fetch each source (over-fetch `limit`) ----
   const updateQuery: any = { status: 'active', 'media.status': 'ready' };
+  if (opts.surface !== 'home') updateQuery['activitySource.id'] = { $exists: false };
+  else if (opts.actor) {
+    const blocked = [...await BlockService.listBlockedIds(opts.actor.id), ...await BlockService.listBlockerIds(opts.actor.id)].map(id => new Types.ObjectId(id));
+    if (blocked.length) updateQuery.$or = [
+      { 'activitySource.id': { $exists: false } },
+      { authorId: { $nin: blocked }, 'activitySource.subjectId': { $nin: blocked } },
+    ];
+  }
   if (opts.tab === 'following') updateQuery.authorId = { $in: [...followedAuthorIds, ...followedOrgIds] };
   // Discover ('for-you') hides admin-moderated posts; `: null` also matches
   // posts predating the field (Mongo null-equality). The 'following' tab and
@@ -272,7 +282,44 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     // hands off from 'following' to 'for-you' too.
     const seenIds = (cur.s ?? []).map((id) => new Types.ObjectId(id));
     if (seenIds.length) updateQuery._id = { $nin: seenIds };
-    updates = await Update.aggregate([{ $match: updateQuery }, { $sample: { size: limit } }]);
+    const sourceVisibility = { status: 'active', 'media.status': 'ready',
+      ...(opts.tab === 'for-you' ? { hiddenFromDiscoverAt: null } : {}) };
+    updates = await Update.aggregate([
+      { $match: opts.surface === 'home'
+        ? { ...updateQuery, 'activitySource.id': { $exists: false } }
+        : updateQuery },
+      // Only generated cards need the identity/source joins. Sample the complete
+      // union so every eligible post keeps the same chance of appearing.
+      ...(opts.surface === 'home' ? [{ $unionWith: {
+        coll: Update.collection.name,
+        pipeline: [
+          { $match: { ...updateQuery, 'activitySource.id': { $exists: true } } },
+          // Match Activity feed actor eligibility before sampling; ordinary posts
+          // and suspended follow targets retain their existing visibility.
+          { $lookup: { from: Buyer.collection.name, localField: 'authorId', foreignField: '_id',
+            pipeline: [{ $match: { socialSuspendedAt: null } }], as: '_eligibleActivityBuyer' } },
+          { $lookup: { from: Vendor.collection.name, localField: 'authorId', foreignField: '_id', as: '_eligibleActivityVendor' } },
+          { $match: { $or: [
+            { authorType: 'buyer', '_eligibleActivityBuyer.0': { $exists: true } },
+            { authorType: 'vendor', '_eligibleActivityVendor.0': { $exists: true } },
+          ] } },
+          { $unset: ['_eligibleActivityBuyer', '_eligibleActivityVendor'] },
+          { $lookup: { from: Buyer.collection.name, localField: 'activitySource.targetId', foreignField: '_id', as: '_activityTargetBuyer' } },
+          { $lookup: { from: Vendor.collection.name, localField: 'activitySource.targetId', foreignField: '_id', as: '_activityTargetVendor' } },
+          { $match: { $or: [
+            { 'activitySource.type': { $ne: 'follow' } },
+            { 'activitySource.targetType': 'buyer', '_activityTargetBuyer.0': { $exists: true } },
+            { 'activitySource.targetType': 'vendor', '_activityTargetVendor.0': { $exists: true } },
+          ] } },
+          { $unset: ['_activityTargetBuyer', '_activityTargetVendor'] },
+          { $lookup: { from: Update.collection.name, localField: 'activitySource.targetId', foreignField: '_id',
+            pipeline: [{ $match: sourceVisibility }], as: '_visibleActivitySource' } },
+          { $match: { $or: [{ 'activitySource.type': { $ne: 'like_post' } }, { '_visibleActivitySource.0': { $exists: true } }] } },
+          { $unset: '_visibleActivitySource' },
+        ],
+      } }] : []),
+      { $sample: { size: limit } },
+    ]);
   }
 
   const eventSkip = cur.e ?? 0;

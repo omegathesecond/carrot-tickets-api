@@ -1,3 +1,4 @@
+import { publishLikeActivity, removeActivity } from '@services/activityPost.service';
 import { Update, IUpdate } from '@models/update.model';
 import { UpdateReaction } from '@models/updateReaction.model';
 import { Vendor } from '@models/vendor.model';
@@ -121,6 +122,10 @@ export async function toggleReaction(updateId: string, actor: SocialActor, type:
     type,
     counterField: counterField(type),
   });
+  if (type === 'like') {
+    if (active) await publishLikeActivity(actor, updateId);
+    else await removeActivity(actor, 'like_post', 'update', updateId);
+  }
   const u = await Update.findById(updateId).select('likeCount saveCount').lean();
   return { active, likeCount: u?.likeCount ?? 0, saveCount: u?.saveCount ?? 0 };
 }

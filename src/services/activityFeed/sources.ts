@@ -46,7 +46,7 @@ async function publishedEventIds(ids: any[]): Promise<Set<string>> {
 /** Ids of posts that are still visible, among the given candidates. */
 async function livePostIds(ids: any[]): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  const docs = await Update.find({ _id: { $in: ids }, status: 'active', 'media.status': 'ready' }).select('_id').lean();
+  const docs = await Update.find({ _id: { $in: ids }, status: 'active', 'media.status': 'ready', 'activitySource.id': { $exists: false } }).select('_id').lean();
   return new Set(docs.map((u) => String(u._id)));
 }
 
@@ -121,7 +121,7 @@ export async function followCandidates(opts: SourceOpts): Promise<SourceResult> 
 }
 
 export async function postCandidates(opts: SourceOpts): Promise<SourceResult> {
-  const query = windowed({ status: 'active', 'media.status': 'ready' }, opts);
+  const query = windowed({ status: 'active', 'media.status': 'ready', 'activitySource.id': { $exists: false } }, opts);
   if (opts.actorIds) query.authorId = { $in: opts.actorIds };
   const rows = await Update.find(query).sort({ createdAt: -1 }).limit(opts.limit).select('authorType authorId createdAt').lean();
   const nextBefore = scanFloor(rows, opts.limit, (r) => r.createdAt as Date);

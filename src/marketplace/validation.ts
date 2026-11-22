@@ -120,6 +120,7 @@ export const opportunitySchema = Joi.object({
   scope: Joi.string().valid('date', 'regular').required(),
   applicationDeadline: Joi.date().iso().required(),
   paymentDeadline: Joi.date().iso().required(),
+  paymentDetails: Joi.string().trim().max(4000).allow('').default(''),
   stallTypes: Joi.array().items(Joi.object({
     name: text(100).required(),
     price: Joi.number().min(0).max(10000000).precision(2).required(),

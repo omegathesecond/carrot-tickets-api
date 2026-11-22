@@ -1,3 +1,4 @@
+import { weekendAttendance } from '@services/weekendAttendance.service';
 import { createPlanCommentController } from '@controllers/eventPlanComment.controller';
 import { weekendComments } from '@services/weekendEngagement.service';
 import { WeekendService } from '@services/weekend.service';
@@ -67,6 +68,11 @@ router.put('/plans/:id', authenticateWeekendParticipant, requireProfilePhoto, We
 router.delete('/plans/:id', authenticateWeekendParticipant, WeekendController.removePlan);
 
 router.get('/plans-needing-media', authenticateWeekendParticipant, WeekendController.plansNeedingMedia);
+
+router.get('/attendance', async (_req, res) => {
+  try { return ApiResponseUtil.success(res, { events: await weekendAttendance() }); }
+  catch (error) { return failWithHttpError(res, error, 'Could not load weekend attendance'); }
+});
 
 router.get('/feed', optionalTicketsAuth, WeekendController.feed);
 router.get('/feed/all', optionalTicketsAuth, WeekendController.feedAll);

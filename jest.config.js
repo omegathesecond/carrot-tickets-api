@@ -2,6 +2,8 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
+  // Fleet jobs share a 16 GiB host; each worker also starts isolated MongoDB.
+  maxWorkers: 2,
   roots: ['<rootDir>/src'],
   testMatch: ['**/?(*.)+(test|spec).ts'],
   moduleNameMapper: {
