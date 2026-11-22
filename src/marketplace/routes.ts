@@ -750,6 +750,7 @@ router.post(
             terms: {
               stallType: selectedType.name,
               stallFee: selectedType.price,
+              ticketsIncluded: selectedType.ticketsIncluded,
               currency: opportunity.currency,
               feeTiers: opportunity.feeTiers,
               optionalCharges: opportunity.optionalCharges,
@@ -862,12 +863,10 @@ router.put(
         }).session(session);
         // Accepted dates, scope and terms cannot be silently rewritten beneath applicants.
         if (existing) {
-          // Older listings have no ticket quantity. An explicitly entered zero
-          // records that no tickets were promised without changing existing terms.
-          const previousStallTypes = opportunity.get('stallTypes').map((type: any) => {
-            const plain = type.toObject ? type.toObject() : { ...type };
-            if (plain.ticketsIncluded === undefined) plain.ticketsIncluded = 0;
-            return plain;
+          // Ticket corrections apply to future applications; submitted terms stay unchanged.
+          const stallTerms = (types: any[]) => types.map((type) => {
+            const { ticketsIncluded: _ticketsIncluded, ...terms } = type.toObject ? type.toObject() : type;
+            return terms;
           });
           for (const key of [
             'eventId',
@@ -884,8 +883,8 @@ router.put(
             'foodCertificates',
           ]) {
             if (
-              JSON.stringify(key === 'stallTypes' ? previousStallTypes : opportunity.get(key)) !==
-              JSON.stringify(value[key])
+              JSON.stringify(key === 'stallTypes' ? stallTerms(opportunity.get(key)) : opportunity.get(key)) !==
+              JSON.stringify(key === 'stallTypes' ? stallTerms(value.stallTypes) : value[key])
             )
               throw new HttpError(
                 409,
