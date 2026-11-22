@@ -856,8 +856,8 @@ router.put(
           req.params['id'],
           session,
         );
-        if (opportunity.status === 'closed')
-          throw new HttpError(409, 'Closed opportunities cannot be edited');
+        if (['closed', 'deleted'].includes(opportunity.status))
+          throw new HttpError(409, 'Closed or deleted opportunities cannot be edited');
         const existing = await MarketApplication.exists({
           opportunityId: opportunity._id,
         }).session(session);
@@ -925,8 +925,8 @@ router.patch(
     );
     return ok(res, await transaction(async (session) => {
       const opportunity = await managedOpportunity(req, req.params['id'], session);
-      if (opportunity.status === 'closed')
-        throw new HttpError(409, 'Closed opportunities cannot be reopened');
+      if (['closed', 'deleted'].includes(opportunity.status))
+        throw new HttpError(409, 'Closed or deleted opportunities cannot be reopened');
       const now = new Date();
       if (applicationDeadline <= now)
         throw new HttpError(400, 'Choose a future application deadline');
@@ -957,8 +957,8 @@ router.patch(
           req.params['id'],
           session,
         );
-        if (opportunity.status === 'closed')
-          throw new HttpError(409, 'Closed opportunities cannot be reopened');
+        if (['closed', 'deleted'].includes(opportunity.status))
+          throw new HttpError(409, 'Closed or deleted opportunities cannot be reopened');
         if (body.status === 'published') {
           const fields = opportunity.toObject();
           validateOpportunity(
@@ -987,6 +987,18 @@ router.patch(
       }),
     );
   }),
+);
+router.delete(
+  '/manage/opportunities/:id',
+  wrap(async (req, res) => ok(res, await transaction(async (session) => {
+    const opportunity = await managedOpportunity(req, req.params['id'], session);
+    if (opportunity.status !== 'deleted') {
+      opportunity.status = 'deleted';
+      opportunity.revision += 1;
+      await opportunity.save({ session });
+    }
+    return opportunity;
+  }))),
 );
 router.get(
   '/manage/opportunities/:id/applications',

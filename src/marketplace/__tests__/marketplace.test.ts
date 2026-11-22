@@ -1054,3 +1054,23 @@ it('allows only the owner to remove contact details from a closed opportunity', 
   expect(saved!.contactEmail).toBe('');
   expect(saved!.status).toBe('closed');
 });
+
+it('allows only the owner or an admin to delete while retaining applications and payment records', async () => {
+  const marketId = await createOpportunity();
+  const profileId = await createProfile();
+  const submitted = await apply(marketId, profileId);
+  expect(submitted.status).toBe(200);
+  const applicationId = submitted.body.data._id;
+  await MarketApplication.updateOne({ _id: applicationId }, { $set: { paymentStatus: 'paid' } });
+  const url = endpoint + '/manage/opportunities/' + marketId;
+  expect((await auth(request(app).delete(url), provider)).status).toBe(403);
+  expect((await auth(request(app).delete(url), organiser)).status).toBe(200);
+  expect((await MarketOpportunity.findById(marketId))?.status).toBe('deleted');
+  expect((await MarketApplication.findById(applicationId))?.paymentStatus).toBe('paid');
+  expect((await apply(marketId, profileId, '2099-11-25')).status).toBe(409);
+  expect((await auth(request(app).get(endpoint + '/opportunities/' + marketId))).status).toBe(404);
+  expect((await auth(request(app).get(url + '/applications'), organiser)).body.data.items).toHaveLength(1);
+  expect((await auth(request(app).patch(url + '/status'), organiser).send({ status: 'published' })).status).toBe(409);
+  const otherId = await createOpportunity();
+  expect((await auth(request(app).delete(endpoint + '/manage/opportunities/' + otherId), stranger)).status).toBe(200);
+});
