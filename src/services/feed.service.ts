@@ -282,7 +282,20 @@ export async function getFeed(opts: FeedOpts): Promise<{ items: FeedSlide[]; nex
     // hands off from 'following' to 'for-you' too.
     const seenIds = (cur.s ?? []).map((id) => new Types.ObjectId(id));
     if (seenIds.length) updateQuery._id = { $nin: seenIds };
-    updates = await Update.aggregate([{ $match: updateQuery }, { $sample: { size: limit } }]);
+    const sourceVisibility = { status: 'active', 'media.status': 'ready',
+      ...(opts.tab === 'for-you' ? { hiddenFromDiscoverAt: null } : {}) };
+    updates = await Update.aggregate([
+      { $match: updateQuery },
+      // Validate the source before sampling, so deleted or moderated posts cannot
+      // leave visible like cards or consume slots in the random feed.
+      ...(opts.surface === 'home' ? [
+        { $lookup: { from: Update.collection.name, localField: 'activitySource.targetId', foreignField: '_id',
+          pipeline: [{ $match: sourceVisibility }], as: '_visibleActivitySource' } },
+        { $match: { $or: [{ 'activitySource.type': { $ne: 'like_post' } }, { '_visibleActivitySource.0': { $exists: true } }] } },
+        { $unset: '_visibleActivitySource' },
+      ] : []),
+      { $sample: { size: limit } },
+    ]);
   }
 
   const eventSkip = cur.e ?? 0;

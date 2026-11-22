@@ -96,6 +96,21 @@ describe('Home activity posts use the existing post rails', () => {
     expect(await Update.countDocuments({ 'activitySource.type': 'follow', status: 'active' })).toBe(1);
   });
 
+  it('only shows like cards while their source post is visible on Home', async () => {
+    const a = await buyer('Alice'); const b = await buyer('Bob');
+    const post = await regularPost(b.id);
+    await toggleReaction(post.id, { type: 'buyer', id: a.id }, 'like');
+    const activity = await Update.findOne({ 'activitySource.type': 'like_post' });
+    const ids = async () => (await getFeed({ tab: 'for-you', surface: 'home', limit: 30 })).items.map(i => i.id);
+    expect(await ids()).toContain(activity!.id);
+    await Update.updateOne({ _id: post.id }, { $set: { hiddenFromDiscoverAt: new Date() } });
+    expect(await ids()).not.toContain(activity!.id);
+    await Update.updateOne({ _id: post.id }, { $set: { hiddenFromDiscoverAt: null, status: 'removed' } });
+    expect(await ids()).not.toContain(activity!.id);
+    await Update.deleteOne({ _id: post.id });
+    expect(await ids()).not.toContain(activity!.id);
+  });
+
   it('supports organizer actors and leaves ordinary saves unchanged', async () => {
     const a = await buyer('Alice');
     const brand = await Vendor.create({ businessName: 'Events', slug: 'events', password: 'test-only-password', logoUrl: 'https://cdn.example/brand.jpg' });
