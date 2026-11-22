@@ -58,6 +58,7 @@ router.delete('/meetups/:id', authenticateBuyer, MeetupController.cancel);
 // rest of the fixed-segment routes, same reasoning as '/users/search' below.
 router.post('/stories', authenticateBuyer, requireProfilePhoto, StoryController.create);
 router.post('/stories/:id/finalize', authenticateBuyer, requireProfilePhoto, StoryController.finalize);
+router.get('/stories/online', authenticateBuyer, StoryController.online);
 router.get('/stories', authenticateBuyer, StoryController.list);
 router.post('/stories/:id/seen', authenticateBuyer, StoryController.seen);
 router.post('/stories/:id/like', authenticateBuyer, StoryController.like);
