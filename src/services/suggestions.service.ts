@@ -96,7 +96,6 @@ export class SuggestionsService {
       ...(actor.type === 'buyer' ? { _id: { $ne: actor.id } } : {}),
       socialSuspendedAt: null,
       username: { $exists: true, $ne: null },
-      ...GENUINE_AVATAR_FILTER,
     } : {
       isActive: true, verificationStatus: VISIBLE_BUSINESS_FILTER.verificationStatus, isSuperAdmin: { $ne: true },
       ...(actor.type === 'vendor' ? { _id: { $ne: actor.id } } : {}),
