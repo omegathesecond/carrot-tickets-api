@@ -36,7 +36,7 @@ describe('onboarding people pagination', () => {
   });
   it('filters all four categories, excludes self/follows, and combines progress', async () => {
     const me = await Buyer.create({ phone: '+26878422613', password: 'secret1', username: 'viewer', avatarUrl: 'photo' });
-    const user = await Buyer.create({ phone: '+26878000001', password: 'secret1', username: 'other', avatarUrl: 'photo' });
+    const user = await Buyer.create({ phone: '+26878000001', password: 'secret1', username: 'other' });
     const makeVendor = (slug: string, extra = {}) => Vendor.create({ businessName: slug, slug, password: 'secret1',
       isActive: true, verificationStatus: 'verified', operatorType: 'events', ...extra });
     const organizer = await makeVendor('organizer');
@@ -55,6 +55,8 @@ describe('onboarding people pagination', () => {
     const page = async (category: string) => (await request(app).get(`/api/social/onboarding/people?category=${category}&seed=123`)
       .set('Authorization', `Bearer ${token}`).expect(200)).body.data.people;
     expect((await page('users')).map((p: any) => p.id)).toEqual([String(user._id)]);
+    expect((await page('users'))[0].avatarUrl).toBeNull();
+    expect((await page('organizers')).find((p: any) => p.id === String(pendingOrganizer._id)).avatarUrl).toBeNull();
     expect(new Set((await page('organizers')).map((p: any) => p.id))).toEqual(new Set([String(organizer._id), String(pendingOrganizer._id)]));
     expect(new Set((await page('providers')).map((p: any) => p.id))).toEqual(new Set([String(provider._id), String(pendingProvider._id)]));
     expect(new Set((await page('venues')).map((p: any) => p.id))).toEqual(new Set([String(venue._id), String(activatedVenue._id), String(pendingVenue._id)]));
