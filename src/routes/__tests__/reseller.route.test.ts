@@ -103,3 +103,29 @@ it('GET /api/reseller/sales returns sales created by this operator', async () =>
   expect(res.body.data.data[0].soldByType).toBe('ResellerOperator');
 });
 
+
+
+it('offers POS payment and records it through the operator API', async () => {
+  const { seedPublishedEvent } = await import('../../__tests__/helpers/fixtures');
+  const { loginCode, pin } = await seedOperator({ role: 'reseller_operator' });
+  const login = await request(app).post('/api/reseller/auth/login').send({ loginCode, pin });
+  expect(login.status).toBe(200);
+  const auth = `Bearer ${login.body.data.accessToken}`;
+  await PaymentConfigService.update({ cashEnabled: false });
+  const methods = await request(app).get('/api/reseller/payment-methods').set('Authorization', auth);
+  expect(methods.status).toBe(200);
+  expect(methods.body.data.methods).toContain('pos_payment');
+  expect(methods.body.data.methods).not.toContain('cash');
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+  const result = await request(app).post('/api/reseller/sales').set('Authorization', auth).send({
+    eventId, items: [{ ticketTypeId, quantity: 1 }], paymentMethod: 'pos_payment', customerName: 'Terminal Buyer',
+  });
+  expect(result.status).toBe(201);
+  expect(result.body.data.status).toBe('completed');
+  const sale = await TicketSale.findById(result.body.data.saleId);
+  expect(sale!.paymentMethod).toBe('pos_payment');
+  const history = await request(app).get('/api/reseller/sales').set('Authorization', auth);
+  expect(history.status).toBe(200);
+  expect(history.body.data.data).toEqual(expect.arrayContaining([expect.objectContaining({ paymentMethod: 'pos_payment' })]));
+  await PaymentConfigService.update({ cashEnabled: true });
+});

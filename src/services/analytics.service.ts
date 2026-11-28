@@ -97,7 +97,7 @@ export interface RevenueStats {
     ticketsSold: number;
   }>;
   revenueByPaymentMethod: Array<{
-    method: 'cash' | 'keshless_wallet' | 'mtn_momo';
+    method: PaymentMethod;
     amount: number;
     count: number;
   }>;
@@ -557,7 +557,7 @@ export class AnalyticsService {
       ]);
 
       const revenueByPaymentMethod = paymentMethodStats.map(stat => ({
-        method: stat._id as 'cash' | 'keshless_wallet' | 'mtn_momo',
+        method: stat._id as PaymentMethod,
         amount: stat.amount,
         count: stat.count
       }));

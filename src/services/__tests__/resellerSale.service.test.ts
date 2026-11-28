@@ -203,3 +203,36 @@ it('sendSaleSms: throws not found for an unknown sale id', async () => {
     )
   ).rejects.toThrow(/not found/i);
 });
+
+
+it('records external POS payments with cash disabled and reports them separately', async () => {
+  await PaymentConfigService.update({ cashEnabled: true, defaultResellerCommissionPercent: 8, platformFeePercent: 0 });
+  const r = await Reseller.create({ businessName: 'Terminal seller', commissionPercent: null });
+  const { eventId, ticketTypeId } = await seedPublishedEvent({ price: 100, capacity: 5 });
+  const params = {
+    operatorId: new mongoose.Types.ObjectId().toString(), resellerId: r._id.toString(),
+    hubId: new mongoose.Types.ObjectId().toString(), eventId, items: [{ ticketTypeId, quantity: 1 }],
+  };
+  await ResellerSaleService.createSale({ ...params, paymentMethod: 'cash' });
+  await PaymentConfigService.update({ cashEnabled: false });
+  const result = await ResellerSaleService.createSale({ ...params, paymentMethod: 'pos_payment' });
+  expect(result.status).toBe('completed');
+  expect('tickets' in result && result.tickets).toHaveLength(1);
+  const { TicketSale } = await import('@models/ticketSale.model');
+  const sale = await TicketSale.findById(result.saleId);
+  expect(sale!.paymentMethod).toBe('pos_payment');
+  expect(sale!.fundsCustody).toBe('reseller');
+  expect(sale!.organizerProceeds).toBe(92);
+  expect(sale!.resellerCommissionAmount).toBe(8);
+  const { ResellerReportService } = await import('@services/resellerReport.service');
+  const scope = { resellerId: r._id.toString(), role: 'reseller_admin' };
+  const summary = await ResellerReportService.summary({ scope });
+  expect(summary.byMethod).toEqual(expect.arrayContaining([
+    { method: 'cash', revenue: 100, tickets: 1, count: 1 },
+    { method: 'pos_payment', revenue: 100, tickets: 1, count: 1 },
+  ]));
+  const history = await ResellerReportService.listSales({ scope, paymentMethod: 'pos_payment' });
+  expect(history.total).toBe(1);
+  expect(history.sales[0]!.paymentMethod).toBe('pos_payment');
+  await PaymentConfigService.update({ cashEnabled: true });
+});

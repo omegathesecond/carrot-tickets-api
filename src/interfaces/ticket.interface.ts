@@ -18,6 +18,7 @@ export enum TicketPdfStatus {
 
 export enum PaymentMethod {
   CASH = 'cash',
+  POS_PAYMENT = 'pos_payment',
   KESHLESS_WALLET = 'keshless_wallet',
   MTN_MOMO = 'mtn_momo',
   PEACH_CARD = 'peach_card',

@@ -170,7 +170,7 @@ export class ResellerController {
     try {
       const cfg = await PaymentConfigService.get();
 
-      const methods: string[] = [];
+      const methods: string[] = ['pos_payment'];
       if (cfg.cashEnabled) methods.push('cash');
       // MoMo requires BOTH the admin toggle AND the processor being configured
       // (MTN_MOMO_ENABLED + creds). Mirrors PublicController.getPaymentMethods so
@@ -206,7 +206,7 @@ export class ResellerController {
           .min(1).max(20).optional(),
         ticketTypeId: Joi.string().optional().regex(/^[0-9a-fA-F]{24}$/),
         quantity: Joi.number().integer().min(1).max(20).optional(),
-        paymentMethod: Joi.string().valid('cash', 'mtn_momo', 'keshless_wallet').required(),
+        paymentMethod: Joi.string().valid('cash', 'pos_payment', 'mtn_momo', 'keshless_wallet').required(),
         customerName: Joi.string().optional().max(100).trim().allow(''),
         customerPhone: Joi.string().optional().trim().allow(''),
         momoPhone: Joi.string().optional().trim().allow(''),

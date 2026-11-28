@@ -73,3 +73,13 @@ describe('computeSaleEconomics — organizer-absorbed service fee', () => {
     expect(r.organizerProceeds).toBe(100);
   });
 });
+
+
+it.each(['ResellerOperator', 'Vendor', 'VendorSubUser'] as const)('keeps external POS funds with the collecting %s', (soldByType) => {
+  const result = computeSaleEconomics({
+    faceAmount: 100, paymentMethod: 'pos_payment', soldByType,
+    resellerCommissionPercent: 8, platformFeePercent: 5,
+  });
+  expect(result.fundsCustody).toBe(soldByType === 'ResellerOperator' ? 'reseller' : 'vendor');
+  expect(result.organizerProceeds).toBe(87);
+});

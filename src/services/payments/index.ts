@@ -1,6 +1,6 @@
 import { PaymentMethod } from '@interfaces/ticket.interface';
 import { PaymentProcessor } from './types';
-import { CashProcessor } from './cash.processor';
+import { ManualPaymentProcessor } from './manual.processor';
 import { KeshlessWalletProcessor } from './keshlessWallet.processor';
 import { MtnMomoProcessor } from './mtnMomo.processor';
 import { CardProcessor } from './card.processor';
@@ -9,7 +9,8 @@ import { YocoProcessor } from './yoco.processor';
 import { YeboPayProcessor } from './yebopay.processor';
 
 const processors: Record<string, PaymentProcessor> = {
-  [PaymentMethod.CASH]: new CashProcessor(),
+  [PaymentMethod.CASH]: new ManualPaymentProcessor(PaymentMethod.CASH),
+  [PaymentMethod.POS_PAYMENT]: new ManualPaymentProcessor(PaymentMethod.POS_PAYMENT),
   [PaymentMethod.KESHLESS_WALLET]: new KeshlessWalletProcessor(),
   [PaymentMethod.MTN_MOMO]: new MtnMomoProcessor(),
   [PaymentMethod.PEACH_CARD]: new CardProcessor(),

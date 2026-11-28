@@ -9,7 +9,7 @@ import { SmsService } from '@services/sms.service';
 import { PaymentMethod, PaymentStatus } from '@interfaces/ticket.interface';
 import type { CartLine } from '@interfaces/cart.interface';
 
-type ResellerPaymentMethod = 'cash' | 'mtn_momo' | 'keshless_wallet';
+type ResellerPaymentMethod = 'cash' | 'pos_payment' | 'mtn_momo' | 'keshless_wallet';
 
 interface CreateSaleParams {
   operatorId: string;
@@ -35,7 +35,7 @@ interface CreateSaleParams {
   keshlessPin?: string;
 }
 
-// Synchronous (cash / keshless_wallet) result: tickets minted immediately.
+// Synchronous (cash / POS payment / keshless_wallet) result: tickets minted immediately.
 interface CompletedSaleResult {
   saleId: string;
   status: 'completed' | 'failed';
@@ -55,8 +55,9 @@ interface PendingSaleResult {
 type CreateSaleResult = CompletedSaleResult | PendingSaleResult;
 
 // Maps the ResellerPaymentMethod to the PaymentConfig toggle key.
-const METHOD_TOGGLE: Record<ResellerPaymentMethod, keyof Awaited<ReturnType<typeof PaymentConfigService.get>>> = {
+const METHOD_TOGGLE: Record<ResellerPaymentMethod, keyof Awaited<ReturnType<typeof PaymentConfigService.get>> | null> = {
   cash: 'cashEnabled',
+  pos_payment: null,
   mtn_momo: 'mtnMomoEnabled',
   keshless_wallet: 'keshlessWalletEnabled',
 };
@@ -64,6 +65,7 @@ const METHOD_TOGGLE: Record<ResellerPaymentMethod, keyof Awaited<ReturnType<type
 // Maps the string method to the PaymentMethod enum used by TicketService.
 const METHOD_ENUM: Record<ResellerPaymentMethod, PaymentMethod> = {
   cash: PaymentMethod.CASH,
+  pos_payment: PaymentMethod.POS_PAYMENT,
   mtn_momo: PaymentMethod.MTN_MOMO,
   keshless_wallet: PaymentMethod.KESHLESS_WALLET,
 };
@@ -85,7 +87,9 @@ export class ResellerSaleService {
 
     // Guard 1: payment method toggle
     const toggleKey = METHOD_TOGGLE[params.paymentMethod];
-    if (!cfg[toggleKey]) {
+    // POS payment records a payment approved on an external terminal.
+    // It has no Carrot gateway or cash toggle.
+    if (toggleKey !== null && !cfg[toggleKey]) {
       throw new Error('Payment method not available');
     }
 
@@ -152,7 +156,7 @@ export class ResellerSaleService {
       resellerCommissionPercent,
     });
 
-    // cash / keshless_wallet are synchronous — only completed or failed here
+    // cash / POS payment / keshless_wallet are synchronous — only completed or failed here
     // (the async pending lane is handled in the mtn_momo branch above).
     const status: 'completed' | 'failed' =
       sale.paymentStatus === PaymentStatus.COMPLETED ? 'completed' : 'failed';

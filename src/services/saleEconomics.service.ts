@@ -49,7 +49,8 @@ export function computeSaleEconomics(input: SaleEconomicsInput): SaleEconomics {
   );
 
   let fundsCustody: FundsCustody;
-  if (paymentMethod !== 'cash') {
+  // External POS receipts stay with the collecting seller, just like cash.
+  if (paymentMethod !== 'cash' && paymentMethod !== 'pos_payment') {
     fundsCustody = 'carrot';
   } else if (soldByType === 'ResellerOperator') {
     fundsCustody = 'reseller';

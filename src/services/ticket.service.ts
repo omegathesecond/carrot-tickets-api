@@ -1433,7 +1433,7 @@ export class TicketService {
    * Claim a FREE ticket — the buyer-checkout path for a tier priced at 0.
    * No payment method, no gateway: a free ticket has nothing to charge, so the
    * buyer never sees a payment picker (see PurchaseModal). Mints through the
-   * same choke point as every other sale (sellTickets → CashProcessor, which
+   * same choke point as every other sale (sellTickets → ManualPaymentProcessor, which
    * moves no money) so the ticket, ledger snapshot and auto-follow behave
    * exactly like a paid online sale, just at amount 0.
    *
@@ -1497,7 +1497,7 @@ export class TicketService {
       return this.purchaseCouponCart(cart, params, PaymentMethod.CASH);
     }
 
-    // sellTickets mints via the CashProcessor (no money moves) at face 0.
+    // sellTickets mints via the ManualPaymentProcessor (no money moves) at face 0.
     const result = await TicketService.sellTickets({
       vendorId: event.vendorId!.toString(),
       eventId,

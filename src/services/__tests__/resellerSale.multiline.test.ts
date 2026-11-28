@@ -30,7 +30,7 @@ afterEach(async () => { await clearTestDb(); jest.restoreAllMocks(); });
 afterAll(disconnectTestDb);
 
 describe('ResellerSaleService — multi-tier till sale', () => {
-  it('rings up two tiers in one cash sale', async () => {
+  it.each(['cash', 'pos_payment'] as const)('rings up two tiers in one %s sale', async (paymentMethod) => {
     const { resellerId, hubId } = await seedReseller();
     const { eventId, ticketTypeIds } = await seedEventWithTiers([
       { name: 'General', price: 100, quantity: 10 },
@@ -44,13 +44,15 @@ describe('ResellerSaleService — multi-tier till sale', () => {
         { ticketTypeId: ticketTypeIds[0]!, quantity: 2 },
         { ticketTypeId: ticketTypeIds[1]!, quantity: 1 },
       ],
-      paymentMethod: 'cash',
+      paymentMethod,
       customerName: 'Walk-up Buyer',
     });
 
     expect(result.status).toBe('completed');
 
     const sale = await TicketSale.findOne({ eventId });
+    expect(sale!.paymentMethod).toBe(paymentMethod);
+    expect(sale!.fundsCustody).toBe('reseller');
     expect(sale!.quantity).toBe(3);
     expect(sale!.totalAmount).toBe(450);
     // Rung at face — a till sale carries no buyer service fee.
