@@ -5,7 +5,7 @@ import { TagWithdrawalRequest } from '@models/tagWithdrawalRequest.model';
 async function main() {
   const uri = process.env['MONGODB_URI'];
   if (!uri) throw new Error('MONGODB_URI is required');
-  await mongoose.connect(uri);
+  await mongoose.connect(uri, { autoIndex: false, autoCreate: false });
   try {
     for (const model of [WalletWithdrawal, TagWithdrawalRequest] as const) {
       const result = await model.collection.updateMany({ payoutAmount: { $exists: false }, feeAmount: { $in: [null, 0] } },
