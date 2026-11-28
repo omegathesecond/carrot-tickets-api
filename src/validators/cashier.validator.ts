@@ -17,5 +17,7 @@ export const cashierWithdrawSchema = Joi.object({
   bandUid: uid.required(),
   eventId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
   amount: Joi.number().integer().min(1).max(MAX_TOPUP_CENTS).required(),
-  clientTxnId: Joi.string().trim().required(),
+  quoteOnly: Joi.boolean().default(false),
+  quotedPayoutAmount: Joi.number().integer().min(1).max(MAX_TOPUP_CENTS).when('quoteOnly', { is: true, then: Joi.forbidden(), otherwise: Joi.required() }),
+  clientTxnId: Joi.string().trim().when('quoteOnly', { is: true, then: Joi.forbidden(), otherwise: Joi.required() }),
 });

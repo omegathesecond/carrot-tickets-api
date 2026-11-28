@@ -1,3 +1,4 @@
+import { withdrawalQuote } from '@utils/purchaseCharge.util';
 /**
  * Enrich the existing dev cashless demo with a CASHIER + a couple of real
  * sample cash-outs, so the organizer report and the cashier "my transactions"
@@ -260,8 +261,11 @@ async function main() {
 
   for (const s of samples) {
     const w = s.wallet!;
+    const cashlessEvent = await Event.findById(eventId);
+    if (!cashlessEvent) throw new Error('Cashless demo event not found');
+    const quote = withdrawalQuote(s.amount, cashlessEvent.withdrawalFee);
     const { withdrawal, wallet } = await WalletService.withdrawCash({
-      walletId: String(w._id), eventId, amount: s.amount, recordedBy: cashierId, clientTxnId: s.clientTxnId,
+      walletId: String(w._id), eventId, amount: s.amount, quotedPayoutAmount: quote.payoutAmount, recordedBy: cashierId, clientTxnId: s.clientTxnId,
     });
     console.log(`💸 Cash-out R${(withdrawal.amount / 100).toFixed(2)} from band ${w.bandUid} → new balance R${(wallet.balance / 100).toFixed(2)}`);
   }

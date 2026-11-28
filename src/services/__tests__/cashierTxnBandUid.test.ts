@@ -37,7 +37,7 @@ it('carries the band UID on withdrawals too', async () => {
   const { eventId } = await seedPublishedEvent({});
   const walletId = await bandWallet(String(eventId), '04FFEEDDCCBBAA');
   await WalletWithdrawal.create({
-    walletId, eventId, amount: 1500, status: 'completed',
+    walletId, eventId, amount: 1500, feeAmount: 0, payoutAmount: 1500, status: 'completed',
     recordedBy: CASHIER, recordedByType: 'Cashier', clientTxnId: 'w-1',
   });
 

@@ -1,3 +1,4 @@
+import { Event } from '@models/event.model';
 import mongoose from 'mongoose';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '../../__tests__/helpers/mongo';
 import { Wallet } from '@models/wallet.model';
@@ -16,13 +17,13 @@ const wallet = () =>
 
 describe('office cash refund', () => {
   // Transactions: this path uses withTransaction, so it needs the replica set.
-  beforeAll(connectLedgerTestDb); afterEach(clearTestDb); afterAll(disconnectTestDb);
+  beforeAll(connectLedgerTestDb); beforeEach(async () => { await Event.create({ _id: EVENT, vendorId: new mongoose.Types.ObjectId(), name: 'Refund fixture', venue: 'Test', eventDate: new Date(), startTime: new Date(), endTime: new Date(), cashless: true }); }); afterEach(clearTestDb); afterAll(disconnectTestDb);
 
   it('records the refund, moves the balance and posts a balanced pair', async () => {
     const w = await wallet();
 
     const { wallet: after, withdrawal } = await WalletService.withdrawCash({
-      walletId: String(w._id), eventId: String(EVENT), amount: 4000,
+      walletId: String(w._id), eventId: String(EVENT), amount: 4000, quotedPayoutAmount: 4000,
       recordedBy: 'vendor-user-1', clientTxnId: 'refund-1',
       method: 'office_cash', recordedByType: 'Vendor', floatTag: FloatTag.OFFICE,
     });
@@ -38,7 +39,7 @@ describe('office cash refund', () => {
   it('is idempotent on a retry of the same clientTxnId', async () => {
     const w = await wallet();
     const args = {
-      walletId: String(w._id), eventId: String(EVENT), amount: 4000,
+      walletId: String(w._id), eventId: String(EVENT), amount: 4000, quotedPayoutAmount: 4000,
       recordedBy: 'vendor-user-1', clientTxnId: 'refund-2',
       method: 'office_cash' as const, recordedByType: 'Vendor' as const, floatTag: FloatTag.OFFICE,
     };
@@ -55,7 +56,7 @@ describe('office cash refund', () => {
 
     await expect(
       WalletService.withdrawCash({
-        walletId: String(w._id), eventId: String(EVENT), amount: 999999,
+        walletId: String(w._id), eventId: String(EVENT), amount: 999999, quotedPayoutAmount: 999999,
         recordedBy: 'vendor-user-1', clientTxnId: 'refund-3',
         method: 'office_cash', recordedByType: 'Vendor', floatTag: FloatTag.OFFICE,
       }),
@@ -69,7 +70,7 @@ describe('office cash refund', () => {
     const w = await wallet();
 
     const { withdrawal } = await WalletService.withdrawCash({
-      walletId: String(w._id), eventId: String(EVENT), amount: 1000,
+      walletId: String(w._id), eventId: String(EVENT), amount: 1000, quotedPayoutAmount: 1000,
       recordedBy: 'cashier-1', clientTxnId: 'cashout-1',
     });
 

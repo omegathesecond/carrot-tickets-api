@@ -229,7 +229,7 @@ describe('office refund', () => {
     const res = await request(app)
       .post(`/api/tickets/events/${event._id}/tags/${wallet._id}/refund`)
       .set('Authorization', `Bearer ${await ADMIN()}`)
-      .send({ amount: 1000, clientTxnId: 'r1' });
+      .send({ amount: 1000, quotedPayoutAmount: 1000, clientTxnId: 'r1' });
 
     expect(res.status).toBe(403);
   });
@@ -261,17 +261,17 @@ describe('office refund', () => {
     const url = `/api/tickets/events/${event._id}/tags/${wallet._id}/refund`;
 
     const first = await request(app).post(url).set('Authorization', `Bearer ${await REFUNDER()}`)
-      .send({ amount: 1000, clientTxnId: 'r-dup' });
+      .send({ amount: 1000, quotedPayoutAmount: 1000, clientTxnId: 'r-dup' });
     expect(first.status).toBe(200);
     expect(first.body.data.balance).toBe(8000);
 
     const mismatch = await request(app).post(url).set('Authorization', `Bearer ${await REFUNDER()}`)
-      .send({ amount: 2000, clientTxnId: 'r-dup' });
+      .send({ amount: 2000, quotedPayoutAmount: 2000, clientTxnId: 'r-dup' });
     expect(mismatch.status).toBe(409);
     expect(mismatch.body.message).toMatch(/clientTxnId already used with a different amount/);
 
     const replay = await request(app).post(url).set('Authorization', `Bearer ${await REFUNDER()}`)
-      .send({ amount: 1000, clientTxnId: 'r-dup' });
+      .send({ amount: 1000, quotedPayoutAmount: 1000, clientTxnId: 'r-dup' });
     expect(replay.status).toBe(200);
     expect(replay.body.data.withdrawalId).toBe(first.body.data.withdrawalId);
     expect((await Wallet.findById(wallet._id))!.balance).toBe(8000);

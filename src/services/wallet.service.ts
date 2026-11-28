@@ -1,3 +1,6 @@
+import { Event } from '@models/event.model';
+import { withdrawalQuote } from '@utils/purchaseCharge.util';
+import { HttpError } from '@utils/httpError.util';
 import { mapConcurrent } from '@utils/mapConcurrent.util';
 import { CashDeskService } from '@services/cashDesk.service';
 import mongoose from 'mongoose';
@@ -568,7 +571,8 @@ export class WalletService {
    *
    * Ledger (reverse of top-up, sum of deltas = 0, so the invariant holds):
    *   WALLET:ref  += amount   (attendee liability reduced)
-   *   FLOAT       -= amount   (cash paid out of the desk)
+   *   FLOAT       -= payoutAmount (amount minus the event withdrawal fee)
+   *   ORGANIZER   -= feeAmount (fee retained for the organizer)
    */
   /** Shared atomic wallet debit + ledger writer. Caller owns the transaction. */
   static async recordWithdrawal(params: {
@@ -576,12 +580,15 @@ export class WalletService {
     recordedByType: IWalletWithdrawal['recordedByType']; clientTxnId: string;
     method: IWalletWithdrawal['method']; floatTag: FloatTag;
     session: mongoose.ClientSession; requiredStatus: 'active' | 'frozen'; closeWallet: boolean;
+    feeAmount: number;
   }): Promise<{ wallet: IWallet; withdrawal: IWalletWithdrawal }> {
     const { walletId, eventId, amount, recordedBy, recordedByType, clientTxnId,
-      method, floatTag, session, requiredStatus, closeWallet } = params;
+      method, floatTag, session, requiredStatus, closeWallet, feeAmount } = params;
     if (!session.inTransaction()) throw new Error('Withdrawal requires a transaction');
     if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_TOPUP_CENTS)
       throw new Error('Invalid withdrawal amount');
+    const payoutAmount = amount - feeAmount;
+    if (!Number.isSafeInteger(feeAmount) || feeAmount < 0 || payoutAmount <= 0) throw new HttpError(400, 'Withdrawal fee must be less than the withdrawal amount');
     const wallet = await Wallet.findOneAndUpdate(
       { _id: walletId, eventId, status: requiredStatus, balance: { $gte: amount } },
       [
@@ -610,7 +617,8 @@ export class WalletService {
       eventId,
       postings: [
         { account: { type: LedgerAccountType.WALLET, ref: walletId }, delta: amount },
-        { account: { type: LedgerAccountType.FLOAT }, delta: -amount, tag: floatTag },
+        { account: { type: LedgerAccountType.FLOAT }, delta: -payoutAmount, tag: floatTag },
+        ...(feeAmount > 0 ? [{ account: { type: LedgerAccountType.ORGANIZER }, delta: -feeAmount }] : []),
       ],
       refType: 'wallet_withdrawal',
       refId: clientTxnId,
@@ -618,7 +626,7 @@ export class WalletService {
     });
 
     const [withdrawal] = await WalletWithdrawal.create(
-      [{ walletId, eventId, amount, method, status: 'completed', recordedBy, recordedByType, clientTxnId }],
+      [{ walletId, eventId, amount, feeAmount, payoutAmount, method, status: 'completed', recordedBy, recordedByType, clientTxnId }],
       { session },
     );
     if (!withdrawal) throw new Error('wallet withdrawal insert failed');
@@ -638,9 +646,9 @@ export class WalletService {
      * cashier hands cash over a desk at the venue, or the office hands a
      * residual balance back afterwards. Same CAS, same balanced posting, same
      * idempotency — only the labelling differs, so these are options rather
-     * than a second copy of the routine. Defaults keep the cashier path
-     * byte-identical.
+     * than a second copy of the routine. Both paths require the reviewed net payout.
      */
+    quotedPayoutAmount: number;
     method?: 'cash' | 'office_cash';
     recordedByType?: 'Cashier' | 'Vendor';
     floatTag?: FloatTag;
@@ -662,6 +670,7 @@ export class WalletService {
     const existing = await WalletWithdrawal.findOne({ walletId, clientTxnId });
     if (existing) {
       assertReplayMatches(existing.amount, amount);
+      assertReplayMatches(existing.payoutAmount, params.quotedPayoutAmount);
       const w = await Wallet.findById(existing.walletId);
       if (!w) throw new Error('wallet not found');
       return { wallet: w, withdrawal: existing };
@@ -673,9 +682,14 @@ export class WalletService {
     try {
       let out!: { wallet: IWallet; withdrawal: IWalletWithdrawal };
       await session.withTransaction(async () => {
+        const event = await Event.findOneAndUpdate({ _id: eventId, cashless: true }, { $inc: { __v: 1 } }, { new: true, session });
+        if (!event) throw new HttpError(404, 'Cashless event not found');
+        const quote = withdrawalQuote(amount, event.withdrawalFee);
+        if (quote.payoutAmount <= 0) throw new HttpError(400, 'Withdrawal fee must be less than the withdrawal amount');
+        if (params.quotedPayoutAmount !== quote.payoutAmount) throw new HttpError(409, 'Withdrawal fee changed — review the payout and try again');
         if (cashDesk) await CashDeskService.touch(eventId, recordedBy, session);
         out = await this.recordWithdrawal({ walletId, eventId, amount, method, recordedBy,
-          recordedByType, clientTxnId, floatTag, session, requiredStatus: 'active', closeWallet: false });
+          recordedByType, clientTxnId, floatTag, session, requiredStatus: 'active', closeWallet: false, feeAmount: quote.feeAmount });
       });
       return out;
     } catch (e) {
@@ -686,6 +700,7 @@ export class WalletService {
         const wallet = withdrawal ? await Wallet.findById(withdrawal.walletId) : null;
         if (withdrawal && wallet) {
           assertReplayMatches(withdrawal.amount, amount);
+          assertReplayMatches(withdrawal.payoutAmount, params.quotedPayoutAmount);
           return { wallet, withdrawal };
         }
       }
@@ -717,7 +732,7 @@ export class WalletService {
     ]);
     const history = [
       ...topups.map(h => ({ type: 'topup' as const, method: h.method, amount: h.amount, at: h.createdAt })),
-      ...withdrawals.map(h => ({ type: 'withdrawal' as const, amount: h.amount, at: h.createdAt })),
+      ...withdrawals.map(h => ({ type: 'withdrawal' as const, amount: h.amount, feeAmount: h.feeAmount, payoutAmount: h.payoutAmount, at: h.createdAt })),
       ...charges.map(h => ({ type: 'purchase' as const, amount: h.amount, purchaseChargeAmount: h.purchaseChargeAmount, at: h.createdAt })),
       ...reversals.map(h => ({ type: 'reversal' as const, amount: h.amount, at: h.reversal!.at })),
     ]

@@ -46,6 +46,8 @@ export interface TagBinding {
 
 export interface TagMovement {
   purchaseChargeAmount?: number;
+  feeAmount?: number;
+  payoutAmount?: number;
   kind: 'topup' | 'spend' | 'cashout' | 'reversal';
   amount: number;
   at: Date;
@@ -281,7 +283,7 @@ export class TagReportService {
       })),
       ...charges.filter(c => c.reversal).map(c => ({ kind: 'reversal' as const, amount: c.amount, at: c.reversal!.at, label: `Sale reversed by ${c.reversal!.staffName}: ${c.reversal!.reason}` })),
       ...withdrawals.map((w: any) => ({
-        kind: 'cashout' as const, amount: w.amount, at: w.createdAt,
+        kind: 'cashout' as const, amount: w.amount, feeAmount: w.feeAmount, payoutAmount: w.payoutAmount, at: w.createdAt,
         label: withdrawalLabel(w.method),
       })),
     ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());

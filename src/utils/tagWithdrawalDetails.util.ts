@@ -16,6 +16,7 @@ export function validateTagWithdrawalInput(input: unknown) {
   const result = Joi.object({
     bandUid: Joi.string().trim().max(64).required(),
     eventId: Joi.string().hex().length(24).required(),
+    expectedPayoutAmount: Joi.number().integer().min(1).max(10_000_000).required(),
     expectedAmount: Joi.number().integer().min(1).max(10_000_000).required(),
     country: Joi.string().valid('SZ', 'ZA').required(),
     method: Joi.string().valid('mobile_money', 'bank_transfer').required(),

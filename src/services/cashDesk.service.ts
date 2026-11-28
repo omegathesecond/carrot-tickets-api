@@ -19,8 +19,8 @@ export class CashDeskService {
   }
   static async totals(eventId: string, cashierId: string, session?: ClientSession) {
     const match = { eventId: new mongoose.Types.ObjectId(eventId), recordedBy: cashierId, recordedByType: 'Cashier', status: 'completed' };
-    async function sum(model: any, filter: any): Promise<number> {
-      const q = model.aggregate([{ $match: filter }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
+    async function sum(model: any, filter: any, field = '$amount'): Promise<number> {
+      const q = model.aggregate([{ $match: filter }, { $group: { _id: null, total: { $sum: field } } }]);
       if (session) q.session(session);
       const rows = await q; return rows[0]?.total ?? 0;
     }
@@ -30,7 +30,7 @@ export class CashDeskService {
       const rows = await query;
       return readTopupTotals(rows[0]);
     }
-    const withdrawals = () => sum(WalletWithdrawal, { ...match, method: 'cash' });
+    const withdrawals = () => sum(WalletWithdrawal, { ...match, method: 'cash' }, '$payoutAmount');
     const collections = () => sum(CashCollection, { eventId: match.eventId, cashierId: new mongoose.Types.ObjectId(cashierId), status: 'confirmed' });
     // Mongo transactions require sequential commands; independent report reads
     // run concurrently so adding the card breakdown adds no extra round-trip.

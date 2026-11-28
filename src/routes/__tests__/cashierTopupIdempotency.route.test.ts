@@ -1,3 +1,6 @@
+import { CashDeskService } from '@services/cashDesk.service';
+import { OrganizerCashlessService } from '@services/organizerCashless.service';
+import { ReconciliationService } from '@services/reconciliation.service';
 // api/src/routes/__tests__/cashierTopupIdempotency.route.test.ts
 //
 // A POS retry carries the same clientTxnId; a retry that carries a DIFFERENT
@@ -74,7 +77,7 @@ it('POST /withdraw: 409s a reused clientTxnId with a different amount; same amou
   const { eventId, wallet, token } = await seedDesk();
   await WalletService.topUpAtDesk({ method: 'cash', walletId: String(wallet._id), eventId, amount: 1000, recordedBy: 'seed', clientTxnId: 'seed' });
   const post = (amount: number) => request(app).post('/api/cashier/withdraw')
-    .set('Authorization', `Bearer ${token}`).send({ bandUid: TAG, eventId, amount, clientTxnId: 'wd-1' });
+    .set('Authorization', `Bearer ${token}`).send({ bandUid: TAG, eventId, amount, quotedPayoutAmount: amount, clientTxnId: 'wd-1' });
 
   expect((await post(300)).status).toBe(200);
 
@@ -216,4 +219,29 @@ it('keeps shipped POS history cash/card-only and exposes full history on the new
   const unrelated = await request(app).get(`/api/cashier/transactions/all-methods?eventId=${eventId}`).set('Authorization', `Bearer ${other.token}`).expect(200);
   expect(unrelated.body.data.transactions).toHaveLength(0);
   expect(String(cashier._id)).not.toBe(String(other.cashier._id));
+});
+
+it('quotes a tiered cash-out, refuses stale payouts and records the exact cash handed over', async () => {
+  const { eventId, wallet, token, cashier } = await seedDesk();
+  await WalletService.topUpAtDesk({ method: 'cash', walletId: String(wallet._id), eventId, amount: 10000, recordedBy: String(cashier._id), recordedByType: 'Cashier', clientTxnId: 'fee-seed' });
+  await Event.updateOne({ _id: eventId }, { $set: { withdrawalFee: { type: 'tiered', tiers: [{ min: 0, max: 5000, fee: 100 }, { min: 5000, max: null, fee: 250 }] } } });
+  const post = (body: object) => request(app).post('/api/cashier/withdraw').set('Authorization', `Bearer ${token}`).send({ bandUid: TAG, eventId, amount: 5000, ...body });
+  const quote = await post({ quoteOnly: true });
+  expect(quote.status).toBe(200);
+  expect(quote.body.data).toEqual({ amount: 5000, feeAmount: 250, payoutAmount: 4750 });
+  expect(await WalletWithdrawal.countDocuments()).toBe(0);
+  expect((await post({ clientTxnId: 'fee-cashout' })).status).toBe(400);
+  expect((await post({ clientTxnId: 'fee-cashout', quotedPayoutAmount: 4900 })).status).toBe(409);
+  expect((await Wallet.findById(wallet._id))!.balance).toBe(10000);
+  const paid = await post({ clientTxnId: 'fee-cashout', quotedPayoutAmount: 4750 });
+  expect(paid.status).toBe(200);
+  expect(paid.body.data).toMatchObject({ amount: 5000, feeAmount: 250, payoutAmount: 4750, newBalance: 5000 });
+  expect(await CashDeskService.totals(eventId, String(cashier._id))).toMatchObject({ cashWithdrawals: 4750, cashOnHand: 5250 });
+  expect(await OrganizerCashlessService.summary(eventId)).toMatchObject({ withdrawn: 5000, withdrawalFees: 250, withdrawalPayouts: 4750 });
+  expect((await OrganizerCashlessService.transactions({ eventId, type: 'withdrawal' })).transactions[0]).toMatchObject({ amount: 5000, feeAmount: 250, payoutAmount: 4750 });
+  expect(await ReconciliationService.checkInvariant(eventId)).toMatchObject({ ok: true, organizerOwed: 250 });
+  await Event.updateOne({ _id: eventId }, { $set: { withdrawalFee: { type: 'fixed', value: 999 } } });
+  const replay = await post({ clientTxnId: 'fee-cashout', quotedPayoutAmount: 4750 });
+  expect(replay.status).toBe(200); expect(replay.body.data.payoutAmount).toBe(4750);
+  expect(await WalletWithdrawal.countDocuments()).toBe(1);
 });

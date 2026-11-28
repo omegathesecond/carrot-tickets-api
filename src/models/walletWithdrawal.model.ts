@@ -10,7 +10,9 @@ import { Schema, model, Document, Types } from 'mongoose';
 export interface IWalletWithdrawal extends Document {
   walletId: Types.ObjectId;
   eventId: Types.ObjectId;
-  amount: number;
+  amount: number; // total wallet debit
+  feeAmount: number;
+  payoutAmount: number; // cash/bank/mobile money actually paid
   method: 'cash' | 'office_cash' | 'bank_transfer' | 'mobile_money';
   status: 'completed';
   /** Actor id that recorded this cash-out (a cashier id in v1). */
@@ -24,6 +26,8 @@ export interface IWalletWithdrawal extends Document {
 const walletWithdrawalSchema = new Schema<IWalletWithdrawal>({
   walletId: { type: Schema.Types.ObjectId, required: true, index: true },
   eventId: { type: Schema.Types.ObjectId, required: true, index: true },
+  feeAmount: { type: Number, required: true, default: 0, min: 0, validate: Number.isSafeInteger },
+  payoutAmount: { type: Number, required: true, min: 1, validate: Number.isSafeInteger },
   amount: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'amount must be integer cents' } },
   method: { type: String, enum: ['cash', 'office_cash', 'bank_transfer', 'mobile_money'], required: true, default: 'cash' },
   status: { type: String, enum: ['completed'], required: true, default: 'completed' },

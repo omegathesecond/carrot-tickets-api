@@ -49,6 +49,16 @@ const ticketTypeSchema = new Schema<ITicketType>({
   waiveServiceFee:   { type: Boolean }
 }, { _id: true });
 
+const cashlessFeeField = {
+  type: new Schema({
+    type: { type: String, enum: ['fixed', 'percentage', 'tiered'], required: true },
+    value: Number,
+    tiers: { type: [new Schema({ min: Number, max: { type: Number, default: null }, fee: Number }, { _id: false })], default: undefined },
+  }, { _id: false }),
+  default: null,
+  validate: { validator: (v: any) => !purchaseChargeSchema.validate(v == null ? null : v.toObject(), { convert: false }).error, message: 'Invalid cashless fee' },
+};
+
 const eventSchema = new Schema<IEvent>({
   // Event Identification
   eventId: {
@@ -116,14 +126,8 @@ const eventSchema = new Schema<IEvent>({
     type: Boolean,
     default: false
   },
-  purchaseCharge: {
-    type: new Schema({
-      type: { type: String, enum: ['fixed', 'percentage'], required: true },
-      value: { type: Number, required: true },
-    }, { _id: false }),
-    default: null,
-    validate: { validator: (v: any) => !purchaseChargeSchema.validate(v == null ? null : v.toObject(), { convert: false }).error, message: 'Invalid purchase charge' },
-  },
+  purchaseCharge: cashlessFeeField,
+  withdrawalFee: cashlessFeeField,
   tagWithdrawalsEnabled: { type: Boolean, default: false },
   cashless: {
     type: Boolean,

@@ -1,3 +1,5 @@
+import { seedPublishedEvent } from '@/__tests__/helpers/fixtures';
+import { Event } from '@models/event.model';
 import { connectLedgerTestDb, clearTestDb, disconnectTestDb } from '@/__tests__/helpers/mongo';
 import { WalletService, MAX_TOPUP_CENTS, WalletIdempotencyMismatchError } from '@services/wallet.service';
 import { WalletDeclinedError } from '@services/merchant.service';
@@ -13,7 +15,8 @@ afterEach(clearTestDb);
 afterAll(disconnectTestDb);
 
 async function seedFundedWallet(amount = 1000) {
-  const eventId = new mongoose.Types.ObjectId();
+  const { eventId } = await seedPublishedEvent();
+  await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
   const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active' });
   await WalletService.topUpAtDesk({ method: 'cash',
     walletId: String(w._id), eventId: String(eventId), amount, recordedBy: 'op1', clientTxnId: 'seed-topup',
@@ -25,7 +28,7 @@ it('debits the wallet and posts a balanced ledger txn (WALLET +amt / FLOAT -amt)
   const { eventId, walletId } = await seedFundedWallet(1000);
 
   const { wallet, withdrawal } = await WalletService.withdrawCash({
-    walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-1',
+    walletId, eventId, amount: 300, quotedPayoutAmount: 300, recordedBy: 'cash1', clientTxnId: 'wd-1',
   });
 
   expect(wallet.balance).toBe(700);
@@ -50,11 +53,12 @@ it('debits the wallet and posts a balanced ledger txn (WALLET +amt / FLOAT -amt)
 
 it('cash back = full remaining balance: a cash-out may exceed cashFundedBalance (floored at 0)', async () => {
   // Simulate 400 cash-funded + 600 non-cash (e.g. card) by seeding the wallet directly.
-  const eventId = new mongoose.Types.ObjectId();
+  const { eventId } = await seedPublishedEvent();
+  await Event.updateOne({ _id: eventId }, { $set: { cashless: true } });
   const w = await Wallet.create({ eventId, ticketId: new mongoose.Types.ObjectId(), status: 'active', balance: 1000, cashFundedBalance: 400 });
 
   const { wallet } = await WalletService.withdrawCash({
-    walletId: String(w._id), eventId: String(eventId), amount: 1000, recordedBy: 'cash1', clientTxnId: 'wd-full',
+    walletId: String(w._id), eventId: String(eventId), amount: 1000, quotedPayoutAmount: 1000, recordedBy: 'cash1', clientTxnId: 'wd-full',
   });
 
   expect(wallet.balance).toBe(0);
@@ -65,7 +69,7 @@ it('DECLINES with WalletDeclinedError on insufficient balance — wallet unchang
   const { eventId, walletId } = await seedFundedWallet(100);
 
   await expect(
-    WalletService.withdrawCash({ walletId, eventId, amount: 500, recordedBy: 'cash1', clientTxnId: 'wd-decline' }),
+    WalletService.withdrawCash({ walletId, eventId, amount: 500, quotedPayoutAmount: 500, recordedBy: 'cash1', clientTxnId: 'wd-decline' }),
   ).rejects.toMatchObject({ reason: 'insufficient_balance', currentBalance: 100 });
 
   const w = await Wallet.findById(walletId).lean();
@@ -79,7 +83,7 @@ it('DECLINES on a non-active wallet without writing anything', async () => {
   await Wallet.updateOne({ _id: walletId }, { $set: { status: 'frozen' } });
 
   await expect(
-    WalletService.withdrawCash({ walletId, eventId, amount: 100, recordedBy: 'cash1', clientTxnId: 'wd-frozen' }),
+    WalletService.withdrawCash({ walletId, eventId, amount: 100, quotedPayoutAmount: 100, recordedBy: 'cash1', clientTxnId: 'wd-frozen' }),
   ).rejects.toMatchObject({ reason: 'wallet_not_active' });
 
   const w = await Wallet.findById(walletId).lean();
@@ -90,8 +94,8 @@ it('DECLINES on a non-active wallet without writing anything', async () => {
 it('is idempotent on {walletId, clientTxnId} — no double cash-out', async () => {
   const { eventId, walletId } = await seedFundedWallet(1000);
 
-  await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
-  await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+  await WalletService.withdrawCash({ walletId, eventId, amount: 300, quotedPayoutAmount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+  await WalletService.withdrawCash({ walletId, eventId, amount: 300, quotedPayoutAmount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
 
   const w = await Wallet.findById(walletId).lean();
   expect(w!.balance).toBe(700); // debited ONCE, not 400
@@ -100,11 +104,11 @@ it('is idempotent on {walletId, clientTxnId} — no double cash-out', async () =
 
 it('rejects a replay of the same clientTxnId with a DIFFERENT amount (no debit, no new row)', async () => {
   const { eventId, walletId } = await seedFundedWallet(1000);
-  await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+  await WalletService.withdrawCash({ walletId, eventId, amount: 300, quotedPayoutAmount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
 
-  await expect(WalletService.withdrawCash({ walletId, eventId, amount: 400, recordedBy: 'cash1', clientTxnId: 'wd-dup' }))
+  await expect(WalletService.withdrawCash({ walletId, eventId, amount: 400, quotedPayoutAmount: 400, recordedBy: 'cash1', clientTxnId: 'wd-dup' }))
     .rejects.toBeInstanceOf(WalletIdempotencyMismatchError);
-  await expect(WalletService.withdrawCash({ walletId, eventId, amount: 400, recordedBy: 'cash1', clientTxnId: 'wd-dup' }))
+  await expect(WalletService.withdrawCash({ walletId, eventId, amount: 400, quotedPayoutAmount: 400, recordedBy: 'cash1', clientTxnId: 'wd-dup' }))
     .rejects.toThrow(/clientTxnId already used with a different amount/);
 
   expect((await Wallet.findById(walletId).lean())!.balance).toBe(700);
@@ -113,8 +117,8 @@ it('rejects a replay of the same clientTxnId with a DIFFERENT amount (no debit, 
 
 it('still returns the ORIGINAL outcome on a true replay (same amount)', async () => {
   const { eventId, walletId } = await seedFundedWallet(1000);
-  const first = await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
-  const again = await WalletService.withdrawCash({ walletId, eventId, amount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+  const first = await WalletService.withdrawCash({ walletId, eventId, amount: 300, quotedPayoutAmount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
+  const again = await WalletService.withdrawCash({ walletId, eventId, amount: 300, quotedPayoutAmount: 300, recordedBy: 'cash1', clientTxnId: 'wd-dup' });
 
   expect(String(again.withdrawal._id)).toBe(String(first.withdrawal._id));
   expect(again.wallet.balance).toBe(700);
@@ -123,6 +127,6 @@ it('still returns the ORIGINAL outcome on a true replay (same amount)', async ()
 it('rejects an amount over the ceiling', async () => {
   const { eventId, walletId } = await seedFundedWallet(1000);
   await expect(
-    WalletService.withdrawCash({ walletId, eventId, amount: MAX_TOPUP_CENTS + 1, recordedBy: 'cash1', clientTxnId: 'wd-over' }),
+    WalletService.withdrawCash({ walletId, eventId, amount: MAX_TOPUP_CENTS + 1, quotedPayoutAmount: MAX_TOPUP_CENTS + 1, recordedBy: 'cash1', clientTxnId: 'wd-over' }),
   ).rejects.toThrow(/maximum allowed withdrawal|amount/i);
 });

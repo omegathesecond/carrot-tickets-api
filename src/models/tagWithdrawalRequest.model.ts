@@ -8,6 +8,8 @@ const schema = new Schema({
   eventId: { type: Schema.Types.ObjectId, required: true, ref: 'Event' },
   eventName: { type: String, required: true },
   bandUid: { type: String, required: true },
+  feeAmount: { type: Number, required: true, default: 0, min: 0, validate: Number.isSafeInteger },
+  payoutAmount: { type: Number, required: true, min: 1, validate: Number.isSafeInteger },
   amount: { type: Number, required: true, min: 1, validate: Number.isSafeInteger },
   currency: { type: String, required: true, enum: ['SZL', 'ZAR'] },
   country: { type: String, required: true, enum: ['SZ', 'ZA'] },

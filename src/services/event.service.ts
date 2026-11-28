@@ -46,6 +46,7 @@ export interface CreateEventParams {
 
 export interface UpdateEventParams {
   purchaseCharge?: import('@utils/purchaseCharge.util').PurchaseCharge | null;
+  withdrawalFee?: import('@utils/purchaseCharge.util').PurchaseCharge | null;
   name?: string;
   description?: string;
   venue?: string;
@@ -444,11 +445,12 @@ export class EventService {
         }
       }
 
-      if (updates.purchaseCharge !== undefined) {
-        const { error } = purchaseChargeSchema.validate(updates.purchaseCharge, { convert: false });
+      for (const field of ['purchaseCharge', 'withdrawalFee'] as const) {
+        if (updates[field] === undefined) continue;
+        const { error } = purchaseChargeSchema.validate(updates[field], { convert: false });
         if (error) throw new HttpError(400, error.message);
-        if (!event.cashless) throw new HttpError(400, 'Purchase charges require a cashless event');
-        event.purchaseCharge = updates.purchaseCharge;
+        if (!event.cashless) throw new HttpError(400, 'Fees require a cashless event');
+        event[field] = updates[field];
       }
 
       // Update fields

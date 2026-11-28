@@ -49,7 +49,7 @@ it('refuses another organizer and invalid settings', async () => {
     await expect(EventService.updateEvent(eventId, vendorId, { purchaseCharge: setting })).rejects.toThrow();
   }
 });
-it.each([{ type: 'fixed' as const, value: 250, fee: 250 }, { type: 'percentage' as const, value: 2.55, fee: 77 }])('adds $type charges without changing stall earnings or platform commission', async ({ fee, ...setting }) => {
+it.each([{ type: 'fixed' as const, value: 250, fee: 250 }, { type: 'percentage' as const, value: 2.55, fee: 77 }, { type: 'tiered' as const, tiers: [{ min: 0, max: 3000, fee: 0 }, { min: 3000, max: null, fee: 125 }], fee: 125 }])('adds $type charges without changing stall earnings or platform commission', async ({ fee, ...setting }) => {
   const { eventId, vendorId, params } = await seed();
   await EventService.updateEvent(eventId, vendorId, { purchaseCharge: setting });
   const quote = await MerchantService.quote(params);
@@ -89,9 +89,9 @@ it('quotes and charges through the till API and requires the reviewed total', as
   expect(paid.status).toBe(200);
   expect(paid.body.data).toMatchObject({ amount: 3250, purchaseChargeAmount: 250, newBalance: 6750 });
 });
-it('charges a fixed amount once on a table spanning two stalls and preserves exact cent allocation', async () => {
+it.each([{ type: 'fixed' as const, value: 101 }, { type: 'tiered' as const, tiers: [{ min: 0, max: 4000, fee: 0 }, { min: 4000, max: null, fee: 101 }] }])('charges a $type fee once on a table spanning two stalls and preserves exact cent allocation', async (purchaseCharge) => {
   const { eventId, vendorId, merchant, wallet } = await seed();
-  await EventService.updateEvent(eventId, vendorId, { purchaseCharge: { type: 'fixed', value: 101 } });
+  await EventService.updateEvent(eventId, vendorId, { purchaseCharge });
   const second = await Merchant.create({ eventId, name: 'Food', commissionPercent: 0 });
   const products = await Product.create([{ eventId, name: 'Beer', category: 'beer', price: 3000 }, { eventId, name: 'Food', category: 'food', price: 1000 }]);
   const waiter = String(new mongoose.Types.ObjectId());
@@ -110,4 +110,12 @@ it('charges a fixed amount once on a table spanning two stalls and preserves exa
 it('rounds percentage cents deterministically and leaves disabled charges at zero', () => {
   expect(purchaseChargeAmount(100, { type: 'percentage', value: 0.5 })).toBe(1);
   expect(purchaseChargeAmount(3000, null)).toBe(0);
+});
+
+it('saves withdrawal tiers only on an owned cashless event', async () => {
+  const { eventId, vendorId } = await seed();
+  const setting = { type: 'tiered' as const, tiers: [{ min: 0, max: 10000, fee: 100 }, { min: 10000, max: null, fee: 250 }] };
+  expect((await EventService.updateEvent(eventId, vendorId, { withdrawalFee: setting })).withdrawalFee).toMatchObject(setting);
+  await expect(EventService.updateEvent(eventId, String(new mongoose.Types.ObjectId()), { withdrawalFee: setting })).rejects.toThrow();
+  expect((await EventService.updateEvent(eventId, vendorId, { withdrawalFee: null })).withdrawalFee).toBeNull();
 });

@@ -1,3 +1,5 @@
+import { HttpError } from '@utils/httpError.util';
+import { withdrawalQuote } from '@utils/purchaseCharge.util';
 // api/src/controllers/cashier.controller.ts
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
@@ -204,16 +206,24 @@ export class CashierController {
       const wallet = await Wallet.findOne({ eventId: value.eventId, bandUid });
       if (!wallet) return ApiResponseUtil.notFound(res, 'No wallet for that band');
 
+      if (value.quoteOnly) {
+        const quote = withdrawalQuote(value.amount, event.withdrawalFee);
+        if (quote.payoutAmount <= 0) return ApiResponseUtil.error(res, 'The amount must exceed the withdrawal fee', 400);
+        return ApiResponseUtil.success(res, quote);
+      }
       const result = await WalletService.withdrawCash({
         walletId: String(wallet._id),
         eventId: value.eventId,
         amount: value.amount,
+        quotedPayoutAmount: value.quotedPayoutAmount,
         recordedBy: cashier.cashierId,
         clientTxnId: value.clientTxnId,
       });
       return ApiResponseUtil.success(res, {
         newBalance: result.wallet.balance,
         amount: result.withdrawal.amount,
+        feeAmount: result.withdrawal.feeAmount,
+        payoutAmount: result.withdrawal.payoutAmount,
       });
     } catch (e: any) {
       if (e instanceof WalletIdempotencyMismatchError) return ApiResponseUtil.error(res, e.message, 409);
@@ -223,6 +233,7 @@ export class CashierController {
           currentBalance: e.currentBalance,
         });
       }
+      if (e instanceof HttpError) return ApiResponseUtil.error(res, e.message, e.statusCode);
       const msg = e?.message || 'Withdrawal failed';
       const status = /not found|cashless|amount|not active/i.test(msg) ? 400 : 500;
       return ApiResponseUtil.error(res, msg, status);

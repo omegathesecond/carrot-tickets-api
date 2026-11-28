@@ -10,6 +10,8 @@ export interface CashierTxn {
   type: 'topup' | 'withdrawal';
   method: string;
   amount: number;
+  feeAmount?: number;
+  payoutAmount?: number;
   status: 'completed';
   at: Date;
   /** The band this row's wallet belongs to. Null when the wallet is bound to a
@@ -56,14 +58,14 @@ export class CashierService {
 
     const transactions: CashierTxn[] = [
       ...topups.map((t) => ({ id: String(t._id), type: 'topup' as const, method: t.method, amount: t.amount, status: t.status, at: t.createdAt, bandUid: bandByWallet.get(String(t.walletId)) ?? null })),
-      ...withdrawals.map((w) => ({ id: String(w._id), type: 'withdrawal' as const, method: w.method, amount: w.amount, status: w.status, at: w.createdAt, bandUid: bandByWallet.get(String(w.walletId)) ?? null })),
+      ...withdrawals.map((w) => ({ id: String(w._id), type: 'withdrawal' as const, method: w.method, amount: w.amount, feeAmount: w.feeAmount, payoutAmount: w.payoutAmount, status: w.status, at: w.createdAt, bandUid: bandByWallet.get(String(w.walletId)) ?? null })),
     ]
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
       .slice(0, limit);
 
     const totals = totalRecordedTopups(topups);
     const toppedUp = topups.reduce((s, t) => s + t.amount, 0);
-    const withdrawn = withdrawals.reduce((s, w) => s + w.amount, 0);
+    const withdrawn = withdrawals.reduce((s, w) => s + w.payoutAmount, 0);
 
     return {
       transactions,

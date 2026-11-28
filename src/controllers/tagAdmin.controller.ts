@@ -1,3 +1,5 @@
+import { HttpError } from '@utils/httpError.util';
+import { withdrawalQuote } from '@utils/purchaseCharge.util';
 import { Request, Response } from 'express';
 import { ApiResponseUtil } from '@utils/apiResponse.util';
 import { loadOwnedCashlessEvent } from '@controllers/organizerCashless.controller';
@@ -107,22 +109,27 @@ export class TagAdminController {
       if (!Number.isInteger(amount) || amount <= 0) {
         return ApiResponseUtil.badRequest(res, 'amount must be a positive whole number of cents');
       }
-      // Client-supplied so a double-submit cannot double-refund.
-      const clientTxnId = typeof req.body?.clientTxnId === 'string' ? req.body.clientTxnId.trim() : '';
-      if (!clientTxnId) return ApiResponseUtil.badRequest(res, 'clientTxnId is required');
-
       const owned = await Wallet.exists({ _id: walletId, eventId });
       if (!owned) return ApiResponseUtil.error(res, 'Tag not found', 404);
+      const quote = withdrawalQuote(amount, event.withdrawalFee);
+      if (req.body?.quoteOnly === true) {
+        if (quote.payoutAmount <= 0) return ApiResponseUtil.error(res, 'The amount must exceed the withdrawal fee', 400);
+        return ApiResponseUtil.success(res, quote);
+      }
+      const clientTxnId = typeof req.body?.clientTxnId === 'string' ? req.body.clientTxnId.trim() : '';
+      if (!clientTxnId) return ApiResponseUtil.badRequest(res, 'clientTxnId is required');
+      const quotedPayoutAmount = req.body?.quotedPayoutAmount;
+      if (!Number.isSafeInteger(quotedPayoutAmount) || quotedPayoutAmount <= 0) return ApiResponseUtil.badRequest(res, 'Review the payout quote first');
 
       const ticketsUser = (req as any).ticketsUser;
       const { wallet, withdrawal } = await WalletService.withdrawCash({
-        walletId, eventId, amount, clientTxnId,
+        walletId, eventId, amount, clientTxnId, quotedPayoutAmount,
         recordedBy: (ticketsUser?.userId || ticketsUser?.vendorId) as string,
         method: 'office_cash', recordedByType: 'Vendor', floatTag: FloatTag.OFFICE,
       });
 
       return ApiResponseUtil.success(res, {
-        walletId: String(wallet._id), balance: wallet.balance, withdrawalId: String(withdrawal._id),
+        walletId: String(wallet._id), balance: wallet.balance, withdrawalId: String(withdrawal._id), feeAmount: withdrawal.feeAmount, payoutAmount: withdrawal.payoutAmount,
       });
     } catch (err: any) {
       // A reused clientTxnId with a different amount is a conflict, not a replay.
@@ -131,6 +138,7 @@ export class TagAdminController {
       if (err?.reason === 'insufficient_balance') return ApiResponseUtil.error(res, 'The tag does not hold that much', 402);
       if (err?.reason === 'wallet_not_active') return ApiResponseUtil.error(res, 'This tag is not active', 409);
       if (err?.reason === 'wallet_not_found') return ApiResponseUtil.error(res, 'Tag not found', 404);
+      if (err instanceof HttpError) return ApiResponseUtil.error(res, err.message, err.statusCode);
       console.error('Tag refund error:', err);
       return ApiResponseUtil.error(res, err.message || 'Failed to record the refund', 400);
     }

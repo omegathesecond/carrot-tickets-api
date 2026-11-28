@@ -345,6 +345,7 @@ export const createEventSchema = Joi.object({
 export const updateEventSchema = Joi.object({
   eventLocation: eventLocationSchema.optional(),
   purchaseCharge: purchaseChargeSchema,
+  withdrawalFee: purchaseChargeSchema,
   name: Joi.string().trim().max(200).optional(),
   description: Joi.string().max(2000).optional(),
   venue: Joi.string().trim().max(200).optional(),

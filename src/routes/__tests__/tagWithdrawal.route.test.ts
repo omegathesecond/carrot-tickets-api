@@ -50,7 +50,7 @@ beforeEach(async () => {
   wallet = await Wallet.create({ eventId: event._id, bandUid: '0ae98d36', currency: 'ZAR' });
   await WalletService.topUpAtDesk({ walletId: String(wallet._id), eventId: String(event._id), amount: 12345,
     method: 'cash', recordedBy: 'test-fixture', clientTxnId: randomUUID() });
-  input = { bandUid: '0A:E9:8D:36', eventId: String(event._id), expectedAmount: 12345, country: 'ZA', method: 'bank_transfer',
+  input = { bandUid: '0A:E9:8D:36', eventId: String(event._id), expectedAmount: 12345, expectedPayoutAmount: 12345, country: 'ZA', method: 'bank_transfer',
     fullName: 'Attendee Name', contactPhone: '+26878422613', email: 'attendee@example.com', bank,
     clientTxnId: randomUUID(), trackingToken: randomBytes(32).toString('hex') };
 });
@@ -156,7 +156,7 @@ it('protects private payout details from other organizers', async () => {
 
 it('blocks cash-outs and spending while funds are reserved', async () => {
   await post();
-  await expect(WalletService.withdrawCash({ walletId: String(wallet._id), eventId: String(event._id), amount: 100,
+  await expect(WalletService.withdrawCash({ walletId: String(wallet._id), eventId: String(event._id), amount: 100, quotedPayoutAmount: 100,
     recordedBy: 'test', method: 'office_cash', clientTxnId: randomUUID() })).rejects.toThrow(/not active/);
   await expect(WalletService.topUpAtDesk({ walletId: String(wallet._id), eventId: String(event._id), amount: 100,
     method: 'cash', recordedBy: 'test', clientTxnId: randomUUID() })).rejects.toThrow(/not active/);
@@ -357,4 +357,32 @@ it('disables new requests for one event while preserving existing tracking', asy
   expect(lookup.body.data).toMatchObject({ eligible: false, reason: 'Tag withdrawals are disabled for this event' });
   expect((await post({ ...input, clientTxnId: randomUUID() })).status).toBe(409);
   expect((await request(app).post(`/public/${created.body.data.id}/track`).set(auth(customer)).send({ token: input.trackingToken, eventId: input.eventId })).status).toBe(200);
+});
+
+it('snapshots the withdrawal fee and net payout, then preserves them when the setting changes', async () => {
+  await Event.updateOne({ _id: event._id }, { $set: { withdrawalFee: { type: 'fixed', value: 250 } } });
+  const quote = await request(app).post('/public/lookup').set(auth(customer)).send({ eventId: String(event._id), bandUid: '0ae98d36' });
+  expect(quote.body.data).toMatchObject({ balance: 12345, feeAmount: 250, payoutAmount: 12095 });
+  expect((await post()).status).toBe(409);
+  expect((await Wallet.findById(wallet._id))!.status).toBe('active');
+  const created = await post({ ...input, expectedPayoutAmount: 12095 });
+  expect(created.status).toBe(200);
+  expect(created.body.data).toMatchObject({ amount: 12345, feeAmount: 250, payoutAmount: 12095 });
+  const id = created.body.data.id;
+  await Event.updateOne({ _id: event._id }, { $set: { withdrawalFee: { type: 'fixed', value: 1000 } } });
+  expect((await decision(id, { status: 'processing' })).status).toBe(200);
+  const paid = await decision(id, { status: 'paid', paymentCompleted: true, paymentReference: 'FEE-TEST' });
+  expect(paid.status).toBe(200);
+  expect(paid.body.data).toMatchObject({ feeAmount: 250, payoutAmount: 12095 });
+  expect(await WalletWithdrawal.findOne({ walletId: wallet._id }).lean()).toMatchObject({ amount: 12345, feeAmount: 250, payoutAmount: 12095 });
+  const legs = await LedgerEntry.find({ refType: 'wallet_withdrawal', refId: `tag-request:${id}` }).lean();
+  expect(legs).toHaveLength(3); expect(legs.reduce((n, row) => n + row.delta, 0)).toBe(0);
+  expect((await ReconciliationService.checkWalletBalances(String(event._id))).ok).toBe(true);
+});
+it('refuses a withdrawal whose fee consumes the balance, without freezing it', async () => {
+  await Event.updateOne({ _id: event._id }, { $set: { withdrawalFee: { type: 'percentage', value: 100 } } });
+  const quote = await request(app).post('/public/lookup').set(auth(customer)).send({ eventId: String(event._id), bandUid: '0ae98d36' });
+  expect(quote.body.data).toMatchObject({ eligible: false, payoutAmount: 0 });
+  expect((await post()).status).toBe(400);
+  expect((await Wallet.findById(wallet._id))!.status).toBe('active');
 });

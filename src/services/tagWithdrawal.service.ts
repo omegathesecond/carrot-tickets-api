@@ -1,3 +1,4 @@
+import { withdrawalQuote } from '@utils/purchaseCharge.util';
 import { createHash, timingSafeEqual } from 'crypto';
 import mongoose from 'mongoose';
 import { Event } from '@models/event.model';
@@ -24,7 +25,7 @@ function uid(value: string) {
 /** Public responses never contain destinations, contact details, ciphertext or staff identities. */
 export function publicTagWithdrawal(row: any) {
   return { id: String(row._id), eventName: row.eventName, bandUid: row.bandUid,
-    amount: row.amount, currency: row.currency, method: row.method, status: row.status,
+    amount: row.amount, feeAmount: row.feeAmount, payoutAmount: row.payoutAmount, currency: row.currency, method: row.method, status: row.status,
     createdAt: row.createdAt, paidAt: row.paidAt, paymentReference: row.paymentReference,
     rejectionReason: row.rejectionReason };
 }
@@ -35,7 +36,7 @@ export class TagWithdrawalService {
     const id = oid(eventId);
     const [wallet, event, registered] = await Promise.all([
       Wallet.findOne({ bandUid, eventId: id }).lean(),
-      Event.findOne({ _id: id, cashless: true }).select('name endTime currency tagWithdrawalsEnabled').lean(),
+      Event.findOne({ _id: id, cashless: true }).select('name endTime currency tagWithdrawalsEnabled withdrawalFee').lean(),
       EventTag.exists({ bandUid, eventId: id, status: 'active' }),
     ]);
     if (!wallet || !event || !registered) throw new HttpError(404, 'No registered wallet was found for that tag code in this event');
@@ -44,8 +45,10 @@ export class TagWithdrawalService {
       ? 'This tag is unavailable or already has a withdrawal in progress'
       : wallet.balance <= 0 ? 'There is no remaining balance to withdraw'
       : !['SZL', 'ZAR'].includes(wallet.currency) ? 'This wallet currency is not supported; contact Carrot support' : null;
-    return { walletId: String(wallet._id), eventId, eventName: event.name,
-      endTime: event.endTime, currency: wallet.currency, balance: wallet.balance, eligible: reason === null, reason };
+    const quote = wallet.balance > 0 ? withdrawalQuote(wallet.balance, event.withdrawalFee) : { feeAmount: 0, payoutAmount: 0 };
+    const feeReason = quote.payoutAmount <= 0 ? 'The balance must exceed the withdrawal fee' : null;
+    return { feeAmount: quote.feeAmount, payoutAmount: quote.payoutAmount, walletId: String(wallet._id), eventId, eventName: event.name,
+      endTime: event.endTime, currency: wallet.currency, balance: wallet.balance, eligible: reason === null && feeReason === null, reason: reason || feeReason };
   }
 
   static async request(input: unknown, actor: string) {
@@ -53,7 +56,7 @@ export class TagWithdrawalService {
     const bandUid = uid(value.bandUid);
     const eventId = oid(value.eventId);
     const trackingHash = hash(value.trackingToken);
-    const inputHash = hash(JSON.stringify({ bandUid, eventId: String(eventId), amount: value.expectedAmount,
+    const inputHash = hash(JSON.stringify({ bandUid, eventId: String(eventId), amount: value.expectedAmount, expectedPayoutAmount: value.expectedPayoutAmount,
       country: value.country, method: value.method, details: value.details, trackingHash }));
     const replay = async () => {
       const row = await TagWithdrawalRequest.findOne({ eventId, bandUid, clientTxnId: value.clientTxnId }).select('+inputHash');
@@ -83,10 +86,13 @@ export class TagWithdrawalService {
         const wallet = await Wallet.findOneAndUpdate({ eventId, bandUid, status: 'active',
           currency: { $in: ['SZL', 'ZAR'] }, balance: value.expectedAmount }, { $set: { status: 'frozen' } }, { new: true, session });
         if (!wallet) throw new HttpError(409, 'The balance or tag availability changed. Check the code again before requesting');
+        const quote = withdrawalQuote(wallet.balance, event.withdrawalFee);
+        if (quote.payoutAmount <= 0) throw new HttpError(400, 'The balance must exceed the withdrawal fee');
+        if (quote.payoutAmount !== value.expectedPayoutAmount) throw new HttpError(409, 'Withdrawal fee changed. Check your tag again before requesting');
         const summary = value.details.bank ? `${value.details.bank.bank} ••••${value.details.bank.accountNumber.slice(-4)}`
           : `${value.details.provider} ••••${value.details.mobileNumber!.slice(-4)}`;
         await TagWithdrawalRequest.create([{ _id: requestId, walletId: wallet._id, eventId, eventName: event.name,
-          bandUid, amount: wallet.balance, currency: wallet.currency, country: value.country, method: value.method,
+          bandUid, amount: wallet.balance, feeAmount: quote.feeAmount, payoutAmount: quote.payoutAmount, currency: wallet.currency, country: value.country, method: value.method,
           detailsEncrypted: encrypted, destinationSummary: summary, clientTxnId: value.clientTxnId,
           trackingHash, inputHash, status: 'pending', active: true,
           history: [{ status: 'pending', at: new Date(), by: actor }] }], { session });
@@ -147,7 +153,7 @@ export class TagWithdrawalService {
           if (!wallet || !event || event.endTime.getTime() >= Date.now())
             throw new HttpError(409, 'Reserved balance or event settings changed; reconcile before confirming payment');
           await WalletService.recordWithdrawal({ walletId: String(row.walletId), eventId: String(row.eventId),
-            amount: row.amount, recordedBy: actor, recordedByType: 'Vendor', method: row.method as 'mobile_money' | 'bank_transfer',
+            amount: row.amount, feeAmount: row.feeAmount, recordedBy: actor, recordedByType: 'Vendor', method: row.method as 'mobile_money' | 'bank_transfer',
             floatTag: FloatTag.OFFICE, clientTxnId: `tag-request:${row._id}`, requiredStatus: 'frozen', closeWallet: true, session });
           row.paidAt = new Date(); row.paymentReference = reference!;
         } else if (status === 'rejected') {

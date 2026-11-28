@@ -11,7 +11,7 @@ afterAll(disconnectTestDb);
 const base = () => ({
   walletId: new mongoose.Types.ObjectId(),
   eventId: new mongoose.Types.ObjectId(),
-  amount: 5000,
+  amount: 5000, feeAmount: 0, payoutAmount: 5000,
   method: 'cash' as const,
   status: 'completed' as const,
   recordedBy: new mongoose.Types.ObjectId().toString(),
